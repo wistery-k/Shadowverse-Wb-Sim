@@ -399,6 +399,68 @@ describe("超進化と他のキーワード", () => {
   });
 });
 
+describe("ぶっとばし", () => {
+  function atSuperTurn() {
+    let s = started();
+    while (s.players[s.active].turnCount < 7) s = endTurn(endTurn(s));
+    const me = s.active;
+    const opp = (1 - me) as PlayerIndex;
+    return { s, me, opp };
+  }
+
+  it("超進化したフォロワーで攻撃して相手のフォロワーを倒すと、相手のリーダーに1ダメージ", () => {
+    const { s, me, opp } = atSuperTurn();
+    const f = putFollower(s, me, "キャラバンマンモス", { evolve: "superEvolved" });
+    const enemy = putFollower(s, opp, "刹那のクイックブレイダー");
+    const t = applyAction(s, { type: "attack", attacker: f.iid, target: enemy.iid });
+    expect(t.players[opp].board).toEqual([]);
+    expect(t.players[opp].leaderHp).toBe(19);
+    expect(t.attack).toBeNull();
+  });
+
+  it("必殺で破壊した場合も含む", () => {
+    const { s, me, opp } = atSuperTurn();
+    const f = putFollower(s, me, "獣性の鉄人", { evolve: "superEvolved" }); // 必殺
+    const enemy = putFollower(s, opp, "キャラバンマンモス");
+    const t = applyAction(s, { type: "attack", attacker: f.iid, target: enemy.iid });
+    expect(t.players[opp].board).toEqual([]);
+    expect(t.players[opp].leaderHp).toBe(19);
+  });
+
+  it("猛毒姫・メドゥーサの【攻撃時】の効果で破壊した場合も含む", () => {
+    const { s, me, opp } = atSuperTurn();
+    const medusa = putFollower(s, me, "猛毒姫・メドゥーサ", { evolve: "superEvolved" });
+    const enemy = putFollower(s, opp, "キャラバンマンモス");
+    const t = applyAction(s, { type: "attack", attacker: medusa.iid, target: enemy.iid });
+    expect(t.players[opp].board).toEqual([]);
+    expect(t.players[opp].leaderHp).toBe(19);
+  });
+
+  it("超進化していない・倒せない・リーダーへの攻撃・攻撃されて倒した場合は発生しない", () => {
+    const evolved = atSuperTurn();
+    const a = putFollower(evolved.s, evolved.me, "キャラバンマンモス", { evolve: "evolved" });
+    const e1 = putFollower(evolved.s, evolved.opp, "刹那のクイックブレイダー");
+    expect(applyAction(evolved.s, { type: "attack", attacker: a.iid, target: e1.iid }).players[evolved.opp].leaderHp).toBe(20);
+
+    const survive = atSuperTurn();
+    const b = putFollower(survive.s, survive.me, "刹那のクイックブレイダー", { evolve: "superEvolved" });
+    const e2 = putFollower(survive.s, survive.opp, "キャラバンマンモス");
+    expect(applyAction(survive.s, { type: "attack", attacker: b.iid, target: e2.iid }).players[survive.opp].leaderHp).toBe(20);
+
+    const leader = atSuperTurn();
+    const c = putFollower(leader.s, leader.me, "刹那のクイックブレイダー", { evolve: "superEvolved" });
+    expect(applyAction(leader.s, { type: "attack", attacker: c.iid, target: "leader" }).players[leader.opp].leaderHp).toBe(19);
+
+    const defend = atSuperTurn();
+    const d = putFollower(defend.s, defend.me, "キャラバンマンモス", { evolve: "superEvolved" });
+    let t = endTurn(defend.s);
+    const attacker = putFollower(t, defend.opp, "刹那のクイックブレイダー");
+    t = applyAction(t, { type: "attack", attacker: attacker.iid, target: d.iid });
+    expect(t.players[defend.opp].board).toEqual([]);
+    expect(t.players[defend.opp].leaderHp).toBe(20);
+  });
+});
+
 describe("エクストラPP", () => {
   /** 後攻の最初のターン */
   function secondPlayersTurn() {

@@ -52,5 +52,6 @@ export function cloneState(s: GameState): GameState {
     stack: s.stack.map((f) => ({ effects: f.effects, pc: f.pc, ctx: cloneCtx(f.ctx) })),
     queue: s.queue.map((q) => ({ ability: q.ability, ctx: cloneCtx(q.ctx) })),
     pending: clonePending(s.pending),
+    attack: s.attack ? { ...s.attack } : null,
   };
 }

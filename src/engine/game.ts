@@ -117,6 +117,7 @@ export function createGame(config: GameConfig): GameState {
     stack: [],
     queue: [],
     pending: null,
+    attack: null,
   };
   const rng = rngFrom(state);
   state.first = rng.int(2) as PlayerIndex;
@@ -214,6 +215,9 @@ function handleInternal(state: GameState, frame: Frame, eff: InternalEffect): vo
       break;
     case "_combat":
       combat(state, eff.attacker, eff.target);
+      break;
+    case "_combatEnd":
+      combatEnd(state);
       break;
   }
 }
@@ -534,7 +538,15 @@ function applyAttack(state: GameState, attackerIid: number, target: AttackTarget
   attacker.keywords = attacker.keywords.filter((k) => k !== "ambush"); // 攻撃すると潜伏を失う
 
   // 戦闘は【攻撃時】【交戦時】の能力の後（処理順は未確認）
-  pushInternal(state, [{ op: "_combat", attacker: attackerIid, target }], newContext(p, attackerIid, attacker.cardId));
+  state.attack =
+    target === "leader"
+      ? null
+      : { attacker: attackerIid, defender: target, superEvolved: attacker.evolve === "superEvolved", defenderDestroyed: false };
+  pushInternal(
+    state,
+    [{ op: "_combat", attacker: attackerIid, target }, { op: "_combatEnd" }],
+    newContext(p, attackerIid, attacker.cardId),
+  );
   const eventId = target === "leader" ? leaderId(opponent(p)) : target;
   const triggered: [Ability, EffectContext][] = [];
   const attackerCtx = (event: number) =>
@@ -579,6 +591,18 @@ function combat(state: GameState, attackerIid: number, target: AttackTarget): vo
   // 体力0以下のものと一緒に、手番のプレイヤーのフォロワーから破壊する
   if (destroyAttacker && attacker.defense > 0 && findBoard(state, attacker.iid)) leaveBoard(state, attacker.iid, "destroy");
   if (destroyDefender && defender.defense > 0 && findBoard(state, defender.iid)) leaveBoard(state, defender.iid, "destroy");
+}
+
+/**
+ * 戦闘の後処理。ぶっとばし: 超進化したフォロワーの攻撃中に攻撃先のフォロワーが破壊されたら、
+ * 相手のリーダーに1ダメージ（必殺や【攻撃時】の効果による破壊を含む）
+ */
+function combatEnd(state: GameState): void {
+  const attack = state.attack;
+  state.attack = null;
+  if (!attack?.superEvolved || !attack.defenderDestroyed) return;
+  state.players[opponent(state.active)].leaderHp -= 1;
+  checkLeaders(state);
 }
 
 function applyEvolve(state: GameState, iid: number, kind: "evolve" | "superEvolve"): void {
