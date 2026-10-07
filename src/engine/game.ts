@@ -21,6 +21,7 @@ import {
   run,
   setInternalHandler,
 } from "./effects";
+import { cloneState } from "./clone";
 import { enhanceCost } from "./keywords";
 import { abilitiesOf, cardOf, crestAbilitiesOf } from "./registry";
 import { rngFrom, shuffle } from "./rng";
@@ -406,7 +407,7 @@ export function legalActions(state: GameState): Action[] {
 // ---- アクションの適用 ----
 
 export function applyAction(prev: GameState, action: Action): GameState {
-  const state = structuredClone(prev);
+  const state = cloneState(prev);
   if (state.phase === "ended") throw new IllegalActionError("対戦は終了しています");
 
   if (state.pending) {
