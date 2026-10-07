@@ -1,0 +1,30 @@
+/* アセット不使用: システムフォントと CSS のみ */
+:root {
+  --bg: #f7f7f5;
+  --fg: #1d1d1f;
+  --muted: #6b6b70;
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, "Hiragino Sans", "Yu Gothic UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #18181b;
+    --fg: #ececee;
+    --muted: #a1a1aa;
+  }
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+.app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 16px;
+}
+footer {
+  margin-top: 32px;
+  font-size: 12px;
+  color: var(--muted);
+}
