@@ -71,3 +71,44 @@ describe("探索 AI", () => {
     expect(wins).toBeGreaterThanOrEqual(5);
   }, 60_000);
 });
+
+import { findLethal, searchLethal } from "../src/ai/lethal";
+
+describe("リーサルの探索", () => {
+  function rhinoceusPosition() {
+    let s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 4 });
+    s = applyAction(s, legalActions(s)[0]!);
+    s = applyAction(s, legalActions(s)[0]!);
+    const me = s.active;
+    const opp = me === 0 ? 1 : 0;
+    const id = (name: string) => ALL_CARDS.find((c) => c.name === name)!.id;
+    s.players[me].hand = [newHandCard(s, id("殺戮のリノセウス")), newHandCard(s, id("森の神秘")), newHandCard(s, id("森の神秘"))];
+    s.players[me].pp = s.players[me].maxPp = 3;
+    s.players[opp].leaderHp = 3;
+    return { s, me, rhinoceus: s.players[me].hand[0]!.iid };
+  }
+
+  it("コンボを稼いでからリノセウスで倒す並びを見つける", () => {
+    const { s, me, rhinoceus } = rhinoceusPosition();
+    const seq = searchLethal(s, me);
+    expect(seq).not.toBeNull();
+    // リノセウスを先に出すと1点しか出ないので、最初の手は森の神秘
+    expect(seq![0]).not.toEqual({ type: "play", iid: rhinoceus });
+    let t = s;
+    for (const a of seq!) t = applyAction(t, a);
+    expect(t.winner).toBe(me);
+  });
+
+  it("勝てなければ null を返す", () => {
+    const { s, me } = rhinoceusPosition();
+    s.players[me === 0 ? 1 : 0].leaderHp = 4;
+    expect(searchLethal(s, me)).toBeNull();
+    expect(findLethal(s, me, rngFrom({ rng: 1 }))).toBeNull();
+  });
+
+  it("探索 AI はリーサルを取りこぼさない", () => {
+    let { s, me } = rhinoceusPosition();
+    while (s.phase !== "ended" && s.active === me) s = applyAction(s, searchAgent.chooseAction(s, legalActions(s), rngFrom({ rng: 2 })));
+    expect(s.winner).toBe(me);
+  });
+});

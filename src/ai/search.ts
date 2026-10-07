@@ -4,6 +4,7 @@
 // 2. 各局面で、自分のターン終了までの行動の並びをビームサーチで探索する
 // 3. 有望な並び（最初の手ごとの最善）について、相手のターンを貪欲法 AI で進めた後の局面を評価する
 // 4. 平均の評価が最も良い「最初の手」を選ぶ（行動するたびに探索し直す）
+// ただし、このターンで勝てる並び（リーサル、lethal.ts）が見つかれば、それを最優先する
 
 import {
   applyAction,
@@ -14,7 +15,9 @@ import {
   type Rng,
 } from "../engine";
 import { determinize } from "./determinize";
-import { createGreedyAgent, evaluate, greedyAgent } from "./greedy";
+import { DEFAULT_WEIGHTS, evaluateWith, type EvalWeights } from "./evaluate";
+import { createGreedyAgent, greedyAgent } from "./greedy";
+import { findLethal } from "./lethal";
 import type { Agent } from "./types";
 
 export interface SearchOptions {
@@ -26,9 +29,13 @@ export interface SearchOptions {
   maxDepth: number;
   /** 相手のターンまで読んで評価し直す候補（最初の手）の数 */
   rescoreTop: number;
+  /** リーサルの探索を行う */
+  lethal: boolean;
+  /** 評価関数の重み */
+  weights: EvalWeights;
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 8, maxDepth: 6, rescoreTop: 4 };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 8, maxDepth: 6, rescoreTop: 4, lethal: true, weights: DEFAULT_WEIGHTS };
 
 interface Node {
   state: GameState;
@@ -68,11 +75,11 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, rng: Rng
   // 深さ1: すべての手を展開する（最初の手の候補を落とさない）
   for (const a of legalActions(root)) {
     if (a.type === "endTurn") {
-      terminals.push({ state: root, first: a, value: evaluate(root, p) });
+      terminals.push({ state: root, first: a, value: evaluateWith(root, p, opts.weights) });
       continue;
     }
     const next = tryApply(root, a);
-    if (next) frontier.push({ state: next, first: a, value: evaluate(next, p) });
+    if (next) frontier.push({ state: next, first: a, value: evaluateWith(next, p, opts.weights) });
   }
 
   for (let depth = 1; depth < opts.maxDepth && frontier.length > 0; depth++) {
@@ -88,7 +95,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, rng: Rng
       for (const a of legalActions(node.state)) {
         if (a.type === "endTurn") continue;
         const next = tryApply(node.state, a);
-        if (next) children.push({ state: next, first: node.first, value: evaluate(next, p) });
+        if (next) children.push({ state: next, first: node.first, value: evaluateWith(next, p, opts.weights) });
       }
     }
     children.sort((x, y) => y.value - x.value);
@@ -107,7 +114,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, rng: Rng
   const result = new Map<string, { action: Action; value: number }>();
   for (const node of ranked.slice(0, opts.rescoreTop)) {
     const after = node.state.phase === "ended" ? node.state : simulateOpponentTurn(node.state, p, rng);
-    result.set(keyOf(node.first), { action: node.first, value: evaluate(after, p) });
+    result.set(keyOf(node.first), { action: node.first, value: evaluateWith(after, p, opts.weights) });
   }
   return result;
 }
@@ -123,6 +130,12 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
       // マリガンは貪欲法と同じ
       if (first.type === "mulligan") return greedyAgent.chooseAction(real, legal, rng);
       const p = real.pending ? real.pending.player : real.active;
+      const legalKeys = new Set(legal.map(keyOf));
+
+      if (opts.lethal) {
+        const lethal = findLethal(real, p, rng);
+        if (lethal && legalKeys.has(keyOf(lethal))) return lethal;
+      }
 
       const totals = new Map<string, { action: Action; sum: number; count: number }>();
       for (let i = 0; i < opts.samples; i++) {
@@ -135,7 +148,6 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
         }
       }
       // 実際の局面で合法な手に限る。どのサンプルでも評価されなかった手は選ばない
-      const legalKeys = new Set(legal.map(keyOf));
       let best: Action | null = null;
       let bestValue = -Infinity;
       for (const [k, t] of totals) {
