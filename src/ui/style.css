@@ -1,16 +1,31 @@
 /* アセット不使用: システムフォントと CSS のみ */
 :root {
-  --bg: #f7f7f5;
+  --bg: #f4f3ef;
+  --panel: #ffffff;
   --fg: #1d1d1f;
   --muted: #6b6b70;
+  --line: #d6d4cc;
+  --accent: #2f6fdb;
+  --target: #d9442e;
+  --ready: #2e9d5b;
+  --elf: #4f9a3a;
+  --royal: #c9a227;
+  --witch: #5a5fd6;
+  --dragon: #d9762e;
+  --nightmare: #9c3c8f;
+  --bishop: #8aa2b8;
+  --nemesis: #3aa6b8;
+  --neutral: #8c8c8c;
   color-scheme: light dark;
   font-family: system-ui, -apple-system, "Hiragino Sans", "Yu Gothic UI", sans-serif;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #18181b;
+    --panel: #232327;
     --fg: #ececee;
     --muted: #a1a1aa;
+    --line: #3a3a40;
   }
 }
 body {
@@ -18,13 +33,283 @@ body {
   background: var(--bg);
   color: var(--fg);
 }
+button,
+select {
+  font: inherit;
+  color: inherit;
+}
 .app {
-  max-width: 960px;
+  max-width: 1200px;
   margin: 0 auto;
-  padding: 16px;
+  padding: 12px 16px;
+}
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+h1 {
+  font-size: 20px;
+  margin: 0 0 8px;
+}
+.muted {
+  color: var(--muted);
 }
 footer {
-  margin-top: 32px;
+  margin-top: 24px;
   font-size: 12px;
   color: var(--muted);
+}
+
+/* 設定画面 */
+.setup {
+  display: grid;
+  gap: 12px;
+  max-width: 360px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+}
+.setup label {
+  display: grid;
+  gap: 4px;
+}
+button {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+button.primary,
+button.end-turn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* 対戦画面 */
+.game {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  grid-template-areas: "opp info" "me info" "controls info";
+  gap: 8px;
+}
+@media (max-width: 800px) {
+  .game {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "opp" "me" "controls" "info";
+  }
+}
+.side {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+}
+.opponent {
+  grid-area: opp;
+}
+.me {
+  grid-area: me;
+}
+.controls {
+  grid-area: controls;
+}
+.info {
+  grid-area: info;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+.player-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 13px;
+  align-items: center;
+}
+.player-info.active strong::after {
+  content: " ●";
+  color: var(--ready);
+}
+.leader {
+  justify-self: center;
+  padding: 4px 16px;
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  font-weight: bold;
+  cursor: pointer;
+}
+.board,
+.hand {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 100px;
+  align-items: flex-start;
+}
+.hand-backs {
+  display: flex;
+  gap: 3px;
+}
+.card-back {
+  width: 14px;
+  height: 20px;
+  border-radius: 3px;
+  background: var(--line);
+}
+
+.card {
+  width: 96px;
+  min-height: 92px;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 2px;
+  padding: 4px;
+  text-align: left;
+  border: 2px solid var(--neutral);
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 12px;
+}
+.card-top {
+  display: flex;
+  gap: 4px;
+  align-items: flex-start;
+}
+.cost {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-weight: bold;
+  display: inline-grid;
+  place-items: center;
+  font-size: 11px;
+}
+.cost.reduced {
+  background: var(--ready);
+}
+.card-name {
+  font-weight: bold;
+  line-height: 1.2;
+  word-break: break-all;
+}
+.card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  align-content: flex-start;
+}
+.badge {
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--line);
+}
+.badge.evo {
+  background: var(--royal);
+  color: #000;
+}
+.stats {
+  display: flex;
+  justify-content: space-between;
+  font-weight: bold;
+  font-size: 14px;
+}
+.stats .atk::before {
+  content: "攻 ";
+  font-size: 10px;
+  color: var(--muted);
+}
+.stats .def::before {
+  content: "体 ";
+  font-size: 10px;
+  color: var(--muted);
+}
+.stats.type {
+  font-size: 11px;
+  font-weight: normal;
+  color: var(--muted);
+}
+.card.ready {
+  box-shadow: 0 0 0 2px var(--ready);
+}
+.card.targetable,
+.leader.targetable {
+  box-shadow: 0 0 0 3px var(--target);
+}
+.card.selected,
+.leader.selected {
+  transform: translateY(-4px);
+  box-shadow: 0 0 0 3px var(--accent);
+}
+.class-elf { border-color: var(--elf); }
+.class-royal { border-color: var(--royal); }
+.class-witch { border-color: var(--witch); }
+.class-dragon { border-color: var(--dragon); }
+.class-nightmare { border-color: var(--nightmare); }
+.class-bishop { border-color: var(--bishop); }
+.class-nemesis { border-color: var(--nemesis); }
+.class-neutral { border-color: var(--neutral); }
+
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  min-height: 36px;
+}
+.banner.column {
+  flex-direction: column;
+  align-items: stretch;
+}
+.banner .end-turn {
+  margin-left: auto;
+}
+
+.detail {
+  background: var(--panel);
+  border: 2px solid var(--neutral);
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 13px;
+}
+.detail-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.detail-meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0;
+}
+.detail-text {
+  white-space: pre-wrap;
+}
+.log {
+  margin: 0;
+  padding: 8px 8px 8px 24px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+  max-height: 360px;
+  overflow-y: auto;
 }
