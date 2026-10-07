@@ -9,7 +9,7 @@ import { playMatch } from "../src/sim/match";
  * 探索 AI の設定 A と B を対戦させる（npm run compare -- <試合数> '<Aの設定JSON>' '<Bの設定JSON>'）。
  * 同じデッキの組で席とデッキを入れ替えて2試合ずつ行い、A の勝率とデッキごとの A の勝率を出す。
  * 例: npm run compare -- 105 '{}' '{"lethal":false}'
- * "weights": "default" で、クラスごとに調整した重みではなく基準の重みを使う。
+ * "weights": "byClass" でクラスごとに調整した重み、"default" で基準の重みを使う。
  */
 export async function main(argv: string[]): Promise<number> {
   const games = Number(argv[0] ?? 28);
