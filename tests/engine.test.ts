@@ -396,11 +396,16 @@ describe("超進化と他のキーワード", () => {
     expect(after.keywords).not.toContain("barrier");
   });
 
-  it("自分のターン中の超進化フォロワーも必殺で破壊される", () => {
+  it("自分のターン中の超進化フォロワーは必殺で破壊されないが、相手のターン中は破壊される", () => {
     const { s, me, opp } = superEvolvedAtOwnTurn();
     const f = putFollower(s, me, "キャラバンマンモス", { evolve: "superEvolved" });
     const bane = putFollower(s, opp, "獣性の鉄人");
-    const t = applyAction(s, { type: "attack", attacker: f.iid, target: bane.iid });
+    let t = applyAction(s, { type: "attack", attacker: f.iid, target: bane.iid });
+    expect(t.players[me].board.map((c) => c.iid)).toEqual([f.iid]);
+
+    t = endTurn(t);
+    const attacker = putFollower(t, opp, "獣性の鉄人");
+    t = applyAction(t, { type: "attack", attacker: attacker.iid, target: f.iid });
     expect(t.players[me].board).toEqual([]);
   });
 });

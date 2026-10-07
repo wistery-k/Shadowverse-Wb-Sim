@@ -161,6 +161,11 @@ function damageFollower(state: GameState, f: FollowerOnBoard, amount: number): n
   return amount;
 }
 
+/** 超進化したフォロワーは持ち主のターン中、効果で破壊されない */
+function immuneToEffectDestroy(state: GameState, f: FollowerOnBoard): boolean {
+  return f.evolve === "superEvolved" && ownerOf(state, f.iid) === state.active;
+}
+
 /** 体力0以下のフォロワーと、指定されたフォロワーを破壊する */
 function destroyDead(state: GameState, alsoDestroy: ReadonlySet<number> = new Set()): void {
   // 手番のプレイヤーの場から、古い順（場に出た順）に処理する（docs/rules.md 11章）
@@ -417,10 +422,10 @@ function applyAttack(state: GameState, attackerIid: number, target: AttackTarget
   damageFollower(state, attacker, defender.attack);
   if (hasKeyword(attacker, "drain")) healLeader(pl, dealt);
 
-  // 必殺: 戦闘ダメージを0以上与えたフォロワーを破壊（0ダメージでも破壊。超進化フォロワーも破壊される）
+  // 必殺: 戦闘ダメージを0以上与えたフォロワーを破壊（0ダメージでも破壊）。必殺は効果による破壊。
   const baneTargets = new Set<number>();
-  if (hasKeyword(attacker, "bane")) baneTargets.add(defender.iid);
-  if (hasKeyword(defender, "bane")) baneTargets.add(attacker.iid);
+  if (hasKeyword(attacker, "bane") && !immuneToEffectDestroy(state, defender)) baneTargets.add(defender.iid);
+  if (hasKeyword(defender, "bane") && !immuneToEffectDestroy(state, attacker)) baneTargets.add(attacker.iid);
   destroyDead(state, baneTargets);
   checkLeaders(state);
 }
