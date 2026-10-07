@@ -1,7 +1,7 @@
 // 対戦画面（プレイヤー vs AI）
 
-import { useEffect, useMemo, useState } from "preact/hooks";
-import type { Agent } from "../ai/types";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import type { AgentRequest, AgentResponse } from "../ai/worker";
 import {
   actingPlayer,
   applyAction,
@@ -21,7 +21,8 @@ const AI_DELAY_MS = 700;
 
 interface Props {
   initial: GameState;
-  ai: Agent;
+  /** src/ai/registry.ts のキー */
+  ai: string;
   onExit: () => void;
 }
 
@@ -34,6 +35,12 @@ export function Game({ initial, ai, onExit }: Props) {
   const [picks, setPicks] = useState<number[]>([]);
   const [detail, setDetail] = useState<string | null>(null);
   const [aiRng] = useState(() => rngFrom({ rng: (initial.rng ^ 0x5bd1e995) >>> 0 }));
+  const [aiThinking, setAiThinking] = useState(false);
+  const worker = useRef<Worker | null>(null);
+  useEffect(() => {
+    worker.current = new Worker(new URL("../ai/worker.ts", import.meta.url), { type: "module" });
+    return () => worker.current?.terminate();
+  }, []);
 
   const legal = useMemo(() => legalActions(state), [state]);
   const acting = actingPlayer(state);
@@ -46,15 +53,32 @@ export function Game({ initial, ai, onExit }: Props) {
     setPicks([]);
   }
 
-  // AI の手番
+  // AI の手番（思考は Worker で行う。最低でも AI_DELAY_MS は待って、操作を目で追えるようにする）
   useEffect(() => {
-    if (state.phase === "ended" || acting !== AI) return;
-    const timer = setTimeout(() => {
-      const action = ai.chooseAction(state, legal, aiRng);
-      setLog((l) => [describeAction(state, action, HUMAN), ...l].slice(0, 200));
-      setState(applyAction(state, action));
-    }, AI_DELAY_MS);
-    return () => clearTimeout(timer);
+    const w = worker.current;
+    if (state.phase === "ended" || acting !== AI || !w) return;
+    let cancelled = false;
+    const id = aiRng.int(2 ** 30);
+    const started = Date.now();
+    setAiThinking(true);
+    w.onmessage = (e: MessageEvent<AgentResponse>) => {
+      const res = e.data;
+      if (cancelled || res.id !== id) return;
+      const action = res.action ?? legal.find((a) => a.type === "endTurn") ?? legal[0];
+      if (res.error) console.error("AI の思考でエラー:", res.error);
+      if (!action) return;
+      setTimeout(() => {
+        if (cancelled) return;
+        setAiThinking(false);
+        setLog((l) => [describeAction(state, action, HUMAN), ...l].slice(0, 200));
+        setState(applyAction(state, action));
+      }, Math.max(0, AI_DELAY_MS - (Date.now() - started)));
+    };
+    const request: AgentRequest = { id, agent: ai, state, legal, seed: aiRng.int(2 ** 30) };
+    w.postMessage(request);
+    return () => {
+      cancelled = true;
+    };
   }, [state]);
 
   const me = state.players[HUMAN];
@@ -179,7 +203,7 @@ export function Game({ initial, ai, onExit }: Props) {
             </button>
           </div>
         ) : !myTurn ? (
-          <div class="banner muted">相手の手番です…</div>
+          <div class="banner muted">{aiThinking ? "相手が考えています…" : "相手の手番です…"}</div>
         ) : mulligan ? (
           <div class="banner">
             入れ替えるカードを選んでください（{picks.length}枚）

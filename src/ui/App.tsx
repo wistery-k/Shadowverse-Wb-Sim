@@ -1,7 +1,4 @@
 import { useState } from "preact/hooks";
-import { greedyAgent } from "../ai/greedy";
-import { randomAgent } from "../ai/random";
-import type { Agent } from "../ai/types";
 import { CLASS_NAMES } from "../cards";
 import { DECK_CLASSES, type DeckClass } from "../cards/deck";
 import { DEFAULT_DECKS } from "../cards/defaultDecks";
@@ -12,9 +9,11 @@ import { Game } from "./Game";
 import { Simulate } from "./Simulate";
 import { loadDecks, saveDecks, type SavedDeck } from "./storage";
 
-const AGENTS: Record<string, { agent: Agent; label: string }> = {
-  greedy: { agent: greedyAgent, label: "ふつう（貪欲法）" },
-  random: { agent: randomAgent, label: "よわい（ランダム）" },
+/** 相手の強さ（キーは src/ai/registry.ts） */
+const OPPONENTS: Record<string, string> = {
+  search: "つよい（探索）",
+  greedy: "ふつう（貪欲法）",
+  random: "よわい（ランダム）",
 };
 
 /** デッキの選択肢: "saved:<id>" / "default:<key>" / "random:<class>" */
@@ -62,7 +61,7 @@ export function App() {
   const [tab, setTab] = useState<"play" | "decks" | "sim">("play");
   const [saved, setSaved] = useState<SavedDeck[]>(() => loadDecks());
   const [setup, setSetupState] = useState<Setup>(() => loadSetup());
-  const [game, setGame] = useState<{ state: GameState; agent: Agent } | null>(null);
+  const [game, setGame] = useState<{ state: GameState; agent: string } | null>(null);
   const [error, setError] = useState("");
 
   const setSetup = (s: Setup) => {
@@ -84,7 +83,7 @@ export function App() {
       return;
     }
     setError("");
-    setGame({ state: createGame({ decks: [me, ai], seed }), agent: (AGENTS[setup.agent] ?? AGENTS.greedy!).agent });
+    setGame({ state: createGame({ decks: [me, ai], seed }), agent: OPPONENTS[setup.agent] ? setup.agent : "greedy" });
   }
 
   return (
@@ -127,7 +126,7 @@ export function App() {
             <label>
               相手の強さ
               <select value={setup.agent} onChange={(e) => setSetup({ ...setup, agent: e.currentTarget.value })}>
-                {Object.entries(AGENTS).map(([key, { label }]) => (
+                {Object.entries(OPPONENTS).map(([key, label]) => (
                   <option key={key} value={key}>
                     {label}
                   </option>

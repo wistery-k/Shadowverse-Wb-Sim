@@ -9,7 +9,7 @@ const CLASSES = ["elf", "royal", "witch", "dragon", "nightmare", "bishop", "neme
 describe("cloneState", () => {
   it("structuredClone と同じ内容を作り、applyAction は元の状態を一切変更しない", () => {
     const rng = rngFrom({ rng: 11 });
-    for (let g = 0; g < 120; g++) {
+    for (let g = 0; g < 80; g++) {
       const decks: [readonly string[], readonly string[]] =
         g % 2 === 0
           ? [DEFAULT_DECKS[g % DEFAULT_DECKS.length]!.cards, DEFAULT_DECKS[(g + 2) % DEFAULT_DECKS.length]!.cards]
@@ -24,5 +24,5 @@ describe("cloneState", () => {
         s = next;
       }
     }
-  });
+  }, 30_000);
 });

@@ -20,3 +20,54 @@ describe("AI", () => {
     expect(wins).toBeGreaterThanOrEqual(16);
   });
 });
+
+import { determinize } from "../src/ai/determinize";
+import { searchAgent } from "../src/ai/search";
+import { applyAction, createGame, legalActions, newHandCard } from "../src/engine";
+import { ALL_CARDS } from "../src/cards";
+import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
+
+describe("determinization", () => {
+  it("自分の手札と場はそのまま、相手の手札と山札は未公開カードの並べ直し、トークンは残す", () => {
+    let s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 3 });
+    s = applyAction(s, legalActions(s)[0]!);
+    s = applyAction(s, legalActions(s)[0]!);
+    const viewer = s.active;
+    const opp = viewer === 0 ? 1 : 0;
+    const fairy = ALL_CARDS.find((c) => c.name === "フェアリー")!.id;
+    s.players[opp].hand.push(newHandCard(s, fairy));
+    const hidden = (st: typeof s) =>
+      [...st.players[opp].hand.filter((h) => h.cardId !== fairy), ...st.players[opp].deck].map((c) => c.cardId).sort();
+
+    const rng = rngFrom({ rng: 1 });
+    const d = determinize(s, viewer, rng);
+    expect(d.players[viewer].hand).toEqual(s.players[viewer].hand);
+    expect(d.players[viewer].board).toEqual(s.players[viewer].board);
+    expect(d.players[viewer].deck.map((c) => c.cardId).sort()).toEqual(s.players[viewer].deck.map((c) => c.cardId).sort());
+    expect(d.players[opp].hand.map((h) => h.iid)).toEqual(s.players[opp].hand.map((h) => h.iid));
+    expect(d.players[opp].hand.at(-1)?.cardId).toBe(fairy);
+    expect(hidden(d)).toEqual(hidden(s));
+    expect(d.rng).not.toBe(s.rng);
+    // 元の局面は変更しない
+    expect(determinize(s, viewer, rngFrom({ rng: 1 }))).toEqual(d);
+  });
+});
+
+describe("探索 AI", () => {
+  it("不変条件を破らずに対戦を終え、貪欲法 AI に勝ち越す", () => {
+    let wins = 0;
+    for (let g = 0; g < 8; g++) {
+      const i = g % 7;
+      const j = (g * 3 + 1) % 7;
+      const searchSeat = g % 2;
+      const decks: [string[], string[]] = [DEFAULT_DECKS[i]!.cards, DEFAULT_DECKS[j]!.cards];
+      const r = playMatch(searchSeat === 0 ? [searchAgent, greedyAgent] : [greedyAgent, searchAgent], {
+        decks,
+        seed: 100 + g,
+        checkInvariants: true,
+      });
+      if (r.winner === searchSeat) wins++;
+    }
+    expect(wins).toBeGreaterThanOrEqual(5);
+  }, 60_000);
+});
