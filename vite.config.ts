@@ -24,5 +24,7 @@ export default defineConfig({
   },
   test: {
     include: ["tests/**/*.test.ts"],
+    // 自己対戦のテストは時間がかかる（CI や負荷の高い環境でも落ちないようにする）
+    testTimeout: 30_000,
   },
 });

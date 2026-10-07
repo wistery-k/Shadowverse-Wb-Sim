@@ -15,9 +15,10 @@ import {
   type Rng,
 } from "../engine";
 import { determinize } from "./determinize";
-import { DEFAULT_WEIGHTS, evaluateWith, type EvalWeights } from "./evaluate";
+import { evaluateWith, type EvalWeights } from "./evaluate";
 import { createGreedyAgent, greedyAgent } from "./greedy";
 import { findLethal } from "./lethal";
+import { weightsFor } from "./weights";
 import type { Agent } from "./types";
 
 export interface SearchOptions {
@@ -31,11 +32,11 @@ export interface SearchOptions {
   rescoreTop: number;
   /** リーサルの探索を行う */
   lethal: boolean;
-  /** 評価関数の重み */
-  weights: EvalWeights;
+  /** 評価関数の重み。"byClass" は自分のデッキのクラスに合わせて data/ai-weights.json の重みを使う */
+  weights: EvalWeights | "byClass";
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 8, maxDepth: 6, rescoreTop: 4, lethal: true, weights: DEFAULT_WEIGHTS };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 8, maxDepth: 6, rescoreTop: 4, lethal: true, weights: "byClass" };
 
 interface Node {
   state: GameState;
@@ -68,18 +69,18 @@ function simulateOpponentTurn(state: GameState, p: PlayerIndex, rng: Rng): GameS
 }
 
 /** 1つの局面で、最初の手ごとの評価値を求める */
-function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, rng: Rng): Map<string, { action: Action; value: number }> {
+function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalWeights, rng: Rng): Map<string, { action: Action; value: number }> {
   const terminals: Node[] = [];
   let frontier: Node[] = [];
 
   // 深さ1: すべての手を展開する（最初の手の候補を落とさない）
   for (const a of legalActions(root)) {
     if (a.type === "endTurn") {
-      terminals.push({ state: root, first: a, value: evaluateWith(root, p, opts.weights) });
+      terminals.push({ state: root, first: a, value: evaluateWith(root, p, w) });
       continue;
     }
     const next = tryApply(root, a);
-    if (next) frontier.push({ state: next, first: a, value: evaluateWith(next, p, opts.weights) });
+    if (next) frontier.push({ state: next, first: a, value: evaluateWith(next, p, w) });
   }
 
   for (let depth = 1; depth < opts.maxDepth && frontier.length > 0; depth++) {
@@ -95,7 +96,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, rng: Rng
       for (const a of legalActions(node.state)) {
         if (a.type === "endTurn") continue;
         const next = tryApply(node.state, a);
-        if (next) children.push({ state: next, first: node.first, value: evaluateWith(next, p, opts.weights) });
+        if (next) children.push({ state: next, first: node.first, value: evaluateWith(next, p, w) });
       }
     }
     children.sort((x, y) => y.value - x.value);
@@ -114,7 +115,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, rng: Rng
   const result = new Map<string, { action: Action; value: number }>();
   for (const node of ranked.slice(0, opts.rescoreTop)) {
     const after = node.state.phase === "ended" ? node.state : simulateOpponentTurn(node.state, p, rng);
-    result.set(keyOf(node.first), { action: node.first, value: evaluateWith(after, p, opts.weights) });
+    result.set(keyOf(node.first), { action: node.first, value: evaluateWith(after, p, w) });
   }
   return result;
 }
@@ -137,10 +138,11 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
         if (lethal && legalKeys.has(keyOf(lethal))) return lethal;
       }
 
+      const w = opts.weights === "byClass" ? weightsFor(real, p) : opts.weights;
       const totals = new Map<string, { action: Action; sum: number; count: number }>();
       for (let i = 0; i < opts.samples; i++) {
         const det = determinize(real, p, rng);
-        for (const [k, { action, value }] of planTurn(det, p, opts, rng)) {
+        for (const [k, { action, value }] of planTurn(det, p, opts, w, rng)) {
           const t = totals.get(k) ?? { action, sum: 0, count: 0 };
           t.sum += value;
           t.count++;

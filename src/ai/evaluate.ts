@@ -32,7 +32,15 @@ export interface EvalWeights {
   /** 相手リーダーの体力がこれ以下のとき、自分のフォロワーの攻撃力を追加で評価する */
   lethalRange: number;
   lethalAttack: number;
+  /**
+   * カードごとの「手札に持っておく価値」（カードID → 点数）。切り札を温存させるために使う。
+   * 手札1枚の価値（myHand）に加算する
+   */
+  hold: Readonly<Record<string, number>>;
 }
+
+/** 数値の重みの名前（hold を除く） */
+export type NumericWeight = Exclude<keyof EvalWeights, "hold">;
 
 /** 手で決めた基準の重み */
 export const DEFAULT_WEIGHTS: EvalWeights = {
@@ -55,6 +63,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   graveyard: 0.05,
   lethalRange: 10,
   lethalAttack: 0.3,
+  hold: {},
 };
 
 const KEYWORD_VALUE: Partial<Record<string, number>> = {
@@ -91,6 +100,7 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
   for (const c of opp.board) oppBoard += boardValue(c, w);
   v -= oppBoard * w.oppBoard;
   v += me.hand.length * w.myHand - opp.hand.length * w.oppHand;
+  for (const h of me.hand) v += w.hold[h.cardId] ?? 0;
   v += me.ep * w.ep + me.sep * w.sep;
   if (me.extraPpAvailable) v += w.extraPp;
   v += (me.crests.length - opp.crests.length) * w.crest;
