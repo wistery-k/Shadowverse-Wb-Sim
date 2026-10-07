@@ -107,6 +107,8 @@ export interface PlayerState {
   pp: number;
   ep: number;
   sep: number;
+  /** エクストラPPを使えるか（後攻のみ） */
+  extraPpAvailable: boolean;
   /** 自分のターンが何回目か（未開始は0） */
   turnCount: number;
   deck: CardRef[];
@@ -209,6 +211,8 @@ export type Action =
   | { type: "superEvolve"; iid: number }
   | { type: "act"; iid: number }
   | { type: "fuse"; host: number; materials: number[] }
+  /** エクストラPP（後攻のみ） */
+  | { type: "extraPp" }
   | { type: "choose"; targets: number[] }
   | { type: "mode"; index: number }
   | { type: "endTurn" };

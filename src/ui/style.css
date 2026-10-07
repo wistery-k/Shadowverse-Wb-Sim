@@ -279,8 +279,12 @@ button.end-turn {
   flex-direction: column;
   align-items: stretch;
 }
+.banner .extra-pp,
 .banner .end-turn {
   margin-left: auto;
+}
+.banner .extra-pp + .end-turn {
+  margin-left: 0;
 }
 
 .detail {

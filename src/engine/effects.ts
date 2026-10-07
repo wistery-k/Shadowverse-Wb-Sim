@@ -758,7 +758,8 @@ function exec(state: GameState, frame: Frame, eff: Effect | InternalEffect): boo
       return next();
 
     case "gainPp":
-      pl.pp = eff.amount === "max" ? pl.maxPp : Math.min(pl.maxPp, pl.pp + val(eff.amount));
+      // 回復は PP最大値まで。エクストラPPで最大値を超えている場合は減らさない
+      pl.pp = Math.max(pl.pp, eff.amount === "max" ? pl.maxPp : Math.min(pl.maxPp, pl.pp + val(eff.amount)));
       return next();
     case "addMaxPp":
       pl.maxPp = Math.min(MAX_PP, pl.maxPp + eff.amount);

@@ -13,7 +13,8 @@ export function invariantViolations(state: GameState): string[] {
     if (pl.hand.length > HAND_LIMIT) v.push(`${where}: 手札が${pl.hand.length}枚`);
     if (pl.board.length > BOARD_LIMIT) v.push(`${where}: 場が${pl.board.length}枚`);
     if (pl.maxPp < 0 || pl.maxPp > MAX_PP) v.push(`${where}: 最大PPが${pl.maxPp}`);
-    if (pl.pp < 0 || pl.pp > pl.maxPp) v.push(`${where}: PPが${pl.pp}/${pl.maxPp}`);
+    // エクストラPPで PP最大値を1超えることがある
+    if (pl.pp < 0 || pl.pp > pl.maxPp + 1) v.push(`${where}: PPが${pl.pp}/${pl.maxPp}`);
     if (pl.ep < 0 || pl.sep < 0) v.push(`${where}: EP/SEPが負`);
     if (pl.leaderHp > pl.leaderMaxHp) v.push(`${where}: リーダー体力が最大値を超過`);
     if (state.phase !== "ended" && pl.leaderHp <= 0) v.push(`${where}: 体力0以下で対戦が継続`);

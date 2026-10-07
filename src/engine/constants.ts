@@ -13,3 +13,6 @@ export const SUPER_EVOLVE_BONUS = 3;
 /** 進化・超進化が解禁される自分のターン数 [先攻, 後攻] */
 export const EVOLVE_TURN: readonly [number, number] = [5, 4];
 export const SUPER_EVOLVE_TURN: readonly [number, number] = [7, 6];
+
+/** 後攻のエクストラPPの使用権が復活する自分のターン数 */
+export const EXTRA_PP_REFRESH_TURN = 6;
