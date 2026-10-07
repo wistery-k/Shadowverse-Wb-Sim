@@ -156,6 +156,8 @@ export interface EffectContext {
 /** エンジン内部の処理（能力の DSL の外） */
 export type InternalEffect =
   | { op: "_combat"; attacker: number; target: number | "leader" }
+  /** 戦闘の後処理（ぶっとばし） */
+  | { op: "_combatEnd" }
   | { op: "_endTurn" }
   | { op: "_cleanup" }
   | { op: "_startTurn" }
@@ -199,6 +201,17 @@ export interface GameState {
   /** 誘発して解決を待っている能力（先頭から解決） */
   queue: QueuedAbility[];
   pending: PendingChoice | null;
+  /** 進行中のフォロワーへの攻撃（ぶっとばしの判定に使う） */
+  attack: AttackInProgress | null;
+}
+
+export interface AttackInProgress {
+  attacker: number;
+  defender: number;
+  /** 攻撃したフォロワーが超進化していたか */
+  superEvolved: boolean;
+  /** 攻撃中に攻撃先が破壊されたか */
+  defenderDestroyed: boolean;
 }
 
 export type AttackTarget = number | "leader";

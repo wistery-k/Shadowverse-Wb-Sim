@@ -303,6 +303,8 @@ export function leaveBoard(state: GameState, iid: number, reason: LeaveReason): 
   if (!hit) return;
   const { player: p, card } = hit;
   const pl = state.players[p];
+  // 攻撃中の攻撃先が破壊された（場を離れる場合に消滅するカードを含む）
+  if (reason === "destroy" && state.attack?.defender === iid) state.attack.defenderDestroyed = true;
   if (abilitiesOf(card.cardId).banishOnLeave) reason = "banish";
 
   // 破壊されたときの誘発は、離れる前の状態で条件を判定する
