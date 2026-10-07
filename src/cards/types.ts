@@ -41,34 +41,30 @@ export const SET_NAMES: Record<CardSet, string> = {
 };
 
 interface CardBase {
-  /** 一意なID。公式のカードIDがあればそれを文字列で使う。 */
+  /** 公式のカードID（文字列） */
   id: string;
   name: string;
   class: ClassId;
   set: CardSet;
-  /** トークンには無い場合がある */
-  rarity?: Rarity;
+  rarity: Rarity;
   cost: number;
   /** タイプ（例: 兵士、マナリア）。無ければ空配列。 */
   tribes: string[];
-  /** 能力テキスト（公式表記のまま）。無ければ空文字列。 */
+  /**
+   * 能力テキスト。公式表記から装飾タグを除いたもの。進化時・超進化時の能力も含む。
+   * 区切り線は改行。キーワードの数値は公式表記どおり「【コンボ_3】」の形。無ければ空文字列。
+   */
   text: string;
-  /** 取得元URLまたは出典の説明 */
-  source: string;
-  /** 人間がテキストと数値をレビュー済みか */
-  verified: boolean;
-  /** 後に能力調整された疑いがあり、スターター用の当時の能力への修正が必要 */
-  needsOriginalText?: boolean;
+  /** 効果で生成・参照するカードのID（公式データの related_card_ids） */
+  related: string[];
+  /** スターター用に当時の能力へ差し替えたカード（公式データの is_starter_ability_changed） */
+  starterAbilityChanged?: true;
 }
 
 export interface FollowerCard extends CardBase {
   type: "follower";
   attack: number;
   defense: number;
-  evolvedAttack: number;
-  evolvedDefense: number;
-  /** 進化後の能力テキスト。無ければ空文字列。 */
-  evolvedText: string;
 }
 
 export interface SpellCard extends CardBase {
@@ -77,6 +73,8 @@ export interface SpellCard extends CardBase {
 
 export interface AmuletCard extends CardBase {
   type: "amulet";
+  /** カウントダウンの初期値。カウントダウンを持たないアミュレットには無い。 */
+  countdown?: number;
 }
 
 export type Card = FollowerCard | SpellCard | AmuletCard;

@@ -40,10 +40,13 @@ src/
   ui/       ブラウザ UI
   sim/      AI vs AI の自動対戦ランナー（Node / Worker）
 data/
-  cards.json  カードデータ
+  cards.json  カードデータ（scripts/convert-cards.ts で生成）
+  raw/        公式カード一覧APIのレスポンス（コミットしない）
 docs/
   rules.md    実装するルールの仕様メモ（出典付き）
 tests/
+scripts/
+  convert-cards.ts  カードデータ変換
 ```
 
 ## 開発
@@ -54,6 +57,7 @@ npm run dev        # 開発サーバー
 npm test           # テスト
 npm run typecheck  # 型チェック
 npm run build      # 本番ビルド（dist/）
+npm run cards      # data/raw/*.json（公式カード一覧APIのレスポンス）から data/cards.json を生成
 ```
 
 ## 公開

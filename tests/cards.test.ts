@@ -19,13 +19,9 @@ const follower = {
   cost: 2,
   attack: 2,
   defense: 2,
-  evolvedAttack: 4,
-  evolvedDefense: 4,
   tribes: [],
   text: "",
-  evolvedText: "",
-  source: "test",
-  verified: true,
+  related: ["test-spell"],
 };
 
 const spell = {
@@ -38,8 +34,7 @@ const spell = {
   cost: 1,
   tribes: [],
   text: "",
-  source: "test",
-  verified: true,
+  related: [],
 };
 
 describe("validateCards", () => {
@@ -53,7 +48,8 @@ describe("validateCards", () => {
 
   it("フォロワーのステータス欠落を検出する", () => {
     const { attack: _, ...broken } = follower;
-    expect(() => validateCards([broken])).toThrow(CardValidationError);
+    expect(() => validateCards([broken, spell])).toThrow(CardValidationError);
+    expect(() => validateCards([broken, spell])).toThrow(/attack/);
   });
 
   it("スペルにフォロワー専用項目があれば検出する", () => {
@@ -64,10 +60,15 @@ describe("validateCards", () => {
     expect(() => validateCards([follower, follower])).toThrow(/重複/);
   });
 
-  it("トークン以外の rarity 欠落を検出する", () => {
-    const { rarity: _, ...noRarity } = spell;
-    expect(() => validateCards([noRarity])).toThrow(/rarity/);
-    expect(() => validateCards([{ ...noRarity, set: "token" }])).not.toThrow();
+  it("存在しない related を検出する", () => {
+    expect(() => validateCards([follower])).toThrow(/test-spell/);
+  });
+
+  it("countdown はアミュレットのみ持てる", () => {
+    const amulet = { ...spell, type: "amulet", countdown: 2 };
+    expect(() => validateCards([amulet])).not.toThrow();
+    expect(() => validateCards([{ ...spell, countdown: 2 }])).toThrow(/countdown/);
+    expect(() => validateCards([{ ...amulet, countdown: 0 }])).toThrow(/countdown/);
   });
 });
 

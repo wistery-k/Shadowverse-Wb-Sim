@@ -1,1 +1,684 @@
-[]
+[
+  {
+    "id": "10001110",
+    "name": "不屈のファイター",
+    "class": "neutral",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【エンハンス_4】これは+3/+3する。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10001120",
+    "name": "ベルエンジェル・リア",
+    "class": "neutral",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【守護】\n【ラストワード】自分のデッキから1枚を引く。\n【進化時】自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "follower",
+    "attack": 0,
+    "defense": 2
+  },
+  {
+    "id": "10001210",
+    "name": "探偵のルーペ",
+    "class": "neutral",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【アクト】これを破壊。相手の場のフォロワー1枚を選ぶ。それは【守護】を失う。",
+    "related": [],
+    "type": "amulet"
+  },
+  {
+    "id": "10011110",
+    "name": "フェアリーテイマー",
+    "class": "elf",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】『フェアリー』2枚を自分の手札に加える。",
+    "related": [
+      "90011110"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10011120",
+    "name": "ストレイビーストマン",
+    "class": "elf",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の【コンボ】を+1する。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10011210",
+    "name": "繚乱の庭",
+    "class": "elf",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】『フェアリー』1枚を自分の手札に加える。\n【カウントダウン_2】\n自分の妖精・フォロワーが場に出たとき、相手の場のフォロワーからランダム1枚に1ダメージ。",
+    "related": [
+      "90011110"
+    ],
+    "type": "amulet",
+    "countdown": 2
+  },
+  {
+    "id": "10012110",
+    "name": "アドベンチャーエルフ・メイ",
+    "class": "elf",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [],
+    "text": "【ファンファーレ】【コンボ_3】相手の場のフォロワー1枚を選ぶ。それに3ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10012310",
+    "name": "虫の知らせ",
+    "class": "elf",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [],
+    "text": "自分の場のカード1枚を選ぶ。それを手札に戻す。相手の場のフォロワーからランダム1枚に2ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10021110",
+    "name": "刹那のクイックブレイダー",
+    "class": "royal",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "【疾走】",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10022110",
+    "name": "王家の御者",
+    "class": "royal",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ラストワード】『ナイト』1枚を自分の場に出す。",
+    "related": [
+      "90021110"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 2
+  },
+  {
+    "id": "10031210",
+    "name": "魔女の錬金釜",
+    "class": "witch",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "土の印"
+    ],
+    "text": "【ファンファーレ】自分のデッキから1枚を引く。\n【土の印】\nコスト1【アクト】自分の場の土の印を+1する。",
+    "related": [
+      "90031210"
+    ],
+    "type": "amulet"
+  },
+  {
+    "id": "10031310",
+    "name": "知恵の輝き",
+    "class": "witch",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10041310",
+    "name": "ドラゴニュートクラッシュ",
+    "class": "dragon",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "相手の場のフォロワー1枚を選ぶ。それに2ダメージ。【覚醒】なら、2ダメージではなく4ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10052110",
+    "name": "魅惑のサキュバス・リリム",
+    "class": "nightmare",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [],
+    "text": "【ラストワード】『バット』1枚を自分の手札に加える。",
+    "related": [
+      "90051120"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10062210",
+    "name": "有翼の石像",
+    "class": "bishop",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [],
+    "text": "【カウントダウン_4】\n【ラストワード】『ホーリーファルコン』1枚を自分の場に出す。\nコスト1【アクト】これのカウントを-1する。",
+    "related": [
+      "90061110"
+    ],
+    "type": "amulet",
+    "countdown": 4
+  },
+  {
+    "id": "10101110",
+    "name": "グリードケルブ・ルビィ",
+    "class": "neutral",
+    "set": "legend_dawn",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の手札1枚を選ぶ。それをデッキに戻す。自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10103110",
+    "name": "楽朗の天宮・フィルドア",
+    "class": "neutral",
+    "set": "legend_dawn",
+    "rarity": "gold",
+    "cost": 2,
+    "tribes": [],
+    "text": "【進化時】相手の場のフォロワー1枚を選ぶ。それを破壊。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10111110",
+    "name": "舞い踊る妖精",
+    "class": "elf",
+    "set": "legend_dawn",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】【コンボ_3】自分の場の他のフォロワーすべては+1/+1する。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10111310",
+    "name": "妖精の招集",
+    "class": "elf",
+    "set": "legend_dawn",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "『フェアリー』2枚を自分の手札に加える。",
+    "related": [
+      "90011110"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10112120",
+    "name": "純粋なるウォーターフェアリー",
+    "class": "elf",
+    "set": "legend_dawn",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [],
+    "text": "【ラストワード】『フェアリー』1枚を自分の手札に加える。",
+    "related": [
+      "90011110"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10112130",
+    "name": "ベビーカーバンクル",
+    "class": "elf",
+    "set": "legend_dawn",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の場の他のカード1枚を選ぶ。それを手札に戻す。\n【超進化時】自分のPPを3回復。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10112210",
+    "name": "燐光の岩",
+    "class": "elf",
+    "set": "legend_dawn",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】『フェアリー』1枚を自分の手札に加える。【コンボ_3】『森の神秘』1枚を自分の手札に加える。\n【アクト】これを破壊。自分の場のフォロワー1枚を選ぶ。それは+1/+1する。",
+    "related": [
+      "90011110",
+      "90011310"
+    ],
+    "type": "amulet"
+  },
+  {
+    "id": "10113110",
+    "name": "ピュアクリスタリア・リリィ",
+    "class": "elf",
+    "set": "legend_dawn",
+    "rarity": "gold",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】【コンボ_3】相手の場のフォロワー1枚を選ぶ。それは体力1になる。\n【進化時】自分のデッキから1枚を引く。相手の場のフォロワー1枚を選ぶ。それに1ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 3
+  },
+  {
+    "id": "10122110",
+    "name": "統率のルミナスナイト",
+    "class": "royal",
+    "set": "legend_dawn",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [
+      "ルミナス"
+    ],
+    "text": "自分の兵士・フォロワーが場に出たとき、ターン終了まで、これは+1/+0する。\n【進化時】『ナイト』1枚を自分の場に出す。",
+    "related": [
+      "90021110"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10131320",
+    "name": "ストームブラスト",
+    "class": "witch",
+    "set": "legend_dawn",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "Xは2から始まる。\n【スペルブースト時】これのXを+1する。\n相手の場のフォロワー1枚を選ぶ。それにXダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10143210",
+    "name": "乙姫の扇",
+    "class": "dragon",
+    "set": "legend_dawn",
+    "rarity": "gold",
+    "cost": 1,
+    "tribes": [],
+    "text": "コスト3【アクト】『乙姫お守り隊』1枚を自分の場に出す。自分の手札1枚を選ぶ。それを捨てる。",
+    "related": [
+      "90043110"
+    ],
+    "type": "amulet"
+  },
+  {
+    "id": "10151310",
+    "name": "死神の一振り",
+    "class": "nightmare",
+    "set": "legend_dawn",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "自分の場のフォロワー1枚と相手の場のフォロワー1枚を選ぶ。それを破壊。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10161210",
+    "name": "穏やかなる教会",
+    "class": "bishop",
+    "set": "legend_dawn",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "【カウントダウン_3】\n【ラストワード】自分のデッキから2枚を引く。\nコスト1【アクト】これのカウントを-1する。",
+    "related": [],
+    "type": "amulet",
+    "countdown": 3
+  },
+  {
+    "id": "10171110",
+    "name": "ビビッドインベンター・イリス",
+    "class": "nemesis",
+    "set": "legend_dawn",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "【ラストワード】『パスト・コア』1枚を自分の手札に加える。",
+    "related": [
+      "90071220",
+      "90072120",
+      "90073110",
+      "90073120",
+      "90073130",
+      "90074110"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10171320",
+    "name": "アーティファクトチャージ",
+    "class": "nemesis",
+    "set": "legend_dawn",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "『フューチャー・コア』1枚と『パスト・コア』1枚を自分の手札に加える。",
+    "related": [
+      "90071210",
+      "90071220",
+      "90072110",
+      "90072120",
+      "90073110",
+      "90073120",
+      "90073130",
+      "90074110"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "90011110",
+    "name": "フェアリー",
+    "class": "elf",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "妖精"
+    ],
+    "text": "【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "90011310",
+    "name": "森の神秘",
+    "class": "elf",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 0,
+    "tribes": [],
+    "text": "自分のリーダーを1回復。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "90021110",
+    "name": "ナイト",
+    "class": "royal",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 0,
+    "tribes": [
+      "兵士"
+    ],
+    "text": "",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "90031210",
+    "name": "大地の魔片",
+    "class": "witch",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "土の印"
+    ],
+    "text": "【土の印】\nコスト1【アクト】自分の場の土の印を+1する。",
+    "related": [
+      "90031210"
+    ],
+    "type": "amulet"
+  },
+  {
+    "id": "90043110",
+    "name": "乙姫お守り隊",
+    "class": "dragon",
+    "set": "token",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [
+      "海洋"
+    ],
+    "text": "【疾走】\n【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "90051120",
+    "name": "バット",
+    "class": "nightmare",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "【ドレイン】",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "90061110",
+    "name": "ホーリーファルコン",
+    "class": "bishop",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【疾走】",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "90071210",
+    "name": "フューチャー・コア",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "【融合】アーティファクト・アミュレット\nこれに【融合】したとき、これは『アタックアーティファクト』に変身する。\nプレイできない。",
+    "related": [
+      "90072110"
+    ],
+    "type": "amulet"
+  },
+  {
+    "id": "90071220",
+    "name": "パスト・コア",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "【融合】アーティファクト・アミュレット\nこれに【融合】したとき、これは『キャッスルアーティファクト』に変身する。\nプレイできない。",
+    "related": [
+      "90072120"
+    ],
+    "type": "amulet"
+  },
+  {
+    "id": "90072110",
+    "name": "アタックアーティファクト",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "【融合】アーティファクト・カード\nこれに【融合】したカードのコストの合計によって変身する。\n　1　⇒『デストロイアーティファクトα』\n　2　⇒『デストロイアーティファクトβ』\n3以上⇒『デストロイアーティファクトγ』\n【突進】",
+    "related": [
+      "90073110",
+      "90073120",
+      "90073130"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 1
+  },
+  {
+    "id": "90072120",
+    "name": "キャッスルアーティファクト",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "【融合】アーティファクト・カード\nこれに【融合】したカードのコストの合計によって変身する。\n　1　⇒『デストロイアーティファクトα』\n　2　⇒『デストロイアーティファクトβ』\n3以上⇒『デストロイアーティファクトγ』\n【守護】",
+    "related": [
+      "90073110",
+      "90073120",
+      "90073130"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 5
+  },
+  {
+    "id": "90073110",
+    "name": "デストロイアーティファクトα",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "【融合】『デストロイアーティファクトβ』や『デストロイアーティファクトγ』\nこれに【融合】したとき、これに【融合】した種類が2なら、これは『イクシードアーティファクトΩ』に変身する。\n自分のターン終了時、自分のリーダーを3回復。",
+    "related": [
+      "90073120",
+      "90073130",
+      "90074110"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 5
+  },
+  {
+    "id": "90073120",
+    "name": "デストロイアーティファクトβ",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "自分のターン終了時、相手のリーダーに3ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "90073130",
+    "name": "デストロイアーティファクトγ",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "自分のターン終了時、相手の場のフォロワーすべてに3ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 3
+  },
+  {
+    "id": "90074110",
+    "name": "イクシードアーティファクトΩ",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "legend",
+    "cost": 10,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "【ファンファーレ】相手の場のフォロワーすべてに5ダメージ。自分のリーダーを5回復。\n【疾走】\n【守護】\n【オーラ】",
+    "related": [],
+    "type": "follower",
+    "attack": 10,
+    "defense": 10
+  }
+]

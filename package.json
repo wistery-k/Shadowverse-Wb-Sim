@@ -7,7 +7,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "typecheck": "tsc",
-    "test": "vitest run"
+    "test": "vitest run",
+    "cards": "node scripts/convert-cards.ts"
   },
   "repository": {
     "type": "git",
