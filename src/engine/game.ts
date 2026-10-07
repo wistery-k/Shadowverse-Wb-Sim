@@ -147,22 +147,23 @@ function ownerOf(state: GameState, iid: number): PlayerIndex | null {
 
 /**
  * フォロワーにダメージを与え、実際に与えたダメージを返す。
- * 超進化したフォロワーは持ち主のターン中ダメージを受けない。バリアは次のダメージを1回0にする。
+ * バリアは次のダメージを1回0にする（超進化で0になる場合も消費する）。
+ * 超進化したフォロワーは持ち主のターン中、受けるダメージが0になる。
  */
 function damageFollower(state: GameState, f: FollowerOnBoard, amount: number): number {
   if (amount <= 0) return 0;
-  if (f.evolve === "superEvolved" && ownerOf(state, f.iid) === state.active) return 0;
   if (hasKeyword(f, "barrier")) {
     f.keywords = f.keywords.filter((k) => k !== "barrier");
     return 0;
   }
+  if (f.evolve === "superEvolved" && ownerOf(state, f.iid) === state.active) return 0;
   f.defense -= amount;
   return amount;
 }
 
 /** 体力0以下のフォロワーと、指定されたフォロワーを破壊する */
 function destroyDead(state: GameState, alsoDestroy: ReadonlySet<number> = new Set()): void {
-  // 破壊順は未確認（docs/rules.md 11章）。手番のプレイヤーの場から、場に出た順に処理する。
+  // 手番のプレイヤーの場から、古い順（場に出た順）に処理する（docs/rules.md 11章）
   for (const p of [state.active, opponent(state.active)]) {
     const pl = state.players[p];
     const survivors: OnBoard[] = [];
@@ -416,7 +417,7 @@ function applyAttack(state: GameState, attackerIid: number, target: AttackTarget
   damageFollower(state, attacker, defender.attack);
   if (hasKeyword(attacker, "drain")) healLeader(pl, dealt);
 
-  // 必殺: 戦闘ダメージを0以上与えたフォロワーを破壊（超進化の「効果で破壊されない」は未確認のため考慮しない）
+  // 必殺: 戦闘ダメージを0以上与えたフォロワーを破壊（0ダメージでも破壊。超進化フォロワーも破壊される）
   const baneTargets = new Set<number>();
   if (hasKeyword(attacker, "bane")) baneTargets.add(defender.iid);
   if (hasKeyword(defender, "bane")) baneTargets.add(attacker.iid);

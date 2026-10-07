@@ -369,11 +369,39 @@ describe("進化・超進化", () => {
     expect(t.players[me].board[0]).toMatchObject({ attack: 13, defense: 13 });
     expect(t.players[opp].board).toEqual([]);
 
-    // 相手のターン中はダメージを受ける
+    // 相手のターン中はダメージを受ける（ここまでの検証の続き）
     t = endTurn(t);
     const attacker = putFollower(t, opp, "キャラバンマンモス");
     t = applyAction(t, { type: "attack", attacker: attacker.iid, target: f.iid });
     expect(t.players[me].board[0]).toMatchObject({ defense: 3 });
+  });
+});
+
+describe("超進化と他のキーワード", () => {
+  function superEvolvedAtOwnTurn() {
+    let s = started();
+    while (s.players[s.active].turnCount < 7) s = endTurn(endTurn(s));
+    const me = s.active;
+    const opp = (1 - me) as PlayerIndex;
+    return { s, me, opp };
+  }
+
+  it("自分のターン中の超進化フォロワーもバリアを消費する", () => {
+    const { s, me, opp } = superEvolvedAtOwnTurn();
+    const f = putFollower(s, me, "セイントシールダー", { evolve: "superEvolved" });
+    const enemy = putFollower(s, opp, "キャラバンマンモス");
+    const t = applyAction(s, { type: "attack", attacker: f.iid, target: enemy.iid });
+    const after = t.players[me].board[0] as FollowerOnBoard;
+    expect(after.defense).toBe(f.defense);
+    expect(after.keywords).not.toContain("barrier");
+  });
+
+  it("自分のターン中の超進化フォロワーも必殺で破壊される", () => {
+    const { s, me, opp } = superEvolvedAtOwnTurn();
+    const f = putFollower(s, me, "キャラバンマンモス", { evolve: "superEvolved" });
+    const bane = putFollower(s, opp, "獣性の鉄人");
+    const t = applyAction(s, { type: "attack", attacker: f.iid, target: bane.iid });
+    expect(t.players[me].board).toEqual([]);
   });
 });
 
