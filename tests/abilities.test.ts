@@ -314,6 +314,20 @@ describe("リソース・キーワード能力", () => {
     expect(t.players[me].hand[0]?.cardId).toBe(id("デストロイアーティファクトβ"));
   });
 
+  it("融合の合法手は、同じカードの融合先・素材を区別しない", () => {
+    const { s, me } = setup();
+    const hosts = [toHand(s, me, "フューチャー・コア"), toHand(s, me, "フューチャー・コア")];
+    toHand(s, me, "パスト・コア");
+    toHand(s, me, "パスト・コア");
+    const fuses = legalActions(s).filter((a) => a.type === "fuse");
+    // 融合先はフューチャー1枚分のみ（同じカード）＋パスト1枚分。素材は種類ごとの枚数の組み合わせ
+    expect(new Set(fuses.map((a) => (a.type === "fuse" ? a.host : 0))).size).toBe(2);
+    expect(fuses.filter((a) => a.type === "fuse" && a.host === hosts[0])).toHaveLength(2 * 3 - 1);
+    // 1枚目が融合済みでも、同じカードの2枚目は融合できる
+    const t = applyAction(s, fuses.find((a) => a.type === "fuse" && a.host === hosts[0])!);
+    expect(legalActions(t).some((a) => a.type === "fuse" && a.host === hosts[1])).toBe(true);
+  });
+
   it("デストロイアーティファクトαは融合した種類が累計2でΩに変身する", () => {
     let { s, me } = setup();
     const alpha = toHand(s, me, "デストロイアーティファクトα");

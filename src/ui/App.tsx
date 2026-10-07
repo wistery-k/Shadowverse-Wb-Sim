@@ -9,6 +9,7 @@ import { createGame, rngFrom, type GameState, type Rng } from "../engine";
 import { randomDeck } from "../sim/decks";
 import { Decks, isPlayable } from "./Decks";
 import { Game } from "./Game";
+import { Simulate } from "./Simulate";
 import { loadDecks, saveDecks, type SavedDeck } from "./storage";
 
 const AGENTS: Record<string, { agent: Agent; label: string }> = {
@@ -58,7 +59,7 @@ function resolveDeck(choice: DeckChoice, saved: readonly SavedDeck[], rng: Rng):
 }
 
 export function App() {
-  const [tab, setTab] = useState<"play" | "decks">("play");
+  const [tab, setTab] = useState<"play" | "decks" | "sim">("play");
   const [saved, setSaved] = useState<SavedDeck[]>(() => loadDecks());
   const [setup, setSetupState] = useState<Setup>(() => loadSetup());
   const [game, setGame] = useState<{ state: GameState; agent: Agent } | null>(null);
@@ -99,6 +100,9 @@ export function App() {
             <button type="button" class={tab === "decks" ? "active" : ""} onClick={() => setTab("decks")}>
               デッキ
             </button>
+            <button type="button" class={tab === "sim" ? "active" : ""} onClick={() => setTab("sim")}>
+              AI対戦
+            </button>
           </nav>
         )}
       </header>
@@ -108,6 +112,8 @@ export function App() {
           <Game initial={game.state} ai={game.agent} onExit={() => setGame(null)} />
         ) : tab === "decks" ? (
           <Decks decks={saved} onChange={updateDecks} />
+        ) : tab === "sim" ? (
+          <Simulate saved={saved} />
         ) : (
           <div class="setup panel">
             <label>

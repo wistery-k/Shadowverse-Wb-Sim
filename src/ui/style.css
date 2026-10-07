@@ -16,6 +16,10 @@
   --bishop: #8aa2b8;
   --nemesis: #3aa6b8;
   --neutral: #8c8c8c;
+  /* 勝率表の発散配色（青 = 勝ち越し、赤 = 負け越し、灰 = 五分） */
+  --div-win: #2a78d6;
+  --div-lose: #e34948;
+  --div-mid: #f0efec;
   color-scheme: light dark;
   font-family: system-ui, -apple-system, "Hiragino Sans", "Yu Gothic UI", sans-serif;
 }
@@ -26,6 +30,9 @@
     --fg: #ececee;
     --muted: #a1a1aa;
     --line: #3a3a40;
+    --div-win: #3987e5;
+    --div-lose: #e66767;
+    --div-mid: #383835;
   }
 }
 body {
@@ -531,4 +538,87 @@ textarea {
 }
 .build-info a {
   color: inherit;
+}
+
+/* AI 対戦 */
+.simulate {
+  display: grid;
+  gap: 12px;
+}
+.sim-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.sim-options fieldset {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  min-width: 200px;
+}
+.sim-options input[type="number"] {
+  width: 5em;
+}
+label.check {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+label.check[class*="class-"] {
+  border-left: 4px solid var(--class-color, var(--neutral));
+  padding-left: 6px;
+}
+progress {
+  width: 100%;
+  margin-top: 8px;
+}
+.table-scroll {
+  overflow-x: auto;
+}
+.winrate {
+  border-collapse: separate;
+  border-spacing: 2px;
+  font-size: 13px;
+}
+.winrate th,
+.winrate td {
+  padding: 4px 8px;
+  text-align: right;
+  white-space: nowrap;
+}
+.winrate th.name {
+  text-align: left;
+  font-weight: normal;
+}
+.winrate td.cell {
+  min-width: 44px;
+  border-radius: 4px;
+  background: var(--div-mid);
+  font-variant-numeric: tabular-nums;
+}
+.winrate td.diag {
+  color: var(--muted);
+}
+.winrate td.total {
+  font-weight: bold;
+  font-variant-numeric: tabular-nums;
+}
+.legend .swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  vertical-align: -1px;
+  margin: 0 4px 0 8px;
+}
+.swatch.win {
+  background: color-mix(in oklab, var(--div-win) 60%, var(--div-mid));
+}
+.swatch.even {
+  background: var(--div-mid);
+}
+.swatch.lose {
+  background: color-mix(in oklab, var(--div-lose) 60%, var(--div-mid));
 }

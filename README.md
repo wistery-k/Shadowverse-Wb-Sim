@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | 1 | ルールエンジン（対戦ロジック）とカードデータ | 全カード・クレストの能力を実装済み（一部の処理順は未確認） |
 | 2 | プレイヤー vs AI（ブラウザ上でプレイ可能） | 貪欲法の AI と対戦可能。デッキ構築（ブラウザに保存・テキストでエクスポート/インポート）対応 |
-| 3 | AI vs AI（自動対戦・勝率集計・AI強さ比較） | 展望 |
+| 3 | AI vs AI（自動対戦・勝率集計・AI強さ比較） | 総当たりの自動対戦と勝率表（ブラウザの「AI対戦」タブ・`npm run sim`）。AI の強化は作業中 |
 
 ## 対象範囲
 
@@ -61,6 +61,7 @@ npm test           # テスト
 npm run typecheck  # 型チェック
 npm run build      # 本番ビルド（dist/）
 npm run cards      # data/raw/*.json（公式カード一覧APIのレスポンス）から data/cards.json・crests.json を生成
+npm run sim        # デフォルトデッキの AI 同士の総当たり（例: npm run sim -- --games 50 --agents greedy,random）
 ```
 
 ## 公開
