@@ -62,6 +62,8 @@ npm run typecheck  # 型チェック
 npm run build      # 本番ビルド（dist/）
 npm run cards      # data/raw/*.json（公式カード一覧APIのレスポンス）から data/cards.json・crests.json を生成
 npm run sim        # デフォルトデッキの AI 同士の総当たり（例: npm run sim -- --games 50 --agents greedy,random）
+npm run compare    # 探索 AI の設定同士の比較（例: npm run compare -- 105 '{}' '{"lethal":false}'）
+npm run tune       # 評価関数の重みを自己対戦で調整（例: npm run tune -- --deck リノセウスエルフ --iters 30）
 ```
 
 ## 公開

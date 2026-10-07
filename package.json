@@ -9,7 +9,9 @@
     "typecheck": "tsc",
     "test": "vitest run",
     "cards": "node scripts/convert-cards.ts",
-    "sim": "node scripts/simulate.mjs"
+    "sim": "node scripts/vite-run.mjs scripts/simulate-main.ts",
+    "tune": "node scripts/vite-run.mjs scripts/tune-main.ts",
+    "compare": "node scripts/vite-run.mjs scripts/compare-main.ts"
   },
   "repository": {
     "type": "git",

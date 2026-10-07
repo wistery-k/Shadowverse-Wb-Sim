@@ -1,4 +1,4 @@
-// npm run sim の本体（scripts/simulate.mjs から Vite のモジュールランナーで実行される）
+// npm run sim の本体（scripts/vite-run.mjs から Vite のモジュールランナーで実行される）
 
 import { writeFileSync } from "node:fs";
 import { AGENTS } from "../src/ai/registry";
