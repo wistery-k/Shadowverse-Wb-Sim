@@ -112,3 +112,26 @@ describe("リーサルの探索", () => {
     expect(s.winner).toBe(me);
   });
 });
+
+import { DEFAULT_WEIGHTS, evaluateWith } from "../src/ai/evaluate";
+import { deckClassOf, weightsForClass } from "../src/ai/weights";
+
+describe("評価関数の重み", () => {
+  it("クラスの重みは基準の重みに差分を重ねる", () => {
+    const table = { elf: { myHp: 2, hold: { x: 1 } } };
+    const w = weightsForClass("elf", table);
+    expect(w.myHp).toBe(2);
+    expect(w.oppHp).toBe(DEFAULT_WEIGHTS.oppHp);
+    expect(w.hold).toEqual({ x: 1 });
+    expect(weightsForClass("royal", table)).toBe(DEFAULT_WEIGHTS);
+  });
+
+  it("デッキのクラスを判定し、手札に持っておく価値を評価に加える", () => {
+    let s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 4 });
+    expect(deckClassOf(s, 0)).toBe(DEFAULT_DECKS[0]!.class);
+    expect(deckClassOf(s, 1)).toBe(DEFAULT_DECKS[1]!.class);
+    const card = s.players[0].hand[0]!.cardId;
+    const base = evaluateWith(s, 0, DEFAULT_WEIGHTS);
+    expect(evaluateWith(s, 0, { ...DEFAULT_WEIGHTS, hold: { [card]: 3 } })).toBeGreaterThanOrEqual(base + 3);
+  });
+});

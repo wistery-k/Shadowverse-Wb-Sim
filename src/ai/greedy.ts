@@ -14,6 +14,7 @@ import {
 } from "../engine";
 import { determinize } from "./determinize";
 import { DEFAULT_WEIGHTS, evaluateWith, type EvalWeights } from "./evaluate";
+import { weightsFor } from "./weights";
 import type { Agent } from "./types";
 
 export { evaluate } from "./evaluate";
@@ -69,15 +70,26 @@ function mulligan(state: GameState, legal: readonly Action[], p: PlayerIndex): A
 /**
  * 貪欲法の AI を作る。omniscient は比較実験用（見えない情報を使う。対戦には使わない）
  */
-export function createGreedyAgent(opts: { omniscient?: boolean; weights?: EvalWeights } = {}): Agent {
-  const w = opts.weights ?? DEFAULT_WEIGHTS;
+export function createGreedyAgent(opts: { omniscient?: boolean; weights?: EvalWeights | "byClass" } = {}): Agent {
+  const weights = opts.weights ?? DEFAULT_WEIGHTS;
   return {
     name: opts.omniscient ? "greedy-omniscient" : "greedy",
-    chooseAction: (real, legal, rng) => chooseGreedy(real, legal, rng, opts.omniscient ?? false, w),
+    chooseAction: (real, legal, rng) => {
+      const p = real.pending ? real.pending.player : real.active;
+      const w = weights === "byClass" ? weightsFor(real, p) : weights;
+      return chooseGreedy(real, legal, rng, opts.omniscient ?? false, w);
+    },
   };
 }
 
+/** 基準の重みの貪欲法 AI（自己対戦での重みの調整や、探索 AI が相手の手番を予想するときの基準） */
 export const greedyAgent: Agent = createGreedyAgent();
+
+/**
+ * クラスごとに調整した重み（data/ai-weights.json）を使う貪欲法 AI（対戦相手の「ふつう」）。
+ * 調整は貪欲法の自己対戦で行っているので、効果を確かめられているのはこの AI
+ */
+export const tunedGreedyAgent: Agent = createGreedyAgent({ weights: "byClass" });
 
 function chooseGreedy(real: GameState, legal: readonly Action[], rng: Rng, omniscient: boolean, w: EvalWeights): Action {
     const first = legal[0];

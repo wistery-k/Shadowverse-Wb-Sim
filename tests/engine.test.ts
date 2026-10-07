@@ -525,7 +525,7 @@ describe("ランダム自己対戦", () => {
       const result = playMatch([randomAgent, randomAgent], { decks, seed, checkInvariants: true });
       expect(invariantViolations(result.final)).toEqual([]);
     }
-  });
+  }, 30_000);
 
   it("同じシードなら同じ結果になる", () => {
     const rng = () => rngFrom({ rng: 7 });

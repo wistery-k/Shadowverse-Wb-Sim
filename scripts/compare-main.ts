@@ -1,6 +1,7 @@
 // AI の設定同士の比較（npm run compare）
 
-import { createSearchAgent } from "../src/ai/search";
+import { DEFAULT_WEIGHTS } from "../src/ai/evaluate";
+import { createSearchAgent, type SearchOptions } from "../src/ai/search";
 import type { Agent } from "../src/ai/types";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { playMatch } from "../src/sim/match";
@@ -8,11 +9,12 @@ import { playMatch } from "../src/sim/match";
  * 探索 AI の設定 A と B を対戦させる（npm run compare -- <試合数> '<Aの設定JSON>' '<Bの設定JSON>'）。
  * 同じデッキの組で席とデッキを入れ替えて2試合ずつ行い、A の勝率とデッキごとの A の勝率を出す。
  * 例: npm run compare -- 105 '{}' '{"lethal":false}'
+ * "weights": "byClass" でクラスごとに調整した重み、"default" で基準の重みを使う。
  */
 export async function main(argv: string[]): Promise<number> {
   const games = Number(argv[0] ?? 28);
-  const a: Agent = createSearchAgent(JSON.parse(argv[1] ?? "{}"));
-  const b: Agent = createSearchAgent(JSON.parse(argv[2] ?? "{}"));
+  const a: Agent = createSearchAgent(parseOptions(argv[1]));
+  const b: Agent = createSearchAgent(parseOptions(argv[2]));
   let wins = 0, n = 0;
   const perDeck = new Map<string, [number, number]>();
   const t0 = Date.now();
@@ -32,4 +34,10 @@ export async function main(argv: string[]): Promise<number> {
   console.log(`A${argv[1] ?? "{}"} vs B${argv[2] ?? "{}"}: ${wins}/${n} = ${((wins / n) * 100).toFixed(1)}%  ${((Date.now() - t0) / n / 1000).toFixed(2)}s/試合`);
   console.log([...perDeck].map(([k, [w, t]]) => `${k} ${w}/${t}`).join(", "));
   return 0;
+}
+
+function parseOptions(json: string | undefined): Partial<SearchOptions> {
+  const raw = JSON.parse(json ?? "{}") as Record<string, unknown>;
+  if (raw.weights === "default") raw.weights = DEFAULT_WEIGHTS;
+  return raw as Partial<SearchOptions>;
 }
