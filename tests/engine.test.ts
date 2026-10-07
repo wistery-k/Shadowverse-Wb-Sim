@@ -399,6 +399,57 @@ describe("超進化と他のキーワード", () => {
   });
 });
 
+describe("エクストラPP", () => {
+  /** 後攻の最初のターン */
+  function secondPlayersTurn() {
+    const s = endTurn(started());
+    return { s, second: s.active };
+  }
+
+  it("後攻だけが使え、先攻は使えない", () => {
+    const s = started();
+    expect(s.players[s.active].extraPpAvailable).toBe(false);
+    expect(has(s, { type: "extraPp" })).toBe(false);
+    const t = secondPlayersTurn();
+    expect(has(t.s, { type: "extraPp" })).toBe(true);
+  });
+
+  it("PPを+1する。PP最大値を超えられるが、PP最大値は増えない。1回使うと使えなくなる", () => {
+    const { s, second } = secondPlayersTurn();
+    const t = applyAction(s, { type: "extraPp" });
+    expect(t.players[second]).toMatchObject({ pp: 2, maxPp: 1, extraPpAvailable: false });
+    expect(has(t, { type: "extraPp" })).toBe(false);
+    expect(invariantViolations(t)).toEqual([]);
+  });
+
+  it("自分の6ターン目の開始時に使用権が復活する", () => {
+    let { s, second } = secondPlayersTurn();
+    s = applyAction(s, { type: "extraPp" });
+    while (s.players[second].turnCount < 5) s = endTurn(endTurn(s));
+    expect(s.players[second].extraPpAvailable).toBe(false);
+    s = endTurn(endTurn(s));
+    expect(s.players[second].turnCount).toBe(6);
+    expect(s.players[second].extraPpAvailable).toBe(true);
+  });
+
+  it("使わずに6ターン目を迎えても使用権は重ならない", () => {
+    let { s, second } = secondPlayersTurn();
+    while (s.players[second].turnCount < 6) s = endTurn(endTurn(s));
+    s = applyAction(s, { type: "extraPp" });
+    expect(has(s, { type: "extraPp" })).toBe(false);
+  });
+
+  it("PP回復の効果は、エクストラPPで最大値を超えたPPを減らさない", () => {
+    let { s, second } = secondPlayersTurn();
+    while (s.players[second].turnCount < 6) s = endTurn(endTurn(s)); // 超進化できるターン
+    s = applyAction(s, { type: "extraPp" });
+    expect(s.players[second]).toMatchObject({ pp: 7, maxPp: 6 });
+    const carbuncle = putFollower(s, second, "ベビーカーバンクル"); // 【超進化時】自分のPPを3回復
+    s = applyAction(s, { type: "superEvolve", iid: carbuncle.iid });
+    expect(s.players[second].pp).toBe(7);
+  });
+});
+
 describe("ランダム自己対戦", () => {
   const classes = ["elf", "royal", "witch", "dragon", "nightmare", "bishop", "nemesis"] as const;
 

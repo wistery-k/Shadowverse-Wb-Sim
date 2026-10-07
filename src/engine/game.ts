@@ -2,7 +2,7 @@
 // applyAction は状態を複製してから変更し、新しい状態を返す（引数の状態は変更しない）。
 
 import type { Card } from "../cards";
-import { EP, EVOLVE_TURN, INITIAL_HAND, LEADER_HP, MAX_PP, SEP, SUPER_EVOLVE_TURN } from "./constants";
+import { EP, EVOLVE_TURN, EXTRA_PP_REFRESH_TURN, INITIAL_HAND, LEADER_HP, MAX_PP, SEP, SUPER_EVOLVE_TURN } from "./constants";
 import type { Ability, Effect } from "./dsl";
 import {
   answerChoose,
@@ -78,6 +78,7 @@ function newPlayer(deck: CardRef[]): PlayerState {
     pp: 0,
     ep: EP,
     sep: SEP,
+    extraPpAvailable: false,
     turnCount: 0,
     deck,
     hand: [],
@@ -119,6 +120,7 @@ export function createGame(config: GameConfig): GameState {
   const rng = rngFrom(state);
   state.first = rng.int(2) as PlayerIndex;
   state.active = state.first;
+  state.players[opponent(state.first)].extraPpAvailable = true;
   for (const p of [0, 1] as const) {
     shuffle(state.players[p].deck, rng);
     drawCards(state, p, INITIAL_HAND);
@@ -151,6 +153,7 @@ function startTurn(state: GameState, p: PlayerIndex): void {
   pl.pp = pl.maxPp;
   pl.combo = 0;
   pl.evolvedThisTurn = false;
+  if (p !== state.first && pl.turnCount === EXTRA_PP_REFRESH_TURN) pl.extraPpAvailable = true;
   for (const q of [0, 1] as const) state.players[q].destroyedThisTurn = [];
   for (const c of pl.board) {
     if (c.kind === "follower") c.attacksThisTurn = 0;
@@ -381,6 +384,7 @@ export function legalActions(state: GameState): Action[] {
       if (m.length > 0) actions.push({ type: "fuse", host: host.iid, materials: m });
     }
   }
+  if (pl.extraPpAvailable) actions.push({ type: "extraPp" });
   actions.push({ type: "endTurn" });
   return actions;
 }
@@ -414,6 +418,13 @@ export function applyAction(prev: GameState, action: Action): GameState {
       case "fuse":
         applyFuse(state, action.host, action.materials);
         break;
+      case "extraPp": {
+        const pl = state.players[state.active];
+        if (!pl.extraPpAvailable) throw new IllegalActionError("エクストラPPは使えません");
+        pl.extraPpAvailable = false;
+        pl.pp++; // PP最大値を超えてよい。PP最大値は増えない
+        break;
+      }
       case "endTurn":
         pushEndTurn(state);
         break;

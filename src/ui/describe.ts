@@ -77,6 +77,8 @@ export function describeAction(state: GameState, action: Action, human: PlayerIn
       return `${who}: ${action.targets.map(name).join("・") || "なし"}を選択`;
     case "mode":
       return `${who}: ${modeLabels(state)[action.index] ?? `モード${action.index + 1}`}を選択`;
+    case "extraPp":
+      return `${who}: エクストラPP`;
     case "endTurn":
       return `${who}: ターン終了`;
   }

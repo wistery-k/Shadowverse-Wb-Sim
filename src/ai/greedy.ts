@@ -47,6 +47,7 @@ export function evaluate(state: GameState, p: PlayerIndex): number {
   v -= opp.board.reduce((s, c) => s + boardValue(c), 0) * 1.1;
   v += me.hand.length * 0.6 - opp.hand.length * 0.3;
   v += me.ep * 1.5 + me.sep * 2.5;
+  if (me.extraPpAvailable) v += 1;
   v += me.crests.length * 1.5 - opp.crests.length * 1.5;
   v += Math.min(me.graveyard, 10) * 0.05;
   // 相手リーダーの体力が少ないほど、こちらの盤面の攻撃力を重く見る
@@ -70,12 +71,21 @@ function valueAfter(state: GameState, action: Action, p: PlayerIndex, depth = 0)
   return evaluate(next, p);
 }
 
+/** エクストラPPは、使った後に打てる最善手の価値で評価する（使うだけでは盤面は良くならないため） */
+function valueAfterExtraPp(state: GameState, p: PlayerIndex): number {
+  const next = applyAction(state, { type: "extraPp" });
+  const values = legalActions(next)
+    .filter((a) => a.type !== "endTurn" && a.type !== "extraPp")
+    .map((a) => valueAfter(next, a, p));
+  return values.length > 0 ? Math.max(...values) : -Infinity;
+}
+
 function bestAction(state: GameState, legal: readonly Action[], p: PlayerIndex): Action {
   let best: Action | undefined;
   let bestValue = -Infinity;
   for (const a of legal) {
     if (a.type === "endTurn") continue;
-    const value = valueAfter(state, a, p);
+    const value = a.type === "extraPp" ? valueAfterExtraPp(state, p) : valueAfter(state, a, p);
     if (value > bestValue) {
       bestValue = value;
       best = a;

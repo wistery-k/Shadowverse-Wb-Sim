@@ -103,6 +103,7 @@ export function Game({ initial, ai, onExit }: Props) {
   };
 
   const endTurn = legal.find((a) => a.type === "endTurn");
+  const extraPp = legal.find((a) => a.type === "extraPp");
 
   return (
     <div class="game">
@@ -212,6 +213,11 @@ export function Game({ initial, ai, onExit }: Props) {
                 </button>
               ))}
             {selectedActions.some((a) => a.type === "attack") && <span class="muted">攻撃先をクリック</span>}
+            {extraPp && (
+              <button type="button" class="extra-pp" onClick={() => act(extraPp)}>
+                エクストラPP（+1）
+              </button>
+            )}
             {endTurn && (
               <button type="button" class="end-turn" onClick={() => act(endTurn)}>
                 ターン終了
@@ -280,6 +286,7 @@ function PlayerInfo({ label, state, p }: { label: string; state: GameState; p: P
       <span>
         PP {pl.pp}/{pl.maxPp}
       </span>
+      {pl.extraPpAvailable && <span class="badge">エクストラPP</span>}
       <span>EP {pl.ep}</span>
       <span>SEP {pl.sep}</span>
       <span>手札 {pl.hand.length}</span>
