@@ -10,7 +10,8 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
 - **画像・音源・フォント等のアセットは一切使わない**（CDN 読み込み、絵文字依存の装飾、base64 埋め込み画像も不可）。表現は CSS とテキストのみ。クラスの識別は色＋文字で行う
 - スタック: TypeScript(strict) + Vite + 軽量UI(Preact想定) + Vitest
 - AI: まずルールベース、次に MCTS。重い思考は Web Worker で実行
-- カードデータは、ユーザーが提供する公式サイトのカード一覧APIのレスポンス（`data/raw/*.json`）を `npm run cards`（`scripts/convert-cards.ts`）で `data/cards.json` に変換する。作業環境からは公式サイト・攻略サイトにアクセスできない
+- カードデータは、ユーザーが提供した公式サイトのカード一覧APIのレスポンス（`data/raw/*.json`）を `npm run cards`（`scripts/convert-cards.ts`）で `data/cards.json` と `data/crests.json` に変換する。作業環境からは公式サイト・攻略サイトにアクセスできない
+- 元データはブランチ `wistery-k-patch-1` の `cardList.json`〜`cardList_7.json`（全198枚、offset 0〜180）。再生成するときは `git show origin/wistery-k-patch-1:<file> > data/raw/<file>` で取り出す
 - ドキュメント・UI 文言・コミットメッセージは日本語。識別子・コードコメントの用語は英語でもよいが、ゲーム用語は `docs/rules.md` の対応表に従う
 
 ## アーキテクチャ方針

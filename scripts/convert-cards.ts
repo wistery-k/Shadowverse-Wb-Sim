@@ -7,6 +7,7 @@
 // - 簡易形式: { "<card_id>": { card_id, name, class, rarity, is_token, cost, skill_text, atk, life } }。
 //   タイプ・関連カード・スターター版の能力を含まない。
 // 同じカードが両方にあれば API 形式を優先する。
+// クレスト（API形式の specific_effect_card_info）は data/crests.json に書き出す。
 // 最後に data/starter-overrides.json（手で管理する当時の能力への上書き）を適用する。
 //
 // カードID（8桁）の構成: [0] 1=通常 9=トークン / [2] セット 0=ベーシック 1=第1弾 2=第2弾…
@@ -14,11 +15,14 @@
 
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Card, CardSet, CardType, ClassId, Rarity } from "../src/cards/types";
+import type { Card, CardSet, CardType, ClassId, Crest, Rarity } from "../src/cards/types";
 
 const RAW_DIR = "data/raw";
 const OVERRIDES_FILE = "data/starter-overrides.json";
 const OUT_FILE = "data/cards.json";
+const CRESTS_FILE = "data/crests.json";
+/** specific_effect_card_info の specific_effect_type。1 はクレスト */
+const SPECIFIC_EFFECT_CREST = 1;
 
 /** スターターで使えるセット（カードIDの3桁目） */
 const POOL_SETS: Record<string, CardSet> = { "0": "basic", "1": "legend_dawn" };
@@ -64,6 +68,10 @@ interface ApiResponse {
     cards: Record<string, { related_card_ids: number[]; specific_effect_card_ids: number[] }>;
     card_details: Record<string, { common: ApiCommon }>;
     tribe_names: Record<string, string>;
+    /** 該当が無いときは空配列になる */
+    specific_effect_card_info:
+      | Record<string, { specific_effect_type: number; cost: number; skill_text: string }>
+      | [];
   };
 }
 type SimpleResponse = Record<string, RawCardFields>;
@@ -72,7 +80,13 @@ type SimpleResponse = Record<string, RawCardFields>;
 interface Source {
   fields: RawCardFields;
   /** setId は通常版のもの（スターター版は別のセットIDを持つ） */
-  api?: { fields: ApiCardFields; setId: number; changed: boolean; related: number[] };
+  api?: {
+    fields: ApiCardFields;
+    setId: number;
+    changed: boolean;
+    related: number[];
+    specificEffects: number[];
+  };
 }
 
 interface Override {
@@ -114,6 +128,7 @@ const referencedNames = (text: string): string[] =>
 
 const sources = new Map<string, Source>();
 const tribeNames: Record<string, string> = {};
+const specificEffects = new Map<string, { type: number; text: string }>();
 
 const files = readdirSync(RAW_DIR).filter((f) => f.endsWith(".json")).sort();
 if (files.length === 0) throw new Error(`${RAW_DIR} に JSON がありません`);
@@ -122,14 +137,22 @@ for (const file of files) {
   if (typeof json === "object" && json !== null && "data" in json) {
     const { data } = json as ApiResponse;
     Object.assign(tribeNames, data.tribe_names);
+    for (const [id, e] of Object.entries(data.specific_effect_card_info)) {
+      specificEffects.set(id, { type: e.specific_effect_type, text: e.skill_text });
+    }
     for (const [id, { common }] of Object.entries(data.card_details)) {
       // スターターでは当時の能力（starter_card）を使う。IDは通常版のものを使う。
       const fields = common.starter_card ?? common;
       const c = data.cards[id];
-      const related = c ? [...c.related_card_ids, ...c.specific_effect_card_ids] : [];
       sources.set(id, {
         fields,
-        api: { fields, setId: common.card_set_id, changed: common.is_starter_ability_changed, related },
+        api: {
+          fields,
+          setId: common.card_set_id,
+          changed: common.is_starter_ability_changed,
+          related: c?.related_card_ids ?? [],
+          specificEffects: c?.specific_effect_card_ids ?? [],
+        },
       });
     }
   } else {
@@ -175,6 +198,30 @@ while (queue.length > 0) {
 
 const overrides = JSON.parse(readFileSync(OVERRIDES_FILE, "utf8")) as Record<string, Override>;
 
+// クレスト: 能力テキストに『クレスト：カード名』がある
+const crests: Crest[] = [];
+const crestOf = new Map<string, string>();
+for (const [id, s] of sources) {
+  if (!pool.has(id)) continue;
+  for (const ref of (s.api?.specificEffects ?? []).map(String)) {
+    const e = specificEffects.get(ref);
+    if (!e) {
+      problems.add(`${id} ${s.fields.name}: 特殊効果 ${ref} のデータがありません`);
+      continue;
+    }
+    if (e.type !== SPECIFIC_EFFECT_CREST) {
+      problems.add(`${id} ${s.fields.name}: 未対応の特殊効果の種類です: ${e.type}`);
+      continue;
+    }
+    const name = `クレスト：${s.fields.name}`;
+    const text = cleanText(e.text, `${ref} ${name}`);
+    const m = /【カウントダウン_(\d+)】/.exec(text);
+    crests.push({ id: ref, name, source: id, text, ...(m?.[1] ? { countdown: Number(m[1]) } : {}) });
+    crestOf.set(id, ref);
+  }
+}
+const crestNames = new Set(crests.map((c) => c.name));
+
 const cards: Card[] = [];
 for (const id of pool) {
   const s = sources.get(id);
@@ -214,6 +261,7 @@ for (const id of pool) {
     tribes: o?.tribes ?? tribes,
     text,
     related: relatedOf.get(id) ?? [],
+    ...(crestOf.has(id) ? { crest: crestOf.get(id) as string } : {}),
     ...(s.api?.changed || o ? { starterAbilityChanged: true as const } : {}),
   };
 
@@ -235,11 +283,13 @@ for (const id of Object.keys(overrides)) {
 // 参照先が見つからない『カード名』
 const unresolved = new Set<string>();
 for (const c of cards) {
-  for (const name of referencedNames(c.text)) if (!idByName.has(name)) unresolved.add(name);
+  for (const name of referencedNames(c.text)) if (!idByName.has(name) && !crestNames.has(name)) unresolved.add(name);
 }
 
 cards.sort((a, b) => a.id.localeCompare(b.id));
+crests.sort((a, b) => a.id.localeCompare(b.id));
 writeFileSync(OUT_FILE, JSON.stringify(cards, null, 2) + "\n");
+writeFileSync(CRESTS_FILE, JSON.stringify(crests, null, 2) + "\n");
 
 // ---- 報告 ----
 
@@ -249,6 +299,7 @@ console.log(
     `（ベーシック ${count((c) => c.set === "basic")}、伝説の幕開け ${count((c) => c.set === "legend_dawn")}、` +
     `トークン ${count((c) => c.set === "token")}）`,
 );
+console.log(`クレスト ${crests.length} 件を ${CRESTS_FILE} に書き出しました`);
 const changed = cards.filter((c) => c.starterAbilityChanged).map((c) => c.name);
 console.log(`当時の能力に差し替えたカード: ${changed.length > 0 ? changed.join("、") : "なし"}`);
 console.log(`タイプ不明（API形式のデータが無い）: ${count((c) => c.tribes === null)} 枚`);

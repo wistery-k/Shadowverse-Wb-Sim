@@ -11,7 +11,7 @@
 
 | フェーズ | 内容 | 状況 |
 | --- | --- | --- |
-| 1 | ルールエンジン（対戦ロジック）とカードデータ | 雛形・カードスキーマ作成済み |
+| 1 | ルールエンジン（対戦ロジック）とカードデータ | カードデータ完了（198枚＋トークン43枚・クレスト7件）。エンジン未着手 |
 | 2 | プレイヤー vs AI（ブラウザ上でプレイ可能） | 未着手 |
 | 3 | AI vs AI（自動対戦・勝率集計・AI強さ比較） | 展望 |
 
@@ -41,6 +41,8 @@ src/
   sim/      AI vs AI の自動対戦ランナー（Node / Worker）
 data/
   cards.json  カードデータ（scripts/convert-cards.ts で生成）
+  crests.json クレスト（同上）
+  starter-overrides.json  当時の能力への手動上書き（通常は空）
   raw/        公式カード一覧APIのレスポンス（コミットしない）
 docs/
   rules.md    実装するルールの仕様メモ（出典付き）
@@ -57,7 +59,7 @@ npm run dev        # 開発サーバー
 npm test           # テスト
 npm run typecheck  # 型チェック
 npm run build      # 本番ビルド（dist/）
-npm run cards      # data/raw/*.json（公式カード一覧APIのレスポンス）から data/cards.json を生成
+npm run cards      # data/raw/*.json（公式カード一覧APIのレスポンス）から data/cards.json・crests.json を生成
 ```
 
 ## 公開

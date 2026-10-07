@@ -7,6 +7,7 @@ import {
   CLASS_IDS,
   RARITIES,
   type Card,
+  type Crest,
 } from "./types";
 
 export class CardValidationError extends Error {
@@ -52,6 +53,10 @@ function checkCard(raw: unknown, where: string, problems: string[]): void {
     p("starterAbilityChanged は true か省略が必要です");
   }
 
+  if (raw.crest !== undefined && (typeof raw.crest !== "string" || raw.crest === "")) {
+    p("crest は空でない文字列か省略が必要です");
+  }
+
   const isFollower = raw.type === "follower";
   for (const key of ["attack", "defense"]) {
     if (isFollower && !isNonNegInt(raw[key])) p(`フォロワーは ${key} に0以上の整数が必要です`);
@@ -90,4 +95,42 @@ export function validateCards(data: unknown): Card[] {
   if (problems.length > 0) throw new CardValidationError(problems);
   // 上で全フィールドを検証済み
   return data as Card[];
+}
+
+/** data/crests.json を検証する。cards は検証済みのカード。 */
+export function validateCrests(data: unknown, cards: readonly Card[]): Crest[] {
+  const problems: string[] = [];
+  if (!Array.isArray(data)) throw new CardValidationError(["クレスト: ルートは配列が必要です"]);
+
+  const cardIds = new Set(cards.map((c) => c.id));
+  const crestIds = new Set<string>();
+  data.forEach((raw, i) => {
+    const where = isObj(raw) && typeof raw.id === "string" ? `クレスト[${i}] ${raw.id}` : `クレスト[${i}]`;
+    const p = (msg: string) => problems.push(`${where}: ${msg}`);
+    if (!isObj(raw)) {
+      p("オブジェクトではありません");
+      return;
+    }
+    for (const key of ["id", "name", "source", "text"]) {
+      if (typeof raw[key] !== "string" || raw[key] === "") p(`${key} は空でない文字列が必要です`);
+    }
+    if (typeof raw.source === "string" && !cardIds.has(raw.source)) {
+      p(`source のカード ${raw.source} が存在しません`);
+    }
+    if (raw.countdown !== undefined && (!isNonNegInt(raw.countdown) || raw.countdown === 0)) {
+      p("countdown は1以上の整数が必要です");
+    }
+    if (typeof raw.id === "string") {
+      if (crestIds.has(raw.id)) p("id が重複しています");
+      crestIds.add(raw.id);
+    }
+  });
+  for (const card of cards) {
+    if (card.crest !== undefined && !crestIds.has(card.crest)) {
+      problems.push(`${card.id}: crest の ${card.crest} が存在しません`);
+    }
+  }
+
+  if (problems.length > 0) throw new CardValidationError(problems);
+  return data as Crest[];
 }

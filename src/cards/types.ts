@@ -57,6 +57,8 @@ interface CardBase {
   text: string;
   /** 効果で生成・参照するカードのID（公式データの related_card_ids） */
   related: string[];
+  /** 能力で得るクレストのID（data/crests.json） */
+  crest?: string;
   /**
    * スターター用に当時の能力へ差し替えたカード
    * （公式データの is_starter_ability_changed、または data/starter-overrides.json で上書き）
@@ -81,3 +83,18 @@ export interface AmuletCard extends CardBase {
 }
 
 export type Card = FollowerCard | SpellCard | AmuletCard;
+
+/**
+ * クレスト: カードの能力で「自分は『クレスト：〇〇』を持つ」ことで得る継続効果。カードではない。
+ * 公式データの specific_effect_card_info（specific_effect_type 1）。
+ */
+export interface Crest {
+  id: string;
+  /** 「クレスト：カード名」 */
+  name: string;
+  /** このクレストを与えるカードのID */
+  source: string;
+  text: string;
+  /** カウントダウンの初期値。持たないクレストには無い。 */
+  countdown?: number;
+}

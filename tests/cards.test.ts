@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import rawCards from "../data/cards.json";
+import rawCrests from "../data/crests.json";
 import {
   CardValidationError,
   STARTER,
   deckProblems,
   validateCards,
+  validateCrests,
   type Card,
 } from "../src/cards";
 
@@ -69,6 +71,30 @@ describe("validateCards", () => {
     expect(() => validateCards([amulet])).not.toThrow();
     expect(() => validateCards([{ ...spell, countdown: 2 }])).toThrow(/countdown/);
     expect(() => validateCards([{ ...amulet, countdown: 0 }])).toThrow(/countdown/);
+  });
+});
+
+describe("validateCrests", () => {
+  it("data/crests.json が検証を通る", () => {
+    expect(() => validateCrests(rawCrests, validateCards(rawCards))).not.toThrow();
+  });
+
+  it("カードの crest の参照先と、クレストの source の参照先を検査する", () => {
+    const crest = { id: "test-crest", name: "クレスト：テストスペル", source: "test-spell", text: "テスト" };
+    const cards = validateCards([{ ...spell, crest: "test-crest" }]);
+    expect(() => validateCrests([crest], cards)).not.toThrow();
+    expect(() => validateCrests([], cards)).toThrow(/test-crest/);
+    expect(() => validateCrests([{ ...crest, source: "none" }], cards)).toThrow(/none/);
+  });
+});
+
+describe("スターターのカードプール", () => {
+  const cards = validateCards(rawCards);
+
+  it("ベーシック56枚・伝説の幕開け142枚で、全カードのタイプが判明している", () => {
+    expect(cards.filter((c) => c.set === "basic")).toHaveLength(56);
+    expect(cards.filter((c) => c.set === "legend_dawn")).toHaveLength(142);
+    expect(cards.filter((c) => c.tribes === null)).toEqual([]);
   });
 });
 
