@@ -1,7 +1,7 @@
 // 貪欲法の AI: 各合法手を適用した後の盤面を評価し、最も良いものを選ぶ。
 // 改善する手が無ければターンを終了する。
-// 注意: 現状は GameState をそのまま使って手を試すため、乱数の結果（ドロー・ランダム対象）を
-// 事前に知ってしまう。MCTS では未観測部分を determinization で扱う予定（CLAUDE.md）。
+// 手は実際の局面ではなく determinization した局面（determinize.ts）で試すため、
+// 相手の手札・山札の中身や、ドロー・ランダム対象の結果を事前に知ることはない。
 
 import {
   applyAction,
@@ -12,7 +12,9 @@ import {
   type GameState,
   type OnBoard,
   type PlayerIndex,
+  type Rng,
 } from "../engine";
+import { determinize } from "./determinize";
 import type { Agent } from "./types";
 
 const KEYWORD_VALUE: Partial<Record<string, number>> = {
@@ -105,13 +107,24 @@ function mulligan(state: GameState, legal: readonly Action[], p: PlayerIndex): A
   );
 }
 
-export const greedyAgent: Agent = {
-  name: "greedy",
-  chooseAction(state, legal) {
+/**
+ * 貪欲法の AI を作る。omniscient は比較実験用（見えない情報を使う。対戦には使わない）
+ */
+export function createGreedyAgent(opts: { omniscient?: boolean } = {}): Agent {
+  return {
+    name: opts.omniscient ? "greedy-omniscient" : "greedy",
+    chooseAction: (real, legal, rng) => chooseGreedy(real, legal, rng, opts.omniscient ?? false),
+  };
+}
+
+export const greedyAgent: Agent = createGreedyAgent();
+
+function chooseGreedy(real: GameState, legal: readonly Action[], rng: Rng, omniscient: boolean): Action {
     const first = legal[0];
     if (!first) throw new Error("合法手がありません");
-    if (first.type === "mulligan") return mulligan(state, legal, first.player);
-    const p = state.pending ? state.pending.player : state.active;
+    if (first.type === "mulligan") return mulligan(real, legal, first.player);
+    const p = real.pending ? real.pending.player : real.active;
+    const state = omniscient ? real : determinize(real, p, rng);
     if (first.type === "choose" || first.type === "mode") {
       let best: Action = first;
       let bestValue = -Infinity;
@@ -125,5 +138,4 @@ export const greedyAgent: Agent = {
       return best;
     }
     return bestAction(state, legal, p);
-  },
-};
+}

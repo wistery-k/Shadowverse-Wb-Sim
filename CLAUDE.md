@@ -22,8 +22,9 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
 4. **合法手列挙**: `legalActions(state)` をエンジンが提供し、UI と AI は同じ API だけを使う。UI/AI がルール判定を再実装しない
 5. **カード効果はデータ駆動**: 効果は `src/cards/abilities/<クラス>.ts` にカードIDをキーに宣言的に記述し（DSL は `src/engine/dsl.ts`、補助関数は `src/cards/abilities/helpers.ts`）、エンジンの効果プリミティブ（ダメージ、ドロー、召喚、バフ、キーワード付与 等）の組み合わせで表現する。表現できない効果が出たらプリミティブを足す。カード個別の `if (id === ...)` は書かない
 5.1 **能力の解決**: `src/engine/effects.ts` が解決スタック（`state.stack`）と誘発待ち（`state.queue`）で解決する。プレイヤーの選択が必要になると `state.pending` を設定して中断し、`choose` / `mode` アクションで再開する。状態に関数を入れないため、継続はデータ（効果の配列とプログラムカウンタ）で持つ
-6. **非公開情報**: AI に渡す観測は相手の手札・山札の中身を含めない（情報集合）。MCTS は未観測部分を determinization（サンプリング）で扱う
-7. **AI インターフェース共通化**: `AI.chooseAction(observation, legalActions, rng) -> Action`。人間・ルールベース・MCTS を同じ対戦ループに差し替え可能にする（AI vs AI の前提）
+6. **非公開情報**: AI は実際の局面を直接先読みせず、`src/ai/determinize.ts` で作った「視点のプレイヤーから見て矛盾しない局面」（相手の手札・山札の中身と山札の順番を並べ直し、乱数の状態も新しくしたもの）で手を試す。新しい AI もこれに従う
+7. **AI インターフェース共通化**: `Agent.chooseAction(state, legalActions, rng) -> Action`（`src/ai/types.ts`）。選べる AI は `src/ai/registry.ts` に登録し、UI・自動対戦（`npm run sim`、「AI対戦」タブ）で共通に使う。UI では AI の思考を Web Worker（`src/ai/worker.ts`）で行う
+8. **AI の強さの比較**: AI を変えたら `npm run sim -- --games 50 --agents <新>,<旧>` 等で勝率を比べてから採用する。状態の複製は `cloneState`（`src/engine/clone.ts`）を使い、状態の型を変えたらそこも更新する
 
 ## ルールの扱い
 

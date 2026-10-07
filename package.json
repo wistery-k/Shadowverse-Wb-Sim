@@ -8,7 +8,8 @@
     "preview": "vite preview",
     "typecheck": "tsc",
     "test": "vitest run",
-    "cards": "node scripts/convert-cards.ts"
+    "cards": "node scripts/convert-cards.ts",
+    "sim": "node scripts/simulate.mjs"
   },
   "repository": {
     "type": "git",

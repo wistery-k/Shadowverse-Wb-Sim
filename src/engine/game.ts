@@ -21,6 +21,7 @@ import {
   run,
   setInternalHandler,
 } from "./effects";
+import { cloneState } from "./clone";
 import { enhanceCost } from "./keywords";
 import { abilitiesOf, cardOf, crestAbilitiesOf } from "./registry";
 import { rngFrom, shuffle } from "./rng";
@@ -336,6 +337,17 @@ export function actingPlayer(state: GameState): PlayerIndex {
   return state.active;
 }
 
+/** 融合の素材の選び方（カードの種類ごとに使う枚数を決める。空の選び方は除く） */
+function materialChoices(materials: readonly HandCard[]): number[][] {
+  const groups = new Map<string, number[]>();
+  for (const m of materials) groups.set(m.cardId, [...(groups.get(m.cardId) ?? []), m.iid]);
+  let choices: number[][] = [[]];
+  for (const iids of groups.values()) {
+    choices = choices.flatMap((c) => Array.from({ length: iids.length + 1 }, (_, n) => [...c, ...iids.slice(0, n)]));
+  }
+  return choices.filter((c) => c.length > 0);
+}
+
 function subsets<T>(items: readonly T[], size?: number): T[][] {
   const out: T[][] = [];
   for (let mask = 0; mask < 1 << items.length; mask++) {
@@ -378,11 +390,14 @@ export function legalActions(state: GameState): Action[] {
       if (act && !c.actedThisTurn && pl.pp >= act.cost) actions.push({ type: "act", iid: c.iid });
     }
   }
+  const fusedHosts = new Set<string>();
   for (const host of pl.hand) {
-    const materials = fusionMaterials(state, p, host).map((c) => c.iid);
-    for (const m of subsets(materials)) {
-      if (m.length > 0) actions.push({ type: "fuse", host: host.iid, materials: m });
-    }
+    // 同じカードの融合先・素材は区別しない（どの1枚を使っても結果は同じ）
+    const choices = materialChoices(fusionMaterials(state, p, host));
+    const hostKey = `${host.cardId}:${host.fusedKinds.join(",")}`;
+    if (choices.length === 0 || fusedHosts.has(hostKey)) continue;
+    fusedHosts.add(hostKey);
+    for (const m of choices) actions.push({ type: "fuse", host: host.iid, materials: m });
   }
   if (pl.extraPpAvailable) actions.push({ type: "extraPp" });
   actions.push({ type: "endTurn" });
@@ -392,7 +407,7 @@ export function legalActions(state: GameState): Action[] {
 // ---- アクションの適用 ----
 
 export function applyAction(prev: GameState, action: Action): GameState {
-  const state = structuredClone(prev);
+  const state = cloneState(prev);
   if (state.phase === "ended") throw new IllegalActionError("対戦は終了しています");
 
   if (state.pending) {
