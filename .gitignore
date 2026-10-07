@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+# 取得した生データ・キャッシュ（コミットしない）
+data/raw/
+.cache/
+*.log

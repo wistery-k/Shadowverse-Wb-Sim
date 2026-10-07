@@ -1,0 +1,33 @@
+{
+  "name": "shadowverse-wb-sim",
+  "version": "1.0.0",
+  "description": "Shadowverse: Worlds Beyond 非公式対戦シミュレータ",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc",
+    "test": "vitest run",
+    "cards": "node scripts/convert-cards.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wistery-k/Shadowverse-Wb-Sim.git"
+  },
+  "bugs": {
+    "url": "https://github.com/wistery-k/Shadowverse-Wb-Sim/issues"
+  },
+  "homepage": "https://github.com/wistery-k/Shadowverse-Wb-Sim#readme",
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.6",
+    "@types/node": "^26.6.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.3",
+    "vitest": "^5.0.3"
+  },
+  "dependencies": {
+    "preact": "^11.0.0"
+  },
+  "private": true,
+  "type": "module"
+}
