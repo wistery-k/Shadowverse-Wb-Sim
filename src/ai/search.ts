@@ -16,7 +16,7 @@ import {
 } from "../engine";
 import { determinize } from "./determinize";
 import { DEFAULT_WEIGHTS, evaluateWith, type EvalWeights } from "./evaluate";
-import { createGreedyAgent, greedyAgent, mulliganAction, type MulliganPolicy } from "./greedy";
+import { createGreedyAgent, greedyAgent } from "./greedy";
 import { findLethal } from "./lethal";
 import { weightsFor } from "./weights";
 import type { Agent } from "./types";
@@ -32,8 +32,6 @@ export interface SearchOptions {
   rescoreTop: number;
   /** リーサルの探索を行う */
   lethal: boolean;
-  /** マリガンの方法 */
-  mulligan: MulliganPolicy;
   /**
    * 評価関数の重み。"byClass" は自分のデッキのクラスに合わせて data/ai-weights.json の重みを使う。
    * 貪欲法で調整した重みは探索 AI では強くならなかった（210試合で 46.7%）ため、既定は基準の重み
@@ -41,7 +39,7 @@ export interface SearchOptions {
   weights: EvalWeights | "byClass";
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 8, maxDepth: 6, rescoreTop: 4, lethal: true, weights: DEFAULT_WEIGHTS, mulligan: "rule" };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 8, maxDepth: 6, rescoreTop: 4, lethal: true, weights: DEFAULT_WEIGHTS };
 
 interface Node {
   state: GameState;
@@ -133,7 +131,8 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
       const first = legal[0];
       if (!first) throw new Error("合法手がありません");
       if (legal.length === 1) return first;
-      if (first.type === "mulligan") return mulliganAction(real, legal, first.player, opts.mulligan);
+      // マリガンは貪欲法と同じ
+      if (first.type === "mulligan") return greedyAgent.chooseAction(real, legal, rng);
       const p = real.pending ? real.pending.player : real.active;
       const legalKeys = new Set(legal.map(keyOf));
 
