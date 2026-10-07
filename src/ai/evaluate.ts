@@ -66,7 +66,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   hold: {},
 };
 
-const KEYWORD_VALUE: Partial<Record<string, number>> = {
+export const KEYWORD_VALUE: Partial<Record<string, number>> = {
   ward: 1,
   bane: 2,
   barrier: 1,

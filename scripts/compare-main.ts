@@ -1,6 +1,8 @@
 // AI の設定同士の比較（npm run compare）
 
+import { readFileSync } from "node:fs";
 import { DEFAULT_WEIGHTS } from "../src/ai/evaluate";
+import type { LinearModel } from "../src/ai/learned";
 import { createSearchAgent, type SearchOptions } from "../src/ai/search";
 import type { Agent } from "../src/ai/types";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
@@ -9,7 +11,8 @@ import { playMatch } from "../src/sim/match";
  * 探索 AI の設定 A と B を対戦させる（npm run compare -- <試合数> '<Aの設定JSON>' '<Bの設定JSON>'）。
  * 同じデッキの組で席とデッキを入れ替えて2試合ずつ行い、A の勝率とデッキごとの A の勝率を出す。
  * 例: npm run compare -- 105 '{}' '{"lethal":false}'
- * "weights": "byClass" でクラスごとに調整した重み、"default" で基準の重みを使う。
+ * "weights": "byClass" でクラスごとに調整した重み、"default" で基準の重み、"learned" で学習した評価関数を使う。
+ * "model": "<パス>" で学習した評価関数のファイルを指定する（npm run learn の出力）。
  */
 export async function main(argv: string[]): Promise<number> {
   const games = Number(argv[0] ?? 28);
@@ -39,5 +42,10 @@ export async function main(argv: string[]): Promise<number> {
 function parseOptions(json: string | undefined): Partial<SearchOptions> {
   const raw = JSON.parse(json ?? "{}") as Record<string, unknown>;
   if (raw.weights === "default") raw.weights = DEFAULT_WEIGHTS;
+  // "model": "<パス>" で学習したモデルのファイルを使う
+  if (typeof raw.model === "string") {
+    raw.weights = { linear: JSON.parse(readFileSync(raw.model, "utf8")) as LinearModel };
+    delete raw.model;
+  }
   return raw as Partial<SearchOptions>;
 }

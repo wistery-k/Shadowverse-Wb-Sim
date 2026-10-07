@@ -17,6 +17,7 @@ import {
 import { determinize } from "./determinize";
 import { DEFAULT_WEIGHTS, evaluateWith, type EvalWeights } from "./evaluate";
 import { createGreedyAgent, greedyAgent } from "./greedy";
+import { evaluateLearned, type LinearModel } from "./learned";
 import { findLethal } from "./lethal";
 import { weightsFor } from "./weights";
 import type { Agent } from "./types";
@@ -34,12 +35,16 @@ export interface SearchOptions {
   lethal: boolean;
   /**
    * 評価関数の重み。"byClass" は自分のデッキのクラスに合わせて data/ai-weights.json の重みを使う。
-   * 貪欲法で調整した重みは探索 AI では強くならなかった（210試合で 46.7%）ため、既定は基準の重み
+   * 貪欲法で調整した重みは探索 AI では強くならなかった（210試合で 46.7%）ため、既定は基準の重み。
+   * "learned" は自己対戦から学習した評価関数（learned.ts、data/ai-model.json）を使う。
+   * { linear } は学習したモデルを直接与える（学習中のモデルの比較用）
    */
-  weights: EvalWeights | "byClass";
+  weights: EvalWeights | "byClass" | "learned" | { linear: LinearModel };
 }
 
 export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 8, maxDepth: 6, rescoreTop: 4, lethal: true, weights: DEFAULT_WEIGHTS };
+
+type Evaluator = (state: GameState, p: PlayerIndex) => number;
 
 interface Node {
   state: GameState;
@@ -72,18 +77,18 @@ function simulateOpponentTurn(state: GameState, p: PlayerIndex, rng: Rng): GameS
 }
 
 /** 1つの局面で、最初の手ごとの評価値を求める */
-function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalWeights, rng: Rng): Map<string, { action: Action; value: number }> {
+function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, ev: Evaluator, rng: Rng): Map<string, { action: Action; value: number }> {
   const terminals: Node[] = [];
   let frontier: Node[] = [];
 
   // 深さ1: すべての手を展開する（最初の手の候補を落とさない）
   for (const a of legalActions(root)) {
     if (a.type === "endTurn") {
-      terminals.push({ state: root, first: a, value: evaluateWith(root, p, w) });
+      terminals.push({ state: root, first: a, value: ev(root, p) });
       continue;
     }
     const next = tryApply(root, a);
-    if (next) frontier.push({ state: next, first: a, value: evaluateWith(next, p, w) });
+    if (next) frontier.push({ state: next, first: a, value: ev(next, p) });
   }
 
   for (let depth = 1; depth < opts.maxDepth && frontier.length > 0; depth++) {
@@ -99,7 +104,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
       for (const a of legalActions(node.state)) {
         if (a.type === "endTurn") continue;
         const next = tryApply(node.state, a);
-        if (next) children.push({ state: next, first: node.first, value: evaluateWith(next, p, w) });
+        if (next) children.push({ state: next, first: node.first, value: ev(next, p) });
       }
     }
     children.sort((x, y) => y.value - x.value);
@@ -118,9 +123,20 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   const result = new Map<string, { action: Action; value: number }>();
   for (const node of ranked.slice(0, opts.rescoreTop)) {
     const after = node.state.phase === "ended" ? node.state : simulateOpponentTurn(node.state, p, rng);
-    result.set(keyOf(node.first), { action: node.first, value: evaluateWith(after, p, w) });
+    result.set(keyOf(node.first), { action: node.first, value: ev(after, p) });
   }
   return result;
+}
+
+function evaluatorFor(weights: SearchOptions["weights"], real: GameState, p: PlayerIndex): Evaluator {
+  if (weights === "learned") return evaluateLearned;
+  if (weights === "byClass") {
+    const w = weightsFor(real, p);
+    return (state, q) => evaluateWith(state, q, w);
+  }
+  if ("linear" in weights) return (state, q) => evaluateLearned(state, q, weights.linear);
+  const w: EvalWeights = weights;
+  return (state, q) => evaluateWith(state, q, w);
 }
 
 export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
@@ -141,11 +157,11 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
         if (lethal && legalKeys.has(keyOf(lethal))) return lethal;
       }
 
-      const w = opts.weights === "byClass" ? weightsFor(real, p) : opts.weights;
+      const ev = evaluatorFor(opts.weights, real, p);
       const totals = new Map<string, { action: Action; sum: number; count: number }>();
       for (let i = 0; i < opts.samples; i++) {
         const det = determinize(real, p, rng);
-        for (const [k, { action, value }] of planTurn(det, p, opts, w, rng)) {
+        for (const [k, { action, value }] of planTurn(det, p, opts, ev, rng)) {
           const t = totals.get(k) ?? { action, sum: 0, count: 0 };
           t.sum += value;
           t.count++;

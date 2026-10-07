@@ -8,6 +8,7 @@ import {
   invariantViolations,
   legalActions,
   rngFrom,
+  type Action,
   type GameState,
   type PlayerIndex,
 } from "../engine";
@@ -26,6 +27,8 @@ export interface MatchOptions {
   checkInvariants?: boolean;
   /** 無限ループ検出用の上限 */
   maxActions?: number;
+  /** 各アクションの直前の局面と選んだ行動を受け取る（学習データの収集用） */
+  observe?: (state: GameState, action: Action) => void;
 }
 
 export function playMatch(agents: [Agent, Agent], opts: MatchOptions): MatchResult {
@@ -38,7 +41,9 @@ export function playMatch(agents: [Agent, Agent], opts: MatchOptions): MatchResu
     if (++actions > maxActions) throw new Error(`アクション数が上限 ${maxActions} を超えました`);
     const legal = legalActions(state);
     const actor = actingPlayer(state);
-    state = applyAction(state, agents[actor].chooseAction(state, legal, agentRng));
+    const action = agents[actor].chooseAction(state, legal, agentRng);
+    opts.observe?.(state, action);
+    state = applyAction(state, action);
     if (opts.checkInvariants) {
       const v = invariantViolations(state);
       if (v.length > 0) throw new Error(`不変条件違反 (seed ${opts.seed}):\n${v.join("\n")}`);

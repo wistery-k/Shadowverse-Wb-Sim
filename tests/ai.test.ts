@@ -135,3 +135,22 @@ describe("評価関数の重み", () => {
     expect(evaluateWith(s, 0, { ...DEFAULT_WEIGHTS, hold: { [card]: 3 } })).toBeGreaterThanOrEqual(base + 3);
   });
 });
+
+import { evaluateLearned, featuresOf, NUMERIC_FEATURES, type LinearModel } from "../src/ai/learned";
+
+describe("学習した評価関数", () => {
+  it("特徴量は数値の特徴の名前と対応し、線形モデルの値を相手リーダーの体力 1 = 1 点に換算する", () => {
+    let state = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 3 });
+    while (state.phase === "mulligan") state = applyAction(state, legalActions(state)[0]!);
+    const p = state.active;
+    const f = featuresOf(state, p);
+    expect(f.num).toHaveLength(NUMERIC_FEATURES.length);
+    expect(f.hand).toEqual(state.players[p].hand.map((h) => h.cardId));
+    const handId = f.hand[0]!;
+    const model: LinearModel = { num: { "opp.hp": -0.2, "my.hp": 0.1 }, hand: { [handId]: 0.4 }, myBoard: {}, oppBoard: {} };
+    const count = f.hand.filter((id) => id === handId).length;
+    const opp = state.players[p === 0 ? 1 : 0];
+    const expected = (0.1 * state.players[p].leaderHp - 0.2 * opp.leaderHp + 0.4 * count) / 0.2;
+    expect(evaluateLearned(state, p, model)).toBeCloseTo(expected);
+  });
+});
