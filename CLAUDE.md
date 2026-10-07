@@ -25,6 +25,9 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
 6. **非公開情報**: AI は実際の局面を直接先読みせず、`src/ai/determinize.ts` で作った「視点のプレイヤーから見て矛盾しない局面」（相手の手札・山札の中身と山札の順番を並べ直し、乱数の状態も新しくしたもの）で手を試す。新しい AI もこれに従う
 7. **AI インターフェース共通化**: `Agent.chooseAction(state, legalActions, rng) -> Action`（`src/ai/types.ts`）。選べる AI は `src/ai/registry.ts` に登録し、UI・自動対戦（`npm run sim`、「AI対戦」タブ）で共通に使う。UI では AI の思考を Web Worker（`src/ai/worker.ts`）で行う
 8. **AI の強さの比較**: AI を変えたら `npm run sim -- --games 50 --agents <新>,<旧>` 等で勝率を比べてから採用する。状態の複製は `cloneState`（`src/engine/clone.ts`）を使い、状態の型を変えたらそこも更新する
+9. **AI の実験記録**: AI の改善で試したことと結果（不採用のものも）は `docs/ai-notes.md` に残す。新しい実験の前に読み、同じことを繰り返さない
+   - 判断は勝率（探索 AI どうしなら `npm run compare`、同じシードで席とデッキを入れ替えて 200 試合程度）で行う。予測精度などの代わりの指標が良くても、勝率で確かめるまで採用しない（評価関数の学習は予測精度が上がったのに勝率は下がった）
+   - 1 組 20 試合の勝率表は 1 マス ±10% ほどぶれる。小さな差で結論を出さない
 
 ## ルールの扱い
 
@@ -66,7 +69,7 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
 
 ## Git / 公開
 
-- 作業ブランチは指示されたブランチ（現在: `claude/eloquent-turing-la2rh7`）。指示なく他ブランチへ push しない
+- 作業ブランチは指示されたブランチ（現在: `claude/next-steps`）。指示なく他ブランチへ push しない
 - PR はユーザーが明示的に求めたときのみ作成する
 - GitHub Pages は GitHub Actions でビルド・デプロイ。Vite の `base` は `/Shadowverse-Wb-Sim/`
 
