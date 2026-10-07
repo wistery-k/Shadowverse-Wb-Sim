@@ -46,7 +46,7 @@ function checkCard(raw: unknown, where: string, problems: string[]): void {
   if (!isOneOf(CARD_TYPES, raw.type)) p(`type が不正です: ${String(raw.type)}`);
   if (!isOneOf(RARITIES, raw.rarity)) p(`rarity が不正です: ${String(raw.rarity)}`);
   if (!isNonNegInt(raw.cost)) p("cost は0以上の整数が必要です");
-  if (!isStringArray(raw.tribes)) p("tribes は文字列の配列が必要です");
+  if (raw.tribes !== null && !isStringArray(raw.tribes)) p("tribes は文字列の配列か null が必要です");
   if (!isStringArray(raw.related)) p("related は文字列の配列が必要です");
   if (raw.starterAbilityChanged !== undefined && raw.starterAbilityChanged !== true) {
     p("starterAbilityChanged は true か省略が必要です");

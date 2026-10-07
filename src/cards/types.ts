@@ -48,8 +48,8 @@ interface CardBase {
   set: CardSet;
   rarity: Rarity;
   cost: number;
-  /** タイプ（例: 兵士、マナリア）。無ければ空配列。 */
-  tribes: string[];
+  /** タイプ（例: 兵士、マナリア）。無ければ空配列。元データに情報が無く不明な場合は null。 */
+  tribes: string[] | null;
   /**
    * 能力テキスト。公式表記から装飾タグを除いたもの。進化時・超進化時の能力も含む。
    * 区切り線は改行。キーワードの数値は公式表記どおり「【コンボ_3】」の形。無ければ空文字列。
@@ -57,7 +57,10 @@ interface CardBase {
   text: string;
   /** 効果で生成・参照するカードのID（公式データの related_card_ids） */
   related: string[];
-  /** スターター用に当時の能力へ差し替えたカード（公式データの is_starter_ability_changed） */
+  /**
+   * スターター用に当時の能力へ差し替えたカード
+   * （公式データの is_starter_ability_changed、または data/starter-overrides.json で上書き）
+   */
   starterAbilityChanged?: true;
 }
 
