@@ -85,7 +85,7 @@ interface Override {
   note?: string;
 }
 
-const problems: string[] = [];
+const problems = new Set<string>();
 
 function lookup<T>(table: Record<string | number, T>, key: string | number, what: string, where: string): T {
   const v = table[key];
@@ -98,10 +98,11 @@ function cleanText(text: string, where: string): string {
   const out = text
     .replace(/<\/?color[^>]*>/g, "")
     .replace(/<\/?s?ev>/g, "")
+    .replace(/<\/?ridx(=\d+)?>/g, "") // 【モード】の選択肢
     .replace(/<hr>/g, "\n")
     .replace(/\n{2,}/g, "\n")
     .trim();
-  if (/[<>]/.test(out)) problems.push(`${where}: 未対応のタグがあります: ${out}`);
+  if (/[<>]/.test(out)) problems.add(`${where}: 未対応のタグがあります: ${out}`);
   return out;
 }
 
@@ -164,7 +165,7 @@ while (queue.length > 0) {
   const id = queue.pop() as string;
   for (const ref of relatedOf.get(id) ?? []) {
     if (pool.has(ref)) continue;
-    if (!ref.startsWith("9")) problems.push(`${id}: 第2弾以降のカード ${ref} を参照しています`);
+    if (!ref.startsWith("9")) problems.add(`${id}: 第2弾以降のカード ${ref} を参照しています`);
     pool.add(ref);
     queue.push(ref);
   }
@@ -178,20 +179,20 @@ const cards: Card[] = [];
 for (const id of pool) {
   const s = sources.get(id);
   if (!s) {
-    problems.push(`${id}: 元データがありません`);
+    problems.add(`${id}: 元データがありません`);
     continue;
   }
   const f = s.fields;
   const where = `${id} ${f.name}`;
   const isToken = id.startsWith("9");
-  if (isToken !== f.is_token) problems.push(`${where}: トークン判定が一致しません`);
+  if (isToken !== f.is_token) problems.add(`${where}: トークン判定が一致しません`);
 
   const set: CardSet = isToken ? "token" : lookup(POOL_SETS, id[2] ?? "", "セット", where);
   let type = lookup(ID_TYPES, id[5] ?? "", "カード種類", where);
   let tribes: string[] | null = null;
   if (s.api) {
     const apiSet = lookup(API_SETS, s.api.setId, "セット", where);
-    if (apiSet !== set) problems.push(`${where}: セットがIDと一致しません (${apiSet})`);
+    if (apiSet !== set) problems.add(`${where}: セットがIDと一致しません (${apiSet})`);
     type = lookup(API_TYPES, s.api.fields.type, "カード種類", where);
     tribes = s.api.fields.tribes
       .filter((t) => t !== 0)
@@ -200,7 +201,7 @@ for (const id of pool) {
 
   const o = overrides[id];
   if (o && type !== "follower" && (o.attack !== undefined || o.defense !== undefined)) {
-    problems.push(`${where}: フォロワー以外に attack/defense の上書きがあります`);
+    problems.add(`${where}: フォロワー以外に attack/defense の上書きがあります`);
   }
   const text = o?.text ?? cleanText(f.skill_text, where);
   const base = {
@@ -220,7 +221,7 @@ for (const id of pool) {
     cards.push({ ...base, type, attack: o?.attack ?? f.atk, defense: o?.defense ?? f.life });
   } else if (type === "amulet") {
     const m = /【カウントダウン_(\d+)】/.exec(text);
-    if (s.api?.fields.type === 3 && !m) problems.push(`${where}: カウントダウンの値が見つかりません`);
+    if (s.api?.fields.type === 3 && !m) problems.add(`${where}: カウントダウンの値が見つかりません`);
     cards.push({ ...base, type, ...(m?.[1] ? { countdown: Number(m[1]) } : {}) });
   } else {
     cards.push({ ...base, type });
@@ -228,7 +229,7 @@ for (const id of pool) {
 }
 
 for (const id of Object.keys(overrides)) {
-  if (!pool.has(id)) problems.push(`${OVERRIDES_FILE}: ${id} はカードプールにありません`);
+  if (!pool.has(id)) problems.add(`${OVERRIDES_FILE}: ${id} はカードプールにありません`);
 }
 
 // 参照先が見つからない『カード名』
@@ -252,7 +253,7 @@ const changed = cards.filter((c) => c.starterAbilityChanged).map((c) => c.name);
 console.log(`当時の能力に差し替えたカード: ${changed.length > 0 ? changed.join("、") : "なし"}`);
 console.log(`タイプ不明（API形式のデータが無い）: ${count((c) => c.tribes === null)} 枚`);
 if (unresolved.size > 0) console.log(`データに無い参照カード名: ${[...unresolved].join("、")}`);
-if (problems.length > 0) {
-  console.warn(`警告 ${problems.length} 件:\n${problems.join("\n")}`);
+if (problems.size > 0) {
+  console.warn(`警告 ${problems.size} 件:\n${[...problems].join("\n")}`);
   process.exitCode = 1;
 }

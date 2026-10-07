@@ -241,7 +241,7 @@
     "set": "basic",
     "rarity": "bronze",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "自分の手札1枚を選ぶ。それをデッキに戻す。自分のデッキからロイヤル・フォロワー2枚を引く。",
     "related": [],
     "type": "spell"
@@ -338,7 +338,7 @@
     "set": "basic",
     "rarity": "bronze",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "『クレイゴーレム』1枚を自分の場に出す。",
     "related": [
       "90031110"
@@ -394,7 +394,7 @@
     "set": "basic",
     "rarity": "bronze",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに1ダメージ。",
     "related": [],
     "type": "follower",
@@ -518,7 +518,7 @@
     "set": "basic",
     "rarity": "bronze",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【ファンファーレ】【ネクロマンス_4】これは【疾走】を持つ。",
     "related": [],
     "type": "follower",
@@ -532,7 +532,7 @@
     "set": "basic",
     "rarity": "bronze",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【モード】1つを選んでその能力が働く。\n（1）自分のデッキからフォロワー1枚を引く。\n（2）【リアニメイト_2】を行う。",
     "related": [],
     "type": "spell"
@@ -576,7 +576,7 @@
     "set": "basic",
     "rarity": "silver",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "自分の場のフォロワー1枚を選ぶ。それを破壊。自分のデッキから2枚を引く。",
     "related": [],
     "type": "spell"
@@ -602,7 +602,7 @@
     "set": "basic",
     "rarity": "bronze",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【守護】",
     "related": [],
     "type": "follower",
@@ -704,7 +704,7 @@
     "set": "basic",
     "rarity": "bronze",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【ファンファーレ】『改良型・操り人形』1枚を自分の手札に加える。",
     "related": [
       "90071120"
@@ -749,10 +749,15 @@
     "set": "basic",
     "rarity": "silver",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【ファンファーレ】『パスト・コア』1枚を自分の手札に加える。",
     "related": [
-      "90071220"
+      "90071220",
+      "90072120",
+      "90073110",
+      "90073120",
+      "90073130",
+      "90074110"
     ],
     "type": "follower",
     "attack": 1,
@@ -779,7 +784,7 @@
     "set": "basic",
     "rarity": "silver",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【ファンファーレ】『操り人形』1枚を自分の手札に加える。\n【カウントダウン_2】\n自分のターン終了時、『操り人形』1枚を自分の手札に加える。",
     "related": [
       "90071110"
@@ -1249,7 +1254,7 @@
     "set": "legend_dawn",
     "rarity": "bronze",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【ファンファーレ】超進化可能ターンなら、これは【必殺】を持つ。\n【突進】",
     "related": [],
     "type": "follower",
@@ -1311,7 +1316,9 @@
     "set": "legend_dawn",
     "rarity": "silver",
     "cost": 2,
-    "tribes": null,
+    "tribes": [
+      "ルミナス"
+    ],
     "text": "【ファンファーレ】『ナイト』1枚を自分の場に出す。\n自分の兵士・フォロワーが場に出たとき、それは【突進】を持つ。",
     "related": [
       "90021110"
@@ -1327,7 +1334,7 @@
     "set": "legend_dawn",
     "rarity": "silver",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【潜伏】\n【進化時】『忍びのムササビ』1枚を自分の場に出す。",
     "related": [],
     "type": "follower",
@@ -1486,9 +1493,11 @@
     "set": "legend_dawn",
     "rarity": "bronze",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【ファンファーレ】自分の手札1枚を選ぶ。それをデッキに戻す。自分のデッキから1枚を引く。自分の場の土の印を+1する。",
-    "related": [],
+    "related": [
+      "90031210"
+    ],
     "type": "follower",
     "attack": 2,
     "defense": 2
@@ -1528,7 +1537,7 @@
     "set": "legend_dawn",
     "rarity": "bronze",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "自分の手札の【スペルブースト時】を持つカード1枚を選ぶ。それは1回スペルブーストする。自分のデッキから1枚を引く。",
     "related": [],
     "type": "spell"
@@ -1552,7 +1561,9 @@
     "set": "legend_dawn",
     "rarity": "silver",
     "cost": 2,
-    "tribes": null,
+    "tribes": [
+      "マナリア"
+    ],
     "text": "【ファンファーレ】自分の手札すべては1回スペルブーストする。\n【進化時】相手の場のフォロワー1枚を選ぶ。それに3ダメージ。自分の手札すべては1回スペルブーストする。",
     "related": [],
     "type": "follower",
@@ -1634,9 +1645,11 @@
     "set": "legend_dawn",
     "rarity": "gold",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【ファンファーレ】自分の場の土の印を+2する。\n【超進化時】自分のデッキから2枚を引く。自分のリーダーを2回復。自分の場の土の印を+2する。",
-    "related": [],
+    "related": [
+      "90031210"
+    ],
     "type": "follower",
     "attack": 2,
     "defense": 2
@@ -1781,7 +1794,7 @@
     "set": "legend_dawn",
     "rarity": "bronze",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【ファンファーレ】『ベビーファイアドレイク』1枚を自分の場に出す。\n【進化時】【ファンファーレ】と同じ能力が働く。",
     "related": [
       "90041110"
@@ -2024,7 +2037,7 @@
     "set": "legend_dawn",
     "rarity": "bronze",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【進化時】『バット』2枚を自分の場に出す。",
     "related": [
       "90051120"
@@ -2096,7 +2109,7 @@
     "set": "legend_dawn",
     "rarity": "silver",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【エンハンス_4】これは【突進】と【必殺】を持つ。\n【ラストワード】『スケルトン』1枚を自分の手札に加える。",
     "related": [
       "90051110"
@@ -2112,7 +2125,7 @@
     "set": "legend_dawn",
     "rarity": "silver",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【ファンファーレ】自分のリーダーに3ダメージ。\n【進化時】自分のリーダーを5回復。",
     "related": [],
     "type": "follower",
@@ -2185,7 +2198,7 @@
     "set": "legend_dawn",
     "rarity": "gold",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【ファンファーレ】自分の墓場を+2する。\n【守護】\n【進化時】【ネクロマンス_4】「相手の場のフォロワーからランダム1枚に2ダメージ。」を2回行う。",
     "related": [],
     "type": "follower",
@@ -2229,7 +2242,7 @@
     "set": "legend_dawn",
     "rarity": "gold",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "相手の場のフォロワー1枚か相手のリーダーを選ぶ。それに3ダメージ。自分のリーダーに2ダメージ。",
     "related": [],
     "type": "spell"
@@ -2328,7 +2341,7 @@
     "set": "legend_dawn",
     "rarity": "bronze",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【オーラ】\n自分がアミュレットを【アクト】したとき、ターン終了まで、これは+1/+0する。",
     "related": [],
     "type": "follower",
@@ -2369,7 +2382,7 @@
     "set": "legend_dawn",
     "rarity": "silver",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "自分の【守護】を持つフォロワーが破壊されたとき、これは+1/+1する。\n【進化時】これは【バリア】を持つ。",
     "related": [],
     "type": "follower",
@@ -2411,7 +2424,7 @@
     "set": "legend_dawn",
     "rarity": "silver",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "コスト1【アクト】自分の場のフォロワー1枚を選ぶ。それは+1/+1する。自分のリーダーを1回復。",
     "related": [],
     "type": "amulet"
@@ -2477,7 +2490,7 @@
     "set": "legend_dawn",
     "rarity": "gold",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【カウントダウン_2】\n【ラストワード】『ホーリーフレイムタイガー』1枚を自分の場に出す。\nコスト1【アクト】これのカウントを-1する。",
     "related": [
       "90061120"
@@ -2583,10 +2596,15 @@
     "set": "legend_dawn",
     "rarity": "bronze",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【ファンファーレ】『フューチャー・コア』1枚を自分の手札に加える。\n【進化時】相手の場のフォロワー1枚を選ぶ。それに3ダメージ。",
     "related": [
-      "90071210"
+      "90071210",
+      "90072110",
+      "90073110",
+      "90073120",
+      "90073130",
+      "90074110"
     ],
     "type": "follower",
     "attack": 2,
@@ -2668,7 +2686,7 @@
     "set": "legend_dawn",
     "rarity": "silver",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "【ファンファーレ】『操り人形』1枚を自分の手札に加える。\n【進化時】【ファンファーレ】と同じ能力が働く。",
     "related": [
       "90071110"
@@ -2700,10 +2718,15 @@
     "set": "legend_dawn",
     "rarity": "silver",
     "cost": 2,
-    "tribes": null,
+    "tribes": [],
     "text": "相手の場のフォロワー1枚を選ぶ。それに3ダメージ。『パスト・コア』1枚を自分の手札に加える。",
     "related": [
-      "90071220"
+      "90071220",
+      "90072120",
+      "90073110",
+      "90073120",
+      "90073130",
+      "90074110"
     ],
     "type": "spell"
   },
@@ -2933,7 +2956,9 @@
     "set": "token",
     "rarity": "bronze",
     "cost": 1,
-    "tribes": null,
+    "tribes": [
+      "ゴーレム"
+    ],
     "text": "",
     "related": [],
     "type": "follower",
@@ -3057,7 +3082,7 @@
     "set": "token",
     "rarity": "bronze",
     "cost": 1,
-    "tribes": null,
+    "tribes": [],
     "text": "【威圧】",
     "related": [],
     "type": "follower",
@@ -3129,7 +3154,9 @@
     "set": "token",
     "rarity": "bronze",
     "cost": 0,
-    "tribes": null,
+    "tribes": [
+      "死者"
+    ],
     "text": "",
     "related": [],
     "type": "follower",
@@ -3213,7 +3240,7 @@
     "set": "token",
     "rarity": "bronze",
     "cost": 4,
-    "tribes": null,
+    "tribes": [],
     "text": "【突進】",
     "related": [],
     "type": "follower",
@@ -3241,7 +3268,9 @@
     "set": "token",
     "rarity": "bronze",
     "cost": 0,
-    "tribes": null,
+    "tribes": [
+      "人形"
+    ],
     "text": "【突進】\n相手のターン終了時、これを破壊。",
     "related": [],
     "type": "follower",
@@ -3255,7 +3284,9 @@
     "set": "token",
     "rarity": "bronze",
     "cost": 1,
-    "tribes": null,
+    "tribes": [
+      "人形"
+    ],
     "text": "【突進】\n相手のターン終了時、これを破壊。",
     "related": [],
     "type": "follower",
