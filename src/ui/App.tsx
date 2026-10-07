@@ -138,6 +138,7 @@ export function App() {
       <footer>
         非公式ファンプロジェクトです。Cygames 社および関連企業とは一切関係ありません。
         ゲーム名・カード名・カードテキストの権利は各権利者に帰属します。
+        <BuildInfo />
       </footer>
     </div>
   );
@@ -172,5 +173,25 @@ function DeckSelect({ value, saved, onChange }: { value: DeckChoice; saved: read
         ))}
       </optgroup>
     </select>
+  );
+}
+
+const REPO_URL = "https://github.com/wistery-k/Shadowverse-Wb-Sim";
+
+/** 最終更新日時とコミットハッシュ（ビルド時に埋め込んだ値） */
+function BuildInfo() {
+  if (!__BUILD_COMMIT__) return null;
+  const date = __BUILD_DATE__ ? new Date(__BUILD_DATE__) : null;
+  const dateText =
+    date && !Number.isNaN(date.getTime())
+      ? date.toLocaleString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+      : "不明";
+  return (
+    <div class="build-info">
+      最終更新: {dateText} / コミット:{" "}
+      <a href={`${REPO_URL}/commit/${__BUILD_COMMIT__}`} target="_blank" rel="noreferrer">
+        {__BUILD_COMMIT__.slice(0, 7)}
+      </a>
+    </div>
   );
 }

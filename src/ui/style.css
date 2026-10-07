@@ -525,3 +525,10 @@ textarea {
   position: sticky;
   top: 8px;
 }
+
+.build-info {
+  margin-top: 4px;
+}
+.build-info a {
+  color: inherit;
+}
