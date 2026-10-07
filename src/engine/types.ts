@@ -1,8 +1,10 @@
 // ゲーム状態とアクションの型。状態は JSON シリアライズ可能に保つ（クラス・関数・Map を入れない）。
 
+import type { Ability, Effect } from "./dsl";
+
 export type PlayerIndex = 0 | 1;
 
-/** 常在型のキーワード（能力テキストに単独行で書かれるもの） */
+/** 常在型のキーワード */
 export type StaticKeyword =
   | "ward" // 守護
   | "storm" // 疾走
@@ -16,37 +18,87 @@ export type StaticKeyword =
 
 export type EvolveState = "none" | "evolved" | "superEvolved";
 
-/** 手札・山札のカード */
+/** 山札のカード */
 export interface CardRef {
-  /** ゲーム内で一意なインスタンスID */
+  /** ゲーム内で一意なインスタンスID（正の整数）。リーダーは負の値（LEADER_ID）。 */
   iid: number;
   cardId: string;
 }
 
+/** 手札のカード。手札にある間に受けた変化を持つ。 */
+export interface HandCard extends CardRef {
+  costMod: number;
+  attackMod: number;
+  defenseMod: number;
+  /** スペルブーストされた回数 */
+  boosts: number;
+  /** X（ストームブラスト等）。持たないカードは null */
+  x: number | null;
+  /** 手札で付与されたキーワード（魔煌のトリックスター・ラスティ等） */
+  keywords: StaticKeyword[];
+  /** これまでに融合した素材のカードID（種類） */
+  fusedKinds: string[];
+  fusedThisTurn: boolean;
+}
+
+interface OnBoardBase extends CardRef {
+  keywords: StaticKeyword[];
+  /** ターン終了までの一時的なキーワード */
+  tempKeywords: StaticKeyword[];
+  /** 付与された能力 */
+  granted: Ability[];
+  /** 場に出た順の通し番号（古いもの優先の処理に使う） */
+  order: number;
+}
+
 /** 場のフォロワー */
-export interface FollowerOnBoard extends CardRef {
+export interface FollowerOnBoard extends OnBoardBase {
   kind: "follower";
   attack: number;
   defense: number;
   maxDefense: number;
-  keywords: StaticKeyword[];
+  /** ターン終了までの攻撃力の増減 */
+  tempAttack: number;
   /** 1ターンに攻撃できる回数 */
   maxAttacks: number;
   attacksThisTurn: number;
-  /** 場に出た時点の、場に出したプレイヤーのターン番号（全体のターン番号） */
+  /** 場に出たときの全体のターン番号 */
   enteredTurn: number;
   evolve: EvolveState;
+  /** このターン番号の終了まで攻撃できない（スノーアウェイク） */
+  cannotAttackUntil: number | null;
+  x: number | null;
+  /** 能力の「自分のターンごとに1回」を使ったターン番号（能力の添字ごと） */
+  usedOncePerTurn: Record<string, number>;
 }
 
 /** 場のアミュレット */
-export interface AmuletOnBoard extends CardRef {
+export interface AmuletOnBoard extends OnBoardBase {
   kind: "amulet";
   /** カウントダウンを持たなければ null */
   countdown: number | null;
-  keywords: StaticKeyword[];
+  /** 【土の印】アミュレットのスタック。持たなければ null */
+  sigils: number | null;
+  actedThisTurn: boolean;
 }
 
 export type OnBoard = FollowerOnBoard | AmuletOnBoard;
+
+/** リーダーが持つクレスト */
+export interface CrestInstance {
+  iid: number;
+  crestId: string;
+  countdown: number | null;
+  order: number;
+  usedOncePerTurn: Record<string, number>;
+}
+
+/** このターン中に破壊された自分のフォロワーの記録（式神・貴人） */
+export interface DestroyedRecord {
+  cardId: string;
+  attack: number;
+  defense: number;
+}
 
 export interface PlayerState {
   leaderHp: number;
@@ -58,20 +110,72 @@ export interface PlayerState {
   /** 自分のターンが何回目か（未開始は0） */
   turnCount: number;
   deck: CardRef[];
-  hand: CardRef[];
+  hand: HandCard[];
   board: OnBoard[];
+  crests: CrestInstance[];
   /** 墓場のカウント */
   graveyard: number;
   /** リアニメイトの対象になるフォロワーのカードID（墓場に行った順） */
   graveyardFollowers: string[];
-  /** このターンにプレイしたカードの枚数（コンボ） */
-  playedThisTurn: number;
+  /** このバトル中に破壊された自分のアミュレットのカードID */
+  destroyedAmulets: string[];
+  /** このターン中に破壊された自分のフォロワー */
+  destroyedThisTurn: DestroyedRecord[];
+  /** コンボ（このターンにプレイしたカードの枚数と、効果による加算） */
+  combo: number;
   /** このターンに進化または超進化したか */
   evolvedThisTurn: boolean;
+  /** 「自分のリーダーが回復したとき」等、リーダーのターンごとに1回の能力の使用記録 */
+  leaderOncePerTurn: Record<string, number>;
   mulliganDone: boolean;
 }
 
 export type Phase = "mulligan" | "main" | "ended";
+
+/** 能力の解決中の文脈 */
+export interface EffectContext {
+  /** 能力の持ち主 */
+  controller: PlayerIndex;
+  /** 能力の持ち主のカード（場・手札・クレスト）。スペルは使用したカード */
+  source: number;
+  sourceCardId: string;
+  /** 能力を誘発させたカード（場に出たフォロワー、交戦相手など） */
+  event: number | null;
+  /** 選択・乱数の結果 */
+  slots: Record<string, number[]>;
+  vars: Record<string, number>;
+  /** エンハンスでプレイしたか */
+  enhanced: boolean;
+  /** 能力の持ち主が場・手札から離れた後でも参照できる値 */
+  sourceX: number | null;
+  sourceAttack: number;
+}
+
+/** エンジン内部の処理（能力の DSL の外） */
+export type InternalEffect =
+  | { op: "_combat"; attacker: number; target: number | "leader" }
+  | { op: "_endTurn" }
+  | { op: "_cleanup" }
+  | { op: "_startTurn" }
+  | { op: "_startTurnDraw" }
+  | { op: "_finishMulligan" };
+
+export interface Frame {
+  effects: (Effect | InternalEffect)[];
+  pc: number;
+  ctx: EffectContext;
+}
+
+/** プレイヤーの選択待ち */
+export type PendingChoice =
+  | { kind: "choose"; player: PlayerIndex; slot: string; candidates: number[]; count: number }
+  | { kind: "mode"; player: PlayerIndex; options: number };
+
+/** 誘発して解決を待っている能力 */
+export interface QueuedAbility {
+  ability: Ability;
+  ctx: EffectContext;
+}
 
 export interface GameState {
   phase: Phase;
@@ -86,6 +190,13 @@ export interface GameState {
   /** 乱数の状態 */
   rng: number;
   nextIid: number;
+  /** 場に出た順の通し番号の次の値 */
+  nextOrder: number;
+  /** 解決中の処理（末尾が実行中） */
+  stack: Frame[];
+  /** 誘発して解決を待っている能力（先頭から解決） */
+  queue: QueuedAbility[];
+  pending: PendingChoice | null;
 }
 
 export type AttackTarget = number | "leader";
@@ -96,4 +207,8 @@ export type Action =
   | { type: "attack"; attacker: number; target: AttackTarget }
   | { type: "evolve"; iid: number }
   | { type: "superEvolve"; iid: number }
+  | { type: "act"; iid: number }
+  | { type: "fuse"; host: number; materials: number[] }
+  | { type: "choose"; targets: number[] }
+  | { type: "mode"; index: number }
   | { type: "endTurn" };

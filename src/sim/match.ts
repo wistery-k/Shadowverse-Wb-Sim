@@ -2,6 +2,7 @@
 
 import type { Agent } from "../ai/types";
 import {
+  actingPlayer,
   applyAction,
   createGame,
   invariantViolations,
@@ -36,8 +37,7 @@ export function playMatch(agents: [Agent, Agent], opts: MatchOptions): MatchResu
   while (state.phase !== "ended") {
     if (++actions > maxActions) throw new Error(`アクション数が上限 ${maxActions} を超えました`);
     const legal = legalActions(state);
-    const actor: PlayerIndex =
-      state.phase === "mulligan" ? (legal[0]?.type === "mulligan" ? legal[0].player : state.active) : state.active;
+    const actor = actingPlayer(state);
     state = applyAction(state, agents[actor].chooseAction(state, legal, agentRng));
     if (opts.checkInvariants) {
       const v = invariantViolations(state);

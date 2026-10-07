@@ -1,6 +1,6 @@
 // カードの能力テキストから常在型のキーワードを読み取る。
-// 単独行の「【守護】」等と「1ターンに2回攻撃できる。」だけを対象にする。
-// 条件付きで得るもの（「【覚醒】なら、これは【威圧】を持つ」等）は効果として別に扱う。
+// 単独行の「【守護】」等と「1ターンにN回攻撃できる。」だけを対象にする。
+// 条件付きで得るもの（「【覚醒】なら、これは【威圧】を持つ」等）は能力（src/cards/abilities）で扱う。
 
 import type { StaticKeyword } from "./types";
 
@@ -25,7 +25,8 @@ export function parseStaticAbilities(text: string): StaticAbilities {
   const keywords: StaticKeyword[] = [];
   let maxAttacks = 1;
   for (const line of text.split("\n")) {
-    if (line === "1ターンに2回攻撃できる。") maxAttacks = 2;
+    const attacks = /^1ターンに(\d)回攻撃できる。$/.exec(line);
+    if (attacks?.[1] !== undefined) maxAttacks = Number(attacks[1]);
     const m = /^【([^】_]+)】$/.exec(line);
     const kw = m?.[1] !== undefined ? KEYWORD_NAMES[m[1]] : undefined;
     if (kw && !keywords.includes(kw)) keywords.push(kw);

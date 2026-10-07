@@ -17,7 +17,12 @@ export function invariantViolations(state: GameState): string[] {
     if (pl.ep < 0 || pl.sep < 0) v.push(`${where}: EP/SEPが負`);
     if (pl.leaderHp > pl.leaderMaxHp) v.push(`${where}: リーダー体力が最大値を超過`);
     if (state.phase !== "ended" && pl.leaderHp <= 0) v.push(`${where}: 体力0以下で対戦が継続`);
-    if (pl.graveyardFollowers.length > pl.graveyard) v.push(`${where}: 墓場のカウントが不足`);
+    if (pl.graveyard < 0) v.push(`${where}: 墓場のカウントが負`);
+    for (const c of pl.board) {
+      if (c.kind === "amulet" && c.sigils !== null && pl.board.filter((x) => x.kind === "amulet" && x.sigils !== null).length > 1) {
+        v.push(`${where}: 【土の印】アミュレットが複数`);
+      }
+    }
     for (const c of [...pl.deck, ...pl.hand, ...pl.board]) {
       if (iids.has(c.iid)) v.push(`${where}: iid ${c.iid} が重複`);
       iids.add(c.iid);
@@ -30,6 +35,9 @@ export function invariantViolations(state: GameState): string[] {
     }
   }
   if (state.phase === "ended" && state.winner === null) v.push("終了しているが勝者がいない");
+  if (state.phase !== "ended" && state.pending === null && (state.stack.length > 0 || state.queue.length > 0)) {
+    v.push("選択待ちでないのに未解決の処理が残っている");
+  }
   if (state.phase !== "ended" && state.winner !== null) v.push("勝者がいるが終了していない");
   return v;
 }

@@ -6,6 +6,8 @@ import {
   IllegalActionError,
   invariantViolations,
   legalActions,
+  newBoardCard,
+  newHandCard,
   parseStaticAbilities,
   playCost,
   rngFrom,
@@ -25,7 +27,7 @@ const id = (name: string): string => {
 };
 
 const VANILLA = id("キャラバンマンモス"); // 7コスト 10/10 能力なし
-const SPELL = id("虫の知らせ"); // 1コスト
+const SPELL = id("知恵の輝き"); // 1コスト 対象なし
 const deckOf = (cardId: string) => Array.from({ length: 40 }, () => cardId);
 
 /** マリガン（入れ替えなし）を済ませ、先攻1ターン目の状態にする */
@@ -36,29 +38,16 @@ function started(seed = 1, decks: [string[], string[]] = [deckOf(VANILLA), deckO
   return s;
 }
 
-let nextTestIid = 10000;
-/** 場にフォロワーを直接置く（テスト用） */
+/** 場にフォロワーを直接置く（テスト用）。前のターンから場にいる扱い */
 function putFollower(
   s: GameState,
   p: PlayerIndex,
   name: string,
   opts: Partial<FollowerOnBoard> = {},
 ): FollowerOnBoard {
-  const card = ALL_CARDS.find((c) => c.name === name);
-  if (!card || card.type !== "follower") throw new Error(`フォロワーがありません: ${name}`);
-  const f: FollowerOnBoard = {
-    kind: "follower",
-    iid: nextTestIid++,
-    cardId: card.id,
-    attack: card.attack,
-    defense: card.defense,
-    maxDefense: card.defense,
-    ...parseStaticAbilities(card.text),
-    attacksThisTurn: 0,
-    enteredTurn: 0, // 前のターンから場にいる
-    evolve: "none",
-    ...opts,
-  };
+  const card = newBoardCard(s, id(name));
+  if (card.kind !== "follower") throw new Error(`フォロワーではありません: ${name}`);
+  const f: FollowerOnBoard = { ...card, enteredTurn: 0, ...opts };
   s.players[p].board.push(f);
   return f;
 }
@@ -125,7 +114,7 @@ describe("ターン進行", () => {
     let s = started();
     const second = (1 - s.first) as PlayerIndex;
     const pl = s.players[second];
-    while (pl.hand.length < 9) pl.hand.push(pl.deck.shift()!);
+    while (pl.hand.length < 9) pl.hand.push(newHandCard(s, pl.deck.shift()!.cardId));
     s = endTurn(s);
     expect(s.players[second].hand).toHaveLength(9);
     expect(s.players[second].graveyard).toBe(1);
@@ -145,7 +134,7 @@ describe("ターン進行", () => {
   it("カウントダウンは自分のターン開始時に1減り、0で破壊される", () => {
     let s = started();
     const p = s.first;
-    s.players[p].board.push({ kind: "amulet", iid: 9999, cardId: id("繚乱の庭"), countdown: 2, keywords: [] });
+    s.players[p].board.push(newBoardCard(s, id("繚乱の庭"))); // カウントダウン2
     s = endTurn(endTurn(s));
     expect(s.players[p].board[0]).toMatchObject({ countdown: 1 });
     s = endTurn(endTurn(s));
@@ -163,7 +152,7 @@ describe("プレイ", () => {
     s = applyAction(s, { type: "play", iid: card.iid });
     expect(s.players[s.active].pp).toBe(0);
     expect(s.players[s.active].board).toMatchObject([{ iid: card.iid, attack: 10, defense: 10 }]);
-    expect(s.players[s.active].playedThisTurn).toBe(1);
+    expect(s.players[s.active].combo).toBe(1);
   });
 
   it("PPが足りなければプレイできない", () => {
@@ -174,7 +163,7 @@ describe("プレイ", () => {
   it("場が5枚のときはフォロワーをプレイできないが、スペルはプレイできる", () => {
     const s = started(1, [deckOf(SPELL), deckOf(SPELL)]);
     const pl = s.players[s.active];
-    pl.hand.push({ iid: 5000, cardId: VANILLA });
+    pl.hand.push(newHandCard(s, VANILLA, 5000));
     pl.pp = pl.maxPp = 10;
     for (let i = 0; i < 5; i++) putFollower(s, s.active, "キャラバンマンモス");
     expect(has(s, { type: "play", iid: 5000 })).toBe(false);
