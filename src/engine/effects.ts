@@ -887,9 +887,10 @@ export function run(state: GameState): void {
     }
     if (frame.pc >= frame.effects.length) {
       state.stack.pop();
-      // この処理で誘発した能力を、外側の処理の続きより先に解決する
-      const queued = state.queue.splice(0);
-      for (const q of queued.reverse()) pushFrame(state, q.ability.effects, q.ctx);
+      // 能力の解決が1つ終わったら、誘発待ち（FIFO）から1つ取り出して解決する。
+      // 誘発待ちが空になってから外側の処理（戦闘、ターン進行など）の続きに戻る
+      const q = state.queue.shift();
+      if (q) pushFrame(state, q.ability.effects, q.ctx);
       continue;
     }
     const eff = frame.effects[frame.pc];
