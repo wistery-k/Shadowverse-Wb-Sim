@@ -13,6 +13,7 @@ import {
   type Rng,
 } from "../engine";
 import { determinize } from "./determinize";
+import { chooseMulligan, chooseMulliganHighCost } from "./mulligan";
 import { DEFAULT_WEIGHTS, evaluateWith, type EvalWeights } from "./evaluate";
 import { weightsFor } from "./weights";
 import type { Agent } from "./types";
@@ -58,9 +59,11 @@ function bestAction(state: GameState, legal: readonly Action[], p: PlayerIndex, 
   return best ?? (legal[0] as Action);
 }
 
-function mulligan(state: GameState, legal: readonly Action[], p: PlayerIndex): Action {
-  // コスト4以上のカードを入れ替える
-  const swap = state.players[p].hand.filter((h) => cardOf(h.cardId).cost >= 4).map((h) => h.iid);
+export type MulliganPolicy = "rule" | "highCost";
+
+/** マリガンのアクションを選ぶ（rule: mulligan.ts の経験則、highCost: コスト4以上を返す旧来の方法） */
+export function mulliganAction(state: GameState, legal: readonly Action[], p: PlayerIndex, policy: MulliganPolicy = "rule"): Action {
+  const swap = policy === "rule" ? chooseMulligan(state, p) : chooseMulliganHighCost(state, p);
   return (
     legal.find((a) => a.type === "mulligan" && JSON.stringify([...a.swap].sort()) === JSON.stringify([...swap].sort())) ??
     (legal[0] as Action)
@@ -70,14 +73,16 @@ function mulligan(state: GameState, legal: readonly Action[], p: PlayerIndex): A
 /**
  * 貪欲法の AI を作る。omniscient は比較実験用（見えない情報を使う。対戦には使わない）
  */
-export function createGreedyAgent(opts: { omniscient?: boolean; weights?: EvalWeights | "byClass" } = {}): Agent {
+export function createGreedyAgent(
+  opts: { omniscient?: boolean; weights?: EvalWeights | "byClass"; mulligan?: MulliganPolicy } = {},
+): Agent {
   const weights = opts.weights ?? DEFAULT_WEIGHTS;
   return {
     name: opts.omniscient ? "greedy-omniscient" : "greedy",
     chooseAction: (real, legal, rng) => {
       const p = real.pending ? real.pending.player : real.active;
       const w = weights === "byClass" ? weightsFor(real, p) : weights;
-      return chooseGreedy(real, legal, rng, opts.omniscient ?? false, w);
+      return chooseGreedy(real, legal, rng, opts.omniscient ?? false, w, opts.mulligan ?? "rule");
     },
   };
 }
@@ -91,10 +96,17 @@ export const greedyAgent: Agent = createGreedyAgent();
  */
 export const tunedGreedyAgent: Agent = createGreedyAgent({ weights: "byClass" });
 
-function chooseGreedy(real: GameState, legal: readonly Action[], rng: Rng, omniscient: boolean, w: EvalWeights): Action {
+function chooseGreedy(
+  real: GameState,
+  legal: readonly Action[],
+  rng: Rng,
+  omniscient: boolean,
+  w: EvalWeights,
+  mulliganPolicy: MulliganPolicy,
+): Action {
     const first = legal[0];
     if (!first) throw new Error("合法手がありません");
-    if (first.type === "mulligan") return mulligan(real, legal, first.player);
+    if (first.type === "mulligan") return mulliganAction(real, legal, first.player, mulliganPolicy);
     const p = real.pending ? real.pending.player : real.active;
     const state = omniscient ? real : determinize(real, p, rng);
     if (first.type === "choose" || first.type === "mode") {

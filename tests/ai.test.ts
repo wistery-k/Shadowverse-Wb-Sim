@@ -135,3 +135,37 @@ describe("評価関数の重み", () => {
     expect(evaluateWith(s, 0, { ...DEFAULT_WEIGHTS, hold: { [card]: 3 } })).toBeGreaterThanOrEqual(base + 3);
   });
 });
+
+import { chooseMulligan } from "../src/ai/mulligan";
+
+describe("マリガン", () => {
+  function handOf(names: string[]) {
+    const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 1 });
+    const id = (name: string) => ALL_CARDS.find((c) => c.name === name)!.id;
+    s.players[0].hand = names.map((n) => newHandCard(s, id(n)));
+    const iidOf = (name: string) => s.players[0].hand.find((h) => h.cardId === id(name))!.iid;
+    return { swap: chooseMulligan(s, 0).sort(), iidOf };
+  }
+
+  it("2コストのフォロワーと進化時能力持ち（5コスト以下）が揃えば、3コスト・1コスト・ドローソースも残し、6コスト以上は返す", () => {
+    const { swap, iidOf } = handOf(["不屈のファイター", "猛撃のドラゴンウォーリアー", "竜の啓示", "キャラバンマンモス"]);
+    expect(swap).toEqual([iidOf("キャラバンマンモス")]);
+    const h2 = handOf(["不屈のファイター", "猛撃のドラゴンウォーリアー", "知恵の輝き", "シャークソルジャー"]);
+    expect(h2.swap).toEqual([h2.iidOf("シャークソルジャー")]);
+  });
+
+  it("どちらも無ければすべて返す", () => {
+    const { swap } = handOf(["竜の啓示", "知恵の輝き", "ディザスターブレス", "シャークソルジャー"]);
+    expect(swap).toHaveLength(4);
+  });
+
+  it("片方だけなら、それだけを残す", () => {
+    const { swap, iidOf } = handOf(["不屈のファイター", "竜の啓示", "知恵の輝き", "キャラバンマンモス"]);
+    expect(swap).toEqual([iidOf("竜の啓示"), iidOf("知恵の輝き"), iidOf("キャラバンマンモス")].sort());
+  });
+
+  it("2コストのフォロワーは1枚まで（2枚目は返す）", () => {
+    const { swap } = handOf(["不屈のファイター", "不屈のファイター", "猛撃のドラゴンウォーリアー", "竜の啓示"]);
+    expect(swap).toHaveLength(1);
+  });
+});
