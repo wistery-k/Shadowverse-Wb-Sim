@@ -6,7 +6,7 @@
 
 import model from "../../data/ai-model.json";
 import type { FollowerOnBoard, GameState, PlayerIndex, PlayerState } from "../engine";
-import { KEYWORD_VALUE } from "./evaluate";
+import { DEFAULT_WEIGHTS, evaluateWith, KEYWORD_VALUE } from "./evaluate";
 
 /** 片方のプレイヤーについての数値の特徴 */
 const SIDE_FEATURES = [
@@ -39,6 +39,8 @@ export const NUMERIC_FEATURES: readonly string[] = [
 ];
 
 export interface LinearModel {
+  /** 基準の評価関数（evaluate.ts の DEFAULT_WEIGHTS）の値にかける重み。学習は基準の評価関数への補正として行う */
+  base?: number;
   /** 数値の特徴の重み（NUMERIC_FEATURES の名前 → 重み） */
   num: Readonly<Record<string, number>>;
   /** カードIDごとの重み: 自分の手札・自分の場・相手の場にある 1 枚あたり */
@@ -49,6 +51,8 @@ export interface LinearModel {
 
 /** 疎な特徴量（学習用）。数値は NUMERIC_FEATURES と同じ順、カードは ID の並び（重複あり） */
 export interface Features {
+  /** 基準の評価関数の値 */
+  base: number;
   num: number[];
   hand: string[];
   myBoard: string[];
@@ -99,6 +103,7 @@ export function featuresOf(state: GameState, p: PlayerIndex): Features {
   const myAttack = my[1] as number;
   const oppAttack = their[1] as number;
   return {
+    base: evaluateWith(state, p, DEFAULT_WEIGHTS),
     num: [
       ...my,
       ...their,
@@ -114,7 +119,7 @@ export function featuresOf(state: GameState, p: PlayerIndex): Features {
 
 /** 線形モデルの値（勝つ確率の対数オッズ） */
 export function linearValue(f: Features, m: LinearModel): number {
-  let v = 0;
+  let v = f.base * (m.base ?? 0);
   for (let i = 0; i < f.num.length; i++) v += (f.num[i] as number) * (m.num[NUMERIC_FEATURES[i] as string] ?? 0);
   for (const id of f.hand) v += m.hand[id] ?? 0;
   for (const id of f.myBoard) v += m.myBoard[id] ?? 0;
@@ -129,8 +134,12 @@ export function linearValue(f: Features, m: LinearModel): number {
  */
 export function evaluateLearned(state: GameState, p: PlayerIndex, m: LinearModel = LEARNED_MODEL): number {
   if (state.phase === "ended") return state.winner === p ? 1e6 : -1e6;
-  const unit = Math.abs(m.num["opp.hp"] ?? 0) || 1;
-  return linearValue(featuresOf(state, p), m) / unit;
+  return linearValue(featuresOf(state, p), m) / unitOf(m);
+}
+
+/** 「相手リーダーの体力 1」にあたるモデルの値（基準の評価関数では相手リーダーの体力 1 が oppHp 点） */
+export function unitOf(m: LinearModel): number {
+  return Math.abs((m.num["opp.hp"] ?? 0) - (m.base ?? 0) * DEFAULT_WEIGHTS.oppHp) || 1;
 }
 
 export const LEARNED_MODEL: LinearModel = model as LinearModel;

@@ -8,11 +8,11 @@
 //   npm run learn -- gen --games 500 --seed 1 --out <ファイル.jsonl> [--model <モデル.json>]
 //     --model を付けると、自己対戦する探索 AI がそのモデルを評価関数に使う（付けなければ基準の重み）
 //   npm run learn -- fit --out data/ai-model.json [--epochs 400] [--l2 0.001] <データ.jsonl> ...
+//     基準の評価関数の値も特徴に含め（正則化しない）、ほかの特徴はその補正として学習する（--no-base で使わない）
 //     試合の 2 割を検証用に取り分け、検証データでの対数損失・正解率を基準の評価関数と比べて表示する
 
 import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
-import { DEFAULT_WEIGHTS, evaluateWith } from "../src/ai/evaluate";
-import { featuresOf, NUMERIC_FEATURES, type Features, type LinearModel } from "../src/ai/learned";
+import { featuresOf, NUMERIC_FEATURES, unitOf, type Features, type LinearModel } from "../src/ai/learned";
 import { createSearchAgent } from "../src/ai/search";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import type { GameState, PlayerIndex } from "../src/engine";
@@ -23,8 +23,8 @@ interface Sample {
   game: number;
   /** この視点のプレイヤーが勝ったか */
   y: 0 | 1;
-  /** 基準の評価関数の値（比較用） */
-  base: number;
+  /** 自分と相手のデッキの名前 */
+  decks: [string, string];
   f: Features;
 }
 
@@ -75,7 +75,8 @@ function gen(argv: string[]): number {
     const lines: string[] = [];
     for (const s of recorded) {
       for (const p of [0, 1] as PlayerIndex[]) {
-        const sample: Sample = { game: gameId, y: r.winner === p ? 1 : 0, base: evaluateWith(s, p, DEFAULT_WEIGHTS), f: featuresOf(s, p) };
+        const decks: [string, string] = p === 0 ? [d0.name, d1.name] : [d1.name, d0.name];
+        const sample: Sample = { game: gameId, y: r.winner === p ? 1 : 0, decks, f: featuresOf(s, p) };
         lines.push(JSON.stringify(sample));
       }
     }
@@ -110,7 +111,12 @@ function fit(argv: string[]): number {
   if (!out) throw new Error("--out がありません");
   const epochs = Number(flag(argv, "--epochs") ?? 400);
   const l2 = Number(flag(argv, "--l2") ?? 0.001);
-  const files = argv.filter((a, i) => !a.startsWith("--") && !(argv[i - 1] ?? "").startsWith("--"));
+  // --no-base: 基準の評価関数を使わず、特徴量だけから学習する
+  const useBase = !argv.includes("--no-base");
+  // --fix a,b,...: 補正しない（重み 0 に固定する）数値の特徴。--fix-hand: 手札のカードの特徴を使わない
+  const fixed = new Set((flag(argv, "--fix") ?? "").split(",").filter((x) => x.length > 0));
+  const fixHand = argv.includes("--fix-hand");
+  const files = argv.filter((a, i) => !a.startsWith("--") && !["--out", "--epochs", "--l2", "--fix"].includes(argv[i - 1] ?? ""));
   const samples: Sample[] = files.flatMap((f) =>
     readFileSync(f, "utf8")
       .split("\n")
@@ -131,25 +137,31 @@ function fit(argv: string[]): number {
     }
     return i;
   };
-  const numN = NUMERIC_FEATURES.length;
+  // 数値の特徴: NUMERIC_FEATURES と、最後に基準の評価関数の値（正則化しない）
+  const numN = NUMERIC_FEATURES.length + 1;
+  const BASE = numN - 1;
+  const numOf = (s: Sample) => [...s.f.num, useBase ? s.f.base : 0];
   // 数値の特徴の平均・標準偏差
   const mean = new Float64Array(numN);
   const sd = new Float64Array(numN);
-  for (const s of samples) for (let i = 0; i < numN; i++) mean[i]! += s.f.num[i]! / samples.length;
-  for (const s of samples) for (let i = 0; i < numN; i++) sd[i]! += (s.f.num[i]! - mean[i]!) ** 2 / samples.length;
+  for (const s of samples) numOf(s).forEach((x, i) => (mean[i]! += x / samples.length));
+  for (const s of samples) numOf(s).forEach((x, i) => (sd[i]! += (x - mean[i]!) ** 2 / samples.length));
   for (let i = 0; i < numN; i++) sd[i] = Math.sqrt(sd[i]!) || 1;
 
   // 検証用: 試合番号のハッシュで 2 割
   const isValidation = (game: number) => ((game * 2654435761) >>> 0) % 5 === 0;
   const encode = (s: Sample): Encoded => ({
-    num: Float64Array.from(s.f.num, (v, i) => (v - mean[i]!) / sd[i]!),
+    num: Float64Array.from(numOf(s), (v, i) => (v - mean[i]!) / sd[i]!),
     cards: Int32Array.from([
-      ...s.f.hand.map((id) => cardKey("hand", id)),
+      ...(fixHand ? [] : s.f.hand.map((id) => cardKey("hand", id))),
       ...s.f.myBoard.map((id) => cardKey("myBoard", id)),
       ...s.f.oppBoard.map((id) => cardKey("oppBoard", id)),
+      // デッキの組み合わせ: デッキの強さの差（相性）を吸収させ、盤面などの特徴がデッキの代わりにならないようにする。
+      // 1回の探索の中では一定なので、評価関数には含めない
+      cardKey("matchup", `${s.decks[0]}|${s.decks[1]}`),
     ]),
     y: s.y,
-    base: s.base,
+    base: s.f.base,
   });
   const train: Encoded[] = [];
   const valid: Encoded[] = [];
@@ -189,7 +201,8 @@ function fit(argv: string[]): number {
       for (const c of e.cards) grad[1 + numN + c]! += err;
     }
     for (let i = 0; i < dim; i++) {
-      const g = grad[i]! / train.length + (i === 0 ? 0 : l2 * w[i]!);
+      if (i >= 1 && i <= NUMERIC_FEATURES.length && fixed.has(NUMERIC_FEATURES[i - 1]!)) continue;
+      const g = grad[i]! / train.length + (i === 0 || i === 1 + BASE ? 0 : l2 * w[i]!);
       m[i] = b1 * m[i]! + (1 - b1) * g;
       v[i] = b2 * v[i]! + (1 - b2) * g * g;
       const mh = m[i]! / (1 - b1 ** epoch);
@@ -223,7 +236,8 @@ function fit(argv: string[]): number {
 
   // 標準化を戻して書き出す（定数項は局面の比較に影響しないので捨てる）
   const round = (x: number) => Math.round(x * 1e5) / 1e5;
-  const model: { num: Record<string, number>; hand: Record<string, number>; myBoard: Record<string, number>; oppBoard: Record<string, number> } = {
+  const model: { base: number; num: Record<string, number>; hand: Record<string, number>; myBoard: Record<string, number>; oppBoard: Record<string, number> } = {
+    base: round(w[1 + BASE]! / sd[BASE]!),
     num: {},
     hand: {},
     myBoard: {},
@@ -231,13 +245,14 @@ function fit(argv: string[]): number {
   };
   NUMERIC_FEATURES.forEach((name, i) => (model.num[name] = round(w[1 + i]! / sd[i]!)));
   for (const [k, i] of [...cardIndex].sort(([x], [y]) => (x < y ? -1 : 1))) {
-    const [kind, id] = k.split(":") as ["hand" | "myBoard" | "oppBoard", string];
+    const [kind, id] = k.split(":") as ["hand" | "myBoard" | "oppBoard" | "matchup", string];
+    if (kind === "matchup") continue;
     const value = round(w[1 + numN + i]!);
     if (value !== 0) model[kind][id] = value;
   }
   writeFileSync(out, JSON.stringify(model, null, 2) + "\n");
-  const unit = Math.abs(model.num["opp.hp"] ?? 1);
-  console.log(`${out} に書き出しました。数値の特徴（相手リーダーの体力 1 = 1 点に換算）:`);
-  console.log(NUMERIC_FEATURES.map((n) => `${n} ${((model.num[n] ?? 0) / unit).toFixed(2)}`).join(", "));
+  const unit = unitOf(model);
+  console.log(`${out} に書き出しました。相手リーダーの体力 1 = 1 点に換算した、基準の評価関数の倍率と、各特徴の補正:`);
+  console.log(`base ${(model.base / unit).toFixed(2)}, ` + NUMERIC_FEATURES.map((n) => `${n} ${((model.num[n] ?? 0) / unit).toFixed(2)}`).join(", "));
   return 0;
 }
