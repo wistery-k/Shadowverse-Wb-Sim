@@ -176,7 +176,7 @@ button.end-turn {
   gap: 2px;
   padding: 4px;
   text-align: left;
-  border: 2px solid var(--neutral);
+  border: 2px solid var(--class-color, var(--neutral));
   border-radius: 6px;
   background: var(--panel);
   font-size: 12px;
@@ -255,14 +255,16 @@ button.end-turn {
   transform: translateY(-4px);
   box-shadow: 0 0 0 3px var(--accent);
 }
-.class-elf { border-color: var(--elf); }
-.class-royal { border-color: var(--royal); }
-.class-witch { border-color: var(--witch); }
-.class-dragon { border-color: var(--dragon); }
-.class-nightmare { border-color: var(--nightmare); }
-.class-bishop { border-color: var(--bishop); }
-.class-nemesis { border-color: var(--nemesis); }
-.class-neutral { border-color: var(--neutral); }
+/* クラス色: 要素ごとに --class-color を設定し、枠線や帯で使う */
+.class-elf { --class-color: var(--elf); }
+.class-royal { --class-color: var(--royal); }
+.class-witch { --class-color: var(--witch); }
+.class-dragon { --class-color: var(--dragon); }
+.class-nightmare { --class-color: var(--nightmare); }
+.class-bishop { --class-color: var(--bishop); }
+.class-nemesis { --class-color: var(--nemesis); }
+.class-neutral { --class-color: var(--neutral); }
+
 
 .banner {
   display: flex;
@@ -289,7 +291,7 @@ button.end-turn {
 
 .detail {
   background: var(--panel);
-  border: 2px solid var(--neutral);
+  border: 2px solid var(--class-color, var(--neutral));
   border-radius: 8px;
   padding: 8px;
   font-size: 13px;
@@ -316,4 +318,210 @@ button.end-turn {
   font-size: 12px;
   max-height: 360px;
   overflow-y: auto;
+}
+
+/* 共通 */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+h2 {
+  font-size: 16px;
+  margin: 0 0 8px;
+}
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  box-sizing: border-box;
+  max-width: 100%;
+}
+textarea {
+  width: 100%;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+.row-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+.problems {
+  color: var(--target);
+  font-size: 13px;
+  margin: 8px 0;
+  padding-left: 20px;
+}
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.tabs button.active,
+.cost-filter button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* デッキ一覧 */
+.decks {
+  display: grid;
+  gap: 12px;
+  max-width: 760px;
+}
+.deck-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.deck-row {
+  border-left: 4px solid var(--class-color, var(--neutral));
+  padding: 6px 8px;
+  background: var(--bg);
+  border-radius: 4px;
+}
+.deck-row-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
+}
+.export-box {
+  margin-top: 8px;
+}
+
+/* デッキ編集 */
+.builder {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 240px;
+  gap: 8px;
+  align-items: start;
+}
+@media (max-width: 960px) {
+  .builder {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.filters input {
+  flex: 1 1 160px;
+}
+.cost-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.cost-filter button {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+.card-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.card-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-left: 4px solid var(--class-color, var(--neutral));
+  background: var(--bg);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+.card-row.selected {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.card-row button {
+  padding: 2px 8px;
+}
+.card-row .row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: none;
+  text-align: left;
+  padding: 2px;
+}
+.row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.row-meta,
+.row-count {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.row-count {
+  min-width: 22px;
+  text-align: right;
+  color: var(--fg);
+  font-weight: bold;
+}
+.deck-name {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.deck-summary {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.deck-summary .ok {
+  color: var(--ready);
+}
+.curve {
+  display: flex;
+  gap: 4px;
+  align-items: flex-end;
+  margin: 8px 0;
+}
+.curve-col {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  font-size: 11px;
+  width: 22px;
+}
+.curve-bar {
+  width: 14px;
+  background: var(--accent);
+  border-radius: 2px 2px 0 0;
+}
+.curve-n,
+.curve-label {
+  color: var(--muted);
+}
+.builder-detail {
+  position: sticky;
+  top: 8px;
 }
