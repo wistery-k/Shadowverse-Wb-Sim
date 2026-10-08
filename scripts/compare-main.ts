@@ -5,14 +5,21 @@ import { createSearchAgent, type SearchOptions } from "../src/ai/search";
 import type { Agent } from "../src/ai/types";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { playMatch } from "../src/sim/match";
+
+/** 比較に使わないデフォルトデッキ（クラスごとに 1 つにするため） */
+const EXCLUDED_DECKS = ["ランプドラゴン"];
+
 /**
  * 探索 AI の設定 A と B を対戦させる（npm run compare -- <試合数> '<Aの設定JSON>' '<Bの設定JSON>'）。
  * 同じデッキの組で席とデッキを入れ替えて2試合ずつ行い、A の勝率とデッキごとの A の勝率を出す。
  * 例: npm run compare -- 105 '{}' '{"lethal":false}'
  * "weights": "byClass" でクラスごとに調整した重み、"default" で基準の重みを使う。
+ * デッキは各クラス1つずつ（ドラゴンは疾走ドラゴン）の 7 つを使う。
  */
 export async function main(argv: string[]): Promise<number> {
   const games = Number(argv[0] ?? 28);
+  const decks = DEFAULT_DECKS.filter((d) => !EXCLUDED_DECKS.includes(d.name));
+  if (decks.length !== 7) throw new Error(`比較用のデッキは 7 つの想定です（${decks.map((d) => d.name).join(", ")}）`);
   const a: Agent = createSearchAgent(parseOptions(argv[1]));
   const b: Agent = createSearchAgent(parseOptions(argv[2]));
   let wins = 0, n = 0;
@@ -21,7 +28,7 @@ export async function main(argv: string[]): Promise<number> {
   for (let g = 0; g < games; g++) {
     const i = g % 7, j = (g * 3 + 1 + Math.floor(g / 7)) % 7;
     for (const swap of [false, true]) {
-      const [da, db] = swap ? [DEFAULT_DECKS[j]!, DEFAULT_DECKS[i]!] : [DEFAULT_DECKS[i]!, DEFAULT_DECKS[j]!];
+      const [da, db] = swap ? [decks[j]!, decks[i]!] : [decks[i]!, decks[j]!];
       const aSeat = (g + (swap ? 1 : 0)) % 2;
       const r = playMatch(aSeat === 0 ? [a, b] : [b, a], { decks: aSeat === 0 ? [da.cards, db.cards] : [db.cards, da.cards], seed: g * 7 + (swap ? 1 : 2) });
       const won = r.winner === aSeat;
