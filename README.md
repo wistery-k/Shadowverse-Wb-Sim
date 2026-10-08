@@ -73,7 +73,7 @@ npm run tune       # 評価関数の重みを自己対戦で調整（例: npm ru
 `main` ブランチへの push で GitHub Actions がビルドし GitHub Pages へデプロイします。
 Vite の `base` はリポジトリ名（`/Shadowverse-Wb-Sim/`）に合わせます。
 
-また `main` への push ごとに「自動対戦」ワークフロー（`.github/workflows/auto-match.yml`）が、探索 AI どうしでデフォルトデッキの総当たり（1組 20 試合、8 並列）を回し、通算勝率と対戦表を Actions の実行結果のサマリーに出します。Actions タブの Run workflow から試合数と AI を変えて手動でも実行できます。
+また `main` への push ごとに「自動対戦」ワークフロー（`.github/workflows/auto-match.yml`）が、探索 AI どうし（リノセウスエルフだけリノセウス用 AI）でデフォルトデッキの総当たり（1組 20 試合、8 並列）を回し、通算勝率と対戦表を Actions の実行結果のサマリーに出します。Actions タブの Run workflow から試合数と AI を変えて手動でも実行できます。
 
 ## ライセンス
 

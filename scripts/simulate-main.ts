@@ -14,10 +14,12 @@ interface Args {
   json: string | null;
   /** 全試合を n 個に分けたうちの i 番目（0 始まり）だけを行う。CI で並列に回すため */
   shard: { index: number; count: number };
+  /** デッキごとに AI を差し替える（デッキ名またはキー → AI）。--agents が 1 つのときだけ使える */
+  deckAgents: Record<string, string>;
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { games: 20, seed: 1, agents: ["greedy"], decks: "all", mirror: false, json: null, shard: { index: 0, count: 1 } };
+  const args: Args = { games: 20, seed: 1, agents: ["greedy"], decks: "all", mirror: false, json: null, shard: { index: 0, count: 1 }, deckAgents: {} };
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
     const value = () => {
@@ -33,14 +35,19 @@ function parseArgs(argv: string[]): Args {
       args.decks = v === "all" ? "all" : v.split(",");
     } else if (key === "--mirror") args.mirror = true;
     else if (key === "--json") args.json = value();
-    else if (key === "--shard") {
+    else if (key === "--deck-agent") {
+      const [deck, agent] = value().split("=");
+      if (!deck || !agent) throw new Error("--deck-agent は <デッキ>=<AI> で指定します");
+      args.deckAgents[deck] = agent;
+    } else if (key === "--shard") {
       const m = /^(\d+)\/(\d+)$/.exec(value());
       if (!m || Number(m[1]) >= Number(m[2])) throw new Error(`--shard は i/n（0 ≦ i < n）で指定します`);
       args.shard = { index: Number(m[1]), count: Number(m[2]) };
     }
     else throw new Error(`不明な引数: ${key}`);
   }
-  for (const a of args.agents) if (!AGENTS[a]) throw new Error(`不明な AI: ${a}（${Object.keys(AGENTS).join(", ")}）`);
+  if (Object.keys(args.deckAgents).length > 0 && args.agents.length > 1) throw new Error("--deck-agent は --agents が 1 つのときだけ使えます");
+  for (const a of [...args.agents, ...Object.values(args.deckAgents)]) if (!AGENTS[a]) throw new Error(`不明な AI: ${a}（${Object.keys(AGENTS).join(", ")}）`);
   return args;
 }
 
@@ -55,9 +62,14 @@ export async function main(argv: string[]): Promise<number> {
     if (!d) throw new Error(`デフォルトデッキがありません: ${name}`);
     return d;
   });
-  const entrants: Entrant[] = decks.flatMap((d) =>
-    args.agents.map((agent) => ({ name: args.agents.length > 1 ? `${d.name}(${agent})` : d.name, deck: d.cards, agent })),
-  );
+  for (const k of Object.keys(args.deckAgents)) {
+    if (!decks.some((d) => d.name === k || d.key === k)) throw new Error(`--deck-agent のデッキがありません: ${k}`);
+  }
+  const entrants: Entrant[] = decks.flatMap((d) => {
+    const override = args.deckAgents[d.name] ?? args.deckAgents[d.key];
+    if (override) return [{ name: `${d.name}(${override})`, deck: d.cards, agent: override }];
+    return args.agents.map((agent) => ({ name: args.agents.length > 1 ? `${d.name}(${agent})` : d.name, deck: d.cards, agent }));
+  });
   const specs = planGames(entrants.length, { gamesPerPair: args.games, seed: args.seed, mirror: args.mirror })
     .filter((_, i) => i % args.shard.count === args.shard.index);
   const shardNote = args.shard.count > 1 ? `、分割 ${args.shard.index}/${args.shard.count}` : "";

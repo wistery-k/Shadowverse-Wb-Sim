@@ -9,7 +9,7 @@ import { AGENTS } from "../src/ai/registry";
 import { summarize, type GameRecord } from "../src/sim/tournament";
 
 interface SimResult {
-  args: { games: number; seed: number; agents: string[]; shard?: { index: number; count: number } };
+  args: { games: number; seed: number; agents: string[]; deckAgents?: Record<string, string> };
   entrants: string[];
   elapsedSec: number;
   records: GameRecord[];
@@ -51,7 +51,9 @@ export async function main(argv: string[]): Promise<number> {
 
   const cpuSec = results.reduce((t, r) => t + r.elapsedSec, 0);
   const wallSec = Math.max(...results.map((r) => r.elapsedSec));
-  const agents = first.args.agents.map((a) => `${AGENTS[a]?.label ?? a}（${a}）`).join("、");
+  const label = (a: string) => `${AGENTS[a]?.label ?? a}（${a}）`;
+  const overrides = Object.entries(first.args.deckAgents ?? {}).map(([d, a]) => `${d} は ${label(a)}`);
+  const agents = first.args.agents.map(label).join("、") + (overrides.length > 0 ? `（${overrides.join("、")}）` : "");
   const out: string[] = [];
   out.push("## 自動対戦の結果", "");
   out.push(`AI: ${agents}　1組 ${first.args.games} 試合・seed ${first.args.seed}・${results.length} 並列`, "");

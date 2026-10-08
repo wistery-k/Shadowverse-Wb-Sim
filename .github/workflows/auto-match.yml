@@ -14,6 +14,9 @@ on:
       agents:
         description: AI（src/ai/registry.ts のキー、カンマ区切り）
         default: search
+      deck_agents:
+        description: デッキごとの AI の差し替え（<デッキ>=<AI>、カンマ区切り。空なら差し替えなし）
+        default: リノセウスエルフ=rhino
 
 permissions:
   contents: read
@@ -25,6 +28,8 @@ concurrency:
 env:
   GAMES: ${{ inputs.games || '20' }}
   AGENTS: ${{ inputs.agents || 'search' }}
+  # 手動実行で空にしたときは差し替えなし。push のときは inputs がないので既定の差し替えを使う
+  DECK_AGENTS: ${{ github.event_name == 'workflow_dispatch' && inputs.deck_agents || github.event_name != 'workflow_dispatch' && 'リノセウスエルフ=rhino' || '' }}
   SHARDS: 8
 
 jobs:
@@ -41,7 +46,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run -s sim -- --games "$GAMES" --agents "$AGENTS" --shard "${{ matrix.shard }}/$SHARDS" --json "shard-${{ matrix.shard }}.json"
+      - run: |
+          extra=()
+          IFS=',' read -ra pairs <<< "$DECK_AGENTS"
+          for p in "${pairs[@]}"; do [ -n "$p" ] && extra+=(--deck-agent "$p"); done
+          npm run -s sim -- --games "$GAMES" --agents "$AGENTS" "${extra[@]}" --shard "${{ matrix.shard }}/$SHARDS" --json "shard-${{ matrix.shard }}.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
