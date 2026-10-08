@@ -42,9 +42,14 @@ export interface SearchOptions {
    * リーサルの探索には使わない（リーサルはルールより優先する）
    */
   allow?: (state: GameState, action: Action, p: PlayerIndex) => boolean;
+  /**
+   * ビームに残す局面のうち、手の順番が違うだけの同じ局面を1つにまとめる
+   * （ビームの枠を同じ局面で埋めて、少し後で得をする並びを切らないため）
+   */
+  dedup: boolean;
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 8, maxDepth: 6, rescoreTop: 4, lethal: true, weights: DEFAULT_WEIGHTS };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 8, maxDepth: 6, rescoreTop: 4, lethal: true, weights: DEFAULT_WEIGHTS, dedup: true };
 
 interface Node {
   state: GameState;
@@ -84,6 +89,20 @@ export function simulateOpponentTurn(state: GameState, p: PlayerIndex, rng: Rng)
   return s ?? state;
 }
 
+/** 評価の高い順に、同じ局面を除いて width 個まで選ぶ（children は評価の降順） */
+function uniqueStates(children: Node[], width: number): Node[] {
+  const seen = new Set<string>();
+  const out: Node[] = [];
+  for (const c of children) {
+    if (out.length >= width) break;
+    const key = JSON.stringify(c.state);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(c);
+  }
+  return out;
+}
+
 /** 1つの局面で、最初の手ごとの評価値を求める */
 function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalWeights, rng: Rng): Map<string, { action: Action; value: number }> {
   const terminals: Node[] = [];
@@ -118,7 +137,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
       }
     }
     children.sort((x, y) => y.value - x.value);
-    frontier = children.slice(0, opts.beamWidth);
+    frontier = opts.dedup ? uniqueStates(children, opts.beamWidth) : children.slice(0, opts.beamWidth);
   }
   terminals.push(...frontier);
 
