@@ -1,5 +1,6 @@
 // 盤面の評価関数。重み（EvalWeights）はデータとして持ち、自己対戦で調整できるようにする（scripts/tune.ts）。
 
+import { id } from "../cards/abilities/helpers";
 import type { FollowerOnBoard, GameState, OnBoard, PlayerIndex } from "../engine";
 
 export interface EvalWeights {
@@ -65,6 +66,27 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   lethalAttack: 0.3,
   hold: {},
 };
+
+/**
+ * 融合で作るカードの「手札に持っておく価値」。融合した素材の枚数 × 手札 1 枚の価値。
+ * 手札を枚数だけで数えると、融合は手札が減る損に見え、AFネメシスがコアを手札に余らせたまま
+ * デストロイアーティファクトを作らなかった（ロイヤル戦 7%。docs/ai-notes.md）
+ */
+const FUSION_HOLD: Readonly<Record<string, number>> = Object.fromEntries(
+  (
+    [
+      ["アタックアーティファクト", 1],
+      ["キャッスルアーティファクト", 1],
+      ["デストロイアーティファクトα", 2],
+      ["デストロイアーティファクトβ", 3],
+      ["デストロイアーティファクトγ", 3],
+      ["イクシードアーティファクトΩ", 5],
+    ] as const
+  ).map(([name, cards]) => [id(name), cards * DEFAULT_WEIGHTS.myHand]),
+);
+
+/** 探索 AI の既定の重み（基準の重み＋融合で作るカードの価値） */
+export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, hold: FUSION_HOLD };
 
 const KEYWORD_VALUE: Partial<Record<string, number>> = {
   ward: 1,
