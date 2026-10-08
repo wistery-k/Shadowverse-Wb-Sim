@@ -15,6 +15,7 @@ const EXCLUDED_DECKS = ["ランプドラゴン"];
  * 例: npm run compare -- 105 '{}' '{"lethal":false}'
  * "weights": "byClass" でクラスごとに調整した重み、"default" で基準の重みを使う。
  * デッキは各クラス1つずつ（ドラゴンは疾走ドラゴン）の 7 つを使う。
+ * "weights" にオブジェクトを渡すと、基準の重みのその項目だけを変える（例: '{"weights":{"myHand":0.8}}'）。
  */
 export async function main(argv: string[]): Promise<number> {
   const games = Number(argv[0] ?? 28);
@@ -46,5 +47,6 @@ export async function main(argv: string[]): Promise<number> {
 function parseOptions(json: string | undefined): Partial<SearchOptions> {
   const raw = JSON.parse(json ?? "{}") as Record<string, unknown>;
   if (raw.weights === "default") raw.weights = DEFAULT_WEIGHTS;
+  else if (typeof raw.weights === "object" && raw.weights !== null) raw.weights = { ...DEFAULT_WEIGHTS, ...raw.weights };
   return raw as Partial<SearchOptions>;
 }
