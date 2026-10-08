@@ -180,14 +180,12 @@ function searchLethalForRhino(root: GameState, p: PlayerIndex): Action[] | null 
 }
 
 /**
- * リノセウス用 AI を作る。search は探索の設定（比較実験用。既定は深さ 8・幅 32）。
- * 探索の深さは 8（汎用は 6）。フェアリーなど 1pp のカードで手数が増え、7 手以上の手順が多いため
- * （seed 2510273090 の 4 ターン目。docs/ai-notes.md）
- * ビームの幅は 32（汎用は 8）。フェアリーを出してベビーカーバンクルで戻す等、コンボを稼ぐ手は途中の点数が低く、幅 8 では切られるため
- * （seed 954874822 の 7 ターン目。docs/ai-notes.md）
+ * リノセウス用 AI を作る。search は探索の設定（比較実験用。既定は汎用の探索 AI と同じ深さ 8・幅 32）。
+ * 深さ 8・幅 32 はリノセウスエルフで先に採用し、後に汎用の探索 AI の既定にした
+ * （seed 2510273090 の 4 ターン目・seed 954874822 の 7 ターン目。docs/ai-notes.md）
  */
 export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}): Agent {
-  const search = createSearchAgent({ allow: allowAction, lethal: false, maxDepth: 8, beamWidth: 32, ...searchOptions });
+  const search = createSearchAgent({ allow: allowAction, lethal: false, ...searchOptions });
   const plainSearch = createSearchAgent();
   return {
     name: "rhino",
