@@ -28,6 +28,7 @@ import {
   type Rng,
 } from "../engine";
 import { determinize } from "./determinize";
+import { KeySet, stateHash } from "./keySet";
 
 export interface LethalOptions {
   beamWidth: number;
@@ -137,12 +138,12 @@ function candidates(state: GameState, setup: boolean): Action[] {
 }
 
 /** 局面の同一判定用のキー（このターンのリーサルに関わる部分だけ。山札の中身と乱数の状態は見ない） */
-function stateKey(state: GameState): string {
-  return JSON.stringify([
+function stateKey(state: GameState): unknown {
+  return [
     state.players.map((pl) => [pl.leaderHp, pl.pp, pl.combo, pl.ep, pl.sep, pl.extraPpAvailable, pl.hand, pl.board, pl.crests, pl.deck.length]),
     state.pending,
     state.stack,
-  ]);
+  ];
 }
 
 interface Node {
@@ -160,14 +161,9 @@ interface Node {
  */
 function selectBeam(children: Node[], p: PlayerIndex, width: number): Node[] {
   children.sort((x, y) => y.score - x.score);
-  const seen = new Set<string>();
+  const seen = new KeySet();
   const unique: Node[] = [];
-  for (const c of children) {
-    const key = stateKey(c.state);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(c);
-  }
+  for (const c of children) if (seen.add(stateKey(c.state), stateHash(c.state, { graveyard: false }))) unique.push(c);
   const picked = new Set<Node>();
   const buckets = new Set<string>();
   for (const c of unique) {
