@@ -20,8 +20,11 @@ export function crestOf(crestId: string): Crest {
   return crest;
 }
 
+// カードIDは数字だけの文字列で、オブジェクトのキーにすると配列の添字として扱われて引くのが遅いので Map にする
+const ABILITIES_BY_ID = new Map(Object.entries(CARD_ABILITIES));
+
 export function abilitiesOf(cardId: string): CardAbilities {
-  return CARD_ABILITIES[cardId] ?? EMPTY;
+  return ABILITIES_BY_ID.get(cardId) ?? EMPTY;
 }
 
 export function crestAbilitiesOf(crestId: string): Ability[] {

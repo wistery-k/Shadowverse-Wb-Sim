@@ -11,7 +11,8 @@
     "cards": "node scripts/convert-cards.ts",
     "sim": "node scripts/vite-run.mjs scripts/simulate-main.ts",
     "tune": "node scripts/vite-run.mjs scripts/tune-main.ts",
-    "compare": "node scripts/vite-run.mjs scripts/compare-main.ts"
+    "compare": "node scripts/vite-run.mjs scripts/compare-main.ts",
+    "bench": "node scripts/vite-run.mjs scripts/bench-main.ts"
   },
   "repository": {
     "type": "git",
