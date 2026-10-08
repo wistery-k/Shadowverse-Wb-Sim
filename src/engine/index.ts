@@ -15,7 +15,7 @@ export {
 } from "./game";
 export { invariantViolations } from "./invariants";
 export { parseStaticAbilities, enhanceCost } from "./keywords";
-export { abilitiesOf, crestOf } from "./registry";
+export { abilitiesOf, crestOf, staticOf } from "./registry";
 export { newBoardCard, newHandCard, leaderId, findBoard, findHand, handCost, attackOf } from "./state";
 export { nextRandom, rngFrom, shuffle, type Rng } from "./rng";
 export { cloneState } from "./clone";
