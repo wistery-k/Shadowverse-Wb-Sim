@@ -13,7 +13,10 @@
     "sim-report": "node scripts/vite-run.mjs scripts/sim-report-main.ts",
     "tune": "node scripts/vite-run.mjs scripts/tune-main.ts",
     "compare": "node scripts/vite-run.mjs scripts/compare-main.ts",
-    "bench": "node scripts/vite-run.mjs scripts/bench-main.ts"
+    "bench": "node scripts/vite-run.mjs scripts/bench-main.ts",
+    "mulligan-data": "node scripts/vite-run.mjs scripts/mulligan-data-main.ts",
+    "mulligan-fit": "node scripts/vite-run.mjs scripts/mulligan-fit-main.ts",
+    "mulligan-eval": "node scripts/vite-run.mjs scripts/mulligan-eval-main.ts"
   },
   "repository": {
     "type": "git",
