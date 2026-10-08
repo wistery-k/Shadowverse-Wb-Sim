@@ -1,7 +1,7 @@
 // AI 同士の総当たり対戦（計画・実行・集計）。Node のコマンドとブラウザの Worker で共通に使う。
 
 import { agentOf } from "../ai/registry";
-import { nextRandom } from "../engine";
+import { nextRandom, type Action, type PlayerIndex } from "../engine";
 import { playMatch } from "./match";
 
 /** 参加者（デッキと AI の組） */
@@ -30,6 +30,12 @@ export interface GameRecord {
   /** 先攻だった参加者の添字 */
   first: number | null;
   turns: number;
+  /** 勝者と先攻の席（エラーでなければ）。ミラーでは参加者の添字では区別できないため */
+  seats?: { winner: PlayerIndex; first: PlayerIndex };
+  /** a がプレイヤー0（seat 0）だったか */
+  aIsPlayer0: boolean;
+  /** 行動の列（記録したときのみ）。replayDecks の decks と seed から再生できる */
+  actions?: Action[];
   error?: string;
 }
 
@@ -58,17 +64,39 @@ export function planGames(entrantCount: number, opts: PlanOptions): GameSpec[] {
   return specs;
 }
 
-export function runGame(spec: GameSpec, entrants: readonly Entrant[]): GameRecord {
+/** 試合のプレイヤー0・1のデッキ */
+export function seatDecks(
+  r: Pick<GameRecord, "a" | "b" | "aIsPlayer0">,
+  entrants: readonly Entrant[],
+): [readonly string[], readonly string[]] {
+  const da = entrants[r.a]!.deck;
+  const db = entrants[r.b]!.deck;
+  return r.aIsPlayer0 ? [da, db] : [db, da];
+}
+
+export function runGame(spec: GameSpec, entrants: readonly Entrant[], opts: { record?: boolean } = {}): GameRecord {
   const ea = entrants[spec.a];
   const eb = entrants[spec.b];
   if (!ea || !eb) throw new Error("参加者がいません");
   const [p0, p1] = spec.aIsPlayer0 ? [ea, eb] : [eb, ea];
   const toEntrant = (player: number) => (player === 0) === spec.aIsPlayer0 ? spec.a : spec.b;
+  const base = { a: spec.a, b: spec.b, seed: spec.seed, aIsPlayer0: spec.aIsPlayer0 };
   try {
-    const r = playMatch([agentOf(p0.agent), agentOf(p1.agent)], { decks: [p0.deck, p1.deck], seed: spec.seed });
-    return { a: spec.a, b: spec.b, seed: spec.seed, winner: toEntrant(r.winner), first: toEntrant(r.final.first), turns: r.turns };
+    const r = playMatch([agentOf(p0.agent), agentOf(p1.agent)], {
+      decks: [p0.deck, p1.deck],
+      seed: spec.seed,
+      record: opts.record ?? false,
+    });
+    return {
+      ...base,
+      winner: toEntrant(r.winner),
+      first: toEntrant(r.final.first),
+      turns: r.turns,
+      seats: { winner: r.winner, first: r.final.first },
+      ...(r.log ? { actions: r.log } : {}),
+    };
   } catch (e) {
-    return { a: spec.a, b: spec.b, seed: spec.seed, winner: null, first: null, turns: 0, error: String(e) };
+    return { ...base, winner: null, first: null, turns: 0, error: String(e) };
   }
 }
 

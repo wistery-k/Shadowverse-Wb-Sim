@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { greedyAgent } from "../src/ai/greedy";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
-import { planGames, runGame, summarize, type Entrant, type GameRecord } from "../src/sim/tournament";
+import { planGames, runGame, seatDecks, summarize, type Entrant, type GameRecord } from "../src/sim/tournament";
 import { playMatch } from "../src/sim/match";
+import { replayStates } from "../src/sim/replay";
 
 describe("総当たりの計画と集計", () => {
   it("組み合わせごとに指定数の試合を計画し、席を交互に入れ替える", () => {
@@ -16,10 +17,10 @@ describe("総当たりの計画と集計", () => {
 
   it("勝敗・先攻の勝率・エラーを集計する", () => {
     const records: GameRecord[] = [
-      { a: 0, b: 1, seed: 1, winner: 0, first: 0, turns: 10 },
-      { a: 0, b: 1, seed: 2, winner: 1, first: 0, turns: 20 },
-      { a: 0, b: 2, seed: 3, winner: 0, first: 2, turns: 12 },
-      { a: 1, b: 2, seed: 4, winner: null, first: null, turns: 0, error: "x" },
+      { a: 0, b: 1, seed: 1, winner: 0, first: 0, turns: 10, aIsPlayer0: true },
+      { a: 0, b: 1, seed: 2, winner: 1, first: 0, turns: 20, aIsPlayer0: false },
+      { a: 0, b: 2, seed: 3, winner: 0, first: 2, turns: 12, aIsPlayer0: true },
+      { a: 1, b: 2, seed: 4, winner: null, first: null, turns: 0, aIsPlayer0: false, error: "x" },
     ];
     const s = summarize(3, records);
     expect(s.totalGames).toBe(3);
@@ -43,6 +44,21 @@ describe("総当たりの計画と集計", () => {
       expect(r.error).toBeUndefined();
       expect([0, 1]).toContain(r.winner);
       expect([0, 1]).toContain(r.first);
+      expect(r.actions).toBeUndefined();
+    }
+  });
+
+  it("記録した行動の列から同じ試合を再生できる", () => {
+    const entrants: Entrant[] = DEFAULT_DECKS.slice(0, 2).map((d) => ({ name: d.name, deck: d.cards, agent: "greedy" }));
+    for (const spec of planGames(2, { gamesPerPair: 2, seed: 7 })) {
+      const r = runGame(spec, entrants, { record: true });
+      expect(r.actions?.length).toBeGreaterThan(0);
+      const states = replayStates(seatDecks(r, entrants), r.seed, r.actions!);
+      expect(states).toHaveLength(r.actions!.length + 1);
+      const last = states[states.length - 1]!;
+      expect(last.phase).toBe("ended");
+      expect(last.turn).toBe(r.turns);
+      expect((last.winner === 0) === r.aIsPlayer0 ? r.a : r.b).toBe(r.winner);
     }
   });
 });
