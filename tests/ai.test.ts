@@ -23,7 +23,8 @@ describe("AI", () => {
 
 import { determinize } from "../src/ai/determinize";
 import { searchAgent, simulateOpponentTurn } from "../src/ai/search";
-import { applyAction, createGame, legalActions, newHandCard } from "../src/engine";
+import { rhinoAgent } from "../src/ai/rhino";
+import { applyAction, createGame, legalActions, newBoardCard, newHandCard } from "../src/engine";
 import { ALL_CARDS } from "../src/cards";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 
@@ -128,6 +129,51 @@ describe("リーサルの探索", () => {
     s.players[me === 0 ? 1 : 0].leaderHp = 4;
     expect(searchLethal(s, me)).toBeNull();
     expect(findLethal(s, me, rngFrom({ rng: 1 }))).toBeNull();
+  });
+
+  /**
+   * ユーザーの指摘（リノセウスエルフ vs スペルウィッチ、seed 2120563865 の 8 ターン目）を元にした局面。
+   * フェアリー2体をウィリアム（守護なし）に当てて煌撃の戦士・ベイルを 0 コストにし、コンボを溜めてリノセウスで殴り、
+   * 聖樹の杖のアクトでリノセウスを手札に戻して出し直し、超進化して殴ると 4 + 8 = 12 点
+   */
+  function bailPosition() {
+    const elf = DEFAULT_DECKS.find((d) => d.class === "elf")!;
+    const witch = DEFAULT_DECKS.find((d) => d.class === "witch")!;
+    let s = createGame({ decks: [elf.cards, witch.cards], seed: 1 });
+    while (s.phase === "mulligan") s = applyAction(s, legalActions(s)[0]!);
+    const id = (name: string) => ALL_CARDS.find((c) => c.name === name)!.id;
+    s.active = 0;
+    const me = s.players[0];
+    const bail = newHandCard(s, id("煌撃の戦士・ベイル"));
+    bail.costMod = -6;
+    me.hand = [newHandCard(s, id("フェアリー")), newHandCard(s, id("フェアリー")), bail, newHandCard(s, id("殺戮のリノセウス"))];
+    me.board = [newBoardCard(s, id("聖樹の杖"))];
+    me.pp = me.maxPp = 8;
+    me.turnCount = 8;
+    me.ep = 0;
+    me.sep = 1;
+    me.combo = 0;
+    s.players[1].board = [newBoardCard(s, id("マナリアの学徒・ウィリアム"))];
+    s.players[1].leaderHp = 11;
+    return s;
+  }
+
+  it("守護でないフォロワーに当てて安くし、リノセウスを出し直す並びを見つける", () => {
+    const s = bailPosition();
+    const seq = searchLethal(s, 0);
+    expect(seq).not.toBeNull();
+    let t = s;
+    for (const a of seq!) t = applyAction(t, a);
+    expect(t.winner).toBe(0);
+  });
+
+  it("見つけたリーサルの手順を途中で探し直さずに最後まで打つ", () => {
+    const rng = rngFrom({ rng: 2 });
+    for (const agent of [searchAgent, rhinoAgent]) {
+      let s = bailPosition();
+      while (s.phase !== "ended" && s.active === 0) s = applyAction(s, agent.chooseAction(s, legalActions(s), rng));
+      expect(s.winner).toBe(0);
+    }
   });
 
   it("探索 AI はリーサルを取りこぼさない", () => {

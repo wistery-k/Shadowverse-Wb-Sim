@@ -176,12 +176,14 @@ export const rhinoAgent: Agent = {
       return legal.find((a) => a.type === "mulligan" && sameSet(a.swap, swap)) ?? first;
     }
     if (legal.length === 1) return first;
-    // 選択待ちと相手のターン中は探索 AI に任せる（選択は allowAction で最後の杖等を避ける）
-    if (real.pending || real.active !== p) return search.chooseAction(real, legal, rng);
-
+    // 相手のターン中の選択は探索 AI に任せる
+    if (real.active !== p) return search.chooseAction(real, legal, rng);
+    // リーサル（ルールより優先。手順の途中の選択も含む）
     const legalKeys = new Set(legal.map(keyOf));
     const lethal = findLethal(real, p, rng);
     if (lethal && legalKeys.has(keyOf(lethal))) return lethal;
+    // 自分の選択待ちは探索 AI に任せる（allowAction で最後の杖等を避ける）
+    if (real.pending) return search.chooseAction(real, legal, rng);
 
     const pl = real.players[p];
     const extraPp = legal.find((a) => a.type === "extraPp");
