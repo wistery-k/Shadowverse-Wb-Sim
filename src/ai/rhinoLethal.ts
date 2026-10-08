@@ -4,7 +4,8 @@
 // - 準備: リノセウスのプレイと顔への攻撃以外の手をビームサーチで並べる。森の神秘は手札にあれば即打つ
 // - 仕上げ: リノセウスを出す最後の数手は決まった形のどれか（下の FINISHERS）。各形を実際に打ち、
 //   最後に殴れるフォロワー全員で顔を殴る
-// 準備の局面は「そこから仕上げで最大何点出せるか」で並べる。相手リーダーの体力は見ない
+// 準備の局面は「そこから仕上げで最大何点出せるか」で並べる（相手に守護がいれば、守護を外せば出せる点数から
+// 守護の体力を引いたものも見る。setupScore）。相手リーダーの体力は見ない
 // （体力だけが違う局面は1つにまとめる）。現在のエルフのカードには、相手の体力でリーサルの可否が変わるものは無い。
 
 import { applyAction, cardOf, legalActions, type Action, type GameState, type PlayerIndex } from "../engine";
@@ -170,6 +171,38 @@ function bestFinish(start: Line, p: PlayerIndex, rootOppHp: number): { damage: n
   return best;
 }
 
+/** 相手の場の守護を外した局面（守護を処理し終えたら何点出せるかを見るため） */
+function withoutWards(s: GameState, opp: PlayerIndex): GameState {
+  const strip = (kws: readonly string[]) => kws.filter((k) => k !== "ward");
+  const board = s.players[opp].board.map((c) =>
+    c.keywords.includes("ward") || c.tempKeywords.includes("ward")
+      ? { ...c, keywords: strip(c.keywords), tempKeywords: strip(c.tempKeywords) }
+      : c,
+  );
+  const players = [...s.players] as GameState["players"];
+  players[opp] = { ...s.players[opp], board } as GameState["players"][PlayerIndex];
+  return { ...s, players };
+}
+
+/**
+ * 準備の局面の点数。仕上げで実際に出せるダメージと、「守護を外せば出せるダメージ − 相手の守護の体力の合計」の大きい方。
+ * 守護があると仕上げの点数はどれも 0 になり、守護を削る準備（ベイルを安くする攻撃など）の良し悪しが付かないため
+ */
+function setupScore(start: Line, p: PlayerIndex, rootOppHp: number): { damage: number; line: Line | null; score: number } {
+  const finish = bestFinish(start, p, rootOppHp);
+  if (finish.damage === Infinity) return { ...finish, score: Infinity };
+  const opp: PlayerIndex = p === 0 ? 1 : 0;
+  const wards = start.state.players[opp].board.filter(
+    (c) => c.kind === "follower" && (c.keywords.includes("ward") || c.tempKeywords.includes("ward")),
+  );
+  if (wards.length === 0) return { ...finish, score: finish.damage };
+  const wardHp = wards.reduce((sum, c) => sum + (c.kind === "follower" ? c.defense : 0), 0);
+  const open = bestFinish({ state: withoutWards(start.state, opp), seq: start.seq }, p, rootOppHp);
+  // 守護を外した局面で勝てる場合は、相手の体力 + 1 点出せたとみなす
+  const openDamage = open.damage === Infinity ? rootOppHp + 1 : open.damage;
+  return { ...finish, score: Math.max(finish.damage, openDamage - wardHp) };
+}
+
 /** 準備の手（リノセウスのプレイと顔への攻撃を除く。森の神秘は手札にあればそれだけ） */
 function setupActions(s: GameState, p: PlayerIndex): Action[] {
   const legal = legalActions(s);
@@ -201,14 +234,14 @@ function setupKey(s: GameState): unknown {
 export function searchRhinoLethal(root: GameState, p: PlayerIndex, opts: RhinoLethalOptions = DEFAULT_RHINO_LETHAL_OPTIONS): Action[] | null {
   if (root.phase !== "main" || root.active !== p || handIid(root, p, RHINO) === null) return null;
   const rootOppHp = root.players[p === 0 ? 1 : 0].leaderHp;
-  let frontier: { line: Line; damage: number }[] = [];
+  let frontier: { line: Line; score: number }[] = [];
   const rootLine: Line = { state: root, seq: [] };
-  const rootFinish = bestFinish(rootLine, p, rootOppHp);
+  const rootFinish = setupScore(rootLine, p, rootOppHp);
   if (rootFinish.damage === Infinity) return rootFinish.line!.seq;
-  frontier.push({ line: rootLine, damage: rootFinish.damage });
+  frontier.push({ line: rootLine, score: rootFinish.score });
 
   for (let depth = 0; depth < opts.maxDepth && frontier.length > 0; depth++) {
-    const children: { line: Line; damage: number }[] = [];
+    const children: { line: Line; score: number }[] = [];
     const seen = new KeySet();
     for (const node of frontier) {
       const s = node.line.state;
@@ -220,15 +253,15 @@ export function searchRhinoLethal(root: GameState, p: PlayerIndex, opts: RhinoLe
         if (!seen.add(setupKey(next.state), stateHash(next.state, { leaderHp: false, graveyard: false }))) continue;
         // 選択待ちの途中では仕上げに入れないので、点数は親から引き継ぐ
         if (next.state.pending) {
-          children.push({ line: next, damage: node.damage });
+          children.push({ line: next, score: node.score });
           continue;
         }
-        const finish = bestFinish(next, p, rootOppHp);
+        const finish = setupScore(next, p, rootOppHp);
         if (finish.damage === Infinity) return finish.line!.seq;
-        children.push({ line: next, damage: finish.damage });
+        children.push({ line: next, score: finish.score });
       }
     }
-    children.sort((x, y) => y.damage - x.damage);
+    children.sort((x, y) => y.score - x.score);
     frontier = children.slice(0, opts.beamWidth);
   }
   return null;
