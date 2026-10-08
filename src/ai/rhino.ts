@@ -16,7 +16,8 @@ import {
   type GameState,
   type PlayerIndex,
 } from "../engine";
-import { findLethal } from "./lethal";
+import { DEFAULT_LETHAL_OPTIONS, DIRECT_SCORING, findLethal, searchLethal } from "./lethal";
+import { searchRhinoLethal } from "./rhinoLethal";
 import { createSearchAgent } from "./search";
 import type { Agent } from "./types";
 import { deckClassOf } from "./weights";
@@ -161,6 +162,15 @@ export function mulliganSwap(state: GameState, p: PlayerIndex): number[] {
 
 const sameSet = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((x) => b.includes(x));
 
+/**
+ * リーサル探索: 汎用の探索（今すぐ殴れるダメージ重視）で見つからなければ、リノセウス専用の探索
+ * （汎用の「準備」重視の探索より、リノセウスの出し方を決め打ちする方がよく見つかる）
+ */
+const DIRECT_ONLY = { ...DEFAULT_LETHAL_OPTIONS, scorings: [DIRECT_SCORING] };
+function searchLethalForRhino(root: GameState, p: PlayerIndex): Action[] | null {
+  return searchLethal(root, p, DIRECT_ONLY) ?? searchRhinoLethal(root, p);
+}
+
 const search = createSearchAgent({ allow: allowAction, lethal: false });
 const plainSearch = createSearchAgent();
 
@@ -180,7 +190,7 @@ export const rhinoAgent: Agent = {
     if (real.active !== p) return search.chooseAction(real, legal, rng);
     // リーサル（ルールより優先。手順の途中の選択も含む）
     const legalKeys = new Set(legal.map(keyOf));
-    const lethal = findLethal(real, p, rng);
+    const lethal = findLethal(real, p, rng, DEFAULT_LETHAL_OPTIONS, searchLethalForRhino);
     if (lethal && legalKeys.has(keyOf(lethal))) return lethal;
     // 自分の選択待ちは探索 AI に任せる（allowAction で最後の杖等を避ける）
     if (real.pending) return search.chooseAction(real, legal, rng);

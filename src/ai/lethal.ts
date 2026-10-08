@@ -233,7 +233,13 @@ function replayWins(state: GameState, seq: readonly Action[], p: PlayerIndex): b
  * 実際の局面から、確実に勝てる行動の並びを探して最初の手を返す。見つからなければ null。
  * 見えない情報は determinization で扱い、別のサンプルでも勝てる並びだけを採用する。
  */
-export function findLethal(real: GameState, p: PlayerIndex, rng: Rng, opts: LethalOptions = DEFAULT_LETHAL_OPTIONS): Action | null {
+export function findLethal(
+  real: GameState,
+  p: PlayerIndex,
+  rng: Rng,
+  opts: LethalOptions = DEFAULT_LETHAL_OPTIONS,
+  search: (root: GameState, p: PlayerIndex) => Action[] | null = (root, q) => searchLethal(root, q, opts),
+): Action | null {
   const legal = legalActions(real);
   const legalKeys = new Set(legal.map((a) => JSON.stringify(a)));
   // 前に見つけた手順の途中で、局面が予想どおりなら続ける（途中の局面から探し直すと見つからないことがある）
@@ -245,7 +251,7 @@ export function findLethal(real: GameState, p: PlayerIndex, rng: Rng, opts: Leth
   current = null;
 
   const det = determinize(real, p, rng);
-  const seq = searchLethal(det, p, opts);
+  const seq = search(det, p);
   if (!seq || seq.length === 0) return null;
   for (let i = 1; i < opts.samples; i++) {
     if (!replayWins(determinize(real, p, rng), seq, p)) return null;
