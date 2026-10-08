@@ -40,6 +40,30 @@ describe("リノセウス用ルール: マリガン", () => {
     const { s, iids } = withHand(["聖樹の杖", "殺戮のリノセウス", "アドベンチャーエルフ・メイ", "虫の知らせ"]);
     expect(mulliganSwap(s, 0)).toEqual(iids);
   });
+
+  it("後攻でも、先攻の相手がエルフ以外でも、エルフのマリガンはルールで行う", () => {
+    for (const elfSeat of [0, 1] as const) {
+      for (const first of [0, 1] as const) {
+        const decks: [string[], string[]] = elfSeat === 0 ? [elf.cards, royal.cards] : [royal.cards, elf.cards];
+        let s = createGame({ decks, seed: 1 });
+        s.first = first;
+        s.active = first;
+        s.players[elfSeat].hand = ["勇壮の堕天使・オリヴィエ", "ベビーカーバンクル", "ベビーカーバンクル", "フェアリーテイマー"].map(
+          (n) => newHandCard(s, id(n)),
+        );
+        const tamer = s.players[elfSeat].hand[3]!.iid;
+        const rng = rngFrom({ rng: 1 });
+        while (s.phase === "mulligan") {
+          const legal = legalActions(s);
+          const a = rhinoAgent.chooseAction(s, legal, rng);
+          if (a.type === "mulligan" && a.player === elfSeat) {
+            expect([...a.swap].sort()).toEqual(s.players[elfSeat].hand.map((h) => h.iid).filter((x) => x !== tamer).sort());
+          }
+          s = applyAction(s, a);
+        }
+      }
+    }
+  });
 });
 
 describe("リノセウス用ルール: 禁じる手", () => {

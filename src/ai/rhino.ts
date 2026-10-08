@@ -8,6 +8,7 @@
 
 import {
   abilitiesOf,
+  actingPlayer,
   applyAction,
   cardOf,
   EXTRA_PP_REFRESH_TURN,
@@ -179,7 +180,8 @@ export const rhinoAgent: Agent = {
   chooseAction(real, legal, rng) {
     const first = legal[0];
     if (!first) throw new Error("合法手がありません");
-    const p = real.pending ? real.pending.player : real.active;
+    // マリガン中の active は先攻なので、マリガンするプレイヤーは actingPlayer で求める
+    const p = actingPlayer(real);
     if (deckClassOf(real, p) !== "elf") return plainSearch.chooseAction(real, legal, rng);
     if (first.type === "mulligan") {
       const swap = mulliganSwap(real, p);
