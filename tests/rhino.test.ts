@@ -265,6 +265,51 @@ describe("リノセウス用ルール: seed 1678126716（アミュレット疾�
   }, 30_000);
 });
 
+describe("seed 954874822（リノセウスエルフ vs アミュレット疾走ビショップ、エルフ先攻）", () => {
+  // ユーザーが指摘した試合の、エルフの 7 ターン目の開始までの行動（ビショップは探索 AI、エルフはリノセウス用 AI。選択をまとめる前の AI の手）
+  const log: Action[] = [{"type":"mulligan","player":0,"swap":[3,27,6]},{"type":"mulligan","player":1,"swap":[]},{"type":"play","iid":2},{"type":"endTurn"},{"type":"endTurn"},{"type":"play","iid":14},{"type":"attack","attacker":2,"target":"leader"},{"type":"endTurn"},{"type":"extraPp"},{"type":"play","iid":56},{"type":"act","iid":56},{"type":"choose","targets":[2]},{"type":"endTurn"},{"type":"play","iid":32},{"type":"attack","attacker":14,"target":"leader"},{"type":"endTurn"},{"type":"play","iid":49},{"type":"endTurn"},{"type":"play","iid":81},{"type":"play","iid":9},{"type":"play","iid":82},{"type":"play","iid":83},{"type":"attack","attacker":81,"target":49},{"type":"attack","attacker":14,"target":"leader"},{"type":"attack","attacker":82,"target":49},{"type":"endTurn"},{"type":"play","iid":62},{"type":"evolve","iid":62},{"type":"choose","targets":[14]},{"type":"attack","attacker":62,"target":83},{"type":"endTurn"},{"type":"play","iid":35},{"type":"evolve","iid":35},{"type":"endTurn"},{"type":"play","iid":51},{"type":"play","iid":55},{"type":"act","iid":55},{"type":"endTurn"},{"type":"play","iid":36},{"type":"attack","attacker":35,"target":"leader"},{"type":"endTurn"},{"type":"superEvolve","iid":86},{"type":"play","iid":64},{"type":"attack","attacker":86,"target":35},{"type":"act","iid":51},{"type":"choose","targets":[86]},{"type":"endTurn"}];
+  const bishop = DEFAULT_DECKS.find((d) => d.key === "アミュレット疾走ビショップ")!;
+  const stateAt = (n: number) => {
+    let s = createGame({ decks: [elf.cards, bishop.cards], seed: 954874822 });
+    for (const a of log.slice(0, n)) s = applyAction(s, a);
+    return s;
+  };
+  const name = (s: GameState, iid: number) => ALL_CARDS.find((c) => c.id === s.players.flatMap((pl) => [...pl.hand, ...pl.board]).find((x) => x.iid === iid)!.cardId)!.name;
+  /** p のターンを agent で最後まで進め、打った手（プレイしたカード名か手の種類）と最後の局面を返す */
+  const playTurn = (s: GameState, p: 0 | 1, agent: typeof searchAgent) => {
+    const rng = rngFrom({ rng: 2 });
+    const moves: { move: string; combo: number }[] = [];
+    while (s.phase === "main" && (s.pending ? s.pending.player : s.active) === p) {
+      const a = agent.chooseAction(s, legalActions(s), rng);
+      moves.push({ move: a.type === "play" ? name(s, a.iid) : a.type, combo: s.players[p].combo });
+      s = applyAction(s, a);
+    }
+    return { moves, end: s };
+  };
+  const oppFollowers = (s: GameState, p: 0 | 1) => s.players[p === 0 ? 1 : 0].board.filter((c) => c.kind === "follower");
+
+  /**
+   * ビショップの 6 ターン目。推奨はエクストラPP → オリヴィエ → 超進化（タイガーも超進化）で、バックウッドとアリアを両方処理する。
+   * 以前はエクストラPP が 1 手分の深さを使い、その時点の点数が低いためビームで切られていた
+   */
+  it("ビショップ 6 ターン目: エクストラPP でオリヴィエを出し、相手のフォロワーを両方処理する", () => {
+    const { moves, end } = playTurn(stateAt(41), 1, searchAgent);
+    expect(moves.map((m) => m.move)).toContain("extraPp");
+    expect(moves.map((m) => m.move)).toContain("勇壮の堕天使・オリヴィエ");
+    expect(oppFollowers(end, 1)).toEqual([]);
+  }, 30_000);
+
+  /**
+   * エルフの 7 ターン目。推奨はフェアリー → ベビーカーバンクル（フェアリーを戻す）→ リリィ（コンボ 3 でタイガーを体力 1）→ リリィ進化でタイガー → 舞い踊る妖精 → リリィでサレファ。
+   * 以前は選択も 1 手分の深さを使い（推奨は 10 手）、コンボを稼ぐ途中の点数が低いため幅 8 のビームで切られていた
+   */
+  it("エルフ 7 ターン目: コンボ 3 でリリィを出し、タイガーとサレファを処理する", () => {
+    const { moves, end } = playTurn(stateAt(47), 0, rhinoAgent);
+    expect(moves.find((m) => m.move === "ピュアクリスタリア・リリィ")!.combo).toBeGreaterThanOrEqual(2);
+    expect(oppFollowers(end, 0)).toEqual([]);
+  }, 60_000);
+});
+
 describe("リノセウス用ルール: 対戦", () => {
   it("不変条件を破らずに対戦を終える", () => {
     for (const [seed, seat] of [

@@ -54,9 +54,14 @@ export interface SearchOptions {
    * （iid が違うため dedup ではまとまらず、ビームの枠を同じ局面で埋めるため）
    */
   sameHandOnce: boolean;
+  /**
+   * 選択（対象の選択・モード）とエクストラPP を、続く手とまとめて 1 手として展開する。
+   * 選択待ちの途中の局面を評価せず、深さも使わない（seed 954874822 のビショップ 6 ターン目・エルフ 7 ターン目。docs/ai-notes.md）
+   */
+  chain: boolean;
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 8, maxDepth: 6, rescoreTop: 4, lethal: true, weights: DEFAULT_WEIGHTS, dedup: true, sameHandOnce: true };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 8, maxDepth: 6, rescoreTop: 4, lethal: true, weights: DEFAULT_WEIGHTS, dedup: true, sameHandOnce: true, chain: true };
 
 interface Node {
   state: GameState;
@@ -127,17 +132,32 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   const terminals: Node[] = [];
   let frontier: Node[] = [];
 
-  // 深さ1: すべての手を展開する（最初の手の候補を落とさない）
   const allowed = (state: GameState, a: Action) => !opts.allow || a.type === "endTurn" || opts.allow(state, a, p);
   const expand = (state: GameState) => (opts.sameHandOnce ? distinctPlays(state, legalActions(state)) : legalActions(state));
+  /** 手 a を打った局面。chain なら、続く自分の選択とエクストラPP の後の手まで進めた局面すべて */
+  const advance = (state: GameState, a: Action, depth = 0): GameState[] => {
+    const next = tryApply(state, a);
+    if (!next) return [];
+    if (!opts.chain || depth >= 8 || next.phase === "ended") return [next];
+    if (next.pending && next.pending.player === p) {
+      const out = legalActions(next).flatMap((c) => (allowed(next, c) ? advance(next, c, depth + 1) : []));
+      return out.length > 0 ? out : [next];
+    }
+    if (a.type === "extraPp" && !next.pending && next.active === p) {
+      const out = expand(next).flatMap((c) => (c.type === "endTurn" || c.type === "extraPp" || !allowed(next, c) ? [] : advance(next, c, depth + 1)));
+      return out.length > 0 ? out : [next];
+    }
+    return [next];
+  };
+
+  // 深さ1: すべての手を展開する（最初の手の候補を落とさない）
   for (const a of expand(root)) {
     if (!allowed(root, a)) continue;
     if (a.type === "endTurn") {
       terminals.push({ state: root, first: a, value: evaluateWith(root, p, w) });
       continue;
     }
-    const next = tryApply(root, a);
-    if (next) frontier.push({ state: next, first: a, value: evaluateWith(next, p, w) });
+    for (const next of advance(root, a)) frontier.push({ state: next, first: a, value: evaluateWith(next, p, w) });
   }
 
   for (let depth = 1; depth < opts.maxDepth && frontier.length > 0; depth++) {
@@ -152,8 +172,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
       terminals.push(node);
       for (const a of expand(node.state)) {
         if (a.type === "endTurn" || !allowed(node.state, a)) continue;
-        const next = tryApply(node.state, a);
-        if (next) children.push({ state: next, first: node.first, value: evaluateWith(next, p, w) });
+        for (const next of advance(node.state, a)) children.push({ state: next, first: node.first, value: evaluateWith(next, p, w) });
       }
     }
     children.sort((x, y) => y.value - x.value);
