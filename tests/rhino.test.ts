@@ -169,6 +169,33 @@ describe("リノセウス専用のリーサル探索", () => {
     expect(rhinoPlays).toBe(2); // 1回では足りない
   });
 
+  /**
+   * ユーザーの指摘（スペルウィッチ vs リノセウスエルフ、seed 2564010370、エルフの 10 ターン目）を簡単にした局面。
+   * 相手の守護（式神・天后）がいると仕上げの点数がどれも 0 になり、フェアリーとテイマーを当ててベイルを安くする準備がビームで切られていた
+   */
+  it("守護をフェアリー・テイマー・ベイルで処理してから、リノセウスを杖で出し直す手順を見つける", () => {
+    let s = mainPhase();
+    const me = s.players[0];
+    const bail = newHandCard(s, id("煌撃の戦士・ベイル"));
+    bail.costMod = -3;
+    me.hand = [newHandCard(s, id("フェアリー")), newHandCard(s, id("フェアリー")), bail, newHandCard(s, id("殺戮のリノセウス"))];
+    const tamer = newBoardCard(s, id("フェアリーテイマー"));
+    if (tamer.kind === "follower") tamer.enteredTurn = s.turn - 2;
+    me.board = [newBoardCard(s, id("聖樹の杖")), tamer];
+    me.pp = me.maxPp = 10;
+    me.turnCount = 10;
+    me.ep = 0;
+    me.sep = 0;
+    me.combo = 0;
+    me.extraPpAvailable = false;
+    s.players[1].board = [newBoardCard(s, id("式神・天后"))];
+    s.players[1].leaderHp = 9;
+    const seq = searchRhinoLethal(s, 0);
+    expect(seq).not.toBeNull();
+    for (const a of seq!) s = applyAction(s, a);
+    expect(s.winner).toBe(0);
+  });
+
   it("森の神秘は手札にあれば先に打つ（打ってもリーサルを逃さない）", () => {
     let s = mainPhase();
     const me = s.players[0];
