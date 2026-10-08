@@ -37,6 +37,11 @@ export interface SearchOptions {
    * 貪欲法で調整した重みは探索 AI では強くならなかった（210試合で 46.7%）ため、既定は基準の重み
    */
   weights: EvalWeights | "byClass";
+  /**
+   * 自分（p）が打ってよい手か（ルールで禁じる手を探索から外す。ターン終了は外さない）。
+   * リーサルの探索には使わない（リーサルはルールより優先する）
+   */
+  allow?: (state: GameState, action: Action, p: PlayerIndex) => boolean;
 }
 
 export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 8, maxDepth: 6, rescoreTop: 4, lethal: true, weights: DEFAULT_WEIGHTS };
@@ -85,7 +90,9 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   let frontier: Node[] = [];
 
   // 深さ1: すべての手を展開する（最初の手の候補を落とさない）
+  const allowed = (state: GameState, a: Action) => !opts.allow || a.type === "endTurn" || opts.allow(state, a, p);
   for (const a of legalActions(root)) {
+    if (!allowed(root, a)) continue;
     if (a.type === "endTurn") {
       terminals.push({ state: root, first: a, value: evaluateWith(root, p, w) });
       continue;
@@ -105,7 +112,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
       // ターン終了も候補（その時点の局面で終える）
       terminals.push(node);
       for (const a of legalActions(node.state)) {
-        if (a.type === "endTurn") continue;
+        if (a.type === "endTurn" || !allowed(node.state, a)) continue;
         const next = tryApply(node.state, a);
         if (next) children.push({ state: next, first: node.first, value: evaluateWith(next, p, w) });
       }
@@ -172,7 +179,10 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
           best = t.action;
         }
       }
-      return best ?? greedyAgent.chooseAction(real, legal, rng);
+      if (best) return best;
+      const allow = opts.allow;
+      const permitted = allow ? legal.filter((a) => a.type === "endTurn" || allow(real, a, p)) : legal;
+      return greedyAgent.chooseAction(real, permitted.length > 0 ? permitted : legal, rng);
     },
   };
 }
