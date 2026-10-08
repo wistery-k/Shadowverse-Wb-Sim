@@ -120,3 +120,72 @@ export class KeySet {
     return true;
   }
 }
+
+/**
+ * カードの iid・場に出た順（order）・スペルブーストの回数（boosts）を除いた中身。
+ * boosts は表示用でルールの判定には使わない（スペルブーストの効果はコスト等の変化として別に持つ）ため、
+ * 前のターンから手札にあったフェアリーと、このターンに加わったフェアリーを同じにする
+ */
+export function withoutIds<T extends { iid: number }>(c: T): Omit<T, "iid" | "order" | "boosts"> {
+  const { iid: _iid, order: _order, boosts: _boosts, ...rest } = c as T & { order?: number; boosts?: number };
+  return rest;
+}
+
+/** iid を除いたカードを、中身の順に並べる（並び順だけが違うものを同じにする） */
+function sortedWithoutIds<T extends { iid: number }>(cards: readonly T[]): unknown[] {
+  return cards
+    .map((c) => {
+      const v = withoutIds(c);
+      return { v, k: JSON.stringify(v) };
+    })
+    .sort((x, y) => (x.k < y.k ? -1 : x.k > y.k ? 1 : 0))
+    .map((x) => x.v);
+}
+
+/**
+ * 手の順番だけが違う局面を同じにするキー（ビームの同じ局面の判定用。sameState とあわせて使う）。
+ * 手の順番が違うと、効果で加わったカードの iid や場に出た順の番号が変わるため、局面全体を比べるとまとまらない。
+ * ここでは手札・場・クレストのカードを iid と order を除いて中身の順に並べ、山札はカードIDだけにして比べる。
+ * 場の並び（古いもの優先の処理の順）が違う局面もまとめるので厳密な同一ではないが、ビームで残す局面を選ぶ目的には十分。
+ * 能力の途中（解決スタック・誘発待ち・選択待ち・攻撃の途中）は iid を参照しているので、局面そのものを返す
+ */
+export function turnOrderKey(s: GameState): unknown {
+  if (s.stack.length > 0 || s.queue.length > 0 || s.pending !== null || s.attack !== null) return s;
+  return {
+    phase: s.phase,
+    turn: s.turn,
+    active: s.active,
+    winner: s.winner,
+    rng: s.rng,
+    players: s.players.map((pl) => ({
+      ...pl,
+      deck: pl.deck.map((c) => c.cardId),
+      hand: sortedWithoutIds(pl.hand),
+      board: sortedWithoutIds(pl.board),
+      crests: sortedWithoutIds(pl.crests),
+    })),
+  };
+}
+
+/** turnOrderKey 用のハッシュ（手札・場のカードは iid・order を使わず、順番によらない和で混ぜる） */
+export function turnOrderHash(s: GameState): number {
+  let h = 0x811c9dc5;
+  for (const pl of s.players) {
+    h = mix(mix(mix(h, pl.leaderHp), pl.graveyard), pl.graveyardFollowers.length);
+    h = mix(mix(mix(mix(mix(h, pl.pp), pl.combo), pl.ep), pl.sep), pl.extraPpAvailable ? 1 : 0);
+    let hand = 0;
+    for (const c of pl.hand) hand = (hand + mix(mix(mix(hashString(c.cardId), c.costMod), c.attackMod), c.defenseMod)) | 0;
+    let board = 0;
+    for (const c of pl.board) {
+      let x = mix(mix(hashString(c.cardId), c.keywords.length), c.granted.length);
+      if (c.kind === "follower") x = mix(mix(mix(mix(mix(x, c.attack), c.defense), c.maxDefense), c.tempAttack), c.attacksThisTurn);
+      else x = mix(mix(x, c.countdown ?? -1), c.actedThisTurn ? 1 : 0);
+      board = (board + x) | 0;
+    }
+    h = mix(mix(mix(mix(h, pl.hand.length), hand), pl.board.length), board);
+    h = mix(h, pl.crests.length);
+  }
+  const pd = s.pending;
+  h = mix(h, pd === null ? 0 : pd.kind === "choose" ? 1 + pd.candidates.length : 100 + pd.options);
+  return mix(h, s.stack.length);
+}

@@ -17,7 +17,7 @@ import {
 import { determinize } from "./determinize";
 import { DEFAULT_WEIGHTS, evaluateWith, type EvalWeights } from "./evaluate";
 import { createGreedyAgent, greedyAgent } from "./greedy";
-import { KeySet, stateHash } from "./keySet";
+import { KeySet, turnOrderHash, turnOrderKey, withoutIds } from "./keySet";
 import { findLethal } from "./lethal";
 import { weightsFor } from "./weights";
 import type { Agent } from "./types";
@@ -45,11 +45,12 @@ export interface SearchOptions {
   allow?: (state: GameState, action: Action, p: PlayerIndex) => boolean;
   /**
    * ビームに残す局面のうち、手の順番が違うだけの同じ局面を1つにまとめる
-   * （ビームの枠を同じ局面で埋めて、少し後で得をする並びを切らないため）
+   * （ビームの枠を同じ局面で埋めて、少し後で得をする並びを切らないため）。
+   * 効果で加わったカードの iid や場に出た順だけが違う局面もまとめる（turnOrderKey）
    */
   dedup: boolean;
   /**
-   * 手札の同じカード（iid 以外がすべて同じ。フェアリー2枚等）は、どちらをプレイしても同じなので1つだけ展開する
+   * 手札の同じカード（iid と表示用のスペルブーストの回数以外がすべて同じ。フェアリー2枚等）は、どちらをプレイしても同じなので1つだけ展開する
    * （iid が違うため dedup ではまとまらず、ビームの枠を同じ局面で埋めるため）
    */
   sameHandOnce: boolean;
@@ -103,8 +104,7 @@ function distinctPlays(state: GameState, actions: readonly Action[]): Action[] {
     if (a.type !== "play") return true;
     const card = state.players[p].hand.find((h) => h.iid === a.iid);
     if (!card) return true;
-    const { iid: _iid, ...rest } = card;
-    const k = JSON.stringify(rest);
+    const k = JSON.stringify(withoutIds(card));
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
@@ -117,7 +117,7 @@ function uniqueStates(children: Node[], width: number): Node[] {
   const out: Node[] = [];
   for (const c of children) {
     if (out.length >= width) break;
-    if (seen.add(c.state, stateHash(c.state))) out.push(c);
+    if (seen.add(turnOrderKey(c.state), turnOrderHash(c.state))) out.push(c);
   }
   return out;
 }
