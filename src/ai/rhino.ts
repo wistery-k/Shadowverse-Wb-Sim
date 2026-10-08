@@ -172,7 +172,11 @@ function searchLethalForRhino(root: GameState, p: PlayerIndex): Action[] | null 
   return searchLethal(root, p, DIRECT_ONLY) ?? searchRhinoLethal(root, p);
 }
 
-const search = createSearchAgent({ allow: allowAction, lethal: false });
+/**
+ * 探索の深さは 8（汎用は 6）。フェアリーなど 1pp のカードで手数が増え、7 手以上の手順が多いため
+ * （seed 2510273090 の 4 ターン目。docs/ai-notes.md）
+ */
+const search = createSearchAgent({ allow: allowAction, lethal: false, maxDepth: 8 });
 const plainSearch = createSearchAgent();
 
 export const rhinoAgent: Agent = {
