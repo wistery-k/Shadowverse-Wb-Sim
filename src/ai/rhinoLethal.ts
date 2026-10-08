@@ -9,7 +9,7 @@
 // （体力だけが違う局面は1つにまとめる）。現在のエルフのカードには、相手の体力でリーサルの可否が変わるものは無い。
 
 import { applyAction, cardOf, legalActions, type Action, type GameState, type PlayerIndex } from "../engine";
-import { KeySet, stateHash } from "./keySet";
+import { LazyKeySet, searchHash, searchKey } from "./keySet";
 
 const RHINO = "殺戮のリノセウス";
 const ROD = "聖樹の杖";
@@ -218,15 +218,6 @@ function setupActions(s: GameState, p: PlayerIndex): Action[] {
   });
 }
 
-/** 局面の同一判定用のキー（相手リーダーの体力・山札の中身・乱数の状態を除く） */
-function setupKey(s: GameState): unknown {
-  return [
-    s.players.map((pl) => [pl.pp, pl.combo, pl.ep, pl.sep, pl.extraPpAvailable, pl.hand, pl.board, pl.crests]),
-    s.pending,
-    s.stack,
-  ];
-}
-
 /**
  * リノセウスで殴り切る手順を探す。見つかれば手順全体、見つからなければ null。
  * 手札にリノセウスが無ければ探さない
@@ -242,7 +233,7 @@ export function searchRhinoLethal(root: GameState, p: PlayerIndex, opts: RhinoLe
 
   for (let depth = 0; depth < opts.maxDepth && frontier.length > 0; depth++) {
     const children: { line: Line; score: number }[] = [];
-    const seen = new KeySet();
+    const seen = new LazyKeySet<GameState>((s) => searchKey(s, { leaderHp: false }));
     for (const node of frontier) {
       const s = node.line.state;
       const actor = s.pending ? s.pending.player : s.active;
@@ -250,7 +241,7 @@ export function searchRhinoLethal(root: GameState, p: PlayerIndex, opts: RhinoLe
       for (const a of setupActions(s, p)) {
         const next = step(node.line, a);
         if (!next || next.state.phase === "ended") continue;
-        if (!seen.add(setupKey(next.state), stateHash(next.state, { leaderHp: false, graveyard: false }))) continue;
+        if (!seen.add(next.state, searchHash(next.state, { leaderHp: false }))) continue;
         // 選択待ちの途中では仕上げに入れないので、点数は親から引き継ぐ
         if (next.state.pending) {
           children.push({ line: next, score: node.score });

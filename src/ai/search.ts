@@ -17,7 +17,7 @@ import {
 import { determinize } from "./determinize";
 import { DEFAULT_WEIGHTS, evaluateWith, type EvalWeights } from "./evaluate";
 import { createGreedyAgent, greedyAgent } from "./greedy";
-import { KeySet, turnOrderHash, turnOrderKey, withoutIds } from "./keySet";
+import { LazyKeySet, searchHash, searchKey, withoutIds } from "./keySet";
 import { findLethal } from "./lethal";
 import { weightsFor } from "./weights";
 import type { Agent } from "./types";
@@ -46,7 +46,7 @@ export interface SearchOptions {
   /**
    * ビームに残す局面のうち、手の順番が違うだけの同じ局面を1つにまとめる
    * （ビームの枠を同じ局面で埋めて、少し後で得をする並びを切らないため）。
-   * 効果で加わったカードの iid や場に出た順だけが違う局面もまとめる（turnOrderKey）
+   * 効果で加わったカードの iid や場に出た順、山札・乱数の状態等だけが違う局面もまとめる（searchKey）
    */
   dedup: boolean;
   /**
@@ -113,11 +113,11 @@ function distinctPlays(state: GameState, actions: readonly Action[]): Action[] {
 
 /** 評価の高い順に、同じ局面を除いて width 個まで選ぶ（children は評価の降順） */
 function uniqueStates(children: Node[], width: number): Node[] {
-  const seen = new KeySet();
+  const seen = new LazyKeySet<GameState>((s) => searchKey(s));
   const out: Node[] = [];
   for (const c of children) {
     if (out.length >= width) break;
-    if (seen.add(turnOrderKey(c.state), turnOrderHash(c.state))) out.push(c);
+    if (seen.add(c.state, searchHash(c.state))) out.push(c);
   }
   return out;
 }

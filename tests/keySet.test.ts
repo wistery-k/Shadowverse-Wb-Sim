@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { jsonEqual, KeySet, stateHash, turnOrderHash, turnOrderKey, type HashScope } from "../src/ai/keySet";
+import { jsonEqual, KeySet, searchHash, searchKey, stateHash, type HashScope } from "../src/ai/keySet";
 import { randomAgent } from "../src/ai/random";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { ALL_CARDS } from "../src/cards";
@@ -31,21 +31,10 @@ describe("jsonEqual", () => {
   });
 });
 
-/** 局面の一部だけを取り出したキー（lethal.ts・rhinoLethal.ts と同じ形） */
+/** 局面の一部だけを取り出したキー */
 const projections: { scope: HashScope; key: (s: GameState) => unknown }[] = [
   { scope: {}, key: (s) => s },
-  {
-    scope: { graveyard: false },
-    key: (s) => [
-      s.players.map((pl) => [pl.leaderHp, pl.pp, pl.combo, pl.ep, pl.sep, pl.extraPpAvailable, pl.hand, pl.board, pl.crests, pl.deck.length]),
-      s.pending,
-      s.stack,
-    ],
-  },
-  {
-    scope: { leaderHp: false, graveyard: false },
-    key: (s) => [s.players.map((pl) => [pl.pp, pl.combo, pl.ep, pl.sep, pl.extraPpAvailable, pl.hand, pl.board, pl.crests]), s.pending, s.stack],
-  },
+  { scope: { leaderHp: false, graveyard: false }, key: (s) => [s.players.map((pl) => [pl.pp, pl.combo, pl.ep, pl.sep, pl.extraPpAvailable, pl.hand, pl.board, pl.crests]), s.pending, s.stack] },
 ];
 
 describe("KeySet", () => {
@@ -90,7 +79,7 @@ describe("KeySet", () => {
   }, 60_000);
 });
 
-describe("turnOrderKey（手の順番だけが違う局面）", () => {
+describe("searchKey（探索で同じとみなす局面）", () => {
   const id = (name: string) => ALL_CARDS.find((c) => c.name === name)!.id;
   const elf = DEFAULT_DECKS.find((d) => d.class === "elf")!;
   const royal = DEFAULT_DECKS.find((d) => d.class === "royal")!;
@@ -118,11 +107,11 @@ describe("turnOrderKey（手の順番だけが違う局面）", () => {
     const a = ["フェアリーテイマー", "燐光の岩", "フェアリー"].reduce(play, root);
     const b = ["燐光の岩", "フェアリー!", "フェアリーテイマー"].reduce(play, root);
     expect(jsonEqual(a, b)).toBe(false);
-    expect(jsonEqual(turnOrderKey(a), turnOrderKey(b))).toBe(true);
-    expect(turnOrderHash(a)).toBe(turnOrderHash(b));
+    expect(jsonEqual(searchKey(a), searchKey(b))).toBe(true);
+    expect(searchHash(a)).toBe(searchHash(b));
     // 中身が違う局面はまとめない（コンボ 3 で岩を出すと森の神秘が加わる）
     const c = ["フェアリーテイマー", "フェアリー", "燐光の岩"].reduce(play, root);
-    expect(jsonEqual(turnOrderKey(a), turnOrderKey(c))).toBe(false);
+    expect(jsonEqual(searchKey(a), searchKey(c))).toBe(false);
   });
 
   it("キーが同じ局面は同じハッシュになる", () => {
@@ -141,19 +130,42 @@ describe("turnOrderKey（手の順番だけが違う局面）", () => {
           if (t.phase === "ended") continue;
           for (const b of legalActions(t)) states.push(applyAction(t, b));
         }
-        const hashes = new Map<string, number>();
-        for (const t of states) {
-          const json = JSON.stringify(turnOrderKey(t));
-          const h = turnOrderHash(t);
-          if (hashes.has(json)) {
-            expect(hashes.get(json)).toBe(h);
-            merged++;
+        for (const scope of [{}, { leaderHp: false }]) {
+          const hashes = new Map<string, number>();
+          for (const t of states) {
+            const json = JSON.stringify(searchKey(t, scope));
+            const h = searchHash(t, scope);
+            if (hashes.has(json)) {
+              expect(hashes.get(json)).toBe(h);
+              merged++;
+            }
+            hashes.set(json, h);
           }
-          hashes.set(json, h);
         }
         s = applyAction(s, randomAgent.chooseAction(s, legalActions(s), rng));
       }
     }
     expect(merged).toBeGreaterThan(100);
   }, 60_000);
+
+  it("山札・乱数の状態は見ず、墓場の記録はそれを参照するクラスだけ見る", () => {
+    const nightmare = DEFAULT_DECKS.find((d) => d.class === "nightmare")!;
+    const base = createGame({ decks: [elf.cards, nightmare.cards], seed: 3 });
+    const vary = (f: (s: GameState) => void) => {
+      const s = structuredClone(base);
+      f(s);
+      return s;
+    };
+    const same = (s: GameState) => jsonEqual(searchKey(base), searchKey(s)) && searchHash(base) === searchHash(s);
+    expect(same(vary((s) => (s.rng = base.rng + 1)))).toBe(true);
+    expect(same(vary((s) => s.players[0].deck.reverse()))).toBe(true);
+    expect(same(vary((s) => s.players[0].deck.pop()))).toBe(true);
+    expect(same(vary((s) => (s.players[0].deck = [])))).toBe(false);
+    // エルフ（0）の墓場は見ず、ナイトメア（1）の墓場は見る
+    expect(same(vary((s) => (s.players[0].graveyard += 3)))).toBe(true);
+    expect(same(vary((s) => (s.players[1].graveyard += 3)))).toBe(false);
+    expect(same(vary((s) => s.players[1].graveyardFollowers.push(nightmare.cards[0]!)))).toBe(false);
+    expect(same(vary((s) => (s.players[0].leaderHp -= 1)))).toBe(false);
+    expect(jsonEqual(searchKey(base, { leaderHp: false }), searchKey(vary((s) => (s.players[0].leaderHp -= 1)), { leaderHp: false }))).toBe(true);
+  });
 });

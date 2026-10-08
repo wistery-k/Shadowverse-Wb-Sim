@@ -18,9 +18,11 @@ export function weightsForClass(cls: ClassId, source: WeightTable = TABLE): Eval
 /** プレイヤーのデッキのクラス（山札・手札・場のニュートラル以外のカードから決める） */
 export function deckClassOf(state: GameState, p: PlayerIndex): ClassId {
   const pl = state.players[p];
-  for (const c of [...pl.hand, ...pl.board, ...pl.deck]) {
-    const cls = cardOf(c.cardId).class;
-    if (cls !== "neutral") return cls;
+  for (const cards of [pl.hand, pl.board, pl.deck]) {
+    for (const c of cards) {
+      const cls = cardOf(c.cardId).class;
+      if (cls !== "neutral") return cls;
+    }
   }
   return "neutral";
 }
