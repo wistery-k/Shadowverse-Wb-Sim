@@ -2,6 +2,7 @@
 
 import { DEFAULT_DECKS } from "../cards/defaultDecks";
 import { actingPlayer, cardOf, type Action, type GameState, type PlayerIndex } from "../engine";
+import table from "../../data/mulligan-weights.json";
 import type { Agent } from "./types";
 
 /**
@@ -9,6 +10,28 @@ import type { Agent } from "./types";
  * 重みは「初手にあるとき、残すと返すより勝率がどれだけ上がるか」（0〜1 の差）。正なら残す
  */
 export type MulliganWeights = Record<string, Record<string, [number, number]>>;
+
+/** 推定した重み（npm run mulligan-fit -- <データ> --out data/mulligan-weights.json） */
+export const MULLIGAN_WEIGHTS: MulliganWeights = parseMulliganWeights(table);
+
+/** JSON の重みを検証して読む */
+export function parseMulliganWeights(raw: unknown): MulliganWeights {
+  const fail = (msg: string): never => {
+    throw new Error(`マリガンの重みが不正です: ${msg}`);
+  };
+  if (typeof raw !== "object" || raw === null) return fail("オブジェクトではありません");
+  const out: MulliganWeights = {};
+  for (const [deck, cards] of Object.entries(raw)) {
+    if (typeof cards !== "object" || cards === null) return fail(deck);
+    const t: Record<string, [number, number]> = {};
+    for (const [id, w] of Object.entries(cards as Record<string, unknown>)) {
+      if (!Array.isArray(w) || w.length !== 2 || !w.every((v) => typeof v === "number" && Number.isFinite(v))) return fail(`${deck} ${id}`);
+      t[id] = [w[0] as number, w[1] as number];
+    }
+    out[deck] = t;
+  }
+  return out;
+}
 
 /** 今のマリガン（コスト 4 以上を返す） */
 export function costMulliganSwap(state: GameState, p: PlayerIndex): number[] {

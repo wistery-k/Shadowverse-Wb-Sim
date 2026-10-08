@@ -73,9 +73,17 @@ export async function main(argv: string[]): Promise<number> {
     else if (argv[i] === "--sig") sig = true;
     else files.push(argv[i]!);
   }
-  const records: MulliganRecord[] = files.flatMap((f) =>
-    readFileSync(f, "utf8").split("\n").filter((l) => l).map((l) => JSON.parse(l) as MulliganRecord),
-  );
+  const records: MulliganRecord[] = [];
+  for (const f of files) {
+    for (const line of readFileSync(f, "utf8").split("\n")) {
+      if (!line) continue;
+      try {
+        records.push(JSON.parse(line) as MulliganRecord);
+      } catch {
+        console.log(`読めない行を飛ばしました（${f}）: ${line.slice(0, 40)}`);
+      }
+    }
+  }
   console.log(`${records.length} 試合`);
   const weights: MulliganWeights = {};
   const deckNames = [...new Set(records.flatMap((r) => r.decks))].sort();
@@ -118,7 +126,8 @@ export async function main(argv: string[]): Promise<number> {
     const isKeep = (j: number) => j >= base && [2, 3, 4, 5].includes((j - base) % per);
     // 1 回目: ほぼ正則化なしで、係数のばらつきと標準誤差から事前分布の分散を見積もる（経験ベイズ）
     const raw = ridge(rows, Array.from({ length: d }, () => 0));
-    const keepCols = [...Array(d).keys()].filter((j) => isKeep(j) && raw.se[j]! < 0.5);
+    // 2 枚目の列は試合数が少なく標準誤差が大きいので、見積もりには 1 枚目を残す列だけを使う
+    const keepCols = [...Array(d).keys()].filter((j) => j >= base && (j - base) % per === 2 && raw.se[j]! < 0.5);
     const meanB2 = keepCols.reduce((s, j) => s + raw.b[j]! ** 2, 0) / keepCols.length;
     const meanSe2 = keepCols.reduce((s, j) => s + raw.se[j]! ** 2, 0) / keepCols.length;
     const tau2 = Math.max(meanB2 - meanSe2, 1e-5);
@@ -137,10 +146,13 @@ export async function main(argv: string[]): Promise<number> {
       // --sig: 2 SE に届かない重みは今の方針（コスト 3 以下を残す）にする
       const costSign = cardOf(c).cost <= 3 ? 1e-4 : -1e-4;
       const w = (j: number) => (sig && Math.abs(fit.b[j]!) < 2 * fit.se[j]! ? costSign : round(fit.b[j]!));
-      table[c] = [w(o + 2), w(o + 3)];
+      // 2 枚目を残す効果は試合数が少なく（2 枚とも残した試合はまれ）ほとんど測れないので、
+      // 2 SE に届かなければ 1 枚目と同じ判断にする（重みを 0 以上の小さな値にする）
+      const w2 = Math.abs(fit.b[o + 3]!) < 2 * fit.se[o + 3]! ? 1e-4 : w(o + 3);
+      table[c] = [w(o + 2), w2];
       const card = cardOf(c);
       const copies = deck.cards.filter((x) => x === c).length;
-      const second = copies >= 2 ? `${pct(fit.b[o + 3]!)}±${(fit.se[o + 3]! * 100).toFixed(1)} | ${pct(raw.b[o + 3]!)}` : "- | -";
+      const second = copies >= 2 ? `${pct(fit.b[o + 3]!)}±${(fit.se[o + 3]! * 100).toFixed(1)} | ${pct(raw.b[o + 3]!)}±${(raw.se[o + 3]! * 100).toFixed(1)}` : "- | -";
       const seatCol = seat ? ` ${pct(fit.b[o + 4]!)}±${(fit.se[o + 4]! * 100).toFixed(1)} |` : "";
       console.log(`| ${card.name} | ${card.cost} | ${n1} | ${pct(fit.b[o + 2]!)}±${(fit.se[o + 2]! * 100).toFixed(1)} | ${pct(raw.b[o + 2]!)}±${(raw.se[o + 2]! * 100).toFixed(1)} | ${second} |${seatCol}`);
     }

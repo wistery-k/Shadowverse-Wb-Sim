@@ -7,6 +7,7 @@
 // ただし、このターンで勝てる並び（リーサル、lethal.ts）が見つかれば、それを最優先する
 
 import {
+  actingPlayer,
   applyAction,
   legalActions,
   type Action,
@@ -19,6 +20,7 @@ import { SEARCH_WEIGHTS, evaluateWith, type EvalWeights } from "./evaluate";
 import { createGreedyAgent, greedyAgent } from "./greedy";
 import { KeySet, turnOrderHash, turnOrderKey, withoutIds } from "./keySet";
 import { findLethal } from "./lethal";
+import { MULLIGAN_WEIGHTS, weightedMulliganSwap } from "./mulligan";
 import { weightsFor } from "./weights";
 import type { Agent } from "./types";
 
@@ -59,9 +61,14 @@ export interface SearchOptions {
    * 選択待ちの途中の局面を評価せず、深さも使わない（seed 954874822 のビショップ 6 ターン目・エルフ 7 ターン目。docs/ai-notes.md）
    */
   chain: boolean;
+  /**
+   * マリガン。"weights" はカードごとの重み（data/mulligan-weights.json。デフォルトデッキのみ、他はコストで決める）、
+   * "cost" はコスト 4 以上を返す（貪欲法と同じ）。重みは今のマリガンに +3.1%（4200 組、docs/ai-notes.md）
+   */
+  mulligan: "weights" | "cost";
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, mulligan: "weights" };
 
 interface Node {
   state: GameState;
@@ -204,8 +211,12 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
       const first = legal[0];
       if (!first) throw new Error("合法手がありません");
       if (legal.length === 1) return first;
-      // マリガンは貪欲法と同じ
-      if (first.type === "mulligan") return greedyAgent.chooseAction(real, legal, rng);
+      if (first.type === "mulligan") {
+        const swap = opts.mulligan === "weights" ? weightedMulliganSwap(real, actingPlayer(real), MULLIGAN_WEIGHTS) : null;
+        const action = swap && legal.find((a) => a.type === "mulligan" && a.swap.length === swap.length && a.swap.every((x) => swap.includes(x)));
+        // 重みの無いデッキは貪欲法と同じ（コスト 4 以上を返す）
+        return action || greedyAgent.chooseAction(real, legal, rng);
+      }
       const p = real.pending ? real.pending.player : real.active;
       const legalKeys = new Set(legal.map(keyOf));
 

@@ -1,4 +1,5 @@
 // マリガンの重みの評価（npm run mulligan-eval -- --weights <file> --games <n> --seed <s> --shard <i>/<k> --out <file.jsonl>）。
+// 集計は npm run mulligan-eval -- --summary <file.jsonl ...>
 // 7 デッキの全ての組（ミラーを除く 42 通り）× 両方の席 × n シードについて、自分側だけマリガンを「今の方針」と「重み」で打ち分ける。
 // 相手は今の AI（今のマリガン）。シードが同じなので、マリガンの判断が同じなら試合はまったく同じになる。
 // そのため判断が違う試合だけを両方の方針で打ち、勝ち負けが入れ替わった数を比べる。
@@ -32,7 +33,51 @@ function mix(seed: number, x: number): number {
 
 const sameSet = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((x) => b.includes(x));
 
+/** 評価の集計（npm run mulligan-eval -- --summary <file.jsonl ...>） */
+function summarize(files: string[]): void {
+  const recs: EvalRecord[] = [];
+  for (const f of files) {
+    for (const line of readFileSync(f, "utf8").split("\n")) {
+      if (!line) continue;
+      try {
+        recs.push(JSON.parse(line) as EvalRecord);
+      } catch {
+        console.log(`読めない行を飛ばしました（${f}）`);
+      }
+    }
+  }
+  const rows = new Map<string, { n: number; diff: number; base: number; neu: number; gain: number; loss: number }>();
+  const add = (k: string, r: EvalRecord) => {
+    const e = rows.get(k) ?? { n: 0, diff: 0, base: 0, neu: 0, gain: 0, loss: 0 };
+    e.n++;
+    if (!r.same) {
+      e.diff++;
+      if (r.baseWin) e.base++;
+      if (r.newWin) e.neu++;
+      if (r.newWin && !r.baseWin) e.gain++;
+      if (!r.newWin && r.baseWin) e.loss++;
+    }
+    rows.set(k, e);
+  };
+  for (const r of recs) {
+    add(r.deck, r);
+    add("全体", r);
+  }
+  console.log("| デッキ | 組 | 判断が違った | 新で勝ち・旧で負け | 新で負け・旧で勝ち | 勝率の差 | z |");
+  console.log("| --- | --- | --- | --- | --- | --- | --- |");
+  for (const [k, e] of [...rows].sort(([a], [b]) => (a === "全体" ? 1 : b === "全体" ? -1 : a.localeCompare(b)))) {
+    // 勝率の差は全ての組（判断が同じ組は差 0）で割る。z は McNemar 検定
+    const d = (e.gain - e.loss) / e.n;
+    const z = e.gain + e.loss === 0 ? 0 : (e.gain - e.loss) / Math.sqrt(e.gain + e.loss);
+    console.log(`| ${k} | ${e.n} | ${e.diff} | ${e.gain} | ${e.loss} | ${d >= 0 ? "+" : ""}${(d * 100).toFixed(1)}% | ${z.toFixed(2)} |`);
+  }
+}
+
 export async function main(argv: string[]): Promise<number> {
+  if (argv[0] === "--summary") {
+    summarize(argv.slice(1));
+    return 0;
+  }
   let games = 10, seed = 2, shard = [0, 1], out = "mulligan-eval.jsonl", weightsFile = "data/mulligan-weights.json";
   for (let i = 0; i < argv.length; i += 2) {
     const k = argv[i], v = argv[i + 1] ?? "";

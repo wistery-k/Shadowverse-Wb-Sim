@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { costMulliganSwap, defaultDeckNameOf, weightedMulliganSwap, withMulligan, type MulliganWeights } from "../src/ai/mulligan";
+import { MULLIGAN_WEIGHTS, costMulliganSwap, defaultDeckNameOf, weightedMulliganSwap, withMulligan, type MulliganWeights } from "../src/ai/mulligan";
 import { greedyAgent } from "../src/ai/greedy";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { applyAction, createGame, legalActions } from "../src/engine";
@@ -41,5 +41,16 @@ describe("マリガンの重み", () => {
     expect(action.type === "mulligan" && action.swap.length).toBe(hand.length);
     const next = applyAction(state, action);
     expect(next.players[p].mulliganDone).toBe(true);
+  });
+});
+
+describe("data/mulligan-weights.json", () => {
+  it("デッキはデフォルトデッキ、カードはそのデッキのカード", () => {
+    expect(Object.keys(MULLIGAN_WEIGHTS).length).toBeGreaterThan(0);
+    for (const [name, table] of Object.entries(MULLIGAN_WEIGHTS)) {
+      const d = DEFAULT_DECKS.find((x) => x.name === name);
+      expect(d, name).toBeDefined();
+      for (const id of Object.keys(table)) expect(d!.cards, `${name} ${id}`).toContain(id);
+    }
   });
 });
