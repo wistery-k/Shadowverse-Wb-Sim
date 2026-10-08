@@ -32,10 +32,14 @@ export const TYPE_NAMES: Record<Card["type"], string> = {
 
 export const classLabel = (card: Card) => CLASS_NAMES[card.class];
 
-export const playerName = (p: PlayerIndex, human: PlayerIndex) => (p === human ? "あなた" : "相手");
+/** 文言の視点: 人間のプレイヤー（「あなた」「相手」と呼ぶ）か、各プレイヤーの名前 */
+export type Viewer = PlayerIndex | readonly [string, string];
+
+export const playerName = (p: PlayerIndex, viewer: Viewer) =>
+  typeof viewer === "number" ? (p === viewer ? "あなた" : "相手") : viewer[p];
 
 /** 実体ID（場・手札・リーダー）の表示名 */
-export function entityName(state: GameState, iid: number, human: PlayerIndex): string {
+export function entityName(state: GameState, iid: number, human: Viewer): string {
   if (iid < 0) return `${playerName(iid === -1 ? 0 : 1, human)}のリーダー`;
   const b = findBoard(state, iid);
   if (b) return cardOf(b.card.cardId).name;
@@ -55,7 +59,7 @@ export function modeLabels(state: GameState): string[] {
 }
 
 /** アクションを（実行前の状態で）説明する */
-export function describeAction(state: GameState, action: Action, human: PlayerIndex): string {
+export function describeAction(state: GameState, action: Action, human: Viewer): string {
   const who = playerName(state.pending?.player ?? state.active, human);
   const name = (iid: number) => entityName(state, iid, human);
   switch (action.type) {

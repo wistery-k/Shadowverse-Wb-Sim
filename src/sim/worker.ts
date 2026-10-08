@@ -5,14 +5,16 @@ import { runGame, type Entrant, type GameRecord, type GameSpec } from "./tournam
 export interface WorkerRequest {
   entrants: Entrant[];
   specs: GameSpec[];
+  /** 行動の列を記録して返す（リプレイ用） */
+  record?: boolean;
 }
 
 export type WorkerResponse = { type: "record"; record: GameRecord } | { type: "done" };
 
 self.onmessage = (e: MessageEvent<WorkerRequest>) => {
-  const { entrants, specs } = e.data;
+  const { entrants, specs, record } = e.data;
   for (const spec of specs) {
-    const response: WorkerResponse = { type: "record", record: runGame(spec, entrants) };
+    const response: WorkerResponse = { type: "record", record: runGame(spec, entrants, { record: record ?? false }) };
     self.postMessage(response);
   }
   const done: WorkerResponse = { type: "done" };

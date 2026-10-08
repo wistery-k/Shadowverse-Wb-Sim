@@ -622,3 +622,60 @@ progress {
 .swatch.lose {
   background: color-mix(in oklab, var(--div-lose) 60%, var(--div-mid));
 }
+
+/* AI対戦の試合一覧・リプレイ */
+.winrate td.clickable {
+  cursor: pointer;
+}
+.winrate td.picked {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.game-list {
+  margin-top: 12px;
+}
+.game-list h3 {
+  font-size: 14px;
+  margin: 0 0 6px;
+}
+.game-list table {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.game-list th,
+.game-list td {
+  padding: 2px 8px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.game-list tr.win td:nth-child(2) {
+  color: var(--div-win);
+  font-weight: bold;
+}
+.game-list tr.lose td:nth-child(2) {
+  color: var(--div-lose);
+  font-weight: bold;
+}
+.replay {
+  display: grid;
+  gap: 8px;
+}
+.replay-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.replay input[type="range"] {
+  width: 100%;
+}
+.replay .leader {
+  cursor: default;
+}
+.replay-log li {
+  cursor: pointer;
+}
+.replay-log li.current {
+  font-weight: bold;
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+}

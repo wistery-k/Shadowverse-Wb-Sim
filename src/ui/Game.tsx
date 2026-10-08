@@ -301,7 +301,7 @@ function actionLabel(state: GameState, a: Action): string {
   }
 }
 
-function PlayerInfo({ label, state, p }: { label: string; state: GameState; p: PlayerIndex }) {
+export function PlayerInfo({ label, state, p }: { label: string; state: GameState; p: PlayerIndex }) {
   const pl = state.players[p];
   const active = state.active === p && state.phase === "main";
   return (
