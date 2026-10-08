@@ -15,7 +15,7 @@ import {
   type Rng,
 } from "../engine";
 import { determinize } from "./determinize";
-import { DEFAULT_WEIGHTS, evaluateWith, type EvalWeights } from "./evaluate";
+import { SEARCH_WEIGHTS, evaluateWith, type EvalWeights } from "./evaluate";
 import { createGreedyAgent, greedyAgent } from "./greedy";
 import { KeySet, turnOrderHash, turnOrderKey, withoutIds } from "./keySet";
 import { findLethal } from "./lethal";
@@ -35,7 +35,7 @@ export interface SearchOptions {
   lethal: boolean;
   /**
    * 評価関数の重み。"byClass" は自分のデッキのクラスに合わせて data/ai-weights.json の重みを使う。
-   * 貪欲法で調整した重みは探索 AI では強くならなかった（210試合で 46.7%）ため、既定は基準の重み
+   * 貪欲法で調整した重みは探索 AI では強くならなかった（210試合で 46.7%）ため、既定は基準の重みに融合で作るカードの価値を足したもの（SEARCH_WEIGHTS）
    */
   weights: EvalWeights | "byClass";
   /**
@@ -61,7 +61,7 @@ export interface SearchOptions {
   chain: boolean;
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: DEFAULT_WEIGHTS, dedup: true, sameHandOnce: true, chain: true };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true };
 
 interface Node {
   state: GameState;

@@ -183,7 +183,8 @@ describe("リーサルの探索", () => {
   });
 });
 
-import { DEFAULT_WEIGHTS, evaluateWith } from "../src/ai/evaluate";
+import { DEFAULT_WEIGHTS, SEARCH_WEIGHTS, evaluateWith } from "../src/ai/evaluate";
+import { id } from "../src/cards/abilities/helpers";
 import { deckClassOf, weightsForClass } from "../src/ai/weights";
 
 describe("評価関数の重み", () => {
@@ -203,5 +204,22 @@ describe("評価関数の重み", () => {
     const card = s.players[0].hand[0]!.cardId;
     const base = evaluateWith(s, 0, DEFAULT_WEIGHTS);
     expect(evaluateWith(s, 0, { ...DEFAULT_WEIGHTS, hold: { [card]: 3 } })).toBeGreaterThanOrEqual(base + 3);
+  });
+
+  it("探索 AI の重みでは、融合で手札の枚数が減っても評価が下がらない", () => {
+    const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 4 });
+    s.phase = "main";
+    s.active = 0;
+    const hand = s.players[0].hand;
+    hand.length = 0;
+    const attack = newHandCard(s, id("アタックアーティファクト"));
+    const castle = newHandCard(s, id("キャッスルアーティファクト"));
+    hand.push(attack, castle);
+    const before = evaluateWith(s, 0, SEARCH_WEIGHTS);
+    // アタック（素材のコスト 3）→ デストロイアーティファクトγ
+    const t = applyAction(s, { type: "fuse", host: attack.iid, materials: [castle.iid] });
+    expect(t.players[0].hand.map((h) => h.cardId)).toEqual([id("デストロイアーティファクトγ")]);
+    expect(evaluateWith(t, 0, SEARCH_WEIGHTS)).toBeGreaterThanOrEqual(before);
+    expect(evaluateWith(t, 0, DEFAULT_WEIGHTS)).toBeLessThan(evaluateWith(s, 0, DEFAULT_WEIGHTS));
   });
 });
