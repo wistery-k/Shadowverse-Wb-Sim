@@ -25,9 +25,9 @@ import type { Agent } from "./types";
 export interface SearchOptions {
   /** determinization の数 */
   samples: number;
-  /** ビームの幅 */
+  /** ビームの幅（既定 32。8→16→32→64 で勝率が上がり、時間との兼ね合いで 32。docs/ai-notes.md） */
   beamWidth: number;
-  /** 1ターンに探索する行動数の上限 */
+  /** 1ターンに探索する行動数の上限（既定 8。chain のおかげで 6 でもほぼ足りるが、上限に当たる局面を減らす） */
   maxDepth: number;
   /** 相手のターンまで読んで評価し直す候補（最初の手）の数 */
   rescoreTop: number;
@@ -61,7 +61,7 @@ export interface SearchOptions {
   chain: boolean;
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 8, maxDepth: 6, rescoreTop: 4, lethal: true, weights: DEFAULT_WEIGHTS, dedup: true, sameHandOnce: true, chain: true };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: DEFAULT_WEIGHTS, dedup: true, sameHandOnce: true, chain: true };
 
 interface Node {
   state: GameState;
