@@ -1,0 +1,82 @@
+name: 自動対戦
+
+# main が更新されるたびに AI どうしの総当たりを回し、結果をジョブサマリーに表で出す。
+# 手動実行（Actions タブの Run workflow）では試合数と AI を変えられる。
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      games:
+        description: 1組（デッキの組み合わせ）あたりの試合数
+        default: "20"
+      agents:
+        description: AI（src/ai/registry.ts のキー、カンマ区切り）
+        default: search
+      deck_agents:
+        description: デッキごとの AI の差し替え（<デッキ>=<AI>、カンマ区切り。空なら差し替えなし）
+        default: リノセウスエルフ=rhino
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auto-match-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GAMES: ${{ inputs.games || '20' }}
+  AGENTS: ${{ inputs.agents || 'search' }}
+  # 手動実行で空にしたときは差し替えなし。push のときは inputs がないので既定の差し替えを使う
+  DECK_AGENTS: ${{ github.event_name == 'workflow_dispatch' && inputs.deck_agents || github.event_name != 'workflow_dispatch' && 'リノセウスエルフ=rhino' || '' }}
+  SHARDS: 8
+
+jobs:
+  sim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: |
+          extra=()
+          IFS=',' read -ra pairs <<< "$DECK_AGENTS"
+          for p in "${pairs[@]}"; do [ -n "$p" ] && extra+=(--deck-agent "$p"); done
+          npm run -s sim -- --games "$GAMES" --agents "$AGENTS" "${extra[@]}" --shard "${{ matrix.shard }}/$SHARDS" --json "shard-${{ matrix.shard }}.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sim-shard-${{ matrix.shard }}
+          path: shard-${{ matrix.shard }}.json
+          retention-days: 7
+
+  report:
+    needs: sim
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sim-shard-*
+          path: results
+          merge-multiple: true
+      - name: 結果をジョブサマリーに出す
+        run: |
+          set -o pipefail
+          echo "コミット: ${GITHUB_SHA::7}" >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          npm run -s sim-report -- results/*.json | tee -a "$GITHUB_STEP_SUMMARY"
