@@ -58,15 +58,23 @@ function tryApply(state: GameState, action: Action): GameState | null {
   }
 }
 
-/** 相手のターン（と、その途中の選択）を貪欲法で進め、自分の手番に戻った局面を返す */
-function simulateOpponentTurn(state: GameState, p: PlayerIndex, rng: Rng): GameState {
-  // determinization 済みの局面の中なので、相手は局面をそのまま見てよい
-  const opponentPolicy = createGreedyAgent({ omniscient: true });
-  let s = tryApply(state, { type: "endTurn" });
-  for (let guard = 0; s && s.phase !== "ended" && guard < 60; guard++) {
-    const actor = s.pending ? s.pending.player : s.active;
-    if (actor === p && !s.pending) break;
-    s = tryApply(s, opponentPolicy.chooseAction(s, legalActions(s), rng));
+/**
+ * 自分のターンを終え、相手のターン（と、その途中の選択）を貪欲法で進め、自分の手番に戻った局面を返す。
+ * 自分の選択待ちが残っている局面（能力の途中）は、先に貪欲法で選択してからターンを終える
+ */
+export function simulateOpponentTurn(state: GameState, p: PlayerIndex, rng: Rng): GameState {
+  // determinization 済みの局面の中なので、局面をそのまま見てよい
+  const policy = createGreedyAgent({ omniscient: true });
+  let s: GameState | null = state;
+  let ended = false;
+  for (let guard = 0; s && s.phase !== "ended" && guard < 80; guard++) {
+    if (!s.pending && s.active === p) {
+      if (ended) break;
+      s = tryApply(s, { type: "endTurn" });
+      ended = true;
+      continue;
+    }
+    s = tryApply(s, policy.chooseAction(s, legalActions(s), rng));
   }
   return s ?? state;
 }

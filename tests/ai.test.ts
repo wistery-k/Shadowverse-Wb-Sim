@@ -22,7 +22,7 @@ describe("AI", () => {
 });
 
 import { determinize } from "../src/ai/determinize";
-import { searchAgent } from "../src/ai/search";
+import { searchAgent, simulateOpponentTurn } from "../src/ai/search";
 import { applyAction, createGame, legalActions, newHandCard } from "../src/engine";
 import { ALL_CARDS } from "../src/cards";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
@@ -70,6 +70,30 @@ describe("探索 AI", () => {
     }
     expect(wins).toBeGreaterThanOrEqual(5);
   }, 60_000);
+
+  it("能力の選択待ちの途中の局面からも、選択を済ませて相手のターンまで読む", () => {
+    // 自分の選択待ちが残った局面を対戦の中から探す
+    let found = false;
+    for (let seed = 1; seed <= 20 && !found; seed++) {
+      let state = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed });
+      const rng = rngFrom({ rng: seed });
+      while (state.phase !== "ended") {
+        const p = state.active;
+        if (state.phase === "main" && state.pending?.player === p) {
+          const after = simulateOpponentTurn(state, p, rngFrom({ rng: seed }));
+          if (after.phase !== "ended") {
+            expect(after.pending).toBeNull();
+            expect(after.active).toBe(p);
+            expect(after.turn).toBe(state.turn + 2);
+          }
+          found = true;
+          break;
+        }
+        state = applyAction(state, greedyAgent.chooseAction(state, legalActions(state), rng));
+      }
+    }
+    expect(found).toBe(true);
+  });
 });
 
 import { findLethal, searchLethal } from "../src/ai/lethal";
