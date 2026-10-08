@@ -19,7 +19,7 @@ import {
 } from "../engine";
 import { DEFAULT_LETHAL_OPTIONS, DIRECT_SCORING, findLethal, searchLethal } from "./lethal";
 import { searchRhinoLethal } from "./rhinoLethal";
-import { createSearchAgent } from "./search";
+import { createSearchAgent, type SearchOptions } from "./search";
 import type { Agent } from "./types";
 import { deckClassOf } from "./weights";
 
@@ -27,6 +27,7 @@ const ROD = "聖樹の杖";
 const ROCK = "燐光の岩";
 const MYSTERY = "森の神秘";
 const BACKWOOD = "薫交の天宮・バックウッド";
+const RHINO = "殺戮のリノセウス";
 /** マリガンで1枚だけ残す序盤のカード（優先順） */
 const EARLY = ["フェアリーテイマー", "純粋なるウォーターフェアリー", "妖精の招集"];
 /** 上の2種（バックウッドと序盤のカード）がどちらもあるときに残すカード（優先順。杖は1枚まで） */
@@ -39,6 +40,10 @@ const keyOf = (a: Action) => JSON.stringify(a);
 
 function boardCount(state: GameState, p: PlayerIndex, name: string): number {
   return state.players[p].board.filter((c) => nameOf(c.cardId) === name).length;
+}
+
+function handCount(state: GameState, p: PlayerIndex, name: string): number {
+  return state.players[p].hand.filter((h) => nameOf(h.cardId) === name).length;
 }
 
 function oppHasFollowers(state: GameState, p: PlayerIndex): boolean {
@@ -119,6 +124,8 @@ export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolea
     case "play": {
       const name = playedName(state, a, p);
       if (name === MYSTERY) return false; // リーサルまで温存
+      // 手札に1枚しかないリノセウスはリーサルまで温存（2枚以上なら1枚は残る）
+      if (name === RHINO && handCount(state, p, RHINO) < 2) return false;
       if (forcesKeeperChoice(state, a, p)) return false;
       // 杖の2枚目以降と燐光の岩は、相手の盤面を全処理できた（フォロワーがいない）ときだけ
       if (name === ROD) return boardCount(state, p, ROD) === 0 || !oppHasFollowers(state, p);
@@ -173,47 +180,51 @@ function searchLethalForRhino(root: GameState, p: PlayerIndex): Action[] | null 
 }
 
 /**
+ * リノセウス用 AI を作る。search は探索の設定（比較実験用。既定は深さ 8）。
  * 探索の深さは 8（汎用は 6）。フェアリーなど 1pp のカードで手数が増え、7 手以上の手順が多いため
  * （seed 2510273090 の 4 ターン目。docs/ai-notes.md）
  */
-const search = createSearchAgent({ allow: allowAction, lethal: false, maxDepth: 8 });
-const plainSearch = createSearchAgent();
-
-export const rhinoAgent: Agent = {
-  name: "rhino",
-  chooseAction(real, legal, rng) {
-    const first = legal[0];
-    if (!first) throw new Error("合法手がありません");
-    // マリガン中の active は先攻なので、マリガンするプレイヤーは actingPlayer で求める
-    const p = actingPlayer(real);
-    if (deckClassOf(real, p) !== "elf") return plainSearch.chooseAction(real, legal, rng);
-    if (first.type === "mulligan") {
-      const swap = mulliganSwap(real, p);
-      return legal.find((a) => a.type === "mulligan" && sameSet(a.swap, swap)) ?? first;
-    }
-    if (legal.length === 1) return first;
-    // 相手のターン中の選択は探索 AI に任せる
-    if (real.active !== p) return search.chooseAction(real, legal, rng);
-    // リーサル（ルールより優先。手順の途中の選択も含む）
-    const legalKeys = new Set(legal.map(keyOf));
-    const lethal = findLethal(real, p, rng, DEFAULT_LETHAL_OPTIONS, searchLethalForRhino);
-    if (lethal && legalKeys.has(keyOf(lethal))) return lethal;
-    // 自分の選択待ちは探索 AI に任せる（allowAction で最後の杖等を避ける）
-    if (real.pending) return search.chooseAction(real, legal, rng);
-
-    const pl = real.players[p];
-    const extraPp = legal.find((a) => a.type === "extraPp");
-    // 1つ目のエクストラPP が期限のターンに残っていれば、ターン開始時に使う
-    if (extraPp && pl.turnCount === FIRST_EXTRA_PP_DEADLINE) return extraPp;
-    // 1枚目の杖は最優先で置く（エクストラPP で置けるなら使う）
-    if (boardCount(real, p, ROD) === 0) {
-      const rod = legal.find((a) => playedName(real, a, p) === ROD);
-      if (rod) return rod;
-      if (extraPp && pl.hand.some((h) => nameOf(h.cardId) === ROD) && allowAction(real, extraPp, p)) {
-        const after = applyAction(real, extraPp);
-        if (legalActions(after).some((a) => playedName(after, a, p) === ROD)) return extraPp;
+export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}): Agent {
+  const search = createSearchAgent({ allow: allowAction, lethal: false, maxDepth: 8, ...searchOptions });
+  const plainSearch = createSearchAgent();
+  return {
+    name: "rhino",
+    chooseAction(real, legal, rng) {
+      const first = legal[0];
+      if (!first) throw new Error("合法手がありません");
+      // マリガン中の active は先攻なので、マリガンするプレイヤーは actingPlayer で求める
+      const p = actingPlayer(real);
+      if (deckClassOf(real, p) !== "elf") return plainSearch.chooseAction(real, legal, rng);
+      if (first.type === "mulligan") {
+        const swap = mulliganSwap(real, p);
+        return legal.find((a) => a.type === "mulligan" && sameSet(a.swap, swap)) ?? first;
       }
-    }
-    return search.chooseAction(real, legal, rng);
-  },
-};
+      if (legal.length === 1) return first;
+      // 相手のターン中の選択は探索 AI に任せる
+      if (real.active !== p) return search.chooseAction(real, legal, rng);
+      // リーサル（ルールより優先。手順の途中の選択も含む）
+      const legalKeys = new Set(legal.map(keyOf));
+      const lethal = findLethal(real, p, rng, DEFAULT_LETHAL_OPTIONS, searchLethalForRhino);
+      if (lethal && legalKeys.has(keyOf(lethal))) return lethal;
+      // 自分の選択待ちは探索 AI に任せる（allowAction で最後の杖等を避ける）
+      if (real.pending) return search.chooseAction(real, legal, rng);
+
+      const pl = real.players[p];
+      const extraPp = legal.find((a) => a.type === "extraPp");
+      // 1つ目のエクストラPP が期限のターンに残っていれば、ターン開始時に使う
+      if (extraPp && pl.turnCount === FIRST_EXTRA_PP_DEADLINE) return extraPp;
+      // 1枚目の杖は最優先で置く（エクストラPP で置けるなら使う）
+      if (boardCount(real, p, ROD) === 0) {
+        const rod = legal.find((a) => playedName(real, a, p) === ROD);
+        if (rod) return rod;
+        if (extraPp && pl.hand.some((h) => nameOf(h.cardId) === ROD) && allowAction(real, extraPp, p)) {
+          const after = applyAction(real, extraPp);
+          if (legalActions(after).some((a) => playedName(after, a, p) === ROD)) return extraPp;
+        }
+      }
+      return search.chooseAction(real, legal, rng);
+    },
+  };
+}
+
+export const rhinoAgent: Agent = createRhinoAgent();

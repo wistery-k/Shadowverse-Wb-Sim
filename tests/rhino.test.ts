@@ -114,6 +114,16 @@ describe("リノセウス用ルール: 禁じる手", () => {
     expect(allowAction(s, { type: "play", iid: mystery.iid }, 0)).toBe(false);
   });
 
+  it("手札に1枚しかないリノセウスはプレイしない（2枚以上ならよい）", () => {
+    const s = mainPhase();
+    s.players[0].pp = s.players[0].maxPp = 5;
+    const rhino = newHandCard(s, id("殺戮のリノセウス"));
+    s.players[0].hand = [rhino];
+    expect(allowAction(s, { type: "play", iid: rhino.iid }, 0)).toBe(false);
+    s.players[0].hand.push(newHandCard(s, id("殺戮のリノセウス")));
+    expect(allowAction(s, { type: "play", iid: rhino.iid }, 0)).toBe(true);
+  });
+
   it("エクストラPP: 2つ目は使わない。1つ目は杖を置けるようになるときに使う", () => {
     const s = mainPhase();
     const pl = s.players[0];
@@ -194,6 +204,37 @@ describe("リノセウス用ルール: 手数の多いターン", () => {
     const rng = rngFrom({ rng: 1 });
     while (s.phase === "main" && s.active === 0) s = applyAction(s, rhinoAgent.chooseAction(s, legalActions(s), rng));
     expect(s.players[1].board.filter((c) => c.kind === "follower")).toEqual([]);
+  }, 30_000);
+});
+
+describe("リノセウス用ルール: seed 1678126716（アミュレット疾走ビショップ vs リノセウスエルフ、エルフ後攻）", () => {
+  // ユーザーが指摘した試合の、エルフの 7 ターン目の 2 手目までの行動（PR #21 時点の AI の手）
+  const log: Action[] = [{"type":"mulligan","player":1,"swap":[43,77,67,66]},{"type":"mulligan","player":0,"swap":[34]},{"type":"endTurn"},{"type":"extraPp"},{"type":"play","iid":4},{"type":"endTurn"},{"type":"play","iid":58},{"type":"endTurn"},{"type":"play","iid":15},{"type":"attack","attacker":4,"target":"leader"},{"type":"endTurn"},{"type":"play","iid":71},{"type":"attack","attacker":58,"target":4},{"type":"endTurn"},{"type":"play","iid":9},{"type":"endTurn"},{"type":"play","iid":54},{"type":"play","iid":49},{"type":"play","iid":46},{"type":"choose","targets":[54]},{"type":"endTurn"},{"type":"play","iid":21},{"type":"evolve","iid":21},{"type":"endTurn"},{"type":"play","iid":81},{"type":"play","iid":82},{"type":"play","iid":64},{"type":"choose","targets":[21]},{"type":"play","iid":83},{"type":"attack","attacker":81,"target":21},{"type":"evolve","iid":64},{"type":"attack","attacker":64,"target":86},{"type":"endTurn"},{"type":"play","iid":12},{"type":"play","iid":6},{"type":"act","iid":12},{"type":"evolve","iid":6},{"type":"choose","targets":[64]},{"type":"attack","attacker":6,"target":82},{"type":"endTurn"},{"type":"play","iid":80},{"type":"play","iid":68},{"type":"evolve","iid":68},{"type":"attack","attacker":83,"target":"leader"},{"type":"attack","attacker":68,"target":"leader"},{"type":"endTurn"},{"type":"play","iid":31},{"type":"act","iid":31},{"type":"endTurn"},{"type":"play","iid":84}];
+  const bishop = DEFAULT_DECKS.find((d) => d.key === "アミュレット疾走ビショップ")!;
+  const stateAt = (n: number) => {
+    let s = createGame({ decks: [bishop.cards, elf.cards], seed: 1678126716 });
+    for (const a of log.slice(0, n)) s = applyAction(s, a);
+    return s;
+  };
+  const names = (cards: readonly { cardId: string }[]) => cards.map((c) => ALL_CARDS.find((x) => x.id === c.cardId)!.name);
+
+  it("6 ターン目: リーサルでなければ、手札に1枚のリノセウスは出さない", () => {
+    let s = stateAt(40);
+    expect(names(s.players[1].hand).filter((n) => n === "殺戮のリノセウス")).toHaveLength(1);
+    const rng = rngFrom({ rng: 1 });
+    while (s.phase === "main" && s.active === 1) s = applyAction(s, rhinoAgent.chooseAction(s, legalActions(s), rng));
+    expect(names(s.players[1].hand)).toContain("殺戮のリノセウス");
+  }, 30_000);
+
+  /**
+   * 7 ターン目（相手の場にフォロワーなし）。フェアリーの後に燐光の岩を出すとコンボ 2 で森の神秘が加わらない。
+   * 以前はビームで、手の順番が違うだけの局面（加わったフェアリーの iid が違う）がまとまらず枠を埋め、岩を 2 手目に出していた
+   */
+  it("7 ターン目: フェアリーの次に燐光の岩を出さない", () => {
+    const s = stateAt(50);
+    expect(s.players[1].combo).toBe(1);
+    const a = rhinoAgent.chooseAction(s, legalActions(s), rngFrom({ rng: 1 }));
+    expect(a.type === "play" && names(s.players[1].hand.filter((h) => h.iid === a.iid))[0]).not.toBe("燐光の岩");
   }, 30_000);
 });
 
