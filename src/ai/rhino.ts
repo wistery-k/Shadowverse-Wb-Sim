@@ -8,6 +8,7 @@
 
 import {
   abilitiesOf,
+  actingPlayer,
   applyAction,
   cardOf,
   EXTRA_PP_REFRESH_TURN,
@@ -171,7 +172,11 @@ function searchLethalForRhino(root: GameState, p: PlayerIndex): Action[] | null 
   return searchLethal(root, p, DIRECT_ONLY) ?? searchRhinoLethal(root, p);
 }
 
-const search = createSearchAgent({ allow: allowAction, lethal: false });
+/**
+ * 探索の深さは 8（汎用は 6）。フェアリーなど 1pp のカードで手数が増え、7 手以上の手順が多いため
+ * （seed 2510273090 の 4 ターン目。docs/ai-notes.md）
+ */
+const search = createSearchAgent({ allow: allowAction, lethal: false, maxDepth: 8 });
 const plainSearch = createSearchAgent();
 
 export const rhinoAgent: Agent = {
@@ -179,7 +184,8 @@ export const rhinoAgent: Agent = {
   chooseAction(real, legal, rng) {
     const first = legal[0];
     if (!first) throw new Error("合法手がありません");
-    const p = real.pending ? real.pending.player : real.active;
+    // マリガン中の active は先攻なので、マリガンするプレイヤーは actingPlayer で求める
+    const p = actingPlayer(real);
     if (deckClassOf(real, p) !== "elf") return plainSearch.chooseAction(real, legal, rng);
     if (first.type === "mulligan") {
       const swap = mulliganSwap(real, p);

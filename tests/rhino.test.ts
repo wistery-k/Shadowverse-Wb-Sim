@@ -4,7 +4,7 @@ import { searchAgent } from "../src/ai/search";
 import { searchRhinoLethal } from "../src/ai/rhinoLethal";
 import { ALL_CARDS } from "../src/cards";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
-import { applyAction, createGame, legalActions, newBoardCard, newHandCard, rngFrom, type GameState } from "../src/engine";
+import { applyAction, createGame, legalActions, newBoardCard, newHandCard, rngFrom, type Action, type GameState } from "../src/engine";
 import { playMatch } from "../src/sim/match";
 
 const id = (name: string) => ALL_CARDS.find((c) => c.name === name)!.id;
@@ -39,6 +39,30 @@ describe("リノセウス用ルール: マリガン", () => {
   it("どちらも無ければすべて入れ替える", () => {
     const { s, iids } = withHand(["聖樹の杖", "殺戮のリノセウス", "アドベンチャーエルフ・メイ", "虫の知らせ"]);
     expect(mulliganSwap(s, 0)).toEqual(iids);
+  });
+
+  it("後攻でも、先攻の相手がエルフ以外でも、エルフのマリガンはルールで行う", () => {
+    for (const elfSeat of [0, 1] as const) {
+      for (const first of [0, 1] as const) {
+        const decks: [string[], string[]] = elfSeat === 0 ? [elf.cards, royal.cards] : [royal.cards, elf.cards];
+        let s = createGame({ decks, seed: 1 });
+        s.first = first;
+        s.active = first;
+        s.players[elfSeat].hand = ["勇壮の堕天使・オリヴィエ", "ベビーカーバンクル", "ベビーカーバンクル", "フェアリーテイマー"].map(
+          (n) => newHandCard(s, id(n)),
+        );
+        const tamer = s.players[elfSeat].hand[3]!.iid;
+        const rng = rngFrom({ rng: 1 });
+        while (s.phase === "mulligan") {
+          const legal = legalActions(s);
+          const a = rhinoAgent.chooseAction(s, legal, rng);
+          if (a.type === "mulligan" && a.player === elfSeat) {
+            expect([...a.swap].sort()).toEqual(s.players[elfSeat].hand.map((h) => h.iid).filter((x) => x !== tamer).sort());
+          }
+          s = applyAction(s, a);
+        }
+      }
+    }
   });
 });
 
@@ -154,6 +178,23 @@ describe("リノセウス専用のリーサル探索", () => {
     s.players[0].hand = [newHandCard(s, id("フェアリー"))];
     expect(searchRhinoLethal(s, 0)).toBeNull();
   });
+});
+
+describe("リノセウス用ルール: 手数の多いターン", () => {
+  /**
+   * ユーザーの指摘（リノセウスエルフ vs アミュレット疾走ビショップ、seed 2510273090、エルフ後攻の 4 ターン目）。
+   * 相手の場は楽朗の天宮・フィルドア 3/1 と鉄拳の神父 5/4。推奨はテイマー → 進化 → フェアリー 2 枚で両方を処理（7 手）。
+   * 探索の深さ 6 では届かず、神父だけ処理してフィルドアを残していた
+   */
+  it("7 手以上かかる手順で相手のフォロワーを両方処理する", () => {
+    const bishop = DEFAULT_DECKS.find((d) => d.key === "アミュレット疾走ビショップ")!;
+    const log: Action[] = [{"type":"mulligan","player":1,"swap":[69,73]},{"type":"mulligan","player":0,"swap":[37]},{"type":"play","iid":41},{"type":"endTurn"},{"type":"endTurn"},{"type":"play","iid":44},{"type":"endTurn"},{"type":"play","iid":18},{"type":"endTurn"},{"type":"play","iid":52},{"type":"act","iid":52},{"type":"attack","attacker":44,"target":18},{"type":"endTurn"},{"type":"play","iid":30},{"type":"endTurn"},{"type":"play","iid":61},{"type":"attack","attacker":44,"target":"leader"},{"type":"endTurn"}];
+    let s = createGame({ decks: [elf.cards, bishop.cards], seed: 2510273090 });
+    for (const a of log) s = applyAction(s, a);
+    const rng = rngFrom({ rng: 1 });
+    while (s.phase === "main" && s.active === 0) s = applyAction(s, rhinoAgent.chooseAction(s, legalActions(s), rng));
+    expect(s.players[1].board.filter((c) => c.kind === "follower")).toEqual([]);
+  }, 30_000);
 });
 
 describe("リノセウス用ルール: 対戦", () => {

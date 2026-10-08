@@ -48,9 +48,14 @@ export interface SearchOptions {
    * （ビームの枠を同じ局面で埋めて、少し後で得をする並びを切らないため）
    */
   dedup: boolean;
+  /**
+   * 手札の同じカード（iid 以外がすべて同じ。フェアリー2枚等）は、どちらをプレイしても同じなので1つだけ展開する
+   * （iid が違うため dedup ではまとまらず、ビームの枠を同じ局面で埋めるため）
+   */
+  sameHandOnce: boolean;
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 8, maxDepth: 6, rescoreTop: 4, lethal: true, weights: DEFAULT_WEIGHTS, dedup: true };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 8, maxDepth: 6, rescoreTop: 4, lethal: true, weights: DEFAULT_WEIGHTS, dedup: true, sameHandOnce: true };
 
 interface Node {
   state: GameState;
@@ -90,6 +95,22 @@ export function simulateOpponentTurn(state: GameState, p: PlayerIndex, rng: Rng)
   return s ?? state;
 }
 
+/** 手札の同じカードのプレイを1つに絞った手の一覧 */
+function distinctPlays(state: GameState, actions: readonly Action[]): Action[] {
+  const p = state.active;
+  const seen = new Set<string>();
+  return actions.filter((a) => {
+    if (a.type !== "play") return true;
+    const card = state.players[p].hand.find((h) => h.iid === a.iid);
+    if (!card) return true;
+    const { iid: _iid, ...rest } = card;
+    const k = JSON.stringify(rest);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 /** 評価の高い順に、同じ局面を除いて width 個まで選ぶ（children は評価の降順） */
 function uniqueStates(children: Node[], width: number): Node[] {
   const seen = new KeySet();
@@ -108,7 +129,8 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
 
   // 深さ1: すべての手を展開する（最初の手の候補を落とさない）
   const allowed = (state: GameState, a: Action) => !opts.allow || a.type === "endTurn" || opts.allow(state, a, p);
-  for (const a of legalActions(root)) {
+  const expand = (state: GameState) => (opts.sameHandOnce ? distinctPlays(state, legalActions(state)) : legalActions(state));
+  for (const a of expand(root)) {
     if (!allowed(root, a)) continue;
     if (a.type === "endTurn") {
       terminals.push({ state: root, first: a, value: evaluateWith(root, p, w) });
@@ -128,7 +150,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
       }
       // ターン終了も候補（その時点の局面で終える）
       terminals.push(node);
-      for (const a of legalActions(node.state)) {
+      for (const a of expand(node.state)) {
         if (a.type === "endTurn" || !allowed(node.state, a)) continue;
         const next = tryApply(node.state, a);
         if (next) children.push({ state: next, first: node.first, value: evaluateWith(next, p, w) });
