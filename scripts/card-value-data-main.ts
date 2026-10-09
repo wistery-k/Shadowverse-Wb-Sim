@@ -5,6 +5,7 @@
 //   - hand: 手札からカード 1 枚を抜く（同じカードは 1 回だけ）
 //   - board: 自分の場からカード 1 枚を抜く（同じカードは 1 回だけ）
 //   - hp: 自分のリーダーの体力を 3 減らす（換算用）
+//   - maxpp: PP 最大値（と残り PP）を 1 減らす / ep・sep: EP・SEP を 1 減らす（評価関数の資源の項の確かめ用）
 // 勝敗の差（そのまま − 変えた局面）が、その局面でそれを持っていることの勝率上の価値になる。
 // 評価関数の点数の差（探索 AI の重み）も記録し、card-value-fit で比べる。
 // 1 局面 1 行の JSON を出力ファイルに追記する。途中で止めても、書き終えた局面はそのまま使える。
@@ -29,11 +30,11 @@ import {
 } from "../src/engine";
 import { playFrom } from "../src/sim/match";
 
-export type VariantKind = "hand" | "board" | "hp";
+export type VariantKind = "hand" | "board" | "hp" | "maxpp" | "ep" | "sep";
 
 export interface CardValueVariant {
   kind: VariantKind;
-  /** hand・board は抜いたカードのID。hp は空文字 */
+  /** hand・board は抜いたカードのID。他は空文字 */
   cardId: string;
   /** その局面のプレイヤーが勝ったか（エラーで最後まで打てなかったら null） */
   win: boolean | null;
@@ -101,6 +102,19 @@ function variantsOf(s: GameState, p: PlayerIndex): { kind: VariantKind; cardId: 
     const v = cloneState(s);
     v.players[p].leaderHp -= 3;
     out.push({ kind: "hp", cardId: "", state: v });
+  }
+  if (me.maxPp > 1) {
+    const v = cloneState(s);
+    const q = v.players[p];
+    q.maxPp -= 1;
+    q.pp = Math.min(q.pp, q.maxPp);
+    out.push({ kind: "maxpp", cardId: "", state: v });
+  }
+  for (const kind of ["ep", "sep"] as const) {
+    if (me[kind] <= 0) continue;
+    const v = cloneState(s);
+    v.players[p][kind] -= 1;
+    out.push({ kind, cardId: "", state: v });
   }
   return out;
 }
