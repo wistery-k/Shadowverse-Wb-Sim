@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { AGENTS } from "../ai/registry";
-import { cardOf, type PlayerIndex } from "../engine";
+import { cardOf, legalActions, opponent, type PlayerIndex } from "../engine";
 import { replayStates } from "../sim/replay";
 import { reproduceCommand } from "../sim/reproduce";
 import { seatDecks, type Entrant, type GameRecord } from "../sim/tournament";
-import { CardDetail, CardView } from "./CardView";
+import { CardDetail, CardView, type Motion } from "./CardView";
 import { describeAction } from "./describe";
-import { PlayerInfo } from "./Game";
+import { EmptySlots, PlayerInfo } from "./Game";
 
 interface Props {
   record: GameRecord;
@@ -41,6 +41,8 @@ export function Replay({ record, entrants, onClose }: Props) {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(SPEEDS[1]!.ms);
   const [detail, setDetail] = useState<string | null>(null);
+  // 下に表示するプレイヤー（表示だけの入れ替え）
+  const [bottom, setBottom] = useState<PlayerIndex>(0);
   const go = (s: number) => setStep(Math.max(0, Math.min(last, s)));
 
   useEffect(() => {
@@ -78,17 +80,60 @@ export function Replay({ record, entrants, onClose }: Props) {
   const state = states[step]!;
   const winnerName = record.seats ? names[record.seats.winner] : "なし";
 
+  // 攻撃できるフォロワー（リーダーにも攻撃できるか）
+  const attackable = useMemo(() => {
+    const m = new Map<number, "follower" | "leader">();
+    if (state.phase !== "main" || state.pending) return m;
+    for (const a of legalActions(state)) {
+      if (a.type !== "attack") continue;
+      if (a.target === "leader") m.set(a.attacker, "leader");
+      else if (!m.has(a.attacker)) m.set(a.attacker, "follower");
+    }
+    return m;
+  }, [state]);
+
+  // 直前の行動の動き: 場に出たフォロワー・攻撃したフォロワーと攻撃されたもの
+  const { motions, leaderHit } = useMemo(() => {
+    const motions = new Map<number, Motion>();
+    let leaderHit: PlayerIndex | null = null;
+    const prev = step > 0 ? states[step - 1]! : null;
+    const action = step > 0 ? actions[step - 1] : undefined;
+    if (prev) {
+      for (const p of [0, 1] as const) {
+        const before = new Set(prev.players[p].board.map((c) => c.iid));
+        for (const c of state.players[p].board) if (c.kind === "follower" && !before.has(c.iid)) motions.set(c.iid, "summon");
+      }
+    }
+    if (prev && action?.type === "attack") {
+      motions.set(action.attacker, prev.active === bottom ? "attack-up" : "attack-down");
+      if (action.target === "leader") leaderHit = opponent(prev.active);
+      else motions.set(action.target, "hit");
+    }
+    return { motions, leaderHit };
+  }, [states, step, bottom]);
+
   const side = (p: PlayerIndex, top: boolean) => {
     const pl = state.players[p];
     const board = (
       <div class="board">
-        {pl.board.map((c) => (
-          <CardView key={c.iid} cardId={c.cardId} board={c} onClick={() => setDetail(c.cardId)} />
-        ))}
+        {pl.board.map((c) => {
+          const motion = motions.get(c.iid) ?? null;
+          return (
+            <CardView
+              // 動きがあるときは作り直して、同じカードでもアニメーションを最初から再生する
+              key={motion ? `${c.iid}-${step}` : c.iid}
+              cardId={c.cardId}
+              board={c}
+              attackable={attackable.get(c.iid) ?? null}
+              motion={motion}
+              onClick={() => setDetail(c.cardId)}
+            />
+          );
+        })}
       </div>
     );
     const leader = (
-      <div class="leader">
+      <div key={leaderHit === p ? `leader-${step}` : "leader"} class={`leader ${leaderHit === p ? "motion-hit" : ""}`}>
         リーダー {pl.leaderHp}/{pl.leaderMaxHp}
       </div>
     );
@@ -98,6 +143,7 @@ export function Replay({ record, entrants, onClose }: Props) {
         {pl.hand.map((h) => (
           <CardView key={h.iid} cardId={h.cardId} hand={h} onClick={() => setDetail(h.cardId)} />
         ))}
+        <EmptySlots count={pl.hand.length} />
       </div>
     );
     return (
@@ -133,8 +179,8 @@ export function Replay({ record, entrants, onClose }: Props) {
       </div>
       <Reproduce record={record} entrants={entrants} names={names} />
       <div class="game">
-        {side(1, true)}
-        {side(0, false)}
+        {side(opponent(bottom), true)}
+        {side(bottom, false)}
         <section class="controls">
           <div class="banner column">
             <div class="replay-buttons">
@@ -176,6 +222,9 @@ export function Replay({ record, entrants, onClose }: Props) {
               <span class="muted">
                 {step}/{last} 手
               </span>
+              <button type="button" title="表示だけ上下を入れ替えます" onClick={() => setBottom(opponent(bottom))}>
+                上下を入れ替え（下: {names[bottom]}）
+              </button>
             </div>
             <input type="range" min={0} max={last} value={step} onInput={(e) => go(Number(e.currentTarget.value))} />
             <div>

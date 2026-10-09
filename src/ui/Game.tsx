@@ -6,8 +6,11 @@ import {
   actingPlayer,
   applyAction,
   cardOf,
+  EP,
+  HAND_LIMIT,
   legalActions,
   rngFrom,
+  SEP,
   type Action,
   type GameState,
   type PlayerIndex,
@@ -191,6 +194,7 @@ export function Game({ initial, ai, onExit }: Props) {
               onClick={() => clickEntity(h.iid)}
             />
           ))}
+          <EmptySlots count={me.hand.length} />
         </div>
       </section>
 
@@ -301,6 +305,30 @@ function actionLabel(state: GameState, a: Action): string {
   }
 }
 
+/** EP（黄）・SEP（紫）を丸で表示する。使ったぶんは中抜き */
+function Points({ kind, left, max }: { kind: "ep" | "sep"; left: number; max: number }) {
+  const label = kind === "ep" ? "EP" : "SEP";
+  return (
+    <span class="points" title={`${label} ${left}/${max}`}>
+      {label}
+      {Array.from({ length: Math.max(max, left) }, (_, i) => (
+        <span key={i} class={`point ${kind} ${i < left ? "" : "used"}`} />
+      ))}
+    </span>
+  );
+}
+
+/** 手札の空き（上限まで点線の枠を並べる） */
+export function EmptySlots({ count }: { count: number }) {
+  return (
+    <>
+      {Array.from({ length: Math.max(0, HAND_LIMIT - count) }, (_, i) => (
+        <span key={`empty-${i}`} class="slot-empty" />
+      ))}
+    </>
+  );
+}
+
 export function PlayerInfo({ label, state, p }: { label: string; state: GameState; p: PlayerIndex }) {
   const pl = state.players[p];
   const active = state.active === p && state.phase === "main";
@@ -311,8 +339,8 @@ export function PlayerInfo({ label, state, p }: { label: string; state: GameStat
         PP {pl.pp}/{pl.maxPp}
       </span>
       {pl.extraPpAvailable && <span class="badge">エクストラPP</span>}
-      <span>EP {pl.ep}</span>
-      <span>SEP {pl.sep}</span>
+      <Points kind="ep" left={pl.ep} max={EP} />
+      <Points kind="sep" left={pl.sep} max={SEP} />
       <span>手札 {pl.hand.length}</span>
       <span>山札 {pl.deck.length}</span>
       <span>墓場 {pl.graveyard}</span>
