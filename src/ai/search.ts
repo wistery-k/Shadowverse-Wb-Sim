@@ -65,7 +65,8 @@ export interface SearchOptions {
   /**
    * 融合を、続く自分の手とまとめて 1 手として展開する（融合だけで終える局面も残す。手札が 9 枚のとき融合して減らしておく手のため）。
    * 融合は評価値を変えないので、融合を挟む手順がビームで切られていた（seed 472546500 の AFネメシス 5 ターン目。docs/ai-notes.md）。
-   * 融合に融合は続けない（続けると、コアの多い局面で 1 手 20 秒かかった）
+   * 融合に融合は続けない（続けると、コアの多い局面で 1 手 20 秒かかった）。
+   * この形では勝率が変わらなかった（AFネメシス 44.0% → 44.0%）ため既定は無効
    */
   chainFuse: boolean;
   /**
@@ -81,7 +82,7 @@ export interface SearchOptions {
   mulligan: "weights" | "cost";
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: true, scoreTurnEnd: "all", mulligan: "weights" };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights" };
 
 interface Node {
   state: GameState;
