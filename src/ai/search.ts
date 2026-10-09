@@ -85,12 +85,13 @@ export interface SearchOptions {
    * 合流する相打ち（convergingTrade.ts）を、ターンを終える前に打つものとして扱う。
    * ターン終了の局面はその攻撃を打ってから採点し、相手のターンもその局面から読む。
    * 合流する攻撃が残っている局面でのターン終了は、攻撃してから終える手に劣らないので候補から外す
-   * （seed 2362697708 のビショップ 5 ターン目、進化したサレファでエースと相打ちしない。docs/ai-notes.md）
+   * （seed 2362697708 のビショップ 5 ターン目、進化したサレファでエースと相打ちしない。docs/ai-notes.md）。
+   * 勝率は変わらず（200 試合で 49.5%）、1 手あたりの時間は約 1.07 倍
    */
   settleTrades: boolean;
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: false };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: true };
 
 interface Node {
   state: GameState;

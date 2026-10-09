@@ -18,9 +18,11 @@
 
 import {
   applyAction,
+  attackOf,
+  attackTargets,
   boardAbilities,
   crestsAndBoard,
-  legalActions,
+  hasKeyword,
   opponent,
   type Ability,
   type Action,
@@ -50,10 +52,16 @@ const HARMLESS_OWN = new Set<Ability["trigger"]["on"]>([
 
 const isFollower = (c: { kind: string }): c is FollowerOnBoard => c.kind === "follower";
 
-/** 場のカードに関わる（対象にする・数える・場に出す）能力か */
+/** 場のカードに関わる（対象にする・数える・場に出す）能力か（能力の定義ごとに覚えておく） */
+const touchesBoardCache = new WeakMap<Ability, boolean>();
 const touchesBoard = (a: Ability) => {
-  const s = JSON.stringify(a.effects);
-  return s.includes('"kind":"board"') || s.includes('"op":"summon');
+  let v = touchesBoardCache.get(a);
+  if (v === undefined) {
+    const s = JSON.stringify(a.effects);
+    v = s.includes('"kind":"board"') || s.includes('"op":"summon');
+    touchesBoardCache.set(a, v);
+  }
+  return v;
 };
 
 /** 場とクレストに、どちらのターンに倒れたかで結果が変わりうる能力がある */
@@ -91,28 +99,39 @@ function canBeAttackedBack(state: GameState, p: PlayerIndex, a: FollowerOnBoard,
 
 /** プレイヤー p の合流する攻撃（p の手番で、選択待ちでないときのみ） */
 export function convergingAttacks(state: GameState, p: PlayerIndex): Action[] {
+  return convergingTrades(state, p, false).map((t) => t.action);
+}
+
+/** 合流する攻撃と、打った後の局面。探索の全局面で呼ぶので、安い判定から行う。first なら最初の1つだけ探す */
+function convergingTrades(state: GameState, p: PlayerIndex, first: boolean): { action: Action; after: GameState }[] {
   if (state.phase === "ended" || state.active !== p || state.pending) return [];
-  const attacks = legalActions(state).filter((a): a is Extract<Action, { type: "attack" }> => a.type === "attack" && a.target !== "leader");
-  if (attacks.length === 0 || hasTimingSensitiveAbility(state)) return [];
   const me = state.players[p];
   const opp = state.players[opponent(p)];
-  const out: Action[] = [];
-  for (const action of attacks) {
-    const a = me.board.find((c) => c.iid === action.attacker);
-    const b = opp.board.find((c) => c.iid === action.target);
-    if (!a || !b || !isFollower(a) || !isFollower(b)) continue;
-    if (b.evolve === "superEvolved") continue;
-    if (!symmetricFollower(a) || !symmetricFollower(b) || hasBoardLastWords(b)) continue;
-    if (!canBeAttackedBack(state, p, a, b)) continue;
-    let after: GameState;
-    try {
-      after = applyAction(state, action);
-    } catch {
-      continue;
+  const out: { action: Action; after: GameState }[] = [];
+  let sensitive: boolean | null = null;
+  for (const a of me.board) {
+    if (!isFollower(a) || a.attacksThisTurn >= a.maxAttacks || !symmetricFollower(a)) continue;
+    for (const b of opp.board) {
+      if (!isFollower(b) || b.evolve === "superEvolved") continue;
+      // 倒せそうにないもの（実際に倒れるかは後で試す）
+      const bane = hasKeyword(a, "bane");
+      if (!bane && (attackOf(a) < b.defense || hasKeyword(b, "barrier"))) continue;
+      if (!symmetricFollower(b) || hasBoardLastWords(b) || !canBeAttackedBack(state, p, a, b)) continue;
+      if (!attackTargets(state, a).includes(b.iid)) continue;
+      sensitive ??= hasTimingSensitiveAbility(state);
+      if (sensitive) return [];
+      const action: Action = { type: "attack", attacker: a.iid, target: b.iid };
+      let after: GameState;
+      try {
+        after = applyAction(state, action);
+      } catch {
+        continue;
+      }
+      if (after.pending || after.phase === "ended") continue;
+      if (after.players[opponent(p)].board.some((c) => c.iid === b.iid)) continue;
+      out.push({ action, after });
+      if (first) return out;
     }
-    if (after.pending || after.phase === "ended") continue;
-    if (after.players[opponent(p)].board.some((c) => c.iid === b.iid)) continue;
-    out.push(action);
   }
   return out;
 }
@@ -121,9 +140,9 @@ export function convergingAttacks(state: GameState, p: PlayerIndex): Action[] {
 export function settleConvergingTrades(state: GameState, p: PlayerIndex): GameState {
   let s = state;
   for (let guard = 0; guard < 7; guard++) {
-    const a = convergingAttacks(s, p)[0];
-    if (!a) break;
-    s = applyAction(s, a);
+    const t = convergingTrades(s, p, true)[0];
+    if (!t) break;
+    s = t.after;
   }
   return s;
 }
