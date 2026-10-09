@@ -89,11 +89,12 @@ const FUSION_HOLD: Readonly<Record<string, number>> = Object.fromEntries(
 );
 
 /**
- * 探索 AI の既定の重み（基準の重み＋PP 最大値＋融合で作るカードの価値）。
+ * 探索 AI の既定の重み（基準の重み＋PP 最大値＋SEP＋融合で作るカードの価値）。
  * PP 最大値の重みが 0 だと、竜の啓示を打つ手は手札が 1 枚減るだけに見え、初手にあっても 95% の試合で打たなかった。
- * 重み 0/1/2/4/6/8/12/16 で比べて 8 が最も勝った（docs/ai-notes.md）
+ * 重み 0/1/2/4/6/8/12/16 で比べて 8 が最も勝った（docs/ai-notes.md）。
+ * SEP が 2.5 だと +3/+3（5.4）より安く、超進化しなくても倒せる相手にもジェノを超進化した（docs/ai-notes.md）
  */
-export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, hold: FUSION_HOLD };
+export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, hold: FUSION_HOLD };
 
 const KEYWORD_VALUE: Partial<Record<string, number>> = {
   ward: 1,

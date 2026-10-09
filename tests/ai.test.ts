@@ -24,7 +24,7 @@ describe("AI", () => {
 import { determinize } from "../src/ai/determinize";
 import { searchAgent, simulateOpponentTurn } from "../src/ai/search";
 import { rhinoAgent } from "../src/ai/rhino";
-import { applyAction, createGame, legalActions, newBoardCard, newHandCard } from "../src/engine";
+import { applyAction, createGame, legalActions, newBoardCard, newHandCard, type GameState } from "../src/engine";
 import { ALL_CARDS } from "../src/cards";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 
@@ -94,6 +94,58 @@ describe("探索 AI", () => {
       }
     }
     expect(found).toBe(true);
+  });
+
+  /** ロイヤルの 8 ターン目（PP 8・SEP 2）。相手は体力 20 で場に opp を置く */
+  function genoTurn(opts: { genoInHand: boolean; opp: string[] }) {
+    const royal = DEFAULT_DECKS.find((d) => d.name === "アマリアロイヤル")!;
+    const dragon = DEFAULT_DECKS.find((d) => d.name === "ランプドラゴン")!;
+    let s = createGame({ decks: [royal.cards, dragon.cards], seed: 1 });
+    s = applyAction(s, { type: "mulligan", player: s.first, swap: [] });
+    s = applyAction(s, { type: "mulligan", player: s.first === 0 ? 1 : 0, swap: [] });
+    while (!(s.active === 0 && s.players[0].turnCount >= 8)) s = applyAction(s, { type: "endTurn" });
+    const [me, opp] = s.players;
+    me.board = [];
+    opp.board = [];
+    me.hand = [];
+    // 前のターンから場にいるフォロワー
+    const follower = (cardId: string) => {
+      const c = newBoardCard(s, cardId);
+      if (c.kind !== "follower") throw new Error(`フォロワーではありません: ${cardId}`);
+      return { ...c, enteredTurn: 0 };
+    };
+    const geno = id("レヴィオンアックス・ジェノ");
+    if (opts.genoInHand) me.hand.push(newHandCard(s, geno));
+    else me.board.push(follower(geno));
+    for (const name of opts.opp) opp.board.push(follower(id(name)));
+    return s;
+  }
+
+  /** 探索 AI でターンの終わりまで打ち、打った手を返す */
+  function playTurn(state: GameState) {
+    let s = state;
+    const rng = rngFrom({ rng: 7 });
+    const actions = [];
+    for (let i = 0; i < 20 && s.phase !== "ended" && (s.pending ? s.pending.player : s.active) === 0; i++) {
+      const a = searchAgent.chooseAction(s, legalActions(s), rng);
+      actions.push(a);
+      if (a.type === "endTurn") break;
+      s = applyAction(s, a);
+    }
+    return actions;
+  }
+
+  it("超進化しなくても倒せる相手には、ジェノを超進化しない", () => {
+    // ジェノ（7/6、2 回攻撃）で激震のゴリアテ（4/5）と異端の侍を倒せる
+    const actions = playTurn(genoTurn({ genoInHand: true, opp: ["激震のゴリアテ", "異端の侍"] }));
+    expect(actions.filter((a) => a.type === "attack")).toHaveLength(2);
+    expect(actions.some((a) => a.type === "superEvolve")).toBe(false);
+  });
+
+  it("超進化すれば倒せる大型がいれば、ジェノを超進化する", () => {
+    // 守護の激震のゴリアテを倒した後、キャラバンマンモス（10/10）は超進化した 10 点でないと倒せない
+    const actions = playTurn(genoTurn({ genoInHand: false, opp: ["激震のゴリアテ", "キャラバンマンモス"] }));
+    expect(actions.some((a) => a.type === "superEvolve")).toBe(true);
   });
 });
 
