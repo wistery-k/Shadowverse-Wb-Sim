@@ -69,9 +69,14 @@ type Memo = Map<string, { damage: number; exact: boolean }>;
 let cache: { turn: number; player: PlayerIndex; memo: Memo; visited: number } | null = null;
 const MAX_CACHE = 500_000;
 
-/** メモを捨てる（テスト用） */
+/** 全探索をした回数と、リーサルを見つけた回数（実験の集計用。resetExactLethalCache で 0 に戻る） */
+export const exactLethalCounts = { searched: 0, found: 0 };
+
+/** メモを捨てる（新しい試合を始めるとき） */
 export function resetExactLethalCache(): void {
   cache = null;
+  exactLethalCounts.searched = 0;
+  exactLethalCounts.found = 0;
 }
 
 function cacheFor(root: GameState, p: PlayerIndex): NonNullable<typeof cache> {
@@ -93,6 +98,7 @@ export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLe
   const memo = turnCache.memo;
   const limit = Math.min(opts.maxStates, opts.maxStatesPerTurn - turnCache.visited);
   if (limit <= 0) return null;
+  exactLethalCounts.searched++;
   let visited = 0;
 
   const candidates = (s: GameState): Action[] => {
@@ -147,7 +153,9 @@ export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLe
       s = found.next;
       need -= found.dealt;
     }
-    return s.winner === p ? seq : null;
+    if (s.winner !== p) return null;
+    exactLethalCounts.found++;
+    return seq;
   } catch (e) {
     if (e instanceof Abort) return null;
     throw e;

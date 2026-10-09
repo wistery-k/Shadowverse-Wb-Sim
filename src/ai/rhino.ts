@@ -21,7 +21,7 @@ import {
   type GameState,
   type PlayerIndex,
 } from "../engine";
-import { DEFAULT_EXACT_LETHAL_OPTIONS, searchExactLethal, type ExactLethalOptions } from "./exactLethal";
+import { DEFAULT_EXACT_LETHAL_OPTIONS, resetExactLethalCache, searchExactLethal, type ExactLethalOptions } from "./exactLethal";
 import { DEFAULT_LETHAL_OPTIONS, DIRECT_SCORING, findLethal, searchLethal } from "./lethal";
 import { searchRhinoLethal } from "./rhinoLethal";
 import { createSearchAgent, type SearchOptions } from "./search";
@@ -287,6 +287,8 @@ export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}): Ag
     chooseAction(real, legal, rng) {
       const first = legal[0];
       if (!first) throw new Error("合法手がありません");
+      // 新しい試合では、全探索のリーサル探索のメモを捨てる（ターン番号で区別しているので、別の試合の同じターンと混ざらないように）
+      if (first.type === "mulligan") resetExactLethalCache();
       // マリガン中の active は先攻なので、マリガンするプレイヤーは actingPlayer で求める
       const p = actingPlayer(real);
       if (deckClassOf(real, p) !== "elf") return plainSearch.chooseAction(real, legal, rng);
