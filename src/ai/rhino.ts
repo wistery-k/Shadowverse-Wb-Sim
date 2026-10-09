@@ -185,7 +185,7 @@ function searchLethalForRhino(root: GameState, p: PlayerIndex): Action[] | null 
  * （seed 2510273090 の 4 ターン目・seed 954874822 の 7 ターン目。docs/ai-notes.md）
  */
 export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}): Agent {
-  const search = createSearchAgent({ allow: allowAction, lethal: false, ...searchOptions });
+  const search = createSearchAgent({ allow: allowAction, lethal: false, nextLethalSearch: (s, q) => searchLethalForRhino(s, q) !== null, ...searchOptions });
   const plainSearch = createSearchAgent();
   return {
     name: "rhino",

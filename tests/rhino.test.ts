@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowAction, mulliganSwap, rhinoAgent } from "../src/ai/rhino";
+import { allowAction, createRhinoAgent, mulliganSwap, rhinoAgent } from "../src/ai/rhino";
 import { searchAgent } from "../src/ai/search";
 import { searchRhinoLethal } from "../src/ai/rhinoLethal";
 import { ALL_CARDS } from "../src/cards";
@@ -312,6 +312,44 @@ describe("seed 954874822（リノセウスエルフ vs アミュレット疾走�
     }
     expect(moves.find((m) => m.move === "ピュアクリスタリア・リリィ")!.combo).toBeGreaterThanOrEqual(2);
     expect(oppFollowers(end, 0)).toEqual([]);
+  }, 60_000);
+});
+
+describe("seed 2275116772（リノセウスエルフ vs アミュレット疾走ビショップ、エルフ先攻）", () => {
+  // ユーザーが指摘した試合の、エルフの 7 ターン目の開始までの行動（両方ともリノセウス用 AI）
+  const log: Action[] = [{"type":"mulligan","player":0,"swap":[18,1,7]},{"type":"mulligan","player":1,"swap":[73,78,72]},{"type":"play","iid":3},{"type":"endTurn"},{"type":"play","iid":43},{"type":"endTurn"},{"type":"play","iid":14},{"type":"attack","attacker":3,"target":"leader"},{"type":"endTurn"},{"type":"extraPp"},{"type":"play","iid":56},{"type":"act","iid":56},{"type":"choose","targets":[3]},{"type":"endTurn"},{"type":"play","iid":12},{"type":"play","iid":81},{"type":"play","iid":82},{"type":"attack","attacker":14,"target":"leader"},{"type":"endTurn"},{"type":"play","iid":55},{"type":"act","iid":55},{"type":"endTurn"},{"type":"play","iid":7},{"type":"play","iid":83},{"type":"attack","attacker":14,"target":"leader"},{"type":"attack","attacker":12,"target":"leader"},{"type":"attack","attacker":81,"target":"leader"},{"type":"attack","attacker":82,"target":"leader"},{"type":"endTurn"},{"type":"play","iid":50},{"type":"act","iid":50},{"type":"evolve","iid":85},{"type":"play","iid":41},{"type":"attack","attacker":85,"target":14},{"type":"endTurn"},{"type":"play","iid":35},{"type":"attack","attacker":12,"target":"leader"},{"type":"evolve","iid":35},{"type":"attack","attacker":81,"target":"leader"},{"type":"attack","attacker":82,"target":"leader"},{"type":"attack","attacker":83,"target":"leader"},{"type":"endTurn"},{"type":"play","iid":45},{"type":"evolve","iid":45},{"type":"choose","targets":[35]},{"type":"act","iid":50},{"type":"play","iid":51},{"type":"attack","attacker":45,"target":81},{"type":"endTurn"},{"type":"play","iid":38},{"type":"evolve","iid":12},{"type":"attack","attacker":12,"target":"leader"},{"type":"play","iid":25},{"type":"attack","attacker":82,"target":"leader"},{"type":"attack","attacker":83,"target":"leader"},{"type":"endTurn"},{"type":"play","iid":70},{"type":"act","iid":70},{"type":"endTurn"}];
+  const bishop = DEFAULT_DECKS.find((d) => d.key === "アミュレット疾走ビショップ")!;
+  const start = () => {
+    let s = createGame({ decks: [elf.cards, bishop.cards], seed: 2275116772 });
+    for (const a of log) s = applyAction(s, a);
+    return s;
+  };
+  const name = (s: GameState, iid: number) => ALL_CARDS.find((c) => c.id === s.players[0].hand.find((h) => h.iid === iid)!.cardId)!.name;
+  /** エルフのターンを最後まで進め、プレイしたカード名とその時点のコンボを返す */
+  const playTurn = (agent: typeof rhinoAgent, seed = 1) => {
+    let s = start();
+    const rng = rngFrom({ rng: seed });
+    const plays: { card: string; combo: number }[] = [];
+    while (s.phase === "main" && (s.pending ? s.pending.player : s.active) === 0) {
+      const a = agent.chooseAction(s, legalActions(s), rng);
+      if (a.type === "play") plays.push({ card: name(s, a.iid), combo: s.players[0].combo });
+      s = applyAction(s, a);
+    }
+    return plays;
+  };
+
+  /**
+   * 7 ターン目（PP 7・SEP 2、相手は体力 8 で場にフォロワーなし）。アリア → 超進化 → フェアリーで顔 4 点にすると、
+   * クレストで疾走の付くフェアリーで次のターンに倒しきれる（相手のターン後に 4 割強。テイマーの手は 1 割強）
+   */
+  it("7 ターン目: 次のターンのリーサルを見て、アリアを出す（nextLethal）", () => {
+    expect(start().players[0].combo).toBe(0);
+    for (const seed of [1, 2, 3]) expect(playTurn(createRhinoAgent({ nextLethal: 10 }), seed).map((x) => x.card)).toContain("自然の妖精姫・アリア");
+  }, 60_000);
+
+  /** テイマーの並びがビームで切られず、燐光の岩はコンボ 2 以上で出す（森の神秘が加わる） */
+  it("7 ターン目: 燐光の岩はコンボ 2 以上で出す（perFirst）", () => {
+    for (const p of playTurn(createRhinoAgent({ perFirst: 4 })).filter((x) => x.card === "燐光の岩")) expect(p.combo).toBeGreaterThanOrEqual(2);
   }, 60_000);
 });
 
