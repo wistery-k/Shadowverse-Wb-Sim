@@ -103,20 +103,33 @@ export function jsonEqual(a: unknown, b: unknown): boolean {
 
 /** JSON にしたときに同じ値を1つにまとめる集合 */
 export class KeySet {
-  private readonly buckets = new Map<number, unknown[]>();
+  /** 値（addLazy で加えたものは、比べる必要が出るまで作らない） */
+  private readonly buckets = new Map<number, { value?: unknown; make: () => unknown }[]>();
 
   /**
    * 同じ値がまだ無ければ加えて true、既にあれば false。
    * hash は値から決まる数（JSON にしたときに同じ値には同じ数）。普通は stateHash を使う
    */
   add(value: unknown, hash: number): boolean {
+    return this.addLazy(() => value, hash);
+  }
+
+  /**
+   * add と同じだが、値は make で作る。同じハッシュのものが無ければ値を作らない
+   * （ハッシュが違えば値も違うので、比べるまでもない。値を作るのが重いときに使う）
+   */
+  addLazy(make: () => unknown, hash: number): boolean {
     const bucket = this.buckets.get(hash);
     if (!bucket) {
-      this.buckets.set(hash, [value]);
+      this.buckets.set(hash, [{ make }]);
       return true;
     }
-    for (const x of bucket) if (jsonEqual(x, value)) return false;
-    bucket.push(value);
+    const value = make();
+    for (const x of bucket) {
+      if (!("value" in x)) x.value = x.make();
+      if (jsonEqual(x.value, value)) return false;
+    }
+    bucket.push({ value, make });
     return true;
   }
 }
@@ -131,14 +144,37 @@ export function withoutIds<T extends { iid: number }>(c: T): Omit<T, "iid" | "or
   return rest;
 }
 
-/** iid を除いたカードを、中身の順に並べる（並び順だけが違うものを同じにする） */
+/** sortedWithoutIds の並べ替え用のハッシュ（iid・order・boosts を除いた中身が同じなら同じ値） */
+function cardSortHash(c: object): number {
+  let h = 0x811c9dc5;
+  for (const [k, v] of Object.entries(c)) {
+    if (k === "iid" || k === "order" || k === "boosts") continue;
+    if (typeof v === "number") h = mix(h, v);
+    else if (typeof v === "string") h = mix(h, hashString(v));
+    else if (typeof v === "boolean") h = mix(h, v ? 1 : 2);
+    else if (Array.isArray(v)) h = mix(h, v.length);
+  }
+  return h;
+}
+
+/**
+ * iid を除いたカードを、中身の順に並べる（並び順だけが違うものを同じにする）。
+ * 並べる順はハッシュ（同じなら JSON の文字列）で決める。中身が同じカードの集まりは、元の並び順によらず同じ列になる
+ */
 function sortedWithoutIds<T extends { iid: number }>(cards: readonly T[]): unknown[] {
-  return cards
-    .map((c) => {
-      const v = withoutIds(c);
-      return { v, k: JSON.stringify(v) };
+  if (cards.length === 0) return [];
+  if (cards.length === 1) return [withoutIds(cards[0]!)];
+  const items = cards.map((c) => {
+    const v = withoutIds(c);
+    return { v, h: cardSortHash(v), k: null as string | null };
+  });
+  const json = (x: (typeof items)[number]) => (x.k ??= JSON.stringify(x.v));
+  return items
+    .sort((x, y) => {
+      if (x.h !== y.h) return x.h < y.h ? -1 : 1;
+      const kx = json(x), ky = json(y);
+      return kx < ky ? -1 : kx > ky ? 1 : 0;
     })
-    .sort((x, y) => (x.k < y.k ? -1 : x.k > y.k ? 1 : 0))
     .map((x) => x.v);
 }
 

@@ -152,7 +152,7 @@ function uniqueStates(children: Node[], width: number): Node[] {
   const out: Node[] = [];
   for (const c of children) {
     if (out.length >= width) break;
-    if (seen.add(turnOrderKey(c.state), turnOrderHash(c.state))) out.push(c);
+    if (seen.addLazy(() => turnOrderKey(c.state), turnOrderHash(c.state))) out.push(c);
   }
   return out;
 }

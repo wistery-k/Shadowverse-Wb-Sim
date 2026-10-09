@@ -27,6 +27,7 @@ import { abilitiesOf, cardOf, crestAbilitiesOf } from "./registry";
 import { rngFrom, shuffle } from "./rng";
 import {
   attackOf,
+  boardAbilities,
   canAddToBoard,
   checkLeaders,
   drawCards,
@@ -202,6 +203,29 @@ function clearTurnEffects(state: GameState): void {
   }
 }
 
+/** clearTurnEffects で変わるものがあるか */
+function hasTurnEffects(state: GameState): boolean {
+  for (const p of [0, 1] as const) {
+    for (const c of state.players[p].board) {
+      if (c.tempKeywords.length > 0) return true;
+      if (c.kind === "follower" && (c.tempAttack !== 0 || (c.cannotAttackUntil !== null && c.cannotAttackUntil <= state.turn))) return true;
+    }
+  }
+  return false;
+}
+
+/** 手番のプレイヤーが今ターンを終えると誘発する【ターン終了時】の能力が、場かクレストにあるか（fire.turnEnd と同じ条件） */
+function hasTurnEndTrigger(state: GameState): boolean {
+  for (const p of [0, 1] as const) {
+    const whose = p === state.active ? "self" : "opponent";
+    const matches = (a: Ability) => a.trigger.on === "turnEnd" && a.trigger.whose === whose;
+    const pl = state.players[p];
+    if (pl.crests.some((c) => crestAbilitiesOf(c.crestId).some(matches))) return true;
+    if (pl.board.some((c) => boardAbilities(c).some(matches))) return true;
+  }
+  return false;
+}
+
 function endTurnCleanup(state: GameState): void {
   clearTurnEffects(state);
   pushStartTurn(state, opponent(state.active));
@@ -214,6 +238,13 @@ function endTurnCleanup(state: GameState): void {
  */
 export function resolveTurnEnd(prev: GameState): GameState {
   if (prev.phase !== "main" || prev.pending || prev.stack.length > 0 || prev.queue.length > 0) return prev;
+  // ターン終了時の能力が無ければ、一時的な効果を終わらせるだけ（AI の探索で全局面に使うので、複製と解決を省く）
+  if (!hasTurnEndTrigger(prev)) {
+    if (!hasTurnEffects(prev)) return prev;
+    const state = cloneState(prev);
+    clearTurnEffects(state);
+    return state;
+  }
   const state = cloneState(prev);
   pushInternal(state, [{ op: "_endTurn" }], systemCtx(state.active));
   run(state);

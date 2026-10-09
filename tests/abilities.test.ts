@@ -391,6 +391,18 @@ describe("ターン終了時の処理だけを進める（resolveTurnEnd）", ()
     expect(JSON.stringify(s)).toBe(before);
   });
 
+  it("ターン終了時の能力が無ければ、一時的な効果だけを終わらせる（終わらせるものも無ければそのまま返す）", () => {
+    const { s, me, opp } = setup();
+    toBoard(s, opp, "キャラバンマンモス");
+    expect(resolveTurnEnd(s)).toBe(s);
+    const buffed = toBoard(s, me, "キャラバンマンモス", { tempAttack: 2, tempKeywords: ["ward"] });
+    const before = JSON.stringify(s);
+    const t = resolveTurnEnd(s);
+    expect(follower(t, buffed.iid)?.tempAttack).toBe(0);
+    expect(follower(t, buffed.iid)?.tempKeywords).toEqual([]);
+    expect(JSON.stringify(s)).toBe(before);
+  });
+
   it("選択待ちの局面はそのまま返す", () => {
     const { s, me, opp } = setup();
     toBoard(s, opp, "キャラバンマンモス");

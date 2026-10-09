@@ -69,6 +69,7 @@ describe("KeySet", () => {
         for (const { scope, key } of projections) {
           const strings = new Set<string>();
           const keys = new KeySet();
+          const lazyKeys = new KeySet();
           const hashes = new Map<string, number>();
           for (const t of states) {
             const k = key(t);
@@ -79,6 +80,7 @@ describe("KeySet", () => {
             const isNew = !strings.has(json);
             strings.add(json);
             expect(keys.add(k, h)).toBe(isNew);
+            expect(lazyKeys.addLazy(() => key(t), h)).toBe(isNew);
             if (!isNew) merged++;
           }
         }
