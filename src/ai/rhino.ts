@@ -17,6 +17,7 @@ import {
   type GameState,
   type PlayerIndex,
 } from "../engine";
+import { DEFAULT_EXACT_LETHAL_OPTIONS, searchExactLethal, type ExactLethalOptions } from "./exactLethal";
 import { DEFAULT_LETHAL_OPTIONS, DIRECT_SCORING, findLethal, searchLethal } from "./lethal";
 import { searchRhinoLethal } from "./rhinoLethal";
 import { createSearchAgent, type SearchOptions } from "./search";
@@ -179,6 +180,23 @@ export function searchLethalForRhino(root: GameState, p: PlayerIndex): Action[] 
   return searchLethal(root, p, DIRECT_ONLY) ?? searchRhinoLethal(root, p);
 }
 
+/** 全探索のリーサル探索では、手札の森の神秘を先に打つ（0 コストでコンボが増えるだけなので、先に打って損は無い） */
+export const RHINO_EXACT: ExactLethalOptions = {
+  ...DEFAULT_EXACT_LETHAL_OPTIONS,
+  forced: (s, p, legal) => {
+    const mystery = s.players[p].hand.find((h) => nameOf(h.cardId) === MYSTERY);
+    return (mystery && legal.find((a) => a.type === "play" && a.iid === mystery.iid)) ?? null;
+  },
+};
+
+/**
+ * 自分のターンに実際に打つ手を決めるときのリーサル探索。上の 2 つで見つからなければ全探索する（ユーザーのリーサル問題集。docs/ai-notes.md）。
+ * 全探索は時間がかかるので、探索 AI の葉の局面（次のターンのリーサル）では使わない
+ */
+export function searchLethalForRhinoTurn(root: GameState, p: PlayerIndex): Action[] | null {
+  return searchLethalForRhino(root, p) ?? (root.players[p].hand.some((h) => nameOf(h.cardId) === RHINO) ? searchExactLethal(root, p, RHINO_EXACT) : null);
+}
+
 /**
  * ビームに最初の手ごとに残す局面の数（SearchOptions.perFirst）。テイマーの並びがアリア等の並びに押し出されて途中で切れ、
  * 燐光の岩をコンボ 1 で出していた（seed 2275116772 の 7 ターン目）。勝率は 242 → 248/600、1 試合 0.38 → 0.40 秒（docs/ai-notes.md）
@@ -210,7 +228,7 @@ export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}): Ag
       if (real.active !== p) return search.chooseAction(real, legal, rng);
       // リーサル（ルールより優先。手順の途中の選択も含む）
       const legalKeys = new Set(legal.map(keyOf));
-      const lethal = findLethal(real, p, rng, DEFAULT_LETHAL_OPTIONS, searchLethalForRhino);
+      const lethal = findLethal(real, p, rng, DEFAULT_LETHAL_OPTIONS, searchLethalForRhinoTurn);
       if (lethal && legalKeys.has(keyOf(lethal))) return lethal;
       // 自分の選択待ちは探索 AI に任せる（allowAction で最後の杖等を避ける）
       if (real.pending) return search.chooseAction(real, legal, rng);

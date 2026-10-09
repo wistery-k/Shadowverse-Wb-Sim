@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { searchLethalForRhino } from "../src/ai/rhino";
+import { searchLethalForRhinoTurn } from "../src/ai/rhino";
 import { searchRhinoLethal } from "../src/ai/rhinoLethal";
 import { applyAction, type Action, type GameState } from "../src/engine";
 import { PUZZLES, puzzleState } from "./rhinoPuzzles";
@@ -10,18 +10,17 @@ function wins(s: GameState, seq: Action[] | null): boolean {
   return s.winner === 0;
 }
 
-/**
- * 全探索（このエンジンのルールで、ターン終了以外のすべての手を試す）では 4 問とも expected 点ちょうどが最大だった。
- * 現在のリーサル探索で見つからない問題は it.fails にしておき、見つかるようになったら普通の it に戻す（docs/ai-notes.md）
- */
-const KNOWN_MISSES = new Set(["リノセウス2（鞄リノリノ）", "リノセウス3（あて先無し）", "リノセウス4（リノリノリノ）"]);
+/** 全探索（このエンジンのルールで、ターン終了以外のすべての手を試す）では 4 問とも expected 点ちょうどが最大だった */
 
-describe("リノセウスのリーサル問題集（相手の体力 = expected）", () => {
+describe("リノセウスのリーサル問題集", () => {
   for (const pz of PUZZLES) {
-    const test = KNOWN_MISSES.has(pz.name) ? it.fails : it;
-    test(pz.name, () => {
+    it(pz.name, () => {
       const s = puzzleState(pz, pz.expected);
-      expect(wins(s, searchLethalForRhino(s, 0))).toBe(true);
+      expect(wins(s, searchLethalForRhinoTurn(s, 0))).toBe(true);
+    });
+
+    it(`${pz.name}: 相手の体力が 1 多ければ見つからない`, () => {
+      expect(searchLethalForRhinoTurn(puzzleState(pz, pz.expected + 1), 0)).toBeNull();
     });
   }
 
