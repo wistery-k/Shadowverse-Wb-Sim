@@ -787,6 +787,8 @@ function exec(state: GameState, frame: Frame, eff: Effect | InternalEffect): boo
       const s = sigilAmulet(state, p);
       if (s && (s.sigils ?? 0) >= eff.amount) {
         s.sigils = (s.sigils ?? 0) - eff.amount;
+        // スタックが0になった【土の印】アミュレットは破壊される（紐づいた能力より先）
+        if (s.sigils === 0) leaveBoard(state, s.iid, "destroy");
         splice(frame, eff.then);
         return true;
       }
