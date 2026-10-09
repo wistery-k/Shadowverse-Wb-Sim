@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { resetExactLethalCache } from "../src/ai/exactLethal";
-import { rhinoDamageBound, searchLethalForRhinoTurn } from "../src/ai/rhino";
+import { rhinoDamageBound, rhinoLethalBound, rhinoThreeDamageBound, searchLethalForRhinoTurn } from "../src/ai/rhino";
 import { searchRhinoLethal } from "../src/ai/rhinoLethal";
 import { determinize } from "../src/ai/determinize";
 import { ALL_CARDS } from "../src/cards";
@@ -47,6 +47,11 @@ describe("リノセウスのリーサル問題集", () => {
   it("ダメージの上限の式（ユーザーの式）: 1〜3 問目は正解以上、4 問目はリノセウス 3 回なので式の外", () => {
     const bounds = PUZZLES.map((pz) => rhinoDamageBound(puzzleState(pz, pz.expected), 0));
     expect(bounds).toEqual([10, 17, 17, 17]);
+  });
+
+  it("リノセウス 3 回の上限の式（ユーザーの式）: 4 問目は正解以上で、足切りに使う上限もすべて正解以上", () => {
+    expect(PUZZLES.map((pz) => rhinoThreeDamageBound(puzzleState(pz, pz.expected), 0))).toEqual([6, 13, 13, 18]);
+    for (const q of PUZZLES) expect(rhinoLethalBound(puzzleState(q, q.expected), 0)).toBeGreaterThanOrEqual(q.expected);
   });
 });
 
