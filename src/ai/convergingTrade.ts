@@ -8,11 +8,11 @@
 // 1. 今 A で B を攻撃すると B が倒れる（バリア等も含めてエンジンで試す）。A が倒れるかは問わない
 // 2. 相手のターンに B が A を攻撃できる: B が攻撃できない状態でない。A が潜伏・威圧を持たない。
 //    A が守護でなければ、自分の場に他の守護がいない
-// 3. どちらから攻撃しても結果が同じ: A・B に攻撃時・交戦時・ラストワード・ターン開始時/終了時等の能力がない。
+// 3. どちらから攻撃しても結果が同じ: A・B に攻撃時・交戦時・ターン開始時/終了時等の能力がない。
 //    ターンの終わりで切れる能力値・キーワードがない。B が超進化していない（相手のターン中はダメージを受けないため）。
-//    場（両者）とクレストに、フォロワーの破壊・回復で誘発する能力や、ターン開始時/終了時（カウントダウンで消えるときを含む）に
-//    場のカードに関わる能力がない
-// 4. A・B にラストワードがない（3 に含む）
+//    場（両者）とクレストに、フォロワーの破壊・回復で誘発する能力や、ターン開始時/終了時に場のカードに関わる能力がない
+// 4. B が場に関わる（対象にする・数える・場に出す）ラストワードを持たない（ユーザー確認済み。A のラストワード、
+//    クレストのラストワードは見ない）
 //
 // 攻撃した側だけに効くもの（ドレイン、超進化の被ダメージ 0・ぶっとばし）は、自分から攻撃した方が得なので許す。
 
@@ -45,6 +45,7 @@ const HARMLESS_OWN = new Set<Ability["trigger"]["on"]>([
   "allyAct",
   "allyFuse",
   "allyLeaveInHand",
+  "lastWords",
 ]);
 
 const isFollower = (c: { kind: string }): c is FollowerOnBoard => c.kind === "follower";
@@ -59,13 +60,10 @@ const touchesBoard = (a: Ability) => {
 function hasTimingSensitiveAbility(state: GameState): boolean {
   for (const p of [0, 1] as const) {
     for (const entry of crestsAndBoard(state, p)) {
-      const countdown = entry.kind === "crest" ? entry.crest.countdown : entry.card.kind === "amulet" ? entry.card.countdown : null;
       for (const a of entry.abilities) {
         const on = a.trigger.on;
         if (on === "allyDestroyed" || on === "leaderHealed") return true;
         if ((on === "turnStart" || on === "turnEnd") && touchesBoard(a)) return true;
-        // カウントダウンで消えるときのラストワード（ターン開始時に起きる）
-        if (on === "lastWords" && countdown !== null && touchesBoard(a)) return true;
       }
     }
   }
@@ -76,6 +74,9 @@ function symmetricFollower(f: FollowerOnBoard): boolean {
   if (f.tempAttack !== 0 || f.tempKeywords.length > 0) return false;
   return boardAbilities(f).every((a) => HARMLESS_OWN.has(a.trigger.on));
 }
+
+/** 場に関わるラストワードを持つ（B がこれを持つと、どちらのターンに倒れたかで結果が変わりうる） */
+const hasBoardLastWords = (f: FollowerOnBoard) => boardAbilities(f).some((a) => a.trigger.on === "lastWords" && touchesBoard(a));
 
 /** 相手のターンに B が A を攻撃できるか（2） */
 function canBeAttackedBack(state: GameState, p: PlayerIndex, a: FollowerOnBoard, b: FollowerOnBoard): boolean {
@@ -101,7 +102,7 @@ export function convergingAttacks(state: GameState, p: PlayerIndex): Action[] {
     const b = opp.board.find((c) => c.iid === action.target);
     if (!a || !b || !isFollower(a) || !isFollower(b)) continue;
     if (b.evolve === "superEvolved") continue;
-    if (!symmetricFollower(a) || !symmetricFollower(b)) continue;
+    if (!symmetricFollower(a) || !symmetricFollower(b) || hasBoardLastWords(b)) continue;
     if (!canBeAttackedBack(state, p, a, b)) continue;
     let after: GameState;
     try {

@@ -78,14 +78,31 @@ describe("合流する相打ち", () => {
     }
   });
 
-  it("ラストワードを持つフォロワーとの攻撃は合流しない", () => {
-    const lastWords = ALL_CARDS.find(
-      (c) => c.type === "follower" && c.set !== "token" && abilitiesOf(c.id).abilities.some((x) => x.trigger.on === "lastWords"),
-    )!;
+  it("攻撃先が場に関わるラストワードを持つときだけ合流しない（攻撃する側のラストワードは見ない）", () => {
+    const lastWords = (board: boolean) =>
+      ALL_CARDS.find((c) => {
+        if (c.type !== "follower" || c.set === "token") return false;
+        const abilities = abilitiesOf(c.id).abilities;
+        if (abilities.some((x) => x.trigger.on !== "lastWords" && x.trigger.on !== "fanfare")) return false;
+        const lw = abilities.filter((x) => x.trigger.on === "lastWords");
+        if (lw.length === 0) return false;
+        const s = JSON.stringify(lw);
+        return board === (s.includes('"kind":"board"') || s.includes('"op":"summon'));
+      })!.name;
     const s = emptyBoards();
     put(s, 0, "ゴブリン", 5, 5);
-    put(s, 1, lastWords.name, 5, 2);
+    put(s, 1, lastWords(true), 5, 2);
     expect(convergingAttacks(s, 0)).toEqual([]);
+
+    const s2 = emptyBoards();
+    const a2 = put(s2, 0, "ゴブリン", 5, 5);
+    const b2 = put(s2, 1, lastWords(false), 5, 2);
+    expect(convergingAttacks(s2, 0)).toEqual([attack(a2, b2)]);
+
+    const s3 = emptyBoards();
+    const a3 = put(s3, 0, lastWords(true), 5, 5);
+    const b3 = put(s3, 1, "ゴブリン", 5, 2);
+    expect(convergingAttacks(s3, 0)).toEqual([attack(a3, b3)]);
   });
 
   it("ターン終了までの攻撃力で倒せるだけなら合流しない", () => {
