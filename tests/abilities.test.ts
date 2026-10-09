@@ -231,6 +231,19 @@ describe("リソース・キーワード能力", () => {
     expect(sigils()[0]!.sigils).toBe(1);
   });
 
+  it("土の秘術でスタックが0になった【土の印】アミュレットは破壊される", () => {
+    const { s, me } = setup();
+    const amulet = newBoardCard(s, id("大地の魔片"));
+    s.players[me].board.push(amulet);
+    (amulet as AmuletOnBoard).sigils = 1;
+    const graveyard = s.players[me].graveyard;
+    const t = applyAction(s, { type: "play", iid: toHand(s, me, "相貌の魔女・レミラミ") });
+    expect(names(t, me)).toContain("ガーディアンゴーレム"); // 土の秘術の能力は働く
+    expect(board(t, me).some((c) => c.iid === amulet.iid)).toBe(false);
+    expect(t.players[me].destroyedAmulets).toContain(id("大地の魔片"));
+    expect(t.players[me].graveyard).toBe(graveyard + 1);
+  });
+
   it("土の印が無い状態で+Nすると大地の魔片をスタックNで出す", () => {
     const { s, me } = setup();
     const t = applyAction(s, { type: "play", iid: toHand(s, me, "魔法の薬剤師・ペネロピー") });
