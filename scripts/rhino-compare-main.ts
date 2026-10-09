@@ -3,9 +3,13 @@
 // リノセウスエルフ（リノセウス用 AI）vs 他の 6 デッキ（探索 AI。ランプドラゴンは除く）を、両方の席で同じシードで打つ。
 // 設定を変えても同じシードの試合になるので、変更前後を同じ試合数で比べられる。
 // 例: npm run rhino-compare -- --games 50 --opts '{"nextLethal":10}'
-//     （--opts はリノセウス用 AI の探索の設定 SearchOptions の一部。試合は CPU のコア数だけ並列に行う）
+//     （--opts はリノセウス用 AI の探索の設定 SearchOptions の一部。"weights" にオブジェクトを渡すと SEARCH_WEIGHTS のその項目だけを変える。
+//      試合は CPU のコア数だけ並列に行う）
+// 自然の妖精姫・アリアを出した試合の数と、最初に出した自分のターン（平均）も出す。
 
+import { SEARCH_WEIGHTS } from "../src/ai/evaluate";
 import { createRhinoAgent } from "../src/ai/rhino";
+import { applyAction, cardOf, createGame } from "../src/engine";
 import { searchAgent, type SearchOptions } from "../src/ai/search";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { playMatch } from "../src/sim/match";
@@ -13,6 +17,7 @@ import { parallelMap } from "./parallel";
 
 const ELF = "リノセウスエルフ";
 const EXCLUDED_DECKS = [ELF, "ランプドラゴン"];
+const ARIA = "自然の妖精姫・アリア";
 
 export async function main(argv: string[]): Promise<number> {
   let games = 50;
@@ -22,7 +27,11 @@ export async function main(argv: string[]): Promise<number> {
     const v = argv[++i];
     if (v === undefined) throw new Error(`${key} の値がありません`);
     if (key === "--games") games = Number(v);
-    else if (key === "--opts") opts = JSON.parse(v) as Partial<SearchOptions>;
+    else if (key === "--opts") {
+      const raw = JSON.parse(v) as Record<string, unknown>;
+      if (typeof raw.weights === "object" && raw.weights !== null) raw.weights = { ...SEARCH_WEIGHTS, ...raw.weights };
+      opts = raw as Partial<SearchOptions>;
+    }
     else throw new Error(`不明な引数: ${key}`);
   }
   const elf = DEFAULT_DECKS.find((d) => d.name === ELF);
@@ -34,11 +43,22 @@ export async function main(argv: string[]): Promise<number> {
   const results = await parallelMap(tasks, ({ o, g, elfSeat }) => {
     const opp = opponents.find((d) => d.name === o)!;
     const seed = 900000 + g * 13 + elfSeat;
-    const r = playMatch(elfSeat === 0 ? [agent, searchAgent] : [searchAgent, agent], {
-      decks: elfSeat === 0 ? [elf.cards, opp.cards] : [opp.cards, elf.cards],
-      seed,
-    });
-    return { deck: o, won: r.winner === elfSeat };
+    const decks: [string[], string[]] = elfSeat === 0 ? [elf.cards, opp.cards] : [opp.cards, elf.cards];
+    const r = playMatch(elfSeat === 0 ? [agent, searchAgent] : [searchAgent, agent], { decks, seed, record: true });
+    // アリアを最初に出した自分のターン
+    let s = createGame({ decks, seed });
+    let ariaTurn: number | null = null;
+    for (const a of r.log ?? []) {
+      if (a.type === "play" && s.active === elfSeat && !s.pending) {
+        const h = s.players[elfSeat].hand.find((c) => c.iid === a.iid);
+        if (h && cardOf(h.cardId).name === ARIA) {
+          ariaTurn = s.players[elfSeat].turnCount;
+          break;
+        }
+      }
+      s = applyAction(s, a);
+    }
+    return { deck: o, won: r.winner === elfSeat, ariaTurn };
   });
   const perDeck = new Map<string, [number, number]>();
   for (const { deck, won } of results) {
@@ -48,6 +68,9 @@ export async function main(argv: string[]): Promise<number> {
   const wins = results.filter((r) => r.won).length;
   const n = results.length;
   console.log(`opts ${JSON.stringify(opts)}: ${wins}/${n} = ${((wins / n) * 100).toFixed(1)}%  ${((Date.now() - t0) / Math.max(1, n) / 1000).toFixed(2)}s/試合`);
+  const aria = results.flatMap((r) => (r.ariaTurn === null ? [] : [r.ariaTurn]));
+  const ariaWins = results.filter((r) => r.ariaTurn !== null && r.won).length;
+  console.log(`アリアを出した試合 ${aria.length}/${n}（そのうち勝ち ${ariaWins}）、最初に出した自分のターン 平均 ${(aria.reduce((x, y) => x + y, 0) / Math.max(1, aria.length)).toFixed(2)}`);
   console.log([...perDeck].map(([name, [w, t]]) => `${name} ${w}/${t}`).join(", "));
   return 0;
 }
