@@ -3,12 +3,14 @@ import { defineConfig } from "vitest/config";
 import preact from "@preact/preset-vite";
 
 /** ビルド時点の最終コミット（画面に表示する）。git が使えなければ空 */
-function gitInfo(): { commit: string; date: string } {
+function gitInfo(): { commit: string; date: string; dirty: boolean } {
   try {
     const [commit = "", date = ""] = execSync("git log -1 --format=%H%n%cI", { encoding: "utf8" }).trim().split("\n");
-    return { commit, date };
+    // 未コミットの変更があると、コミットだけでは試合を再現できない（リプレイ画面で知らせる）
+    const dirty = execSync("git status --porcelain --untracked-files=no", { encoding: "utf8" }).trim() !== "";
+    return { commit, date, dirty };
   } catch {
-    return { commit: "", date: "" };
+    return { commit: "", date: "", dirty: false };
   }
 }
 
@@ -21,6 +23,7 @@ export default defineConfig({
   define: {
     __BUILD_COMMIT__: JSON.stringify(git.commit),
     __BUILD_DATE__: JSON.stringify(git.date),
+    __BUILD_DIRTY__: JSON.stringify(git.dirty),
   },
   test: {
     include: ["tests/**/*.test.ts"],

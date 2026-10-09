@@ -679,3 +679,28 @@ progress {
   font-weight: bold;
   background: color-mix(in oklab, var(--accent) 18%, transparent);
 }
+
+/* リプレイの再現情報 */
+.repro {
+  gap: 4px;
+}
+.repro a {
+  color: inherit;
+}
+.repro-command {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.repro-command pre {
+  flex: 1;
+  margin: 0;
+  padding: 6px 8px;
+  overflow-x: auto;
+  white-space: pre;
+  user-select: all;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 12px;
+}

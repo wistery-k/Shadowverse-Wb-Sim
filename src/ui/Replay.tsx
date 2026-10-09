@@ -1,8 +1,10 @@
 // AI 対戦の試合を再生する画面（両者の手札を公開して表示する）
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { AGENTS } from "../ai/registry";
 import { cardOf, type PlayerIndex } from "../engine";
 import { replayStates } from "../sim/replay";
+import { reproduceCommand } from "../sim/reproduce";
 import { seatDecks, type Entrant, type GameRecord } from "../sim/tournament";
 import { CardDetail, CardView } from "./CardView";
 import { describeAction } from "./describe";
@@ -129,6 +131,7 @@ export function Replay({ record, entrants, onClose }: Props) {
           {names[0]} vs {names[1]} / 勝者: {winnerName} / {record.turns} ターン / seed {record.seed}
         </span>
       </div>
+      <Reproduce record={record} entrants={entrants} names={names} />
       <div class="game">
         {side(1, true)}
         {side(0, false)}
@@ -192,6 +195,49 @@ export function Replay({ record, entrants, onClose }: Props) {
             ))}
           </ol>
         </aside>
+      </div>
+    </div>
+  );
+}
+
+const REPO_URL = "https://github.com/wistery-k/Shadowverse-Wb-Sim";
+
+/** 試合を手元で再現するための情報（コミット・両者の AI とデッキ・コマンド） */
+function Reproduce({ record, entrants, names }: { record: GameRecord; entrants: readonly Entrant[]; names: [string, string] }) {
+  const [copied, setCopied] = useState(false);
+  const seats = record.aIsPlayer0 ? [entrants[record.a]!, entrants[record.b]!] : [entrants[record.b]!, entrants[record.a]!];
+  const command = [...(__BUILD_COMMIT__ ? [`git checkout ${__BUILD_COMMIT__}`] : []), reproduceCommand(record, entrants)].join("\n");
+  const copy = () => {
+    void navigator.clipboard?.writeText(command).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <div class="banner column repro">
+      <div>
+        再現に必要な情報 / コミット:{" "}
+        {__BUILD_COMMIT__ ? (
+          <a href={`${REPO_URL}/commit/${__BUILD_COMMIT__}`} target="_blank" rel="noreferrer">
+            {__BUILD_COMMIT__.slice(0, 7)}
+          </a>
+        ) : (
+          "不明"
+        )}
+        {__BUILD_DIRTY__ && <strong> （ビルド時に未コミットの変更あり。コミットだけでは再現できない可能性があります）</strong>}
+        {" "}/ seed {record.seed}
+      </div>
+      {seats.map((e, p) => (
+        <div key={p} class="muted">
+          P{p + 1}{record.seats && (record.seats.first === p ? "（先攻）" : "（後攻）")}: {names[p]} / AI:{" "}
+          {AGENTS[e.agent]?.label ?? e.agent}（{e.agent}）/ デッキ {e.deck.length} 枚
+        </div>
+      ))}
+      <div class="repro-command">
+        <pre>{command}</pre>
+        <button type="button" onClick={copy}>
+          {copied ? "コピーしました" : "コピー"}
+        </button>
       </div>
     </div>
   );

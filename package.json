@@ -10,6 +10,7 @@
     "test": "vitest run",
     "cards": "node scripts/convert-cards.ts",
     "sim": "node scripts/vite-run.mjs scripts/simulate-main.ts",
+    "game": "node scripts/vite-run.mjs scripts/game-main.ts",
     "sim-report": "node scripts/vite-run.mjs scripts/sim-report-main.ts",
     "tune": "node scripts/vite-run.mjs scripts/tune-main.ts",
     "compare": "node scripts/vite-run.mjs scripts/compare-main.ts",
