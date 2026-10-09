@@ -267,7 +267,7 @@ export function findLethal(
 let current: { player: PlayerIndex; steps: Action[]; expected: string[]; index: number } | null = null;
 
 /** p から見える局面の要約（相手の手札・山札の中身と乱数の状態を除く） */
-function visibleKey(s: GameState, p: PlayerIndex): string {
+export function visibleKey(s: GameState, p: PlayerIndex): string {
   const me = s.players[p];
   const opp = s.players[p === 0 ? 1 : 0];
   return JSON.stringify([
