@@ -206,6 +206,22 @@ describe("評価関数の重み", () => {
     expect(evaluateWith(s, 0, { ...DEFAULT_WEIGHTS, hold: { [card]: 3 } })).toBeGreaterThanOrEqual(base + 3);
   });
 
+  it("探索 AI の重みでは、竜の啓示で PP 最大値を増やすと評価が上がる", () => {
+    const dragon = DEFAULT_DECKS.find((d) => d.class === "dragon")!;
+    const s = createGame({ decks: [dragon.cards, DEFAULT_DECKS[1]!.cards], seed: 4 });
+    s.phase = "main";
+    s.active = 0;
+    const me = s.players[0];
+    me.maxPp = 3;
+    me.pp = 3;
+    const card = newHandCard(s, id("竜の啓示"));
+    me.hand = [card];
+    const t = applyAction(s, { type: "play", iid: card.iid });
+    expect(t.players[0].maxPp).toBe(4);
+    expect(evaluateWith(t, 0, SEARCH_WEIGHTS)).toBeGreaterThan(evaluateWith(s, 0, SEARCH_WEIGHTS));
+    expect(evaluateWith(t, 0, DEFAULT_WEIGHTS)).toBeLessThan(evaluateWith(s, 0, DEFAULT_WEIGHTS));
+  });
+
   it("探索 AI の重みでは、融合で手札の枚数が減っても評価が下がらない", () => {
     const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 4 });
     s.phase = "main";

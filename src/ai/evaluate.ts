@@ -1,7 +1,7 @@
 // 盤面の評価関数。重み（EvalWeights）はデータとして持ち、自己対戦で調整できるようにする（scripts/tune.ts）。
 
 import { id } from "../cards/abilities/helpers";
-import type { FollowerOnBoard, GameState, OnBoard, PlayerIndex } from "../engine";
+import { MAX_PP, type FollowerOnBoard, type GameState, type OnBoard, type PlayerIndex } from "../engine";
 
 export interface EvalWeights {
   /** 自分・相手のリーダー体力 1 点 */
@@ -26,6 +26,8 @@ export interface EvalWeights {
   ep: number;
   sep: number;
   extraPp: number;
+  /** 自分の PP 最大値を、毎ターンの自然な増加（ターン数、最大 10）より増やした分 1 あたり（竜の啓示等） */
+  maxPp: number;
   /** クレスト 1 つ */
   crest: number;
   /** 墓場 1（10 まで） */
@@ -60,6 +62,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   ep: 1.5,
   sep: 2.5,
   extraPp: 1,
+  maxPp: 0,
   crest: 1.5,
   graveyard: 0.05,
   lethalRange: 10,
@@ -85,8 +88,12 @@ const FUSION_HOLD: Readonly<Record<string, number>> = Object.fromEntries(
   ).map(([name, cards]) => [id(name), cards * DEFAULT_WEIGHTS.myHand]),
 );
 
-/** 探索 AI の既定の重み（基準の重み＋融合で作るカードの価値） */
-export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, hold: FUSION_HOLD };
+/**
+ * 探索 AI の既定の重み（基準の重み＋PP 最大値＋融合で作るカードの価値）。
+ * PP 最大値の重みが 0 だと、竜の啓示を打つ手は手札が 1 枚減るだけに見え、初手にあっても 95% の試合で打たなかった。
+ * 重み 0/1/2/4/6/8/12/16 で比べて 8 が最も勝った（docs/ai-notes.md）
+ */
+export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, hold: FUSION_HOLD };
 
 const KEYWORD_VALUE: Partial<Record<string, number>> = {
   ward: 1,
@@ -125,6 +132,8 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
   for (const h of me.hand) v += w.hold[h.cardId] ?? 0;
   v += me.ep * w.ep + me.sep * w.sep;
   if (me.extraPpAvailable) v += w.extraPp;
+  // 自然に増えた分は数えない（PP を増やさないデッキの評価値を変えないため）
+  v += (me.maxPp - Math.min(me.turnCount, MAX_PP)) * w.maxPp;
   v += (me.crests.length - opp.crests.length) * w.crest;
   v += Math.min(me.graveyard, 10) * w.graveyard;
   if (opp.leaderHp <= w.lethalRange) {
