@@ -124,7 +124,7 @@ describe("リノセウス用ルール: 禁じる手", () => {
     expect(allowAction(s, { type: "play", iid: rhino.iid }, 0)).toBe(true);
   });
 
-  it("エクストラPP: 2つ目は使わない。1つ目は杖を置けるようになるときに使う", () => {
+  it("エクストラPP: 2つ目はオリヴィエを出せるようになるときだけ使う。1つ目は杖を置けるようになるときに使う", () => {
     const s = mainPhase();
     const pl = s.players[0];
     pl.extraPpAvailable = true;
@@ -138,6 +138,13 @@ describe("リノセウス用ルール: 禁じる手", () => {
     expect(allowAction(s, { type: "extraPp" }, 0)).toBe(false);
     pl.turnCount = 6;
     pl.hand = [newHandCard(s, id("聖樹の杖"))];
+    expect(allowAction(s, { type: "extraPp" }, 0)).toBe(false);
+    pl.maxPp = 6;
+    pl.pp = 6;
+    pl.hand = [newHandCard(s, id("勇壮の堕天使・オリヴィエ"))];
+    expect(allowAction(s, { type: "extraPp" }, 0)).toBe(true);
+    // 使わなくても出せるなら使わない
+    pl.pp = 7;
     expect(allowAction(s, { type: "extraPp" }, 0)).toBe(false);
   });
 });
@@ -313,6 +320,24 @@ describe("seed 954874822（リノセウスエルフ vs アミュレット疾走�
     expect(moves.find((m) => m.move === "ピュアクリスタリア・リリィ")!.combo).toBeGreaterThanOrEqual(2);
     expect(oppFollowers(end, 0)).toEqual([]);
   }, 60_000);
+});
+
+describe("seed 2382023030（疾走ドラゴン vs リノセウスエルフ、エルフ後攻）", () => {
+  // ユーザーが指摘した試合の、エルフの 6 ターン目の開始までの行動（PR #37 時点の AI の手）
+  const log: Action[] = [{"type":"mulligan","player":1,"swap":[76,61,71]},{"type":"mulligan","player":0,"swap":[11,29,23]},{"type":"play","iid":42},{"type":"endTurn"},{"type":"play","iid":1},{"type":"endTurn"},{"type":"play","iid":45},{"type":"endTurn"},{"type":"play","iid":26},{"type":"endTurn"},{"type":"act","iid":42},{"type":"choose","targets":[68]},{"type":"attack","attacker":45,"target":"leader"},{"type":"attack","attacker":81,"target":"leader"},{"type":"endTurn"},{"type":"play","iid":15},{"type":"play","iid":82},{"type":"attack","attacker":26,"target":81},{"type":"attack","attacker":82,"target":81},{"type":"endTurn"},{"type":"play","iid":44},{"type":"choose","targets":[26]},{"type":"play","iid":51},{"type":"attack","attacker":45,"target":"leader"},{"type":"endTurn"},{"type":"play","iid":7},{"type":"play","iid":83},{"type":"play","iid":85},{"type":"extraPp"},{"type":"play","iid":16},{"type":"attack","attacker":15,"target":"leader"},{"type":"attack","attacker":83,"target":45},{"type":"attack","attacker":85,"target":51},{"type":"evolve","iid":16},{"type":"attack","attacker":16,"target":44},{"type":"endTurn"},{"type":"play","iid":64},{"type":"attack","attacker":84,"target":16},{"type":"evolve","iid":64},{"type":"attack","attacker":64,"target":85},{"type":"endTurn"},{"type":"play","iid":86},{"type":"play","iid":14},{"type":"play","iid":87},{"type":"play","iid":88},{"type":"attack","attacker":15,"target":"leader"},{"type":"evolve","iid":86},{"type":"attack","attacker":86,"target":64},{"type":"endTurn"},{"type":"play","iid":55},{"type":"act","iid":42},{"type":"choose","targets":[65]},{"type":"evolve","iid":55},{"type":"choose","targets":[15]},{"type":"attack","attacker":55,"target":14},{"type":"attack","attacker":89,"target":87},{"type":"endTurn"}];
+  const dragon = DEFAULT_DECKS.find((d) => d.key === "疾走ドラゴン")!;
+
+  it("エルフ 6 ターン目: 2つ目のエクストラPP でオリヴィエを出す", () => {
+    let s = createGame({ decks: [elf.cards, dragon.cards], seed: 2382023030 });
+    for (const a of log) s = applyAction(s, a);
+    expect(s.players[0].turnCount).toBe(6);
+    const rng = rngFrom({ rng: 1 });
+    const first = rhinoAgent.chooseAction(s, legalActions(s), rng);
+    expect(first).toEqual({ type: "extraPp" });
+    s = applyAction(s, first);
+    const next = rhinoAgent.chooseAction(s, legalActions(s), rng);
+    expect(next.type === "play" && ALL_CARDS.find((c) => c.id === s.players[0].hand.find((h) => h.iid === next.iid)?.cardId)?.name).toBe("勇壮の堕天使・オリヴィエ");
+  }, 30_000);
 });
 
 describe("リノセウス用ルール: 対戦", () => {

@@ -28,6 +28,7 @@ const ROCK = "燐光の岩";
 const MYSTERY = "森の神秘";
 const BACKWOOD = "薫交の天宮・バックウッド";
 const RHINO = "殺戮のリノセウス";
+const OLIVIER = "勇壮の堕天使・オリヴィエ";
 /** マリガンで1枚だけ残す序盤のカード（優先順） */
 const EARLY = ["フェアリーテイマー", "純粋なるウォーターフェアリー", "妖精の招集"];
 /** 上の2種（バックウッドと序盤のカード）がどちらもあるときに残すカード（優先順。杖は1枚まで） */
@@ -61,8 +62,8 @@ function playedName(state: GameState, a: Action, p: PlayerIndex): string | null 
   return h ? nameOf(h.cardId) : null;
 }
 
-/** 1枚目のエクストラPP で、今は出せないが使えば出せるようになる「使う理由のある」カードがあるか */
-function extraPpEnablesKeyPlay(state: GameState, p: PlayerIndex): boolean {
+/** エクストラPP で、今は出せないが使えば出せるようになるカードのうち、enables を満たすものがあるか */
+function extraPpEnables(state: GameState, p: PlayerIndex, enables: (after: GameState, a: Action) => boolean): boolean {
   let after: GameState;
   try {
     after = applyAction(state, { type: "extraPp" });
@@ -70,9 +71,14 @@ function extraPpEnablesKeyPlay(state: GameState, p: PlayerIndex): boolean {
     return false;
   }
   const now = new Set(legalActions(state).map(keyOf));
+  return legalActions(after).some((a) => a.type === "play" && !now.has(keyOf(a)) && enables(after, a));
+}
+
+/** 1枚目のエクストラPP で、今は出せないが使えば出せるようになる「使う理由のある」カードがあるか */
+function extraPpEnablesKeyPlay(state: GameState, p: PlayerIndex): boolean {
   const combo = state.players[p].combo;
-  return legalActions(after).some((a) => {
-    if (a.type !== "play" || now.has(keyOf(a))) return false;
+  return extraPpEnables(state, p, (after, a) => {
+    if (a.type !== "play") return false;
     const name = playedName(after, a, p);
     const cardId = after.players[p].hand.find((c) => c.iid === a.iid)?.cardId;
     if (name === ROD) return allowAction(after, a, p);
@@ -140,8 +146,9 @@ export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolea
       return !forcesKeeperChoice(state, a, p);
     }
     case "extraPp":
-      // 2つ目はリーサルまで温存。1つ目は使う理由があるときだけ
-      if (pl.turnCount >= EXTRA_PP_REFRESH_TURN) return false;
+      // 2つ目はリーサルまで温存。ただしオリヴィエを出せるようになるなら使ってよい（PP を 2 回復するので、残りの PP でもう 1〜2 枚出せる。
+      // ユーザーが seed 2382023030 の 6 ターン目で指摘）。1つ目は使う理由があるときだけ
+      if (pl.turnCount >= EXTRA_PP_REFRESH_TURN) return extraPpEnables(state, p, (after, x) => playedName(after, x, p) === OLIVIER);
       return extraPpEnablesKeyPlay(state, p);
     default:
       return true;
