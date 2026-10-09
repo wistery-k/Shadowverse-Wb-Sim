@@ -21,7 +21,7 @@ import { determinize } from "./determinize";
 import { SEARCH_WEIGHTS, evaluateWith, type EvalWeights } from "./evaluate";
 import { createGreedyAgent, greedyAgent } from "./greedy";
 import { KeySet, turnOrderHash, turnOrderKey, withoutIds } from "./keySet";
-import { findLethal, visibleKey } from "./lethal";
+import { findLethal, searchLethal, visibleKey } from "./lethal";
 import { MULLIGAN_WEIGHTS, weightedMulliganSwap } from "./mulligan";
 import { weightsFor } from "./weights";
 import type { Agent } from "./types";
@@ -96,9 +96,22 @@ export interface SearchOptions {
   reusePlan: boolean;
   /** reusePlan のとき、最初の手ごとに相手のターンまで読む終局面の数 */
   planCandidates: number;
+  /**
+   * 相手のターンを読んだ後の局面で、自分の次のターンにリーサルがあるときに足す点（0 なら調べない）。
+   * 調べ方は nextLethalSearch（既定は汎用のリーサル探索）。時間がかかるので、相手の体力が lethalRange 以下のときだけ調べる。
+   * 評価関数は、次のターンに倒しきれる局面（クレストで疾走が付くフェアリー等）を見ていない（seed 2275116772 のエルフ 7 ターン目。docs/ai-notes.md）
+   */
+  nextLethal: number;
+  nextLethalSearch?: (state: GameState, p: PlayerIndex) => boolean;
+  /**
+   * ビームに、最初の手ごとに少なくともこの数の局面を残す（幅を超えてもよい。0 なら幅だけで切る）。
+   * 点数の高い最初の手の局面でビームが埋まると、他の最初の手の並びが途中で切れ、短い並びのまま相手のターンまで読まれる。
+   * reusePlan ではその短い並びをそのまま打つ（seed 2275116772 のエルフ 7 ターン目、燐光の岩をコンボ 1 で出した。docs/ai-notes.md）
+   */
+  perFirst: number;
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: true, reusePlan: true, planCandidates: 3 };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0 };
 
 /** 打った手の並び（後ろから前へのリスト）。各手を打った後の局面も持つ */
 interface Step {
@@ -177,13 +190,24 @@ function distinctPlays(state: GameState, actions: readonly Action[]): Action[] {
   });
 }
 
-/** 評価の高い順に、同じ局面を除いて width 個まで選ぶ（children は評価の降順） */
-function uniqueStates(children: Node[], width: number): Node[] {
+/**
+ * 評価の高い順に、同じ局面を除いて width 個まで選ぶ（children は評価の降順）。
+ * perFirst が正なら、最初の手ごとに perFirst 個までは width を超えても残す
+ */
+function uniqueStates(children: Node[], width: number, perFirst = 0): Node[] {
   const seen = new KeySet();
   const out: Node[] = [];
+  const count = new Map<string, number>();
   for (const c of children) {
-    if (out.length >= width) break;
-    if (seen.addLazy(() => turnOrderKey(c.state), turnOrderHash(c.state))) out.push(c);
+    const k = keyOf(c.first);
+    const n = count.get(k) ?? 0;
+    if (out.length >= width) {
+      if (perFirst === 0) break;
+      if (n >= perFirst) continue;
+    }
+    if (!seen.addLazy(() => turnOrderKey(c.state), turnOrderHash(c.state))) continue;
+    out.push(c);
+    count.set(k, n + 1);
   }
   return out;
 }
@@ -250,7 +274,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
       }
     }
     children.sort((x, y) => y.value - x.value);
-    frontier = opts.dedup ? uniqueStates(children, opts.beamWidth) : children.slice(0, opts.beamWidth);
+    frontier = opts.dedup ? uniqueStates(children, opts.beamWidth, opts.perFirst) : children.slice(0, opts.beamWidth);
   }
   terminals.push(...frontier);
   if (opts.scoreTurnEnd === "terminal") for (const t of terminals) t.value = endScore(t.state);
@@ -278,11 +302,13 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
     }
     return out;
   };
+  const hasNextLethal = opts.nextLethalSearch ?? ((state: GameState, q: PlayerIndex) => searchLethal(state, q) !== null);
   const result = new Map<string, Plan>();
   for (const best of ranked) {
     for (const node of candidatesOf(best)) {
       const after = node.state.phase === "ended" ? node.state : simulateOpponentTurn(settle(node.state), p, rng);
-      const value = evaluateWith(after, p, w);
+      let value = evaluateWith(after, p, w);
+      if (opts.nextLethal !== 0 && after.phase !== "ended" && after.players[p === 0 ? 1 : 0].leaderHp <= w.lethalRange && hasNextLethal(after, p)) value += opts.nextLethal;
       const k = keyOf(node.first);
       const cur = result.get(k);
       if (!cur || value > cur.value) result.set(k, { action: node.first, value, steps: stepsOf(node.path) });
