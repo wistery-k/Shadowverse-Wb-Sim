@@ -254,7 +254,7 @@ function winsElsewhere(root: GameState, p: PlayerIndex, seq: readonly Action[]):
  * リノセウスを 2 回出して与えられるダメージの上限（ユーザーの式。docs/ai-notes.md）。相手の体力がこれより大きければリーサルは無い。
  * - 基本は 2 ×（PP − 7）+ 8（超進化できる場合）。エクストラPP が使えれば PP に 1 を足す
  * - 超進化できればベビーカーバンクル（手札か場、1 枚まで）で +2。できなければ、進化できれば −1、どちらもできなければ −3
- * - 手札の森の神秘・煌撃の戦士・ベイル 1 枚につき +2、手札と場の燐光の岩 1 枚につき +1、溜まっているコンボ 1 につき +2
+ * - 手札の森の神秘 1 枚と、2 コスト以下の煌撃の戦士・ベイル（0 コストとみなす）1 枚につき +2、手札と場の燐光の岩 1 枚につき +1、溜まっているコンボ 1 につき +2
  * - 場に残っていてリーダーを攻撃できるフォロワーの攻撃力（残りの攻撃回数分）を足す
  */
 export function rhinoDamageBound(s: GameState, p: PlayerIndex): number {
@@ -267,14 +267,41 @@ export function rhinoDamageBound(s: GameState, p: PlayerIndex): number {
   let bound = 2 * (pp - 7) + 8 + 2 * pl.combo;
   if (canSuper) bound += inHand(CARBUNCLE) + boardCount(s, p, CARBUNCLE) > 0 ? 2 : 0;
   else bound -= canEvolve ? 1 : 3;
-  bound += 2 * (inHand(MYSTERY) + inHand(BAIL)) + inHand(ROCK) + boardCount(s, p, ROCK);
+  bound += 2 * (inHand(MYSTERY) + cheapBails(s, p)) + inHand(ROCK) + boardCount(s, p, ROCK);
   return bound + boardAttack(s, p);
 }
 
-/** リノセウスで与えられるダメージの上限。3 回出せるかもしれなければ、2 回と 3 回の式の大きい方 */
+/**
+ * リノセウスで与えられるダメージの上限。リノセウス 1 回と 2 回の式の大きい方（PP が少ないと 1 回の方が大きい）。
+ * 3 回出せるかもしれなければ 3 回の式も見る
+ */
 export function rhinoLethalBound(s: GameState, p: PlayerIndex): number {
-  const two = rhinoDamageBound(s, p);
-  return mayPlayThreeRhinos(s, p) ? Math.max(two, rhinoThreeDamageBound(s, p)) : two;
+  const bound = Math.max(rhinoOneDamageBound(s, p), rhinoDamageBound(s, p));
+  return mayPlayThreeRhinos(s, p) ? Math.max(bound, rhinoThreeDamageBound(s, p)) : bound;
+}
+
+/** 手札の煌撃の戦士・ベイルのうち、今 2 コスト以下のもの（ターン中に安くなる分を見込んで 0 コストとみなす。ユーザーの決めた雑な扱い） */
+function cheapBails(s: GameState, p: PlayerIndex): number {
+  return s.players[p].hand.filter((h) => nameOf(h.cardId) === BAIL && cardOf(h.cardId).cost + h.costMod <= 2).length;
+}
+
+/**
+ * リノセウスを 1 回出して与えられるダメージの上限（seed 900001 のエルフ 6 ターン目でユーザーが示した数え方。docs/ai-notes.md）。
+ * - 残りの PP を 1 コストのカードに使い、最後にリノセウス（3 コスト）を出す: PP − 3 + 1（リノセウス自身のコンボ）。エクストラPP が使えれば PP に 1 を足す
+ * - 進化できれば +2。超進化できれば +3、さらにベビーカーバンクル（手札か場）があれば PP 3 回復の分 +3
+ * - 溜まっているコンボ、手札の森の神秘、2 コスト以下のベイル、手札と場の燐光の岩 1 につき +1。場に残っていてリーダーを攻撃できるフォロワーの攻撃力を足す
+ */
+export function rhinoOneDamageBound(s: GameState, p: PlayerIndex): number {
+  const pl = s.players[p];
+  const inHand = (name: string) => pl.hand.filter((h) => nameOf(h.cardId) === name).length;
+  const order = p === s.first ? 0 : 1;
+  const canSuper = !pl.evolvedThisTurn && pl.sep > 0 && pl.turnCount >= SUPER_EVOLVE_TURN[order];
+  const canEvolve = !pl.evolvedThisTurn && pl.ep > 0 && pl.turnCount >= EVOLVE_TURN[order];
+  const pp = pl.pp + (pl.extraPpAvailable ? 1 : 0);
+  let bound = pp - 2 + pl.combo + inHand(MYSTERY) + cheapBails(s, p) + inHand(ROCK) + boardCount(s, p, ROCK);
+  if (canSuper) bound += 3 + (inHand(CARBUNCLE) + boardCount(s, p, CARBUNCLE) > 0 ? 3 : 0);
+  else if (canEvolve) bound += 2;
+  return bound + boardAttack(s, p);
 }
 
 /**
