@@ -28,6 +28,7 @@ const ROCK = "燐光の岩";
 const MYSTERY = "森の神秘";
 const BACKWOOD = "薫交の天宮・バックウッド";
 const RHINO = "殺戮のリノセウス";
+const BUGS = "虫の知らせ";
 /** マリガンで1枚だけ残す序盤のカード（優先順） */
 const EARLY = ["フェアリーテイマー", "純粋なるウォーターフェアリー", "妖精の招集"];
 /** 上の2種（バックウッドと序盤のカード）がどちらもあるときに残すカード（優先順。杖は1枚まで） */
@@ -111,8 +112,27 @@ function forcesKeeperChoice(state: GameState, a: Action, p: PlayerIndex): boolea
   return legalActions(after).every((c) => c.type === "choose" && c.targets.some((t) => keepers.has(t)));
 }
 
+/**
+ * 実験中のルール（勝率で比べてから採否を決める。docs/ai-notes.md）。
+ * bugs: 虫の知らせをリーサル以外で打つ条件。
+ *   "any" いつでも（今のルール）/ "lethal" リーサルまで温存 / "kill" 2 ダメージで必ず相手のフォロワーを倒せるとき
+ *   （相手の場のフォロワーがすべて体力 2 以下）だけ
+ */
+export interface RhinoRules {
+  bugs: "any" | "lethal" | "kill";
+}
+
+export const DEFAULT_RHINO_RULES: RhinoRules = { bugs: "any" };
+
+function bugsAllowed(state: GameState, p: PlayerIndex, rules: RhinoRules): boolean {
+  if (rules.bugs === "any") return true;
+  if (rules.bugs === "lethal") return false;
+  const opp = state.players[p === 0 ? 1 : 0].board.filter((c) => c.kind === "follower");
+  return opp.length > 0 && opp.every((c) => c.kind === "follower" && c.defense <= 2);
+}
+
 /** ルールで打ってよい手か（リーサル以外の場面に使う） */
-export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolean {
+export function allowAction(state: GameState, a: Action, p: PlayerIndex, rules: RhinoRules = DEFAULT_RHINO_RULES): boolean {
   const pl = state.players[p];
   switch (a.type) {
     case "choose": {
@@ -126,6 +146,7 @@ export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolea
       if (name === MYSTERY) return false; // リーサルまで温存
       // 手札に1枚しかないリノセウスはリーサルまで温存（2枚以上なら1枚は残る）
       if (name === RHINO && handCount(state, p, RHINO) < 2) return false;
+      if (name === BUGS && !bugsAllowed(state, p, rules)) return false;
       if (forcesKeeperChoice(state, a, p)) return false;
       // 杖の2枚目以降と燐光の岩は、相手の盤面を全処理できた（フォロワーがいない）ときだけ
       if (name === ROD) return boardCount(state, p, ROD) === 0 || !oppHasFollowers(state, p);
@@ -180,12 +201,13 @@ function searchLethalForRhino(root: GameState, p: PlayerIndex): Action[] | null 
 }
 
 /**
- * リノセウス用 AI を作る。search は探索の設定（比較実験用。既定は汎用の探索 AI と同じ深さ 8・幅 32）。
+ * リノセウス用 AI を作る。rules は実験中のルール。search は探索の設定（比較実験用。既定は汎用の探索 AI と同じ深さ 8・幅 32）。
  * 深さ 8・幅 32 はリノセウスエルフで先に採用し、後に汎用の探索 AI の既定にした
  * （seed 2510273090 の 4 ターン目・seed 954874822 の 7 ターン目。docs/ai-notes.md）
  */
-export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}): Agent {
-  const search = createSearchAgent({ allow: allowAction, lethal: false, ...searchOptions });
+export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}, rules: RhinoRules = DEFAULT_RHINO_RULES): Agent {
+  const allow = (state: GameState, a: Action, p: PlayerIndex) => allowAction(state, a, p, rules);
+  const search = createSearchAgent({ allow, lethal: false, ...searchOptions });
   const plainSearch = createSearchAgent();
   return {
     name: "rhino",
