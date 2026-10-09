@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { searchLethalForRhinoTurn } from "../src/ai/rhino";
+import { rhinoDamageBound, searchLethalForRhinoTurn } from "../src/ai/rhino";
 import { searchRhinoLethal } from "../src/ai/rhinoLethal";
 import { applyAction, type Action, type GameState } from "../src/engine";
 import { PUZZLES, puzzleState } from "./rhinoPuzzles";
@@ -30,5 +30,10 @@ describe("リノセウスのリーサル問題集", () => {
       const s = puzzleState(pz, pz.expected);
       expect(wins(s, searchRhinoLethal(s, 0, { beamWidth, maxDepth: 10 }))).toBe(true);
     }
+  });
+
+  it("ダメージの上限の式（ユーザーの式）: 1〜3 問目は正解以上、4 問目はリノセウス 3 回なので式の外", () => {
+    const bounds = PUZZLES.map((pz) => rhinoDamageBound(puzzleState(pz, pz.expected), 0));
+    expect(bounds).toEqual([10, 17, 17, 17]);
   });
 });

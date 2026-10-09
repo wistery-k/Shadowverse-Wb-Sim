@@ -10,9 +10,13 @@ import {
   abilitiesOf,
   actingPlayer,
   applyAction,
+  attackOf,
   cardOf,
+  EVOLVE_TURN,
   EXTRA_PP_REFRESH_TURN,
+  hasKeyword,
   legalActions,
+  SUPER_EVOLVE_TURN,
   type Action,
   type GameState,
   type PlayerIndex,
@@ -29,6 +33,9 @@ const ROCK = "燐光の岩";
 const MYSTERY = "森の神秘";
 const BACKWOOD = "薫交の天宮・バックウッド";
 const RHINO = "殺戮のリノセウス";
+const CARBUNCLE = "ベビーカーバンクル";
+const BAIL = "煌撃の戦士・ベイル";
+const BUGS = "虫の知らせ";
 /** マリガンで1枚だけ残す序盤のカード（優先順） */
 const EARLY = ["フェアリーテイマー", "純粋なるウォーターフェアリー", "妖精の招集"];
 /** 上の2種（バックウッドと序盤のカード）がどちらもあるときに残すカード（優先順。杖は1枚まで） */
@@ -194,7 +201,50 @@ export const RHINO_EXACT: ExactLethalOptions = {
  * 全探索は時間がかかるので、探索 AI の葉の局面（次のターンのリーサル）では使わない
  */
 export function searchLethalForRhinoTurn(root: GameState, p: PlayerIndex): Action[] | null {
-  return searchLethalForRhino(root, p) ?? (root.players[p].hand.some((h) => nameOf(h.cardId) === RHINO) ? searchExactLethal(root, p, RHINO_EXACT) : null);
+  const found = searchLethalForRhino(root, p);
+  if (found) return found;
+  if (!root.players[p].hand.some((h) => nameOf(h.cardId) === RHINO)) return null;
+  if (!mayPlayThreeRhinos(root, p) && root.players[p === 0 ? 1 : 0].leaderHp > rhinoDamageBound(root, p)) return null;
+  return searchExactLethal(root, p, RHINO_EXACT);
+}
+
+/**
+ * リノセウスを 2 回出して与えられるダメージの上限（ユーザーの式。docs/ai-notes.md）。相手の体力がこれより大きければリーサルは無い。
+ * - 基本は 2 ×（PP − 7）+ 8（超進化できる場合）。エクストラPP が使えれば PP に 1 を足す
+ * - 超進化できればベビーカーバンクル（手札か場、1 枚まで）で +2。できなければ、進化できれば −1、どちらもできなければ −3
+ * - 手札の森の神秘・煌撃の戦士・ベイル 1 枚につき +2、手札と場の燐光の岩 1 枚につき +1、溜まっているコンボ 1 につき +2
+ * - 場に残っていてリーダーを攻撃できるフォロワーの攻撃力（残りの攻撃回数分）を足す
+ */
+export function rhinoDamageBound(s: GameState, p: PlayerIndex): number {
+  const pl = s.players[p];
+  const inHand = (name: string) => pl.hand.filter((h) => nameOf(h.cardId) === name).length;
+  const order = p === s.first ? 0 : 1;
+  const canSuper = !pl.evolvedThisTurn && pl.sep > 0 && pl.turnCount >= SUPER_EVOLVE_TURN[order];
+  const canEvolve = !pl.evolvedThisTurn && pl.ep > 0 && pl.turnCount >= EVOLVE_TURN[order];
+  const pp = pl.pp + (pl.extraPpAvailable ? 1 : 0);
+  let bound = 2 * (pp - 7) + 8 + 2 * pl.combo;
+  if (canSuper) bound += inHand(CARBUNCLE) + boardCount(s, p, CARBUNCLE) > 0 ? 2 : 0;
+  else bound -= canEvolve ? 1 : 3;
+  bound += 2 * (inHand(MYSTERY) + inHand(BAIL)) + inHand(ROCK) + boardCount(s, p, ROCK);
+  for (const c of pl.board) {
+    if (c.kind !== "follower" || c.attacksThisTurn >= c.maxAttacks) continue;
+    if (c.cannotAttackUntil !== null && c.cannotAttackUntil >= s.turn) continue;
+    if (c.enteredTurn === s.turn && !hasKeyword(c, "storm")) continue;
+    bound += attackOf(c) * (c.maxAttacks - c.attacksThisTurn);
+  }
+  return bound;
+}
+
+/**
+ * リノセウスを 3 回出せるかもしれない（上の式はリノセウス 2 回の上限なので足切りしない）。
+ * 手札に 2 枚以上あり、戻す手段（場の聖樹の杖・手札の虫の知らせかベビーカーバンクル）があって、PP が 9 以上（問題集の 4 問目）
+ */
+function mayPlayThreeRhinos(s: GameState, p: PlayerIndex): boolean {
+  const pl = s.players[p];
+  const inHand = (name: string) => pl.hand.some((h) => nameOf(h.cardId) === name);
+  const rhinos = pl.hand.filter((h) => nameOf(h.cardId) === RHINO).length;
+  const bounce = boardCount(s, p, ROD) > 0 || inHand(BUGS) || inHand(CARBUNCLE);
+  return rhinos >= 2 && bounce && pl.pp + (pl.extraPpAvailable ? 1 : 0) >= 9;
 }
 
 /**
