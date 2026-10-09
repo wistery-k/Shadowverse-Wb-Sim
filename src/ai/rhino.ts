@@ -210,7 +210,8 @@ export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}): Ag
       if (real.active !== p) return search.chooseAction(real, legal, rng);
       // リーサル（ルールより優先。手順の途中の選択も含む）
       const legalKeys = new Set(legal.map(keyOf));
-      const lethal = findLethal(real, p, rng, DEFAULT_LETHAL_OPTIONS, searchLethalForRhino);
+      const recheck = searchOptions.lethalRecheck ?? DEFAULT_LETHAL_OPTIONS.recheck;
+      const lethal = findLethal(real, p, rng, { ...DEFAULT_LETHAL_OPTIONS, recheck }, searchLethalForRhino);
       if (lethal && legalKeys.has(keyOf(lethal))) return lethal;
       // 自分の選択待ちは探索 AI に任せる（allowAction で最後の杖等を避ける）
       if (real.pending) return search.chooseAction(real, legal, rng);

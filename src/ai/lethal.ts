@@ -37,6 +37,12 @@ export interface LethalOptions {
   samples: number;
   /** ビームの並べ方。順に試し、最初に見つかった並びを使う */
   scorings: readonly LethalScoring[];
+  /**
+   * 探し直す条件。"always" は毎手探す。"onNewInfo" は、前の手で探して見つからなかった後、
+   * 見えない情報が変わっていなければ（ドロー・乱数を使う効果・相手の手札や山札の枚数・ターンが変わらない）探さない。
+   * 自分の手だけで進んだ局面は、前の局面からの探索で読んでいるため
+   */
+  recheck: "always" | "onNewInfo";
 }
 
 /**
@@ -68,6 +74,7 @@ export const DEFAULT_LETHAL_OPTIONS: LethalOptions = {
   maxDepth: 14,
   samples: 3,
   scorings: [DIRECT_SCORING, SETUP_SCORING],
+  recheck: "onNewInfo",
 };
 
 const WIN = 1e9;
@@ -246,12 +253,16 @@ export function findLethal(
   }
   current = null;
 
+  const info = opts.recheck === "onNewInfo" ? infoKey(real, p) : null;
+  if (info !== null && lastMiss[p] === info) return null;
+  lastMiss[p] = info;
   const det = determinize(real, p, rng);
   const seq = search(det, p);
   if (!seq || seq.length === 0) return null;
   for (let i = 1; i < opts.samples; i++) {
     if (!replayWins(determinize(real, p, rng), seq, p)) return null;
   }
+  lastMiss[p] = null;
   // 手順の各手を打つ前に見えているはずの局面を記録する
   const expected: string[] = [];
   let s: GameState | null = det;
@@ -261,6 +272,19 @@ export function findLethal(
   }
   current = { player: p, steps: seq, expected, index: 1 };
   return seq[0] ?? null;
+}
+
+/** プレイヤーごとの、前にリーサルが見つからなかった局面の infoKey（recheck: "onNewInfo"） */
+const lastMiss: [string | null, string | null] = [null, null];
+
+/**
+ * p から見て、見えない情報の状態を表すキー。自分の手（ドローや乱数を使わないもの）で進んでも変わらず、
+ * ドロー（山札の枚数）・乱数を使う効果（乱数の状態）・相手の手札や山札の枚数・ターンが変わると変わる
+ */
+function infoKey(s: GameState, p: PlayerIndex): string {
+  const me = s.players[p];
+  const opp = s.players[p === 0 ? 1 : 0];
+  return `${s.first}:${s.turn}:${s.active}:${s.rng}:${me.deck.length}:${opp.hand.length}:${opp.deck.length}`;
 }
 
 /** 実行中のリーサルの手順（findLethal が次の呼び出しで続けるため） */

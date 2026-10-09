@@ -21,7 +21,7 @@ import { determinize } from "./determinize";
 import { SEARCH_WEIGHTS, evaluateWith, type EvalWeights } from "./evaluate";
 import { createGreedyAgent, greedyAgent } from "./greedy";
 import { KeySet, turnOrderHash, turnOrderKey, withoutIds } from "./keySet";
-import { findLethal, searchLethal, visibleKey } from "./lethal";
+import { DEFAULT_LETHAL_OPTIONS, findLethal, searchLethal, visibleKey, type LethalOptions } from "./lethal";
 import { MULLIGAN_WEIGHTS, weightedMulliganSwap } from "./mulligan";
 import { weightsFor } from "./weights";
 import type { Agent } from "./types";
@@ -37,6 +37,8 @@ export interface SearchOptions {
   rescoreTop: number;
   /** リーサルの探索を行う */
   lethal: boolean;
+  /** リーサルを探し直す条件（LethalOptions.recheck。既定は見えない情報が変わったときだけ） */
+  lethalRecheck: LethalOptions["recheck"];
   /**
    * 評価関数の重み。"byClass" は自分のデッキのクラスに合わせて data/ai-weights.json の重みを使う。
    * 貪欲法で調整した重みは探索 AI では強くならなかった（210試合で 46.7%）ため、既定は基準の重みに融合で作るカードの価値を足したもの（SEARCH_WEIGHTS）
@@ -111,7 +113,7 @@ export interface SearchOptions {
   perFirst: number;
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0 };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, lethalRecheck: "onNewInfo", weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0 };
 
 /** 打った手の並び（後ろから前へのリスト）。各手を打った後の局面も持つ */
 interface Step {
@@ -337,7 +339,7 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
       const legalKeys = new Set(legal.map(keyOf));
 
       if (opts.lethal) {
-        const lethal = findLethal(real, p, rng);
+        const lethal = findLethal(real, p, rng, { ...DEFAULT_LETHAL_OPTIONS, recheck: opts.lethalRecheck });
         if (lethal && legalKeys.has(keyOf(lethal))) {
           plans[p] = null;
           return lethal;
