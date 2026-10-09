@@ -7,7 +7,7 @@ import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { playMatch } from "../src/sim/match";
 
 /** 比較に使わないデフォルトデッキ（クラスごとに 1 つにするため） */
-const EXCLUDED_DECKS = ["ランプドラゴン"];
+const EXCLUDED_DECKS = ["ランプドラゴン", "スペルウィッチ２"];
 
 /**
  * 探索 AI の設定 A と B を対戦させる（npm run compare -- <試合数> '<Aの設定JSON>' '<Bの設定JSON>'）。

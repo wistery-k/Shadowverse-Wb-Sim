@@ -15,7 +15,7 @@ import type { Agent } from "../src/ai/types";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { actingPlayer, applyAction, createGame, legalActions, rngFrom, type Action, type GameState, type PlayerIndex } from "../src/engine";
 
-const EXCLUDED_DECKS = ["ランプドラゴン"];
+const EXCLUDED_DECKS = ["ランプドラゴン", "スペルウィッチ２"];
 
 /** 行動の列の簡単なハッシュ（FNV-1a、32 ビット） */
 function digest(actions: readonly Action[]): string {

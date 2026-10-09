@@ -13,7 +13,7 @@ import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { createGame, nextRandom, type GameState, type PlayerIndex } from "../src/engine";
 import { playMatch } from "../src/sim/match";
 
-const EXCLUDED_DECKS = ["ランプドラゴン"];
+const EXCLUDED_DECKS = ["ランプドラゴン", "スペルウィッチ２"];
 const ELF = "リノセウスエルフ";
 
 export interface EvalRecord {

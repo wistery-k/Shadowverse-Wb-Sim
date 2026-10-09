@@ -11,7 +11,7 @@ import { actingPlayer, nextRandom, type PlayerIndex } from "../src/engine";
 import { playMatch } from "../src/sim/match";
 
 /** 比較に使うデッキ（npm run compare と同じ 7 つ） */
-const EXCLUDED_DECKS = ["ランプドラゴン"];
+const EXCLUDED_DECKS = ["ランプドラゴン", "スペルウィッチ２"];
 
 /** 1 試合の記録 */
 export interface MulliganRecord {
