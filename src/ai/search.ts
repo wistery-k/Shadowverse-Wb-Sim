@@ -16,6 +16,7 @@ import {
   type PlayerIndex,
   type Rng,
 } from "../engine";
+import { convergingAttacks, settleConvergingTrades } from "./convergingTrade";
 import { determinize } from "./determinize";
 import { SEARCH_WEIGHTS, evaluateWith, type EvalWeights } from "./evaluate";
 import { createGreedyAgent, greedyAgent } from "./greedy";
@@ -80,9 +81,16 @@ export interface SearchOptions {
    * "cost" はコスト 4 以上を返す（貪欲法と同じ）。重みは今のマリガンに +3.1%（4200 組、docs/ai-notes.md）
    */
   mulligan: "weights" | "cost";
+  /**
+   * 合流する相打ち（convergingTrade.ts）を、ターンを終える前に打つものとして扱う。
+   * ターン終了の局面はその攻撃を打ってから採点し、相手のターンもその局面から読む。
+   * 合流する攻撃が残っている局面でのターン終了は、攻撃してから終える手に劣らないので候補から外す
+   * （seed 2362697708 のビショップ 5 ターン目、進化したサレファでエースと相打ちしない。docs/ai-notes.md）
+   */
+  settleTrades: boolean;
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights" };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: false };
 
 interface Node {
   state: GameState;
@@ -153,8 +161,10 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   const terminals: Node[] = [];
   let frontier: Node[] = [];
 
-  const endScore = (state: GameState) => evaluateWith(resolveTurnEnd(state), p, w);
-  const score = opts.scoreTurnEnd === "all" ? endScore : (state: GameState) => evaluateWith(state, p, w);
+  /** ターンを終える局面（合流する相打ちを打った後） */
+  const settle = (state: GameState) => (opts.settleTrades ? settleConvergingTrades(state, p) : state);
+  const endScore = (state: GameState) => evaluateWith(resolveTurnEnd(settle(state)), p, w);
+  const score = opts.scoreTurnEnd === "all" ? endScore : (state: GameState) => evaluateWith(settle(state), p, w);
   const allowed = (state: GameState, a: Action) => !opts.allow || a.type === "endTurn" || opts.allow(state, a, p);
   const expand = (state: GameState) => (opts.sameHandOnce ? distinctPlays(state, legalActions(state)) : legalActions(state));
   /** 手 a を打った局面。chain なら、続く自分の選択とエクストラPP の後の手まで進めた局面すべて */
@@ -179,9 +189,11 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   };
 
   // 深さ1: すべての手を展開する（最初の手の候補を落とさない）
+  const rootConverges = opts.settleTrades && convergingAttacks(root, p).length > 0;
   for (const a of expand(root)) {
     if (!allowed(root, a)) continue;
     if (a.type === "endTurn") {
+      if (rootConverges) continue; // 合流する攻撃をしてから終える手に劣らない
       terminals.push({ state: root, first: a, value: score(root) });
       continue;
     }
@@ -219,7 +231,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   const ranked = [...bestByFirst.values()].sort((x, y) => y.value - x.value);
   const result = new Map<string, { action: Action; value: number }>();
   for (const node of ranked.slice(0, opts.rescoreTop)) {
-    const after = node.state.phase === "ended" ? node.state : simulateOpponentTurn(node.state, p, rng);
+    const after = node.state.phase === "ended" ? node.state : simulateOpponentTurn(settle(node.state), p, rng);
     result.set(keyOf(node.first), { action: node.first, value: evaluateWith(after, p, w) });
   }
   return result;
