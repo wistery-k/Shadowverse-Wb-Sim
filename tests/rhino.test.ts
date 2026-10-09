@@ -305,6 +305,11 @@ describe("seed 954874822（リノセウスエルフ vs アミュレット疾走�
    */
   it("エルフ 7 ターン目: コンボ 3 でリリィを出し、タイガーとサレファを処理する", () => {
     const { moves, end } = playTurn(stateAt(47), 0, rhinoAgent);
+    // このターンに勝てばよい（合流する相打ちの扱い（settleTrades）を入れてから、このターンのリーサルを見つけるようになった）
+    if (end.phase === "ended") {
+      expect(end.winner).toBe(0);
+      return;
+    }
     expect(moves.find((m) => m.move === "ピュアクリスタリア・リリィ")!.combo).toBeGreaterThanOrEqual(2);
     expect(oppFollowers(end, 0)).toEqual([]);
   }, 60_000);
