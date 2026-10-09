@@ -16,11 +16,14 @@ import {
   EXTRA_PP_REFRESH_TURN,
   hasKeyword,
   legalActions,
+  rngFrom,
   SUPER_EVOLVE_TURN,
+  tryApplyAction,
   type Action,
   type GameState,
   type PlayerIndex,
 } from "../engine";
+import { determinize } from "./determinize";
 import { DEFAULT_EXACT_LETHAL_OPTIONS, resetExactLethalCache, searchExactLethal, type ExactLethalOptions } from "./exactLethal";
 import { DEFAULT_LETHAL_OPTIONS, DIRECT_SCORING, findLethal, searchLethal } from "./lethal";
 import { searchRhinoLethal } from "./rhinoLethal";
@@ -222,11 +225,29 @@ export const RHINO_EXACT: ExactLethalOptions = {
  * 全探索は時間がかかるので、探索 AI の葉の局面（次のターンのリーサル）では使わない
  */
 export function searchLethalForRhinoTurn(root: GameState, p: PlayerIndex): Action[] | null {
+  // 運頼みの手順（虫の知らせのランダムダメージで守護を倒す等）は findLethal の確認で捨てられるので、ここで確かめて次を探す
   const found = searchLethalForRhino(root, p);
-  if (found) return found;
-  if (!root.players[p].hand.some((h) => nameOf(h.cardId) === RHINO)) return null;
-  if (!mayPlayThreeRhinos(root, p) && root.players[p === 0 ? 1 : 0].leaderHp > rhinoDamageBound(root, p)) return null;
-  return searchExactLethal(root, p, RHINO_EXACT);
+  if (found && winsElsewhere(root, p, found)) return found;
+  if (!root.players[p].hand.some((h) => nameOf(h.cardId) === RHINO)) return found;
+  if (!mayPlayThreeRhinos(root, p) && root.players[p === 0 ? 1 : 0].leaderHp > rhinoDamageBound(root, p)) return found;
+  const exact = searchExactLethal(root, p, RHINO_EXACT);
+  if (!exact) return found;
+  if (winsElsewhere(root, p, exact)) return exact;
+  // 乱数で結果が変わる手を除いて探し直す（seed 900234 のエルフ 7 ターン目。docs/ai-notes.md）
+  return searchExactLethal(root, p, { ...RHINO_EXACT, deterministicOnly: true }) ?? exact;
+}
+
+/** 乱数・山札・相手の手札を決め直した局面（findLethal の確認と同じ考え方）でも勝てるか */
+const ELSEWHERE_SEEDS = [1, 2];
+function winsElsewhere(root: GameState, p: PlayerIndex, seq: readonly Action[]): boolean {
+  return ELSEWHERE_SEEDS.every((seed) => {
+    let s: GameState | null = determinize(root, p, rngFrom({ rng: (root.rng ^ (seed * 0x9e3779b9)) >>> 0 }));
+    for (const a of seq) {
+      if (!s || s.phase === "ended") break;
+      s = tryApplyAction(s, a);
+    }
+    return s !== null && s.phase === "ended" && s.winner === p;
+  });
 }
 
 /**

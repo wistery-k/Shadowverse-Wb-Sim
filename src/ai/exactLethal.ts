@@ -5,9 +5,10 @@
 // - 手札・場の並び順とインスタンス ID、相手の手札の中身はキーに含めない
 // - 相手の体力に届いた時点で打ち切る。1 回に調べる局面の数が maxStates を超えたら諦める（null）
 // - メモは同じターンの間、使い回す
-// - 乱数を使う効果は、渡された局面の乱数の状態で決まった 1 通りだけを見る（他のリーサル探索と同じ）
+// - 乱数を使う効果は、渡された局面の乱数の状態で決まった 1 通りだけを見る（他のリーサル探索と同じ）。
+//   deterministicOnly なら、乱数で結果が変わる手は試さない
 
-import { legalActions, tryApplyAction, type Action, type GameState, type PlayerIndex } from "../engine";
+import { legalActions, rngFrom, shuffle, tryApplyAction, type Action, type GameState, type PlayerIndex } from "../engine";
 import type { HandCard, OnBoard, PlayerState } from "../engine/types";
 
 export interface ExactLethalOptions {
@@ -19,6 +20,11 @@ export interface ExactLethalOptions {
   maxStatesPerTurn: number;
   /** 必ず打つ手（あればその手だけを試す。森の神秘など、先に打って損の無い手） */
   forced?: (s: GameState, p: PlayerIndex, legal: Action[]) => Action | null;
+  /**
+   * 乱数で結果が変わる手を試さない。運頼みでない手順だけを探す（山札から引く手は試す。引いたカードに頼る手順は呼び出し側で確かめる）
+   * （虫の知らせのランダムダメージで守護を倒す前提の手順は、別の決定化で通らない。docs/ai-notes.md）
+   */
+  deterministicOnly?: boolean;
   /** 調べた局面の数を書き込む（計測用） */
   stats?: { visited: number; memo: number };
 }
@@ -66,7 +72,14 @@ type Memo = Map<string, { damage: number; exact: boolean }>;
  * 同じターンの間はメモを使い回す（ターン中は手を打つたびに探し直すため）。
  * 相手の手札の中身はキーに含めないので、決定化（determinize）で相手の手札が変わっても使い回せる
  */
-let cache: { turn: number; player: PlayerIndex; memo: Memo; visited: number } | null = null;
+interface TurnCache {
+  turn: number;
+  player: PlayerIndex;
+  memo: Memo;
+  visited: number;
+}
+/** deterministicOnly かどうかで試す手が違うので、メモを分ける */
+const caches: { all: TurnCache | null; deterministic: TurnCache | null } = { all: null, deterministic: null };
 const MAX_CACHE = 500_000;
 
 /** 全探索をした回数と、リーサルを見つけた回数（実験の集計用。resetExactLethalCache で 0 に戻る） */
@@ -74,14 +87,44 @@ export const exactLethalCounts = { searched: 0, found: 0 };
 
 /** メモを捨てる（新しい試合を始めるとき） */
 export function resetExactLethalCache(): void {
-  cache = null;
+  caches.all = null;
+  caches.deterministic = null;
   exactLethalCounts.searched = 0;
   exactLethalCounts.found = 0;
 }
 
-function cacheFor(root: GameState, p: PlayerIndex): NonNullable<typeof cache> {
-  if (!cache || cache.turn !== root.turn || cache.player !== p || cache.memo.size > MAX_CACHE) cache = { turn: root.turn, player: p, memo: new Map(), visited: 0 };
-  return cache;
+function cacheFor(root: GameState, p: PlayerIndex, deterministic: boolean): TurnCache {
+  const kind = deterministic ? "deterministic" : "all";
+  const c = caches[kind];
+  if (c && c.turn === root.turn && c.player === p && c.memo.size <= MAX_CACHE) return c;
+  return (caches[kind] = { turn: root.turn, player: p, memo: new Map(), visited: 0 });
+}
+
+const ALT_SEEDS = [0x9e3779b9, 0x85ebca6b, 0xc2b2ae35];
+
+/** 乱数の状態と p の山札の順番だけを変えた局面 */
+function withOtherRandom(s: GameState, p: PlayerIndex, seed: number): GameState {
+  const rng = (s.rng ^ seed) >>> 0;
+  const deck = [...s.players[p].deck];
+  shuffle(deck, rngFrom({ rng }));
+  const players = [...s.players] as GameState["players"];
+  players[p] = { ...s.players[p], deck };
+  return { ...s, players, rng };
+}
+
+/**
+ * 手 a の結果が乱数で変わるか。乱数を使わなかった手（乱数の状態が進んでいない）は変わらない。
+ * 使った手は、乱数の状態と山札の順番を変えた局面でも同じ局面・同じ相手の体力になるかで見る（候補が 1 つのランダム等は変わらない）
+ */
+export function variesWithRandom(s: GameState, a: Action, next: GameState, p: PlayerIndex): boolean {
+  if (next.rng === s.rng) return false;
+  const opp: PlayerIndex = p === 0 ? 1 : 0;
+  const key = (x: GameState) => `${x.players[opp].leaderHp}|${x.phase}|${lethalKey(x, opp)}`;
+  const expected = key(next);
+  return ALT_SEEDS.some((seed) => {
+    const alt = tryApplyAction(withOtherRandom(s, p, seed), a);
+    return !alt || key(alt) !== expected;
+  });
 }
 
 const isTransient = (s: GameState) => s.pending !== null || s.stack.length > 0 || s.queue.length > 0;
@@ -94,7 +137,7 @@ const actorOf = (s: GameState) => (s.pending ? s.pending.player : s.active);
 export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLethalOptions = DEFAULT_EXACT_LETHAL_OPTIONS): Action[] | null {
   if (root.phase !== "main" || actorOf(root) !== p) return null;
   const opp: PlayerIndex = p === 0 ? 1 : 0;
-  const turnCache = cacheFor(root, p);
+  const turnCache = cacheFor(root, p, opts.deterministicOnly ?? false);
   const memo = turnCache.memo;
   const limit = Math.min(opts.maxStates, opts.maxStatesPerTurn - turnCache.visited);
   if (limit <= 0) return null;
@@ -120,6 +163,7 @@ export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLe
     for (const a of candidates(s)) {
       const next = tryApplyAction(s, a);
       if (!next || (next.phase === "ended" && next.winner !== p)) continue;
+      if (opts.deterministicOnly && variesWithRandom(s, a, next, p)) continue;
       const dealt = s.players[opp].leaderHp - next.players[opp].leaderHp;
       const damage = dealt + dfs(next, need - dealt);
       if (damage > best) best = damage;
@@ -142,6 +186,7 @@ export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLe
       for (const a of candidates(s)) {
         const next = tryApplyAction(s, a);
         if (!next || (next.phase === "ended" && next.winner !== p)) continue;
+        if (opts.deterministicOnly && variesWithRandom(s, a, next, p)) continue;
         const dealt = s.players[opp].leaderHp - next.players[opp].leaderHp;
         if (dealt + dfs(next, need - dealt) >= need) {
           found = { a, next, dealt };
