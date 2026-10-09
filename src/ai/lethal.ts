@@ -40,7 +40,8 @@ export interface LethalOptions {
   /**
    * 探し直す条件。"always" は毎手探す。"onNewInfo" は、前の手で探して見つからなかった後、
    * 見えない情報が変わっていなければ（ドロー・乱数を使う効果・相手の手札や山札の枚数・ターンが変わらない）探さない。
-   * 自分の手だけで進んだ局面は、前の局面からの探索で読んでいるため
+   * 自分の手だけで進んだ局面は、前の局面からの探索で読んでいるはず、という考え。
+   * ただしビーム探索は網羅しないので、進んだ局面から探し直すと見つかることがあり、勝率が下がった（docs/ai-notes.md）。既定は "always"
    */
   recheck: "always" | "onNewInfo";
 }
@@ -74,7 +75,7 @@ export const DEFAULT_LETHAL_OPTIONS: LethalOptions = {
   maxDepth: 14,
   samples: 3,
   scorings: [DIRECT_SCORING, SETUP_SCORING],
-  recheck: "onNewInfo",
+  recheck: "always",
 };
 
 const WIN = 1e9;

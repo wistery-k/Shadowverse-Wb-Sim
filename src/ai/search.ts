@@ -37,7 +37,7 @@ export interface SearchOptions {
   rescoreTop: number;
   /** リーサルの探索を行う */
   lethal: boolean;
-  /** リーサルを探し直す条件（LethalOptions.recheck。既定は見えない情報が変わったときだけ） */
+  /** リーサルを探し直す条件（LethalOptions.recheck。既定は毎手。docs/ai-notes.md） */
   lethalRecheck: LethalOptions["recheck"];
   /**
    * 評価関数の重み。"byClass" は自分のデッキのクラスに合わせて data/ai-weights.json の重みを使う。
@@ -113,7 +113,7 @@ export interface SearchOptions {
   perFirst: number;
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, lethalRecheck: "onNewInfo", weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0 };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, lethalRecheck: "always", weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0 };
 
 /** 打った手の並び（後ろから前へのリスト）。各手を打った後の局面も持つ */
 interface Step {
