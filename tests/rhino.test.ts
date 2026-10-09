@@ -326,3 +326,49 @@ describe("リノセウス用ルール: 対戦", () => {
     }
   }, 60_000);
 });
+
+describe("seed 3964241101（アマリアロイヤル vs リノセウスエルフ、エルフ先攻）", () => {
+  // ユーザーが指摘した試合の、エルフの 7 ターン目の開始までの行動（どちらもリノセウス用 AI。ロイヤルは汎用の探索 AI と同じ）
+  const log: Action[] = [{"type":"mulligan","player":1,"swap":[70,42,80,69]},{"type":"mulligan","player":0,"swap":[28]},{"type":"play","iid":50},{"type":"endTurn"},{"type":"extraPp"},{"type":"play","iid":6},{"type":"attack","attacker":6,"target":50},{"type":"endTurn"},{"type":"play","iid":66},{"type":"endTurn"},{"type":"play","iid":8},{"type":"endTurn"},{"type":"play","iid":81},{"type":"play","iid":65},{"type":"attack","attacker":66,"target":8},{"type":"endTurn"},{"type":"play","iid":14},{"type":"attack","attacker":14,"target":65},{"type":"endTurn"},{"type":"play","iid":70},{"type":"attack","attacker":66,"target":"leader"},{"type":"play","iid":44},{"type":"choose","targets":[66]},{"type":"attack","attacker":81,"target":"leader"},{"type":"endTurn"},{"type":"play","iid":21},{"type":"evolve","iid":21},{"type":"attack","attacker":21,"target":81},{"type":"endTurn"},{"type":"play","iid":73},{"type":"evolve","iid":73},{"type":"attack","attacker":73,"target":84},{"type":"endTurn"},{"type":"play","iid":27},{"type":"attack","attacker":83,"target":"leader"},{"type":"evolve","iid":27},{"type":"attack","attacker":27,"target":73},{"type":"endTurn"},{"type":"play","iid":82},{"type":"play","iid":48},{"type":"play","iid":85},{"type":"play","iid":57},{"type":"evolve","iid":82},{"type":"choose","targets":[83]},{"type":"attack","attacker":82,"target":27},{"type":"endTurn"},{"type":"extraPp"},{"type":"play","iid":36},{"type":"attack","attacker":36,"target":82},{"type":"superEvolve","iid":36},{"type":"attack","attacker":36,"target":85},{"type":"endTurn"}];
+  const stateAt = (n: number) => {
+    let s = createGame({ decks: [royal.cards, elf.cards], seed: 3964241101 });
+    for (const a of log.slice(0, n)) s = applyAction(s, a);
+    return s;
+  };
+  /** p のターンを agent で最後まで進め、打った手を返す */
+  const playTurn = (s: GameState, p: 0 | 1, agent: typeof searchAgent, seed = 2) => {
+    const rng = rngFrom({ rng: seed });
+    const moves: { action: Action; state: GameState }[] = [];
+    while (s.phase === "main" && (s.pending ? s.pending.player : s.active) === p) {
+      const a = agent.chooseAction(s, legalActions(s), rng);
+      moves.push({ action: a, state: s });
+      s = applyAction(s, a);
+    }
+    return moves;
+  };
+
+  /**
+   * ロイヤルの 6 ターン目。以前はジェノで 1 回攻撃してから超進化し、1 回目の攻撃のぶっとばしを失っていた
+   * （超進化するかどうかは僅差で、乱数によって変わるので、乱数を変えて 6 回打つ）
+   */
+  it("ロイヤル 6 ターン目: 攻撃したフォロワーを後から進化・超進化しない", () => {
+    for (let seed = 1; seed <= 6; seed++) {
+      const attacked = new Set<number>();
+      for (const { action } of playTurn(stateAt(46), 0, searchAgent, seed)) {
+        if (action.type === "attack") attacked.add(action.attacker);
+        if (action.type === "evolve" || action.type === "superEvolve") expect(attacked.has(action.iid)).toBe(false);
+      }
+    }
+  }, 60_000);
+
+  /** エルフの 7 ターン目。以前は舞い踊る妖精で攻撃せずにベビーカーバンクルで戻していた（リーダーへの攻撃から始まる並びがビームから落ちていた） */
+  it("エルフ 7 ターン目: 舞い踊る妖精は、ベビーカーバンクルで戻す前にリーダーを攻撃する", () => {
+    const s = stateAt(52);
+    const dancer = s.players[1].board.find((c) => ALL_CARDS.find((x) => x.id === c.cardId)!.name === "舞い踊る妖精")!.iid;
+    const moves = playTurn(s, 1, rhinoAgent).map((m) => m.action);
+    const bounce = moves.findIndex((a) => a.type === "choose" && a.targets.includes(dancer));
+    const attack = moves.findIndex((a) => a.type === "attack" && a.attacker === dancer && a.target === "leader");
+    expect(attack).toBeGreaterThanOrEqual(0);
+    if (bounce >= 0) expect(attack).toBeLessThan(bounce);
+  }, 60_000);
+});

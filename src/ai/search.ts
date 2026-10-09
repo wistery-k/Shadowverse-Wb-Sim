@@ -89,9 +89,21 @@ export interface SearchOptions {
    * 勝率は変わらず（200 試合で 49.5%）、1 手あたりの時間は約 1.07 倍
    */
   settleTrades: boolean;
+  /**
+   * ビームの枠とは別に、最初の手ごとに評価の高い局面をこの数まで残す（0 なら残さない）。
+   * 評価をあまり上げない手（リーダーへの攻撃等）から始まる並びは、同じ深さで先へ進んだ並びに押されてビームから落ちる
+   * （seed 3964241101 のエルフ 7 ターン目、舞い踊る妖精でリーダーを攻撃してからベビーカーバンクルで戻す並び。docs/ai-notes.md）
+   */
+  perFirst: number;
+  /**
+   * このターンに攻撃したフォロワーは進化・超進化しない（攻撃する前に進化する並びに劣らないため）。
+   * 進化するかどうかの判断が手ごとの探索し直しで変わると、攻撃してから進化する下位互換の手順になる
+   * （seed 3964241101 のロイヤル 6 ターン目、ジェノで攻撃してから超進化して、ぶっとばしを 1 回失う。docs/ai-notes.md）
+   */
+  evolveBeforeAttack: boolean;
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: true };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: true, perFirst: 4, evolveBeforeAttack: true };
 
 interface Node {
   state: GameState;
@@ -146,13 +158,25 @@ function distinctPlays(state: GameState, actions: readonly Action[]): Action[] {
   });
 }
 
-/** 評価の高い順に、同じ局面を除いて width 個まで選ぶ（children は評価の降順） */
-function uniqueStates(children: Node[], width: number): Node[] {
+/** 手 a が、このターンに攻撃したフォロワーの進化・超進化か */
+function evolvesAttacked(state: GameState, a: Action): boolean {
+  if (a.type !== "evolve" && a.type !== "superEvolve") return false;
+  const f = state.players[state.active].board.find((c) => c.iid === a.iid);
+  return f?.kind === "follower" && f.attacksThisTurn > 0;
+}
+
+/** 評価の高い順に、同じ局面を除いて width 個まで選ぶ（children は評価の降順）。最初の手ごとに perFirst 個までは枠の外でも残す */
+function uniqueStates(children: Node[], width: number, perFirst: number): Node[] {
   const seen = new KeySet();
   const out: Node[] = [];
+  const perKey = new Map<string, number>();
   for (const c of children) {
-    if (out.length >= width) break;
-    if (seen.add(turnOrderKey(c.state), turnOrderHash(c.state))) out.push(c);
+    const k = perFirst > 0 ? keyOf(c.first) : "";
+    const n = perKey.get(k) ?? 0;
+    if (out.length >= width && n >= perFirst) continue;
+    if (!seen.add(turnOrderKey(c.state), turnOrderHash(c.state))) continue;
+    out.push(c);
+    if (perFirst > 0) perKey.set(k, n + 1);
   }
   return out;
 }
@@ -167,7 +191,10 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   const endScore = (state: GameState) => evaluateWith(resolveTurnEnd(settle(state)), p, w);
   const score = opts.scoreTurnEnd === "all" ? endScore : (state: GameState) => evaluateWith(settle(state), p, w);
   const allowed = (state: GameState, a: Action) => !opts.allow || a.type === "endTurn" || opts.allow(state, a, p);
-  const expand = (state: GameState) => (opts.sameHandOnce ? distinctPlays(state, legalActions(state)) : legalActions(state));
+  const expand = (state: GameState) => {
+    const actions = opts.sameHandOnce ? distinctPlays(state, legalActions(state)) : legalActions(state);
+    return opts.evolveBeforeAttack ? actions.filter((a) => !evolvesAttacked(state, a)) : actions;
+  };
   /** 手 a を打った局面。chain なら、続く自分の選択とエクストラPP の後の手まで進めた局面すべて */
   const advance = (state: GameState, a: Action, depth = 0): GameState[] => {
     const next = tryApply(state, a);
@@ -217,7 +244,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
       }
     }
     children.sort((x, y) => y.value - x.value);
-    frontier = opts.dedup ? uniqueStates(children, opts.beamWidth) : children.slice(0, opts.beamWidth);
+    frontier = opts.dedup ? uniqueStates(children, opts.beamWidth, opts.perFirst) : children.slice(0, opts.beamWidth);
   }
   terminals.push(...frontier);
   if (opts.scoreTurnEnd === "terminal") for (const t of terminals) t.value = endScore(t.state);
