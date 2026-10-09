@@ -6,6 +6,7 @@ import {
   legalActions,
   newBoardCard,
   newHandCard,
+  resolveTurnEnd,
   type Action,
   type AmuletOnBoard,
   type FollowerOnBoard,
@@ -358,5 +359,31 @@ describe("リソース・キーワード能力", () => {
     const { s, me } = setup();
     const t = applyAction(s, { type: "play", iid: toHand(s, me, "最果ての罪・サタン") });
     expect(t.players[me].deck).toHaveLength(10);
+  });
+});
+
+describe("ターン終了時の処理だけを進める（resolveTurnEnd）", () => {
+  it("ターン終了時の能力と一時的な効果の終了だけを行い、相手のターンは始めない", () => {
+    const { s, me, opp } = setup();
+    toBoard(s, me, "デストロイアーティファクトγ", { tempAttack: 2 });
+    const knight = toBoard(s, opp, "キャラバンマンモス");
+    const before = JSON.stringify(s);
+    const t = resolveTurnEnd(s);
+    expect(follower(t, knight.iid)?.defense).toBe((knight as FollowerOnBoard).defense - 3);
+    expect((board(t, me)[0] as FollowerOnBoard).tempAttack).toBe(0);
+    expect(t.active).toBe(me);
+    expect(t.turn).toBe(s.turn);
+    expect(t.players[opp].hand).toHaveLength(0);
+    expect(t.players[opp].pp).toBe(s.players[opp].pp);
+    expect(JSON.stringify(s)).toBe(before);
+  });
+
+  it("選択待ちの局面はそのまま返す", () => {
+    const { s, me, opp } = setup();
+    toBoard(s, opp, "キャラバンマンモス");
+    toBoard(s, opp, "刹那のクイックブレイダー");
+    const t = applyAction(s, { type: "play", iid: toHand(s, me, "烈火のファイアリザード") });
+    expect(t.pending).not.toBeNull();
+    expect(resolveTurnEnd(t)).toBe(t);
   });
 });

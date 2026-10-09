@@ -182,7 +182,8 @@ function startTurn(state: GameState, p: PlayerIndex): void {
   fire.turnStart(state);
 }
 
-function endTurnCleanup(state: GameState): void {
+/** ターン終了時に切れる一時的な効果（ターン終了までの攻撃力・キーワード等）を消す */
+function clearTurnEffects(state: GameState): void {
   for (const p of [0, 1] as const) {
     for (const c of state.players[p].board) {
       c.tempKeywords = [];
@@ -192,7 +193,25 @@ function endTurnCleanup(state: GameState): void {
       }
     }
   }
+}
+
+function endTurnCleanup(state: GameState): void {
+  clearTurnEffects(state);
   pushStartTurn(state, opponent(state.active));
+}
+
+/**
+ * 手番のプレイヤーがここでターンを終えたときの、ターン終了時の処理（ターン終了時の能力・一時的な効果の終了）だけを
+ * 行った局面を返す。相手のターンは始めない（AI がターン終了の局面を評価するため）。
+ * 選択待ち・解決中の局面と決着した局面はそのまま返す。ターン終了時の能力が選択待ちになったら、その時点の局面を返す
+ */
+export function resolveTurnEnd(prev: GameState): GameState {
+  if (prev.phase !== "main" || prev.pending || prev.stack.length > 0 || prev.queue.length > 0) return prev;
+  const state = cloneState(prev);
+  pushInternal(state, [{ op: "_endTurn" }], systemCtx(state.active));
+  run(state);
+  if (state.phase === "main" && !state.pending && state.stack.length === 0 && state.queue.length === 0) clearTurnEffects(state);
+  return state;
 }
 
 function handleInternal(state: GameState, frame: Frame, eff: InternalEffect): void {

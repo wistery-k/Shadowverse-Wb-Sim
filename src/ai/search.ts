@@ -10,6 +10,7 @@ import {
   actingPlayer,
   applyAction,
   legalActions,
+  resolveTurnEnd,
   type Action,
   type GameState,
   type PlayerIndex,
@@ -62,13 +63,23 @@ export interface SearchOptions {
    */
   chain: boolean;
   /**
+   * 融合を、続く自分の手とまとめて 1 手として展開する（融合だけで終える局面も残す。手札が 9 枚のとき融合して減らしておく手のため）。
+   * 融合は評価値を変えないので、融合を挟む手順がビームで切られていた（seed 472546500 の AFネメシス 5 ターン目。docs/ai-notes.md）
+   */
+  chainFuse: boolean;
+  /**
+   * ターン終了の局面の採点に、ターン終了時の処理（ターン終了時の能力等）を含める。
+   * "all" はビームの中の局面も、"terminal" は最初の手ごとの最善を選ぶときだけ。"none" は含めない
+   */
+  scoreTurnEnd: "none" | "terminal" | "all";
+  /**
    * マリガン。"weights" はカードごとの重み（data/mulligan-weights.json。デフォルトデッキのみ、他はコストで決める）、
    * "cost" はコスト 4 以上を返す（貪欲法と同じ）。重みは今のマリガンに +3.1%（4200 組、docs/ai-notes.md）
    */
   mulligan: "weights" | "cost";
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, mulligan: "weights" };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "none", mulligan: "weights" };
 
 interface Node {
   state: GameState;
@@ -139,6 +150,8 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   const terminals: Node[] = [];
   let frontier: Node[] = [];
 
+  const endScore = (state: GameState) => evaluateWith(resolveTurnEnd(state), p, w);
+  const score = opts.scoreTurnEnd === "all" ? endScore : (state: GameState) => evaluateWith(state, p, w);
   const allowed = (state: GameState, a: Action) => !opts.allow || a.type === "endTurn" || opts.allow(state, a, p);
   const expand = (state: GameState) => (opts.sameHandOnce ? distinctPlays(state, legalActions(state)) : legalActions(state));
   /** 手 a を打った局面。chain なら、続く自分の選択とエクストラPP の後の手まで進めた局面すべて */
@@ -149,6 +162,13 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
     if (next.pending && next.pending.player === p) {
       const out = legalActions(next).flatMap((c) => (allowed(next, c) ? advance(next, c, depth + 1) : []));
       return out.length > 0 ? out : [next];
+    }
+    if (opts.chainFuse && a.type === "fuse" && !next.pending && next.active === p) {
+      // 続けて融合するときは融合先の iid の小さい順に限る（順番違いの同じ融合を何通りも作らない）
+      const out = expand(next).flatMap((c) =>
+        c.type === "endTurn" || (c.type === "fuse" && c.host < a.host) || !allowed(next, c) ? [] : advance(next, c, depth + 1),
+      );
+      return [next, ...out];
     }
     if (a.type === "extraPp" && !next.pending && next.active === p) {
       const out = expand(next).flatMap((c) => (c.type === "endTurn" || c.type === "extraPp" || !allowed(next, c) ? [] : advance(next, c, depth + 1)));
@@ -161,10 +181,10 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   for (const a of expand(root)) {
     if (!allowed(root, a)) continue;
     if (a.type === "endTurn") {
-      terminals.push({ state: root, first: a, value: evaluateWith(root, p, w) });
+      terminals.push({ state: root, first: a, value: score(root) });
       continue;
     }
-    for (const next of advance(root, a)) frontier.push({ state: next, first: a, value: evaluateWith(next, p, w) });
+    for (const next of advance(root, a)) frontier.push({ state: next, first: a, value: score(next) });
   }
 
   for (let depth = 1; depth < opts.maxDepth && frontier.length > 0; depth++) {
@@ -179,13 +199,14 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
       terminals.push(node);
       for (const a of expand(node.state)) {
         if (a.type === "endTurn" || !allowed(node.state, a)) continue;
-        for (const next of advance(node.state, a)) children.push({ state: next, first: node.first, value: evaluateWith(next, p, w) });
+        for (const next of advance(node.state, a)) children.push({ state: next, first: node.first, value: score(next) });
       }
     }
     children.sort((x, y) => y.value - x.value);
     frontier = opts.dedup ? uniqueStates(children, opts.beamWidth) : children.slice(0, opts.beamWidth);
   }
   terminals.push(...frontier);
+  if (opts.scoreTurnEnd === "terminal") for (const t of terminals) t.value = endScore(t.state);
 
   // 最初の手ごとに最善の終局面を残し、上位を相手のターンまで読んで評価し直す
   const bestByFirst = new Map<string, Node>();
