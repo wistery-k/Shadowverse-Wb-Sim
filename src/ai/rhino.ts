@@ -213,7 +213,8 @@ export const RHINO_EXACT: ExactLethalOptions = {
   ...DEFAULT_EXACT_LETHAL_OPTIONS,
   maxStates: 30_000,
   maxStatesPerTurn: 60_000,
-  order: (s, p, actions) => [...actions].sort((x, y) => exactOrderRank(s, p, x) - exactOrderRank(s, p, y)),
+  // リノセウスでリーダー以外を攻撃する手は試さない（ユーザーの案。seed 900091 の 8 ターン目。docs/ai-notes.md）
+  order: (s, p, actions) => actions.filter((a) => !isRhinoFollowerAttack(s, p, a)).sort((x, y) => exactOrderRank(s, p, x) - exactOrderRank(s, p, y)),
   forced: (s, p, legal) => {
     const mystery = s.players[p].hand.find((h) => nameOf(h.cardId) === MYSTERY);
     return (mystery && legal.find((a) => a.type === "play" && a.iid === mystery.iid)) ?? null;
@@ -239,6 +240,12 @@ export function searchLethalForRhinoTurn(root: GameState, p: PlayerIndex): Actio
   if (winsElsewhere(root, p, exact)) return exact;
   // 乱数で結果が変わる手を除いて探し直す（seed 900234 のエルフ 7 ターン目。docs/ai-notes.md）
   return searchExactLethal(root, p, { ...opts, deterministicOnly: true }) ?? exact;
+}
+
+function isRhinoFollowerAttack(s: GameState, p: PlayerIndex, a: Action): boolean {
+  if (a.type !== "attack" || a.target === "leader") return false;
+  const c = s.players[p].board.find((x) => x.iid === a.attacker);
+  return c !== undefined && nameOf(c.cardId) === RHINO;
 }
 
 export function isRhinoPlay(s: GameState, a: Action): boolean {
