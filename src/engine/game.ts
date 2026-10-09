@@ -56,9 +56,16 @@ import type {
 export { opponent } from "./state";
 export { cardOf } from "./registry";
 
+/**
+ * 不正な行動。AI の探索は打てるか分からない手を applyAction で試して、この例外で判定することが多い
+ * （探索中の applyAction の約 4 分の 1）。スタックトレースの取得が重いので取らない（メッセージで原因は分かる）
+ */
 export class IllegalActionError extends Error {
   constructor(message: string) {
+    const limit = Error.stackTraceLimit;
+    Error.stackTraceLimit = 0;
     super(message);
+    Error.stackTraceLimit = limit;
     this.name = "IllegalActionError";
   }
 }
