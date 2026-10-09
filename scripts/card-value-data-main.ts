@@ -106,12 +106,13 @@ function variantsOf(s: GameState, p: PlayerIndex): { kind: VariantKind; cardId: 
 }
 
 /**
- * npm run card-value-data -- --games <n> --seed <s> --shard <i>/<k> --out <file.jsonl> [--turns 2-8] [--maxpp0]
+ * npm run card-value-data -- --games <n> --seed <s> --shard <i>/<k> --out <file.jsonl> [--turns 2-8] [--maxpp0] [--focus <デッキ名>]
  * 試合番号 g（0 ≦ g < n）のうち g % k === i のものを行う。1 試合から最大 2 局面（両プレイヤー 1 つずつ）。
+ * --focus は片方の席をそのデッキ（ミラーを除く）にし、そのデッキの局面だけを取る。
  * 出力ファイルに既にある seed は飛ばす（再開用）。--maxpp0 は評価関数の PP 最大値の重みを 0 にする（竜の啓示で方法を確かめる用）
  */
 export async function main(argv: string[]): Promise<number> {
-  let games = 10, seed = 1, shard = [0, 1], out = "card-value-data.jsonl", turns = [2, 8], weights: EvalWeights = SEARCH_WEIGHTS;
+  let games = 10, seed = 1, shard = [0, 1], out = "card-value-data.jsonl", turns = [2, 8], weights: EvalWeights = SEARCH_WEIGHTS, focus = "";
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i], v = argv[i + 1] ?? "";
     if (k === "--maxpp0") {
@@ -124,9 +125,12 @@ export async function main(argv: string[]): Promise<number> {
     else if (k === "--shard") shard = v.split("/").map(Number);
     else if (k === "--out") out = v;
     else if (k === "--turns") turns = v.split("-").map(Number);
+    else if (k === "--focus") focus = v;
     else throw new Error(`不明な引数: ${k}`);
   }
-  const decks = DEFAULT_DECKS.filter((d) => !EXCLUDED_DECKS.includes(d.name));
+  const decks = DEFAULT_DECKS.filter((d) => !EXCLUDED_DECKS.includes(d.name) || d.name === focus);
+  const focusIndex = decks.findIndex((d) => d.name === focus);
+  if (focus && focusIndex < 0) throw new Error(`デッキが見つかりません: ${focus}`);
   const done = new Set<number>();
   if (existsSync(out)) {
     for (const line of readFileSync(out, "utf8").split("\n")) if (line) done.add((JSON.parse(line) as CardValueRecord).seed);
@@ -142,8 +146,14 @@ export async function main(argv: string[]): Promise<number> {
     const [r2, s2] = nextRandom(s1);
     const [r3, s3] = nextRandom(s2);
     const [r4] = nextRandom(s3);
-    const i = Math.floor(r1 * decks.length);
-    const j = (i + 1 + Math.floor(r2 * (decks.length - 1))) % decks.length;
+    let i = Math.floor(r1 * decks.length);
+    let j = (i + 1 + Math.floor(r2 * (decks.length - 1))) % decks.length;
+    if (focusIndex >= 0) {
+      // 相手はフォーカス以外から選び、席はシードで入れ替える
+      const others = decks.filter((_, k) => k !== focusIndex && !EXCLUDED_DECKS.includes(decks[k]!.name));
+      const opp = decks.indexOf(others[Math.floor(r2 * others.length)]!);
+      [i, j] = r1 < 0.5 ? [focusIndex, opp] : [opp, focusIndex];
+    }
     const pair = [decks[i]!, decks[j]!];
     const names: [string, string] = [pair[0]!.name, pair[1]!.name];
     const span = turns[1]! - turns[0]! + 1;
@@ -155,7 +165,8 @@ export async function main(argv: string[]): Promise<number> {
     const agents = makeAgents(names, weights);
     const agentRng = rngFrom({ rng: (gameSeed ^ 0x9e3779b9) >>> 0 });
     let actions = 0;
-    while (state.phase !== "ended" && (snaps[0] === null || snaps[1] === null)) {
+    const wanted = ([0, 1] as const).filter((p) => focusIndex < 0 || names[p] === focus);
+    while (state.phase !== "ended" && wanted.some((p) => snaps[p] === null)) {
       if (++actions > 10000) throw new Error(`アクション数が上限を超えました (seed ${gameSeed})`);
       const actor = actingPlayer(state);
       if (snaps[actor] === null && isStartOfTurn(state) && state.active === actor && state.players[actor].turnCount === target[actor]) {
@@ -166,7 +177,7 @@ export async function main(argv: string[]): Promise<number> {
 
     for (const p of [0, 1] as const) {
       const snap = snaps[p];
-      if (!snap) continue;
+      if (!snap || !wanted.includes(p)) continue;
       const contSeed = mix(gameSeed, 200 + p);
       const run = (s: GameState): boolean | null => {
         plays++;
