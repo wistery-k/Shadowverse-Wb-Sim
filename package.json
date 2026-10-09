@@ -17,7 +17,9 @@
     "bench": "node scripts/vite-run.mjs scripts/bench-main.ts",
     "mulligan-data": "node scripts/vite-run.mjs scripts/mulligan-data-main.ts",
     "mulligan-fit": "node scripts/vite-run.mjs scripts/mulligan-fit-main.ts",
-    "mulligan-eval": "node scripts/vite-run.mjs scripts/mulligan-eval-main.ts"
+    "mulligan-eval": "node scripts/vite-run.mjs scripts/mulligan-eval-main.ts",
+    "card-value-data": "node scripts/vite-run.mjs scripts/card-value-data-main.ts",
+    "card-value-fit": "node scripts/vite-run.mjs scripts/card-value-fit-main.ts"
   },
   "repository": {
     "type": "git",
