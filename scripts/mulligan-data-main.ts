@@ -6,7 +6,7 @@ import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { rhinoAgent } from "../src/ai/rhino";
 import { searchAgent } from "../src/ai/search";
 import type { Agent } from "../src/ai/types";
-import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
+import { DEFAULT_DECKS, type DefaultDeck } from "../src/cards/defaultDecks";
 import { actingPlayer, nextRandom, type PlayerIndex } from "../src/engine";
 import { playMatch } from "../src/sim/match";
 
@@ -59,18 +59,28 @@ function randomMulligan(inner: Agent, coinSeed: number, observed: { hand: string
 /**
  * npm run mulligan-data -- --games <n> --seed <s> --shard <i>/<k> --out <file.jsonl>
  * 試合番号 g（0 ≦ g < n）のうち g % k === i のものを行う。出力ファイルに既にある seed は飛ばす（再開用）。
+ * --focus <デッキ名,...> を付けると、片方を指定のデッキ（ランプドラゴンも可）、もう片方を指定以外の比較用のデッキにし、
+ * コインで決めるのは指定のデッキだけにする（相手は今の AI のマリガン。相手側の hands・kept は空）。一部のデッキだけ取り直すため
  */
 export async function main(argv: string[]): Promise<number> {
   let games = 100, seed = 1, shard = [0, 1], out = "mulligan-data.jsonl";
+  let focus: string[] = [];
   for (let i = 0; i < argv.length; i += 2) {
     const k = argv[i], v = argv[i + 1] ?? "";
     if (k === "--games") games = Number(v);
     else if (k === "--seed") seed = Number(v);
     else if (k === "--shard") shard = v.split("/").map(Number);
     else if (k === "--out") out = v;
+    else if (k === "--focus") focus = v.split(",");
     else throw new Error(`不明な引数: ${k}`);
   }
   const decks = DEFAULT_DECKS.filter((d) => !EXCLUDED_DECKS.includes(d.name));
+  const focusDecks = focus.map((name) => {
+    const d = DEFAULT_DECKS.find((x) => x.name === name);
+    if (!d) throw new Error(`デッキがありません: ${name}`);
+    return d;
+  });
+  const others = decks.filter((d) => !focus.includes(d.name));
   const done = new Set<number>();
   if (existsSync(out)) {
     for (const line of readFileSync(out, "utf8").split("\n")) if (line) done.add((JSON.parse(line) as MulliganRecord).seed);
@@ -84,11 +94,22 @@ export async function main(argv: string[]): Promise<number> {
     // デッキの組（ミラーを除く）をシードから決める
     const [r1, s1] = nextRandom(gameSeed);
     const [r2] = nextRandom(s1);
-    const i = Math.floor(r1 * decks.length);
-    const j = (i + 1 + Math.floor(r2 * (decks.length - 1))) % decks.length;
-    const pair = [decks[i]!, decks[j]!];
+    let pair: DefaultDeck[];
+    if (focusDecks.length > 0) {
+      const [r3] = nextRandom(nextRandom(s1)[1]);
+      const f = focusDecks[Math.floor(r1 * focusDecks.length)]!;
+      const o = others[Math.floor(r2 * others.length)]!;
+      pair = r3 < 0.5 ? [f, o] : [o, f];
+    } else {
+      const i = Math.floor(r1 * decks.length);
+      const j = (i + 1 + Math.floor(r2 * (decks.length - 1))) % decks.length;
+      pair = [decks[i]!, decks[j]!];
+    }
     const obs = [{ hand: [] as string[], kept: [] as boolean[] }, { hand: [] as string[], kept: [] as boolean[] }];
-    const agents = pair.map((d, p) => randomMulligan(d.name === "リノセウスエルフ" ? rhinoAgent : searchAgent, mix(gameSeed, 100 + p), obs[p]!)) as [Agent, Agent];
+    const agents = pair.map((d, p) => {
+      const inner = d.name === "リノセウスエルフ" ? rhinoAgent : searchAgent;
+      return focusDecks.length > 0 && !focus.includes(d.name) ? inner : randomMulligan(inner, mix(gameSeed, 100 + p), obs[p]!);
+    }) as [Agent, Agent];
     const r = playMatch(agents, { decks: [pair[0]!.cards, pair[1]!.cards], seed: gameSeed });
     const rec: MulliganRecord = {
       seed: gameSeed,

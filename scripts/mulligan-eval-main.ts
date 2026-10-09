@@ -1,11 +1,11 @@
-// マリガンの重みの評価（npm run mulligan-eval -- --weights <file> --games <n> --seed <s> --shard <i>/<k> --out <file.jsonl>）。
+// マリガンの重みの評価（npm run mulligan-eval -- --weights <file> --games <n> --seed <s> --shard <i>/<k> --out <file.jsonl> [--decks <デッキ名,...>]）。
 // 集計は npm run mulligan-eval -- --summary <file.jsonl ...>
-// 7 デッキの全ての組（ミラーを除く 42 通り）× 両方の席 × n シードについて、自分側だけマリガンを「今の方針」と「重み」で打ち分ける。
+// 自分側のデッキ（既定は比較用の 7 デッキ）× 相手（ミラーを除く）× 両方の席 × n シードについて、自分側だけマリガンを「今の AI の方針」と「重み」で打ち分ける。
 // 相手は今の AI（今のマリガン）。シードが同じなので、マリガンの判断が同じなら試合はまったく同じになる。
 // そのため判断が違う試合だけを両方の方針で打ち、勝ち負けが入れ替わった数を比べる。
 
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
-import { costMulliganSwap, weightedMulliganSwap, withMulligan, type MulliganWeights } from "../src/ai/mulligan";
+import { MULLIGAN_WEIGHTS, costMulliganSwap, weightedMulliganSwap, withMulligan, type MulliganWeights } from "../src/ai/mulligan";
 import { mulliganSwap as rhinoMulliganSwap, rhinoAgent } from "../src/ai/rhino";
 import { searchAgent } from "../src/ai/search";
 import type { Agent } from "../src/ai/types";
@@ -78,6 +78,10 @@ export async function main(argv: string[]): Promise<number> {
     summarize(argv.slice(1));
     return 0;
   }
+  let xNames: string[] | null = null;
+  const fail = (name: string): never => {
+    throw new Error(`デッキがありません: ${name}`);
+  };
   let games = 10, seed = 2, shard = [0, 1], out = "mulligan-eval.jsonl", weightsFile = "data/mulligan-weights.json";
   for (let i = 0; i < argv.length; i += 2) {
     const k = argv[i], v = argv[i + 1] ?? "";
@@ -86,10 +90,14 @@ export async function main(argv: string[]): Promise<number> {
     else if (k === "--shard") shard = v.split("/").map(Number);
     else if (k === "--out") out = v;
     else if (k === "--weights") weightsFile = v;
+    else if (k === "--decks") xNames = v.split(",");
     else throw new Error(`不明な引数: ${k}`);
   }
   const weights = JSON.parse(readFileSync(weightsFile, "utf8")) as MulliganWeights;
-  const decks = DEFAULT_DECKS.filter((d) => !EXCLUDED_DECKS.includes(d.name));
+  const compareDecks = DEFAULT_DECKS.filter((d) => !EXCLUDED_DECKS.includes(d.name));
+  // --decks: 自分側のデッキ（ランプドラゴンも可）。相手は比較用のデッキのうち自分側に無いもの
+  const decks = xNames ? xNames.map((n) => DEFAULT_DECKS.find((d) => d.name === n) ?? fail(n)) : compareDecks;
+  const opponents = xNames ? compareDecks.filter((d) => !xNames!.includes(d.name)) : compareDecks;
   const done = new Set<string>();
   if (existsSync(out)) {
     for (const line of readFileSync(out, "utf8").split("\n")) if (line) {
@@ -97,18 +105,20 @@ export async function main(argv: string[]): Promise<number> {
       done.add(`${r.seed}/${r.deck}/${r.opponent}/${r.seat}`);
     }
   }
-  const baseSwap = (deck: string) => (s: GameState, p: PlayerIndex) => (deck === ELF ? rhinoMulliganSwap(s, p) : costMulliganSwap(s, p));
+  // 今の AI のマリガン（探索 AI は data/mulligan-weights.json の重み、無ければコスト。エルフはリノセウス用のルール）
+  const baseSwap = (deck: string) => (s: GameState, p: PlayerIndex) =>
+    deck === ELF ? rhinoMulliganSwap(s, p) : (weightedMulliganSwap(s, p, MULLIGAN_WEIGHTS) ?? costMulliganSwap(s, p));
   const baseAgent = (deck: string): Agent => (deck === ELF ? rhinoAgent : searchAgent);
   const t0 = Date.now();
   let n = 0, played = 0;
   let idx = 0;
   for (let g = 0; g < games; g++) {
     for (const x of decks) {
-      for (const y of decks) {
+      for (const y of opponents) {
         if (x === y) continue;
         for (const seat of [0, 1] as const) {
           if (idx++ % shard[1]! !== shard[0]) continue;
-          const gameSeed = mix(mix(seed, g), decks.indexOf(x) * 16 + decks.indexOf(y));
+          const gameSeed = mix(mix(seed, g), decks.indexOf(x) * 16 + opponents.indexOf(y));
           const key = `${gameSeed}/${x.name}/${y.name}/${seat}`;
           if (done.has(key)) continue;
           const deckList: [readonly string[], readonly string[]] = seat === 0 ? [x.cards, y.cards] : [y.cards, x.cards];

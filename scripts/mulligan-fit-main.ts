@@ -1,14 +1,14 @@
-// マリガンの重みの推定（npm run mulligan-fit -- <データ.jsonl ...> [--out data/mulligan-weights.json] [--seat] [--sig]）。
+// マリガンの重みの推定（npm run mulligan-fit -- <データ.jsonl ...> [--out data/mulligan-weights.json] [--seat] [--sig] [--merge]）。
 // データは npm run mulligan-data で取る（初手の各カードをコインで残す・返すを決めた試合）。
 // デッキごとに、勝敗 ~ 先後 + 相手デッキ + 初手にあったカード + 残したカード の線形確率モデルを当てはめ、
 // 「残した」の係数（＝初手にあるとき、残すと返すより勝率がどれだけ上がるか）を重みにする。
 // 残すかどうかはコインで決めたので、この係数は因果的な効果の推定になる。マリガン後に引いたカードは入れない（処置の後の変数）。
 // 係数は経験ベイズで 0 に向けて縮める（偶然大きく出た係数をそのまま使わないため）。
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { cardOf } from "../src/engine";
-import type { MulliganWeights } from "../src/ai/mulligan";
+import { parseMulliganWeights, type MulliganWeights } from "../src/ai/mulligan";
 import type { MulliganRecord } from "./mulligan-data-main";
 
 interface Row {
@@ -67,10 +67,12 @@ export async function main(argv: string[]): Promise<number> {
   let out: string | null = null;
   let seat = false;
   let sig = false;
+  let merge = false;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--out") out = argv[++i] ?? null;
     else if (argv[i] === "--seat") seat = true;
     else if (argv[i] === "--sig") sig = true;
+    else if (argv[i] === "--merge") merge = true;
     else files.push(argv[i]!);
   }
   const records: MulliganRecord[] = [];
@@ -86,13 +88,15 @@ export async function main(argv: string[]): Promise<number> {
   }
   console.log(`${records.length} 試合`);
   const weights: MulliganWeights = {};
-  const deckNames = [...new Set(records.flatMap((r) => r.decks))].sort();
+  // コインで決めた側（kept が空でない側）のデッキだけ推定する
+  const deckNames = [...new Set(records.flatMap((r) => r.decks.filter((_, s) => (r.kept[s]?.length ?? 0) > 0)))].sort();
 
   for (const deckName of deckNames) {
     const deck = DEFAULT_DECKS.find((d) => d.name === deckName);
     if (!deck) throw new Error(`デッキがありません: ${deckName}`);
     const cards = [...new Set(deck.cards)];
-    const opps = deckNames.filter((n) => n !== deckName);
+    // このデッキが実際に当たった相手（定数項の基準は最初の 1 つ）
+    const opps = [...new Set(records.flatMap((r) => ([0, 1] as const).filter((s) => r.decks[s] === deckName).map((s) => r.decks[1 - s]!)))].sort();
     // 列: 定数, 後攻, 相手デッキ（最初の 1 つを除く）, カードごとに [初手1枚以上, 初手2枚以上, 残した1枚以上, 残した2枚以上]（--seat なら残した×後攻も）
     const base = 2 + (opps.length - 1);
     const per = seat ? 6 : 4;
@@ -100,7 +104,7 @@ export async function main(argv: string[]): Promise<number> {
     const rows: Row[] = [];
     for (const r of records) {
       for (const s of [0, 1] as const) {
-        if (r.decks[s] !== deckName) continue;
+        if (r.decks[s] !== deckName || r.kept[s].length === 0) continue;
         const x = new Array<number>(d).fill(0);
         const second = r.first !== s ? 1 : 0;
         x[0] = 1;
@@ -160,7 +164,9 @@ export async function main(argv: string[]): Promise<number> {
     if (!(sig && deckName === "リノセウスエルフ")) weights[deckName] = table;
   }
   if (out) {
-    writeFileSync(out, JSON.stringify(weights, null, 2) + "\n");
+    // --merge: 出力ファイルの既存の重みのうち、推定しなかったデッキは残す
+    const base: MulliganWeights = merge && existsSync(out) ? parseMulliganWeights(JSON.parse(readFileSync(out, "utf8"))) : {};
+    writeFileSync(out, JSON.stringify({ ...base, ...weights }, null, 2) + "\n");
     console.log(`\n${out} に書き出しました`);
   }
   return 0;
