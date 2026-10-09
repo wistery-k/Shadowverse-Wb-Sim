@@ -349,7 +349,7 @@ describe("seed 2275116772（リノセウスエルフ vs アミュレット疾走
 
   /** テイマーの並びがビームで切られず、燐光の岩はコンボ 2 以上で出す（森の神秘が加わる） */
   it("7 ターン目: 燐光の岩はコンボ 2 以上で出す（perFirst）", () => {
-    for (const p of playTurn(createRhinoAgent({ perFirst: 4 })).filter((x) => x.card === "燐光の岩")) expect(p.combo).toBeGreaterThanOrEqual(2);
+    for (const p of playTurn(rhinoAgent).filter((x) => x.card === "燐光の岩")) expect(p.combo).toBeGreaterThanOrEqual(2);
   }, 60_000);
 });
 

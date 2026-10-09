@@ -180,12 +180,18 @@ function searchLethalForRhino(root: GameState, p: PlayerIndex): Action[] | null 
 }
 
 /**
+ * ビームに最初の手ごとに残す局面の数（SearchOptions.perFirst）。テイマーの並びがアリア等の並びに押し出されて途中で切れ、
+ * 燐光の岩をコンボ 1 で出していた（seed 2275116772 の 7 ターン目）。勝率は 242 → 248/600、1 試合 0.38 → 0.40 秒（docs/ai-notes.md）
+ */
+const RHINO_PER_FIRST = 4;
+
+/**
  * リノセウス用 AI を作る。search は探索の設定（比較実験用。既定は汎用の探索 AI と同じ深さ 8・幅 32）。
  * 深さ 8・幅 32 はリノセウスエルフで先に採用し、後に汎用の探索 AI の既定にした
  * （seed 2510273090 の 4 ターン目・seed 954874822 の 7 ターン目。docs/ai-notes.md）
  */
 export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}): Agent {
-  const search = createSearchAgent({ allow: allowAction, lethal: false, nextLethalSearch: (s, q) => searchLethalForRhino(s, q) !== null, ...searchOptions });
+  const search = createSearchAgent({ allow: allowAction, lethal: false, perFirst: RHINO_PER_FIRST, nextLethalSearch: (s, q) => searchLethalForRhino(s, q) !== null, ...searchOptions });
   const plainSearch = createSearchAgent();
   return {
     name: "rhino",
