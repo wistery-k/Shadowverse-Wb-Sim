@@ -288,7 +288,7 @@ function cheapBails(s: GameState, p: PlayerIndex): number {
 /**
  * リノセウスを 1 回出して与えられるダメージの上限（seed 900001 のエルフ 6 ターン目でユーザーが示した数え方。docs/ai-notes.md）。
  * - 残りの PP を 1 コストのカードに使い、最後にリノセウス（3 コスト）を出す: PP − 3 + 1（リノセウス自身のコンボ）。エクストラPP が使えれば PP に 1 を足す
- * - 進化できれば +2。超進化できれば +3、さらにベビーカーバンクル（手札か場）があれば PP 3 回復の分 +3
+ * - 進化できれば +2、超進化できれば +3（ベビーカーバンクルを超進化して PP 3 回復しても、コンボ 2 と超進化の 1 点でリノセウスの超進化と変わらないので足さない。ユーザーの指摘）
  * - 溜まっているコンボ、手札の森の神秘、2 コスト以下のベイル、手札と場の燐光の岩 1 につき +1。場に残っていてリーダーを攻撃できるフォロワーの攻撃力を足す
  */
 export function rhinoOneDamageBound(s: GameState, p: PlayerIndex): number {
@@ -299,8 +299,7 @@ export function rhinoOneDamageBound(s: GameState, p: PlayerIndex): number {
   const canEvolve = !pl.evolvedThisTurn && pl.ep > 0 && pl.turnCount >= EVOLVE_TURN[order];
   const pp = pl.pp + (pl.extraPpAvailable ? 1 : 0);
   let bound = pp - 2 + pl.combo + inHand(MYSTERY) + cheapBails(s, p) + inHand(ROCK) + boardCount(s, p, ROCK);
-  if (canSuper) bound += 3 + (inHand(CARBUNCLE) + boardCount(s, p, CARBUNCLE) > 0 ? 3 : 0);
-  else if (canEvolve) bound += 2;
+  bound += canSuper ? 3 : canEvolve ? 2 : 0;
   return bound + boardAttack(s, p);
 }
 
