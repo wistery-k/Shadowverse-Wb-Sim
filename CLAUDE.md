@@ -70,7 +70,7 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
 ## Git / 公開
 
 - 作業ブランチは指示されたブランチ（現在: `claude/next-steps`）。指示なく他ブランチへ push しない
-- PR はユーザーが明示的に求めたときのみ作成する
+- 作業が一区切りついたら、ユーザーに求められなくても基本的に PR を作成する
 - GitHub Pages は GitHub Actions でビルド・デプロイ。Vite の `base` は `/Shadowverse-Wb-Sim/`
 
 ## 権利・表記
