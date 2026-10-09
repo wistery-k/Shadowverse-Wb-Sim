@@ -25,6 +25,12 @@ export interface ExactLethalOptions {
    * （虫の知らせのランダムダメージで守護を倒す前提の手順は、別の決定化で通らない。docs/ai-notes.md）
    */
   deterministicOnly?: boolean;
+  /**
+   * 手順の中で必ず count 回打つ手（matches）。feasible が false の局面（残り remaining 回をもう打てない）は調べない。
+   * 最初の局面でリノセウス 1 回の上限が相手の体力に届かなければ、リノセウスを 2 回以上出す手順だけを探す（docs/ai-notes.md）。
+   * feasible は局面と remaining だけで決まるので、メモのキーに remaining を足せば相手の体力によらず使い回せる
+   */
+  mustPlay?: { count: number; matches: (s: GameState, a: Action) => boolean; feasible: (s: GameState, p: PlayerIndex, remaining: number) => boolean };
   /** 調べた局面の数を書き込む（計測用） */
   stats?: { visited: number; memo: number };
 }
@@ -150,11 +156,15 @@ export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLe
     return forced ? [forced] : opts.order ? opts.order(s, p, legal) : legal;
   };
 
-  /** s から与えられる最大のダメージ（need 以上が見つかればそこで打ち切った値） */
-  const dfs = (s: GameState, need: number): number => {
+  const must = opts.mustPlay;
+  const remainingAfter = (s: GameState, a: Action, remaining: number) => (must && remaining > 0 && must.matches(s, a) ? remaining - 1 : remaining);
+
+  /** s から与えられる最大のダメージ（need 以上が見つかればそこで打ち切った値）。remaining は mustPlay の残り回数 */
+  const dfs = (s: GameState, need: number, remaining: number): number => {
     if (s.phase !== "main" || actorOf(s) !== p) return 0;
+    if (must && remaining > 0 && !isTransient(s) && !must.feasible(s, p, remaining)) return 0;
     // 選択待ち・解決中の局面はメモしない（キーが重く、すぐに次の局面に進むため）
-    const key = isTransient(s) ? null : lethalKey(s, opp);
+    const key = isTransient(s) ? null : `${remaining}|${lethalKey(s, opp)}`;
     const hit = key === null ? undefined : memo.get(key);
     if (hit && (hit.exact || hit.damage >= need)) return hit.damage;
     if (++visited > limit) throw new Abort();
@@ -165,7 +175,7 @@ export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLe
       if (!next || (next.phase === "ended" && next.winner !== p)) continue;
       if (opts.deterministicOnly && variesWithRandom(s, a, next, p)) continue;
       const dealt = s.players[opp].leaderHp - next.players[opp].leaderHp;
-      const damage = dealt + dfs(next, need - dealt);
+      const damage = dealt + dfs(next, need - dealt, remainingAfter(s, a, remaining));
       if (damage > best) best = damage;
       if (best >= need) break;
     }
@@ -176,9 +186,10 @@ export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLe
   };
 
   let need = root.players[opp].leaderHp;
+  let remaining = must?.count ?? 0;
   const seq: Action[] = [];
   try {
-    if (dfs(root, need) < need) return null;
+    if (dfs(root, need, remaining) < need) return null;
     // ダメージが足りる手を順にたどる（キーにインスタンス ID を含めないので、手そのものはメモしない）
     let s = root;
     while (s.phase !== "ended") {
@@ -188,13 +199,14 @@ export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLe
         if (!next || (next.phase === "ended" && next.winner !== p)) continue;
         if (opts.deterministicOnly && variesWithRandom(s, a, next, p)) continue;
         const dealt = s.players[opp].leaderHp - next.players[opp].leaderHp;
-        if (dealt + dfs(next, need - dealt) >= need) {
+        if (dealt + dfs(next, need - dealt, remainingAfter(s, a, remaining)) >= need) {
           found = { a, next, dealt };
           break;
         }
       }
       if (!found) return null;
       seq.push(found.a);
+      remaining = remainingAfter(s, found.a, remaining);
       s = found.next;
       need -= found.dealt;
     }

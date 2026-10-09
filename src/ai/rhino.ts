@@ -229,12 +229,39 @@ export function searchLethalForRhinoTurn(root: GameState, p: PlayerIndex): Actio
   const found = searchLethalForRhino(root, p);
   if (found && winsElsewhere(root, p, found)) return found;
   if (!root.players[p].hand.some((h) => nameOf(h.cardId) === RHINO)) return found;
-  if (root.players[p === 0 ? 1 : 0].leaderHp > rhinoLethalBound(root, p)) return found;
-  const exact = searchExactLethal(root, p, RHINO_EXACT);
+  const hp = root.players[p === 0 ? 1 : 0].leaderHp;
+  if (hp > rhinoLethalBound(root, p)) return found;
+  // リノセウス 1 回（2 回）の上限が届かなければ、2 回（3 回）以上出す手順だけを探す
+  const count = hp <= rhinoOneDamageBound(root, p) ? 0 : hp <= rhinoDamageBound(root, p) ? 2 : 3;
+  const opts: ExactLethalOptions = count > 0 ? { ...RHINO_EXACT, mustPlay: { count, matches: isRhinoPlay, feasible: canStillPlayRhinos } } : RHINO_EXACT;
+  const exact = searchExactLethal(root, p, opts);
   if (!exact) return found;
   if (winsElsewhere(root, p, exact)) return exact;
   // 乱数で結果が変わる手を除いて探し直す（seed 900234 のエルフ 7 ターン目。docs/ai-notes.md）
-  return searchExactLethal(root, p, { ...RHINO_EXACT, deterministicOnly: true }) ?? exact;
+  return searchExactLethal(root, p, { ...opts, deterministicOnly: true }) ?? exact;
+}
+
+export function isRhinoPlay(s: GameState, a: Action): boolean {
+  if (a.type !== "play") return false;
+  const h = s.players[s.active].hand.find((c) => c.iid === a.iid);
+  return h !== undefined && nameOf(h.cardId) === RHINO;
+}
+
+/**
+ * あと remaining 回リノセウスを出せるかもしれないか。PP（エクストラPP と、超進化できるならベビーカーバンクルの PP 3 回復を含む）が
+ * 3 × remaining 以上あり、出すリノセウス（手札と、戻す手段があれば場のもの）がある
+ */
+export function canStillPlayRhinos(s: GameState, p: PlayerIndex, remaining: number): boolean {
+  const pl = s.players[p];
+  const inHand = (name: string) => pl.hand.some((h) => nameOf(h.cardId) === name);
+  const order = p === s.first ? 0 : 1;
+  const canSuper = !pl.evolvedThisTurn && pl.sep > 0 && pl.turnCount >= SUPER_EVOLVE_TURN[order];
+  const refund = canSuper && (inHand(CARBUNCLE) || boardCount(s, p, CARBUNCLE) > 0) ? 3 : 0;
+  if (pl.pp + (pl.extraPpAvailable ? 1 : 0) + refund < 3 * remaining) return false;
+  const rhinos = pl.hand.filter((h) => nameOf(h.cardId) === RHINO).length;
+  if (rhinos >= remaining) return true;
+  const bounce = boardCount(s, p, ROD) > 0 || inHand(BUGS) || inHand(CARBUNCLE);
+  return bounce && rhinos + boardCount(s, p, RHINO) > 0;
 }
 
 /** 乱数・山札・相手の手札を決め直した局面（findLethal の確認と同じ考え方）でも勝てるか */
@@ -254,7 +281,7 @@ function winsElsewhere(root: GameState, p: PlayerIndex, seq: readonly Action[]):
  * リノセウスを 2 回出して与えられるダメージの上限（ユーザーの式。docs/ai-notes.md）。相手の体力がこれより大きければリーサルは無い。
  * - 基本は 2 ×（PP − 7）+ 8（超進化できる場合）。エクストラPP が使えれば PP に 1 を足す
  * - 超進化できればベビーカーバンクル（手札か場、1 枚まで）で +2。できなければ、進化できれば −1、どちらもできなければ −3
- * - 手札の森の神秘 1 枚と、2 コスト以下の煌撃の戦士・ベイル（0 コストとみなす）1 枚につき +2、手札と場の燐光の岩 1 枚につき +1、溜まっているコンボ 1 につき +2
+ * - 手札の森の神秘・煌撃の戦士・ベイル（コストを見ずに 0 コストとみなす。ターン中に安くなるため）1 枚につき +2、手札と場の燐光の岩 1 枚につき +1、溜まっているコンボ 1 につき +2
  * - 場に残っていてリーダーを攻撃できるフォロワーの攻撃力（残りの攻撃回数分）を足す
  */
 export function rhinoDamageBound(s: GameState, p: PlayerIndex): number {
@@ -267,7 +294,7 @@ export function rhinoDamageBound(s: GameState, p: PlayerIndex): number {
   let bound = 2 * (pp - 7) + 8 + 2 * pl.combo;
   if (canSuper) bound += inHand(CARBUNCLE) + boardCount(s, p, CARBUNCLE) > 0 ? 2 : 0;
   else bound -= canEvolve ? 1 : 3;
-  bound += 2 * (inHand(MYSTERY) + cheapBails(s, p)) + inHand(ROCK) + boardCount(s, p, ROCK);
+  bound += 2 * (inHand(MYSTERY) + inHand(BAIL)) + inHand(ROCK) + boardCount(s, p, ROCK);
   return bound + boardAttack(s, p);
 }
 
@@ -280,16 +307,11 @@ export function rhinoLethalBound(s: GameState, p: PlayerIndex): number {
   return mayPlayThreeRhinos(s, p) ? Math.max(bound, rhinoThreeDamageBound(s, p)) : bound;
 }
 
-/** 手札の煌撃の戦士・ベイルのうち、今 2 コスト以下のもの（ターン中に安くなる分を見込んで 0 コストとみなす。ユーザーの決めた雑な扱い） */
-function cheapBails(s: GameState, p: PlayerIndex): number {
-  return s.players[p].hand.filter((h) => nameOf(h.cardId) === BAIL && cardOf(h.cardId).cost + h.costMod <= 2).length;
-}
-
 /**
  * リノセウスを 1 回出して与えられるダメージの上限（seed 900001 のエルフ 6 ターン目でユーザーが示した数え方。docs/ai-notes.md）。
  * - 残りの PP を 1 コストのカードに使い、最後にリノセウス（3 コスト）を出す: PP − 3 + 1（リノセウス自身のコンボ）。エクストラPP が使えれば PP に 1 を足す
  * - 進化できれば +2、超進化できれば +3（ベビーカーバンクルを超進化して PP 3 回復しても、コンボ 2 と超進化の 1 点でリノセウスの超進化と変わらないので足さない。ユーザーの指摘）
- * - 溜まっているコンボ、手札の森の神秘、2 コスト以下のベイル、手札と場の燐光の岩 1 につき +1。場に残っていてリーダーを攻撃できるフォロワーの攻撃力を足す
+ * - 溜まっているコンボ、手札の森の神秘・ベイル、手札と場の燐光の岩 1 につき +1。場に残っていてリーダーを攻撃できるフォロワーの攻撃力を足す
  */
 export function rhinoOneDamageBound(s: GameState, p: PlayerIndex): number {
   const pl = s.players[p];
@@ -298,7 +320,7 @@ export function rhinoOneDamageBound(s: GameState, p: PlayerIndex): number {
   const canSuper = !pl.evolvedThisTurn && pl.sep > 0 && pl.turnCount >= SUPER_EVOLVE_TURN[order];
   const canEvolve = !pl.evolvedThisTurn && pl.ep > 0 && pl.turnCount >= EVOLVE_TURN[order];
   const pp = pl.pp + (pl.extraPpAvailable ? 1 : 0);
-  let bound = pp - 2 + pl.combo + inHand(MYSTERY) + cheapBails(s, p) + inHand(ROCK) + boardCount(s, p, ROCK);
+  let bound = pp - 2 + pl.combo + inHand(MYSTERY) + inHand(BAIL) + inHand(ROCK) + boardCount(s, p, ROCK);
   bound += canSuper ? 3 : canEvolve ? 2 : 0;
   return bound + boardAttack(s, p);
 }
