@@ -34,7 +34,15 @@ export async function main(argv: string[]): Promise<number> {
     else files.push(argv[i]!);
   }
   const recs: CardValueRecord[] = files.flatMap((f) =>
-    readFileSync(f, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as CardValueRecord),
+    readFileSync(f, "utf8").split("\n").filter(Boolean).flatMap((l, i) => {
+      // 共有フォルダへの追記が壊れた行（同期の途中の断片）は飛ばす
+      try {
+        return [JSON.parse(l) as CardValueRecord];
+      } catch {
+        console.error(`読めない行を飛ばします: ${f}:${i + 1}`);
+        return [];
+      }
+    }),
   );
   const cells = new Map<string, Cell>();
   const all: { d: number; e: number }[] = [];
