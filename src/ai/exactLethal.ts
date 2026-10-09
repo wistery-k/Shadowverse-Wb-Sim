@@ -11,15 +11,19 @@ import { legalActions, tryApplyAction, type Action, type GameState, type PlayerI
 import type { HandCard, OnBoard, PlayerState } from "../engine/types";
 
 export interface ExactLethalOptions {
-  /** 調べる局面の数の上限 */
+  /** 手を試す順番（省略時は legalActions の順） */
+  order?: (s: GameState, p: PlayerIndex, actions: Action[]) => Action[];
+  /** 1 回に調べる局面の数の上限 */
   maxStates: number;
+  /** 1 ターンに調べる局面の数の上限（ターン中は手を打つたびに探し直すため） */
+  maxStatesPerTurn: number;
   /** 必ず打つ手（あればその手だけを試す。森の神秘など、先に打って損の無い手） */
   forced?: (s: GameState, p: PlayerIndex, legal: Action[]) => Action | null;
   /** 調べた局面の数を書き込む（計測用） */
   stats?: { visited: number; memo: number };
 }
 
-export const DEFAULT_EXACT_LETHAL_OPTIONS: ExactLethalOptions = { maxStates: 100_000 };
+export const DEFAULT_EXACT_LETHAL_OPTIONS: ExactLethalOptions = { maxStates: 100_000, maxStatesPerTurn: 200_000 };
 
 const json = (x: unknown) => JSON.stringify(x);
 
@@ -62,12 +66,17 @@ type Memo = Map<string, { damage: number; exact: boolean }>;
  * 同じターンの間はメモを使い回す（ターン中は手を打つたびに探し直すため）。
  * 相手の手札の中身はキーに含めないので、決定化（determinize）で相手の手札が変わっても使い回せる
  */
-let cache: { turn: number; player: PlayerIndex; memo: Memo } | null = null;
+let cache: { turn: number; player: PlayerIndex; memo: Memo; visited: number } | null = null;
 const MAX_CACHE = 500_000;
 
-function memoFor(root: GameState, p: PlayerIndex): Memo {
-  if (!cache || cache.turn !== root.turn || cache.player !== p || cache.memo.size > MAX_CACHE) cache = { turn: root.turn, player: p, memo: new Map() };
-  return cache.memo;
+/** メモを捨てる（テスト用） */
+export function resetExactLethalCache(): void {
+  cache = null;
+}
+
+function cacheFor(root: GameState, p: PlayerIndex): NonNullable<typeof cache> {
+  if (!cache || cache.turn !== root.turn || cache.player !== p || cache.memo.size > MAX_CACHE) cache = { turn: root.turn, player: p, memo: new Map(), visited: 0 };
+  return cache;
 }
 
 const isTransient = (s: GameState) => s.pending !== null || s.stack.length > 0 || s.queue.length > 0;
@@ -80,13 +89,16 @@ const actorOf = (s: GameState) => (s.pending ? s.pending.player : s.active);
 export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLethalOptions = DEFAULT_EXACT_LETHAL_OPTIONS): Action[] | null {
   if (root.phase !== "main" || actorOf(root) !== p) return null;
   const opp: PlayerIndex = p === 0 ? 1 : 0;
-  const memo = memoFor(root, p);
+  const turnCache = cacheFor(root, p);
+  const memo = turnCache.memo;
+  const limit = Math.min(opts.maxStates, opts.maxStatesPerTurn - turnCache.visited);
+  if (limit <= 0) return null;
   let visited = 0;
 
   const candidates = (s: GameState): Action[] => {
     const legal = legalActions(s).filter((a) => a.type !== "endTurn");
     const forced = s.pending ? null : (opts.forced?.(s, p, legal) ?? null);
-    return forced ? [forced] : legal;
+    return forced ? [forced] : opts.order ? opts.order(s, p, legal) : legal;
   };
 
   /** s から与えられる最大のダメージ（need 以上が見つかればそこで打ち切った値） */
@@ -96,9 +108,8 @@ export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLe
     const key = isTransient(s) ? null : lethalKey(s, opp);
     const hit = key === null ? undefined : memo.get(key);
     if (hit && (hit.exact || hit.damage >= need)) return hit.damage;
-    if (++visited > opts.maxStates) throw new Abort();
+    if (++visited > limit) throw new Abort();
     let best = 0;
-    let exact = true;
     if (key !== null) memo.set(key, { damage: 0, exact: false });
     for (const a of candidates(s)) {
       const next = tryApplyAction(s, a);
@@ -106,11 +117,10 @@ export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLe
       const dealt = s.players[opp].leaderHp - next.players[opp].leaderHp;
       const damage = dealt + dfs(next, need - dealt);
       if (damage > best) best = damage;
-      if (best >= need) {
-        exact = false;
-        break;
-      }
+      if (best >= need) break;
     }
+    // 打ち切ったなら best は最大値ではない（下限）
+    const exact = best < need;
     if (key !== null) memo.set(key, { damage: best, exact });
     return best;
   };
@@ -142,6 +152,7 @@ export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLe
     if (e instanceof Abort) return null;
     throw e;
   } finally {
+    turnCache.visited += visited;
     if (opts.stats) Object.assign(opts.stats, { visited, memo: memo.size });
   }
 }

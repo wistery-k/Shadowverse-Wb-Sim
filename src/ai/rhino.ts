@@ -187,9 +187,30 @@ export function searchLethalForRhino(root: GameState, p: PlayerIndex): Action[] 
   return searchLethal(root, p, DIRECT_ONLY) ?? searchRhinoLethal(root, p);
 }
 
-/** 全探索のリーサル探索では、手札の森の神秘を先に打つ（0 コストでコンボが増えるだけなので、先に打って損は無い） */
+/**
+ * 全探索で手を試す順番: リーダーへの攻撃 → カードのプレイ（コストの低い順）→ アクト → 進化 → フォロワーへの攻撃。
+ * リーサルがあるときに早く見つかる（問題集の 2 問目で 35641 → 4556 局面）
+ */
+function exactOrderRank(s: GameState, p: PlayerIndex, a: Action): number {
+  if (a.type === "attack") return a.target === "leader" ? 0 : 5;
+  if (a.type === "play") {
+    const h = s.players[p].hand.find((c) => c.iid === a.iid);
+    return 1 + (h ? cardOf(h.cardId).cost : 0) / 100;
+  }
+  if (a.type === "act") return 2;
+  if (a.type === "evolve" || a.type === "superEvolve") return 3;
+  return 4;
+}
+
+/**
+ * 全探索のリーサル探索の設定。手札の森の神秘を先に打つ（0 コストでコンボが増えるだけなので、先に打って損は無い）。
+ * リーサルが無い局面では上限まで調べるので、局面の数は少なめにする（docs/ai-notes.md）
+ */
 export const RHINO_EXACT: ExactLethalOptions = {
   ...DEFAULT_EXACT_LETHAL_OPTIONS,
+  maxStates: 30_000,
+  maxStatesPerTurn: 60_000,
+  order: (s, p, actions) => [...actions].sort((x, y) => exactOrderRank(s, p, x) - exactOrderRank(s, p, y)),
   forced: (s, p, legal) => {
     const mystery = s.players[p].hand.find((h) => nameOf(h.cardId) === MYSTERY);
     return (mystery && legal.find((a) => a.type === "play" && a.iid === mystery.iid)) ?? null;

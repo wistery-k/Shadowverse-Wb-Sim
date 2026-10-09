@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { resetExactLethalCache } from "../src/ai/exactLethal";
 import { rhinoDamageBound, searchLethalForRhinoTurn } from "../src/ai/rhino";
 import { searchRhinoLethal } from "../src/ai/rhinoLethal";
 import { applyAction, type Action, type GameState } from "../src/engine";
@@ -13,6 +14,9 @@ function wins(s: GameState, seq: Action[] | null): boolean {
 /** 全探索（このエンジンのルールで、ターン終了以外のすべての手を試す）では 4 問とも expected 点ちょうどが最大だった */
 
 describe("リノセウスのリーサル問題集", () => {
+  // 問題はどれも同じターン番号なので、ターンごとのメモと局面数の上限を問題ごとに戻す
+  beforeEach(() => resetExactLethalCache());
+
   for (const pz of PUZZLES) {
     it(pz.name, () => {
       const s = puzzleState(pz, pz.expected);
