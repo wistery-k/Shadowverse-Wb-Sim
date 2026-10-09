@@ -21,7 +21,7 @@ import { determinize } from "./determinize";
 import { SEARCH_WEIGHTS, evaluateWith, type EvalWeights } from "./evaluate";
 import { createGreedyAgent, greedyAgent } from "./greedy";
 import { KeySet, turnOrderHash, turnOrderKey, withoutIds } from "./keySet";
-import { findLethal } from "./lethal";
+import { findLethal, visibleKey } from "./lethal";
 import { MULLIGAN_WEIGHTS, weightedMulliganSwap } from "./mulligan";
 import { weightsFor } from "./weights";
 import type { Agent } from "./types";
@@ -89,15 +89,46 @@ export interface SearchOptions {
    * 勝率は変わらず（200 試合で 49.5%）、1 手あたりの時間は約 1.07 倍
    */
   settleTrades: boolean;
+  /**
+   * ターン内で計画を使い回す。探索で選んだ手の後も、そのサンプルで最善だった並びのとおりに局面が進んでいれば
+   * （見えている部分が予想と同じなら）、探索し直さずに並びの次の手を打つ。並びを打ち終えたら探索し直す
+   */
+  reusePlan: boolean;
+  /** reusePlan のとき、最初の手ごとに相手のターンまで読む終局面の数 */
+  planCandidates: number;
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: true };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: true, reusePlan: true, planCandidates: 3 };
+
+/** 打った手の並び（後ろから前へのリスト）。各手を打った後の局面も持つ */
+interface Step {
+  action: Action;
+  /** action を打った後の局面 */
+  state: GameState;
+  prev: Step | null;
+}
 
 interface Node {
   state: GameState;
   /** この並びの最初の手 */
   first: Action;
   value: number;
+  /** この局面までの手の並び（最初の手を含む） */
+  path: Step;
+}
+
+/** 並びを前から順の配列にする */
+function stepsOf(path: Step): Step[] {
+  const out: Step[] = [];
+  for (let s: Step | null = path; s; s = s.prev) out.push(s);
+  return out.reverse();
+}
+
+/** 1つのサンプルで、最初の手の評価値と、その手から始まる最善の並び */
+interface Plan {
+  action: Action;
+  value: number;
+  steps: Step[];
 }
 
 const keyOf = (a: Action) => JSON.stringify(a);
@@ -158,7 +189,7 @@ function uniqueStates(children: Node[], width: number): Node[] {
 }
 
 /** 1つの局面で、最初の手ごとの評価値を求める */
-function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalWeights, rng: Rng): Map<string, { action: Action; value: number }> {
+function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalWeights, rng: Rng): Map<string, Plan> {
   const terminals: Node[] = [];
   let frontier: Node[] = [];
 
@@ -168,25 +199,27 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   const score = opts.scoreTurnEnd === "all" ? endScore : (state: GameState) => evaluateWith(settle(state), p, w);
   const allowed = (state: GameState, a: Action) => !opts.allow || a.type === "endTurn" || opts.allow(state, a, p);
   const expand = (state: GameState) => (opts.sameHandOnce ? distinctPlays(state, legalActions(state)) : legalActions(state));
-  /** 手 a を打った局面。chain なら、続く自分の選択とエクストラPP の後の手まで進めた局面すべて */
-  const advance = (state: GameState, a: Action, depth = 0): GameState[] => {
+  /** 手 a を打った局面（と、そこまでの並び）。chain なら、続く自分の選択とエクストラPP の後の手まで進めた局面すべて */
+  const advance = (state: GameState, a: Action, prev: Step | null, depth = 0): { state: GameState; path: Step }[] => {
     const next = tryApply(state, a);
     if (!next) return [];
-    if (!opts.chain || depth >= 8 || next.phase === "ended") return [next];
+    const path: Step = { action: a, state: next, prev };
+    const self = [{ state: next, path }];
+    if (!opts.chain || depth >= 8 || next.phase === "ended") return self;
     if (next.pending && next.pending.player === p) {
-      const out = legalActions(next).flatMap((c) => (allowed(next, c) ? advance(next, c, depth + 1) : []));
-      return out.length > 0 ? out : [next];
+      const out = legalActions(next).flatMap((c) => (allowed(next, c) ? advance(next, c, path, depth + 1) : []));
+      return out.length > 0 ? out : self;
     }
     if (opts.chainFuse && a.type === "fuse" && !next.pending && next.active === p) {
       // 融合に融合は続けない（融合の素材の選び方の組み合わせで、展開する手が膨らむ）
-      const out = expand(next).flatMap((c) => (c.type === "endTurn" || c.type === "fuse" || !allowed(next, c) ? [] : advance(next, c, depth + 1)));
-      return [next, ...out];
+      const out = expand(next).flatMap((c) => (c.type === "endTurn" || c.type === "fuse" || !allowed(next, c) ? [] : advance(next, c, path, depth + 1)));
+      return [...self, ...out];
     }
     if (a.type === "extraPp" && !next.pending && next.active === p) {
-      const out = expand(next).flatMap((c) => (c.type === "endTurn" || c.type === "extraPp" || !allowed(next, c) ? [] : advance(next, c, depth + 1)));
-      return out.length > 0 ? out : [next];
+      const out = expand(next).flatMap((c) => (c.type === "endTurn" || c.type === "extraPp" || !allowed(next, c) ? [] : advance(next, c, path, depth + 1)));
+      return out.length > 0 ? out : self;
     }
-    return [next];
+    return self;
   };
 
   // 深さ1: すべての手を展開する（最初の手の候補を落とさない）
@@ -195,10 +228,10 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
     if (!allowed(root, a)) continue;
     if (a.type === "endTurn") {
       if (rootConverges) continue; // 合流する攻撃をしてから終える手に劣らない
-      terminals.push({ state: root, first: a, value: score(root) });
+      terminals.push({ state: root, first: a, value: score(root), path: { action: a, state: root, prev: null } });
       continue;
     }
-    for (const next of advance(root, a)) frontier.push({ state: next, first: a, value: score(next) });
+    for (const next of advance(root, a, null)) frontier.push({ ...next, first: a, value: score(next.state) });
   }
 
   for (let depth = 1; depth < opts.maxDepth && frontier.length > 0; depth++) {
@@ -213,7 +246,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
       terminals.push(node);
       for (const a of expand(node.state)) {
         if (a.type === "endTurn" || !allowed(node.state, a)) continue;
-        for (const next of advance(node.state, a)) children.push({ state: next, first: node.first, value: score(next) });
+        for (const next of advance(node.state, a, node.path)) children.push({ ...next, first: node.first, value: score(next.state) });
       }
     }
     children.sort((x, y) => y.value - x.value);
@@ -223,23 +256,45 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   if (opts.scoreTurnEnd === "terminal") for (const t of terminals) t.value = endScore(t.state);
 
   // 最初の手ごとに最善の終局面を残し、上位を相手のターンまで読んで評価し直す
+  // （計画を使い回すときは、最初の手ごとに異なる終局面を planCandidates 個まで読み、最も良いものをその手の評価と並びにする。
+  //  使い回さないときは、2 手目以降は打つたびに読み直して選ぶが、使い回すと最初に選んだ並びをそのまま打つため）
   const bestByFirst = new Map<string, Node>();
   for (const t of terminals) {
     const k = keyOf(t.first);
     const cur = bestByFirst.get(k);
     if (!cur || t.value > cur.value) bestByFirst.set(k, t);
   }
-  const ranked = [...bestByFirst.values()].sort((x, y) => y.value - x.value);
-  const result = new Map<string, { action: Action; value: number }>();
-  for (const node of ranked.slice(0, opts.rescoreTop)) {
-    const after = node.state.phase === "ended" ? node.state : simulateOpponentTurn(settle(node.state), p, rng);
-    result.set(keyOf(node.first), { action: node.first, value: evaluateWith(after, p, w) });
+  const ranked = [...bestByFirst.values()].sort((x, y) => y.value - x.value).slice(0, opts.rescoreTop);
+  /** 最初の手 first の、評価の高い順に異なる終局面（最善の終局面 best を含めて planCandidates 個まで） */
+  const candidatesOf = (best: Node): Node[] => {
+    if (!opts.reusePlan || opts.planCandidates <= 1) return [best];
+    const k = keyOf(best.first);
+    const seen = new KeySet();
+    seen.add(turnOrderKey(best.state), turnOrderHash(best.state));
+    const out = [best];
+    for (const t of [...terminals].filter((x) => x !== best && keyOf(x.first) === k).sort((x, y) => y.value - x.value)) {
+      if (out.length >= opts.planCandidates) break;
+      if (seen.addLazy(() => turnOrderKey(t.state), turnOrderHash(t.state))) out.push(t);
+    }
+    return out;
+  };
+  const result = new Map<string, Plan>();
+  for (const best of ranked) {
+    for (const node of candidatesOf(best)) {
+      const after = node.state.phase === "ended" ? node.state : simulateOpponentTurn(settle(node.state), p, rng);
+      const value = evaluateWith(after, p, w);
+      const k = keyOf(node.first);
+      const cur = result.get(k);
+      if (!cur || value > cur.value) result.set(k, { action: node.first, value, steps: stepsOf(node.path) });
+    }
   }
   return result;
 }
 
 export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
   const opts = { ...DEFAULT_SEARCH_OPTIONS, ...options };
+  /** プレイヤーごとの、打っている途中の計画（reusePlan）。expected[i] は steps[i] を打つ前に見えているはずの局面 */
+  const plans: [{ steps: Step[]; expected: string[]; index: number } | null, { steps: Step[]; expected: string[]; index: number } | null] = [null, null];
   return {
     name: "search",
     chooseAction(real, legal, rng) {
@@ -257,22 +312,39 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
 
       if (opts.lethal) {
         const lethal = findLethal(real, p, rng);
-        if (lethal && legalKeys.has(keyOf(lethal))) return lethal;
+        if (lethal && legalKeys.has(keyOf(lethal))) {
+          plans[p] = null;
+          return lethal;
+        }
+      }
+
+      // 前に選んだ並びの途中で、局面が予想どおりなら続ける
+      const plan = plans[p];
+      plans[p] = null;
+      if (plan && plan.index < plan.steps.length) {
+        const next = plan.steps[plan.index]!.action;
+        if (visibleKey(real, p) === plan.expected[plan.index] && legalKeys.has(keyOf(next))) {
+          plan.index++;
+          plans[p] = plan;
+          return next;
+        }
       }
 
       const w = opts.weights === "byClass" ? weightsFor(real, p) : opts.weights;
-      const totals = new Map<string, { action: Action; sum: number; count: number }>();
+      const totals = new Map<string, { action: Action; sum: number; count: number; plan: Plan }>();
       for (let i = 0; i < opts.samples; i++) {
         const det = determinize(real, p, rng);
-        for (const [k, { action, value }] of planTurn(det, p, opts, w, rng)) {
-          const t = totals.get(k) ?? { action, sum: 0, count: 0 };
-          t.sum += value;
+        for (const [k, sample] of planTurn(det, p, opts, w, rng)) {
+          const t = totals.get(k) ?? { action: sample.action, sum: 0, count: 0, plan: sample };
+          t.sum += sample.value;
           t.count++;
+          // 並びは、その手の評価が最も高かったサンプルのものを使う
+          if (sample.value > t.plan.value) t.plan = sample;
           totals.set(k, t);
         }
       }
       // 実際の局面で合法な手に限る。どのサンプルでも評価されなかった手は選ばない
-      let best: Action | null = null;
+      let best: { action: Action; plan: Plan } | null = null;
       let bestValue = -Infinity;
       for (const [k, t] of totals) {
         if (!legalKeys.has(k)) continue;
@@ -280,10 +352,16 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
         const value = t.sum / t.count - (opts.samples - t.count) * 0.5;
         if (value > bestValue) {
           bestValue = value;
-          best = t.action;
+          best = t;
         }
       }
-      if (best) return best;
+      if (best) {
+        if (opts.reusePlan && best.plan.steps.length > 1) {
+          const steps = best.plan.steps;
+          plans[p] = { steps, expected: steps.map((_, i) => (i === 0 ? "" : visibleKey(steps[i - 1]!.state, p))), index: 1 };
+        }
+        return best.action;
+      }
       const allow = opts.allow;
       const permitted = allow ? legal.filter((a) => a.type === "endTurn" || allow(real, a, p)) : legal;
       return greedyAgent.chooseAction(real, permitted.length > 0 ? permitted : legal, rng);
