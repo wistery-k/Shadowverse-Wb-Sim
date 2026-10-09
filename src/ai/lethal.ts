@@ -13,7 +13,7 @@
 // - 見つけた並びは別の determinization でも勝てるかを再生して確かめる（運任せのリーサルは選ばない）
 
 import {
-  applyAction,
+  tryApplyAction,
   attackOf,
   attackTargets,
   cardOf,
@@ -74,7 +74,7 @@ const WIN = 1e9;
 
 function tryApply(state: GameState, action: Action): GameState | null {
   try {
-    return applyAction(state, action);
+    return tryApplyAction(state, action);
   } catch {
     return null;
   }

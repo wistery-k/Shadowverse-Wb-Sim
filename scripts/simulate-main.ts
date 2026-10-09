@@ -4,6 +4,7 @@ import { writeFileSync } from "node:fs";
 import { AGENTS } from "../src/ai/registry";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { planGames, runGame, summarize, type Entrant, type GameRecord } from "../src/sim/tournament";
+import { isParallelWorker, parallelMap } from "./parallel";
 
 interface Args {
   games: number;
@@ -73,16 +74,13 @@ export async function main(argv: string[]): Promise<number> {
   const specs = planGames(entrants.length, { gamesPerPair: args.games, seed: args.seed, mirror: args.mirror })
     .filter((_, i) => i % args.shard.count === args.shard.index);
   const shardNote = args.shard.count > 1 ? `、分割 ${args.shard.index}/${args.shard.count}` : "";
-  console.log(`参加者 ${entrants.length}、${specs.length} 試合（1組 ${args.games} 試合、seed ${args.seed}${shardNote}）`);
+  if (!isParallelWorker) console.log(`参加者 ${entrants.length}、${specs.length} 試合（1組 ${args.games} 試合、seed ${args.seed}${shardNote}）`);
 
-  const records: GameRecord[] = [];
   const started = Date.now();
-  for (const [i, spec] of specs.entries()) {
-    records.push(runGame(spec, entrants));
-    if ((i + 1) % 20 === 0 || i + 1 === specs.length) {
-      process.stdout.write(`\r${i + 1}/${specs.length} 試合（${((Date.now() - started) / 1000).toFixed(1)}秒）`);
-    }
-  }
+  // 1 試合ずつ並列に行う（各試合はシードで決まるので、結果は並列数によらない）
+  const records: GameRecord[] = await parallelMap(specs, (spec) => runGame(spec, entrants), (done, total) => {
+    if (done % 20 === 0 || done === total) process.stdout.write(`\r${done}/${total} 試合（${((Date.now() - started) / 1000).toFixed(1)}秒）`);
+  });
   process.stdout.write("\n\n");
 
   const s = summarize(entrants.length, records);

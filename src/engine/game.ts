@@ -56,9 +56,16 @@ import type {
 export { opponent } from "./state";
 export { cardOf } from "./registry";
 
+/**
+ * 不正な行動。AI の探索は打てるか分からない手を applyAction で試して、この例外で判定することが多い
+ * （探索中の applyAction の約 4 分の 1）。スタックトレースの取得が重いので取らない（メッセージで原因は分かる）
+ */
 export class IllegalActionError extends Error {
   constructor(message: string) {
+    const limit = Error.stackTraceLimit;
+    Error.stackTraceLimit = 0;
     super(message);
+    Error.stackTraceLimit = limit;
     this.name = "IllegalActionError";
   }
 }
@@ -429,17 +436,101 @@ export function legalActions(state: GameState): Action[] {
 
 // ---- アクションの適用 ----
 
-export function applyAction(prev: GameState, action: Action): GameState {
-  const state = cloneState(prev);
-  if (state.phase === "ended") throw new IllegalActionError("対戦は終了しています");
+/**
+ * 行動が不正なら、その理由（打てるなら null）。局面は変えない。
+ * applyAction はこれで判定して IllegalActionError を投げる。AI の探索は tryApplyAction で、局面を複製する前に弾く
+ */
+export function illegalReason(state: GameState, action: Action): string | null {
+  if (state.phase === "ended") return "対戦は終了しています";
+  const pd = state.pending;
+  if (pd) {
+    if (pd.kind === "choose" && action.type === "choose") {
+      const ok =
+        action.targets.length === pd.count &&
+        new Set(action.targets).size === action.targets.length &&
+        action.targets.every((t) => pd.candidates.includes(t));
+      return ok ? null : "選択が不正です";
+    }
+    if (pd.kind === "mode" && action.type === "mode") {
+      return action.index < 0 || action.index >= pd.options ? "モードの選択が不正です" : null;
+    }
+    return "選択待ちです";
+  }
+  if (action.type === "mulligan") {
+    const p = action.player;
+    if (state.phase !== "mulligan" || mulliganPlayer(state) !== p) return `プレイヤー${p}はマリガンできません`;
+    const hand = state.players[p].hand;
+    if (new Set(action.swap).size !== action.swap.length || action.swap.some((iid) => !hand.some((c) => c.iid === iid))) {
+      return "入れ替えるカードが手札にありません";
+    }
+    return null;
+  }
+  if (state.phase !== "main") return "マリガン中です";
+  const p = state.active;
+  const pl = state.players[p];
+  switch (action.type) {
+    case "play": {
+      const ref = pl.hand.find((c) => c.iid === action.iid);
+      return ref && canPlay(state, p, ref) ? null : `カード${action.iid}はプレイできません`;
+    }
+    case "attack": {
+      const attacker = pl.board.find((c): c is FollowerOnBoard => c.kind === "follower" && c.iid === action.attacker);
+      return attacker && attackTargets(state, attacker).includes(action.target)
+        ? null
+        : `フォロワー${action.attacker}は${String(action.target)}を攻撃できません`;
+    }
+    case "evolve":
+    case "superEvolve": {
+      const f = pl.board.find((c): c is FollowerOnBoard => c.kind === "follower" && c.iid === action.iid);
+      return f && canEvolve(state, f, action.type) ? null : `フォロワー${action.iid}は${action.type}できません`;
+    }
+    case "act": {
+      const amulet = pl.board.find((c) => c.iid === action.iid);
+      const act = amulet ? actAbility(amulet.cardId) : null;
+      return !amulet || amulet.kind !== "amulet" || !act || amulet.actedThisTurn || pl.pp < act.cost
+        ? `アミュレット${action.iid}はアクトできません`
+        : null;
+    }
+    case "fuse": {
+      const host = pl.hand.find((c) => c.iid === action.host);
+      const candidates = host ? fusionMaterials(state, p, host).map((c) => c.iid) : [];
+      const m = action.materials;
+      return !host || m.length === 0 || new Set(m).size !== m.length || !m.every((x) => candidates.includes(x)) ? "融合できません" : null;
+    }
+    case "extraPp":
+      return pl.extraPpAvailable ? null : "エクストラPPは使えません";
+    case "endTurn":
+      return null;
+    default:
+      return `選択待ちではありません: ${action.type}`;
+  }
+}
 
+export function applyAction(prev: GameState, action: Action): GameState {
+  const reason = illegalReason(prev, action);
+  if (reason !== null) throw new IllegalActionError(reason);
+  return applyLegal(prev, action);
+}
+
+/**
+ * 打てる手なら打った局面、不正な手なら null（例外を投げず、局面も複製しない）。
+ * 効果の解決中のエラー等、不正な手以外の例外はそのまま投げる
+ */
+export function tryApplyAction(prev: GameState, action: Action): GameState | null {
+  return illegalReason(prev, action) === null ? applyLegal(prev, action) : null;
+}
+
+/** 打てると確かめた手を打つ（illegalReason が null の手） */
+function applyLegal(prev: GameState, action: Action): GameState {
+  const state = cloneState(prev);
   if (state.pending) {
-    applyAnswer(state, action);
-  } else if (action.type === "mulligan") {
-    applyMulligan(state, action.player, action.swap);
+    if (action.type === "choose") answerChoose(state, action.targets);
+    else if (action.type === "mode") answerMode(state, action.index);
   } else {
-    if (state.phase !== "main") throw new IllegalActionError("マリガン中です");
     switch (action.type) {
+      case "mulligan":
+        applyMulligan(state, action.player, action.swap);
+        break;
       case "play":
         applyPlay(state, action.iid);
         break;
@@ -458,7 +549,6 @@ export function applyAction(prev: GameState, action: Action): GameState {
         break;
       case "extraPp": {
         const pl = state.players[state.active];
-        if (!pl.extraPpAvailable) throw new IllegalActionError("エクストラPPは使えません");
         pl.extraPpAvailable = false;
         pl.pp++; // PP最大値を超えてよい。PP最大値は増えない
         break;
@@ -466,43 +556,15 @@ export function applyAction(prev: GameState, action: Action): GameState {
       case "endTurn":
         pushEndTurn(state);
         break;
-      default:
-        throw new IllegalActionError(`選択待ちではありません: ${action.type}`);
     }
   }
   run(state);
   return state;
 }
 
-function applyAnswer(state: GameState, action: Action): void {
-  const pd = state.pending;
-  if (!pd) return;
-  if (pd.kind === "choose" && action.type === "choose") {
-    const ok =
-      action.targets.length === pd.count &&
-      new Set(action.targets).size === action.targets.length &&
-      action.targets.every((t) => pd.candidates.includes(t));
-    if (!ok) throw new IllegalActionError("選択が不正です");
-    answerChoose(state, action.targets);
-    return;
-  }
-  if (pd.kind === "mode" && action.type === "mode") {
-    if (action.index < 0 || action.index >= pd.options) throw new IllegalActionError("モードの選択が不正です");
-    answerMode(state, action.index);
-    return;
-  }
-  throw new IllegalActionError("選択待ちです");
-}
-
 function applyMulligan(state: GameState, p: PlayerIndex, swap: readonly number[]): void {
-  if (state.phase !== "mulligan" || mulliganPlayer(state) !== p) {
-    throw new IllegalActionError(`プレイヤー${p}はマリガンできません`);
-  }
   const pl = state.players[p];
   const set = new Set(swap);
-  if (set.size !== swap.length || swap.some((iid) => !pl.hand.some((c) => c.iid === iid))) {
-    throw new IllegalActionError("入れ替えるカードが手札にありません");
-  }
   // 選んだカードを脇に置き、同じ枚数を引いてから、脇のカードを山札に戻してシャッフル
   const aside = pl.hand.filter((c) => set.has(c.iid));
   pl.hand = pl.hand.filter((c) => !set.has(c.iid));
@@ -518,7 +580,7 @@ function applyPlay(state: GameState, iid: number): void {
   const p = state.active;
   const pl = state.players[p];
   const ref = pl.hand.find((c) => c.iid === iid);
-  if (!ref || !canPlay(state, p, ref)) throw new IllegalActionError(`カード${iid}はプレイできません`);
+  if (!ref) return;
   const card = cardOf(ref.cardId);
 
   const cost = playCost(card, pl.pp, ref);
@@ -549,9 +611,7 @@ function applyAttack(state: GameState, attackerIid: number, target: AttackTarget
   const p = state.active;
   const pl = state.players[p];
   const attacker = pl.board.find((c): c is FollowerOnBoard => c.kind === "follower" && c.iid === attackerIid);
-  if (!attacker || !attackTargets(state, attacker).includes(target)) {
-    throw new IllegalActionError(`フォロワー${attackerIid}は${String(target)}を攻撃できません`);
-  }
+  if (!attacker) return;
 
   attacker.attacksThisTurn++;
   attacker.keywords = attacker.keywords.filter((k) => k !== "ambush"); // 攻撃すると潜伏を失う
@@ -628,7 +688,7 @@ function applyEvolve(state: GameState, iid: number, kind: "evolve" | "superEvolv
   const p = state.active;
   const pl = state.players[p];
   const f = pl.board.find((c): c is FollowerOnBoard => c.kind === "follower" && c.iid === iid);
-  if (!f || !canEvolve(state, f, kind)) throw new IllegalActionError(`フォロワー${iid}は${kind}できません`);
+  if (!f) return;
 
   if (kind === "evolve") pl.ep--;
   else pl.sep--;
@@ -649,9 +709,7 @@ function applyAct(state: GameState, iid: number): void {
   const pl = state.players[p];
   const amulet = pl.board.find((c) => c.iid === iid);
   const act = amulet ? actAbility(amulet.cardId) : null;
-  if (!amulet || amulet.kind !== "amulet" || !act || amulet.actedThisTurn || pl.pp < act.cost) {
-    throw new IllegalActionError(`アミュレット${iid}はアクトできません`);
-  }
+  if (!amulet || amulet.kind !== "amulet" || !act) return;
   pl.pp -= act.cost;
   amulet.actedThisTurn = true;
   fire.allyAct(state, p);
@@ -662,15 +720,7 @@ function applyFuse(state: GameState, hostIid: number, materials: readonly number
   const p = state.active;
   const pl = state.players[p];
   const host = pl.hand.find((c) => c.iid === hostIid);
-  const candidates = host ? fusionMaterials(state, p, host).map((c) => c.iid) : [];
-  if (
-    !host ||
-    materials.length === 0 ||
-    new Set(materials).size !== materials.length ||
-    !materials.every((m) => candidates.includes(m))
-  ) {
-    throw new IllegalActionError("融合できません");
-  }
+  if (!host) return;
   const used = pl.hand.filter((c) => materials.includes(c.iid));
   pl.hand = pl.hand.filter((c) => !materials.includes(c.iid));
   host.fusedThisTurn = true;

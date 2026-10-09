@@ -8,7 +8,7 @@
 // 守護の体力を引いたものも見る。setupScore）。相手リーダーの体力は見ない
 // （体力だけが違う局面は1つにまとめる）。現在のエルフのカードには、相手の体力でリーサルの可否が変わるものは無い。
 
-import { applyAction, cardOf, legalActions, type Action, type GameState, type PlayerIndex } from "../engine";
+import { cardOf, legalActions, tryApplyAction, type Action, type GameState, type PlayerIndex } from "../engine";
 import { KeySet, stateHash } from "./keySet";
 
 const RHINO = "殺戮のリノセウス";
@@ -38,7 +38,8 @@ function step(line: Line | null, action: Action | null): Line | null {
   if (!line || !action) return null;
   if (line.state.phase === "ended") return line;
   try {
-    return { state: applyAction(line.state, action), seq: [...line.seq, action] };
+    const state = tryApplyAction(line.state, action);
+    return state ? { state, seq: [...line.seq, action] } : null;
   } catch {
     return null;
   }

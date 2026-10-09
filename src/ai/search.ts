@@ -8,7 +8,7 @@
 
 import {
   actingPlayer,
-  applyAction,
+  tryApplyAction,
   legalActions,
   resolveTurnEnd,
   type Action,
@@ -104,7 +104,7 @@ const keyOf = (a: Action) => JSON.stringify(a);
 
 function tryApply(state: GameState, action: Action): GameState | null {
   try {
-    return applyAction(state, action);
+    return tryApplyAction(state, action);
   } catch {
     return null;
   }

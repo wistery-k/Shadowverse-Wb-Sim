@@ -5,6 +5,8 @@ export {
   createGame,
   legalActions,
   applyAction,
+  illegalReason,
+  tryApplyAction,
   resolveTurnEnd,
   attackTargets,
   playCost,
