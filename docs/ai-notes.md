@@ -553,15 +553,18 @@ AI の改善で試したことと結果。同じ実験を繰り返さないた�
 - **変更（AI の手は変わらない）:**
   - `IllegalActionError` はスタックトレースを取らない
   - `npm run compare`・`npm run sim` は試合を CPU のコア数だけ並列に行う（`scripts/parallel.ts`、worker_threads。環境変数 `THREADS` で並列数を変えられる）
+  - エンジンに `illegalReason`（不正な手の理由。局面は変えない）と `tryApplyAction`（不正な手なら局面を複製せずに null）を足し、探索（`search`・`lethal`・`rhinoLethal`・`greedy`）の試し打ちはこれを使う。`applyAction` も同じ `illegalReason` で判定する
   - `scripts/vite-run.mjs` は Vite のモジュールランナーで直接実行せず、`vite build --ssr` で 1 ファイルにしてから実行する（モジュールをまたぐ呼び出しが速くなる。Worker でも同じファイルを読める）
 - **計測:**
 
   | | 変更前 | 変更後 |
   | --- | --- | --- |
-  | `npm run bench` の seed 319922105（リノセウス用 AI どうし）の思考時間 | 7.15 秒 | 4.17 秒 |
-  | `npm run compare -- 14 '{}' '{"beamWidth":8,"maxDepth":6}'`（28 試合、4 コア）| 49.8 秒 | 1 スレッド 41.3 秒・並列 18.5 秒 |
+  | `npm run bench` の seed 319922105（リノセウス用 AI どうし）の思考時間 | 7.15 秒 | 3.83 秒 |
+  | リノセウス用 AI 対 探索 AI の 6 試合（seed 1000〜1005、1 スレッド）| 25.4 秒 | 16.9 秒 |
+  | `npm run compare -- 14 '{}' '{"beamWidth":8,"maxDepth":6}'`（28 試合、4 コア）| 49.8 秒 | 並列 17.4 秒（`tryApplyAction` の前は 1 スレッド 41.3 秒・並列 18.5 秒）|
 
-  - 行動列のハッシュ（`npm run bench`）、compare の勝敗、`npm run sim` の全試合の記録（`--json`）が変更前・1 スレッド・並列で一致
+  - compare は探索 AI どうしで、例外の多いリノセウス専用のリーサル探索を使わないため `tryApplyAction` の効果が小さい
+  - 行動列のハッシュ（`npm run bench`）、上の 6 試合の勝者と行動数、compare の勝敗、`npm run sim` の全試合の記録（`--json`）が変更前・1 スレッド・並列で一致
   - 試合数が少ないと、最後に残った長い試合を待つ時間の割合が大きく、並列の効果はコア数倍より小さい
 
 ## 分かっている弱点・未着手の候補

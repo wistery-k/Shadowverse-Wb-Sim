@@ -11,12 +11,14 @@ import {
   parseStaticAbilities,
   playCost,
   rngFrom,
+  tryApplyAction,
   type Action,
   type FollowerOnBoard,
   type GameState,
   type PlayerIndex,
 } from "../src/engine";
 import { randomAgent } from "../src/ai/random";
+import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { randomDeck } from "../src/sim/decks";
 import { playMatch } from "../src/sim/match";
 
@@ -533,5 +535,46 @@ describe("ランダム自己対戦", () => {
     const a = playMatch([randomAgent, randomAgent], { decks, seed: 7 });
     const b = playMatch([randomAgent, randomAgent], { decks, seed: 7 });
     expect(a.final).toEqual(b.final);
+  });
+});
+
+describe("tryApplyAction", () => {
+  /** 合法手に加えて、打てないかもしれない手（全手札のプレイ・全フォロワーの顔への攻撃・進化等）を試す */
+  function candidates(s: GameState): Action[] {
+    const pl = s.players[s.active];
+    const out: Action[] = [...legalActions(s), { type: "extraPp" }, { type: "choose", targets: [] }, { type: "mode", index: 0 }];
+    for (const h of pl.hand) out.push({ type: "play", iid: h.iid });
+    for (const c of pl.board) {
+      out.push({ type: "attack", attacker: c.iid, target: "leader" }, { type: "evolve", iid: c.iid }, { type: "superEvolve", iid: c.iid }, { type: "act", iid: c.iid });
+    }
+    return out;
+  }
+
+  it("applyAction が IllegalActionError を投げる手だけ null を返し、それ以外は同じ局面を返す", () => {
+    let checked = 0, illegal = 0;
+    for (let seed = 1; seed <= 6; seed++) {
+      const rng = rngFrom({ rng: seed });
+      const decks = DEFAULT_DECKS.map((d) => d.cards);
+      let s = createGame({ decks: [decks[seed % decks.length]!, decks[(seed * 3 + 1) % decks.length]!], seed });
+      while (s.phase !== "ended") {
+        if (s.phase === "main") {
+          for (const a of candidates(s)) {
+            let expected: GameState | null;
+            try {
+              expected = applyAction(s, a);
+            } catch (e) {
+              if (!(e instanceof IllegalActionError)) throw e;
+              expected = null;
+            }
+            expect(tryApplyAction(s, a)).toEqual(expected);
+            checked++;
+            if (expected === null) illegal++;
+          }
+        }
+        s = applyAction(s, randomAgent.chooseAction(s, legalActions(s), rng));
+      }
+    }
+    expect(illegal).toBeGreaterThan(100);
+    expect(checked - illegal).toBeGreaterThan(100);
   });
 });
