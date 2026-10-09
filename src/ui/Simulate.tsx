@@ -38,13 +38,48 @@ function cellColor(rate: number): string {
 
 const pct = (n: number, d: number) => (d === 0 ? "-" : `${Math.round((n / d) * 100)}%`);
 
+/** デッキと AI のチェック状態の保存先（localStorage） */
+const SELECTION_KEY = "svwb-sim:simulate-selection:v1";
+interface Selection {
+  decks: string[];
+  agents: string[];
+}
+function loadSelection(): Selection {
+  const fallback: Selection = { decks: DEFAULT_DECKS.map((d) => `default:${d.key}`), agents: ["greedy"] };
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(SELECTION_KEY) ?? "null");
+    if (typeof v !== "object" || v === null) return fallback;
+    const strings = (x: unknown): string[] | null =>
+      Array.isArray(x) && x.every((k) => typeof k === "string") ? (x as string[]) : null;
+    const { decks, agents } = v as Record<string, unknown>;
+    return {
+      decks: strings(decks) ?? fallback.decks,
+      agents: strings(agents)?.filter((k) => k in AGENTS) ?? fallback.agents,
+    };
+  } catch {
+    // 保存できない環境では既定値を使う
+  }
+  return fallback;
+}
+function saveSelection(selection: Selection): void {
+  try {
+    localStorage.setItem(SELECTION_KEY, JSON.stringify(selection));
+  } catch {
+    // 保存できなくても動作には影響しない
+  }
+}
+
 export function Simulate({ saved }: Props) {
   const options: DeckOption[] = [
     ...DEFAULT_DECKS.map((d) => ({ key: `default:${d.key}`, deck: d, label: d.name })),
     ...saved.filter(isPlayable).map((d) => ({ key: `saved:${d.id}`, deck: d, label: `${d.name}（保存）` })),
   ];
-  const [selected, setSelected] = useState<string[]>(() => DEFAULT_DECKS.map((d) => `default:${d.key}`));
-  const [agents, setAgents] = useState<string[]>(["greedy"]);
+  // 保存済みの選択には、削除されたデッキの key が残っていることがあるので、今ある選択肢だけに絞る
+  const [initial] = useState(loadSelection);
+  const [checkedDecks, setSelected] = useState<string[]>(initial.decks);
+  const [agents, setAgents] = useState<string[]>(initial.agents);
+  const selected = checkedDecks.filter((k) => options.some((o) => o.key === k));
+  useEffect(() => saveSelection({ decks: checkedDecks, agents }), [checkedDecks, agents]);
   const [games, setGames] = useState(10);
   const [mirror, setMirror] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
