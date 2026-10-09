@@ -6,8 +6,11 @@
 //     （--opts はリノセウス用 AI の探索の設定 SearchOptions の一部。"weights" にオブジェクトを渡すと SEARCH_WEIGHTS のその項目だけを変える。
 //      試合は CPU のコア数だけ並列に行う）
 // 自然の妖精姫・アリアを出した試合の数と、最初に出した自分のターン（平均）も出す。
+// --out ファイル名 で、試合ごとの結果（相手デッキ・g・席・勝ち・全探索でリーサルを見つけた回数）を JSON Lines で書き出す（変更前後で試合ごとに比べる用）。
 
 import { SEARCH_WEIGHTS } from "../src/ai/evaluate";
+import { writeFileSync } from "node:fs";
+import { exactLethalCounts } from "../src/ai/exactLethal";
 import { createRhinoAgent } from "../src/ai/rhino";
 import { applyAction, cardOf, createGame } from "../src/engine";
 import { searchAgent, type SearchOptions } from "../src/ai/search";
@@ -22,11 +25,13 @@ const ARIA = "自然の妖精姫・アリア";
 export async function main(argv: string[]): Promise<number> {
   let games = 50;
   let opts: Partial<SearchOptions> = {};
+  let out: string | null = null;
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
     const v = argv[++i];
     if (v === undefined) throw new Error(`${key} の値がありません`);
     if (key === "--games") games = Number(v);
+    else if (key === "--out") out = v;
     else if (key === "--opts") {
       const raw = JSON.parse(v) as Record<string, unknown>;
       if (typeof raw.weights === "object" && raw.weights !== null) raw.weights = { ...SEARCH_WEIGHTS, ...raw.weights };
@@ -58,7 +63,7 @@ export async function main(argv: string[]): Promise<number> {
       }
       s = applyAction(s, a);
     }
-    return { deck: o, won: r.winner === elfSeat, ariaTurn };
+    return { deck: o, g, elfSeat, won: r.winner === elfSeat, ariaTurn, exactFound: exactLethalCounts.found };
   });
   const perDeck = new Map<string, [number, number]>();
   for (const { deck, won } of results) {
@@ -72,5 +77,8 @@ export async function main(argv: string[]): Promise<number> {
   const ariaWins = results.filter((r) => r.ariaTurn !== null && r.won).length;
   console.log(`アリアを出した試合 ${aria.length}/${n}（そのうち勝ち ${ariaWins}）、最初に出した自分のターン 平均 ${(aria.reduce((x, y) => x + y, 0) / Math.max(1, aria.length)).toFixed(2)}`);
   console.log([...perDeck].map(([name, [w, t]]) => `${name} ${w}/${t}`).join(", "));
+  const exact = results.filter((r) => r.exactFound > 0);
+  console.log(`全探索でリーサルを見つけた試合 ${exact.length}/${n}（そのうち勝ち ${exact.filter((r) => r.won).length}）`);
+  if (out) writeFileSync(out, results.map((r) => JSON.stringify({ deck: r.deck, g: r.g, elfSeat: r.elfSeat, won: r.won, exactFound: r.exactFound })).join("\n") + "\n");
   return 0;
 }
