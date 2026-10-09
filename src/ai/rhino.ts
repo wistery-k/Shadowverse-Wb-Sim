@@ -175,7 +175,7 @@ const sameSet = (a: readonly number[], b: readonly number[]) => a.length === b.l
  * （汎用の「準備」重視の探索より、リノセウスの出し方を決め打ちする方がよく見つかる）
  */
 const DIRECT_ONLY = { ...DEFAULT_LETHAL_OPTIONS, scorings: [DIRECT_SCORING] };
-function searchLethalForRhino(root: GameState, p: PlayerIndex): Action[] | null {
+export function searchLethalForRhino(root: GameState, p: PlayerIndex): Action[] | null {
   return searchLethal(root, p, DIRECT_ONLY) ?? searchRhinoLethal(root, p);
 }
 
