@@ -164,10 +164,8 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
       return out.length > 0 ? out : [next];
     }
     if (opts.chainFuse && a.type === "fuse" && !next.pending && next.active === p) {
-      // 続けて融合するときは融合先の iid の小さい順に限る（順番違いの同じ融合を何通りも作らない）
-      const out = expand(next).flatMap((c) =>
-        c.type === "endTurn" || (c.type === "fuse" && c.host < a.host) || !allowed(next, c) ? [] : advance(next, c, depth + 1),
-      );
+      // 融合に融合は続けない（融合の素材の選び方の組み合わせで、展開する手が膨らむ）
+      const out = expand(next).flatMap((c) => (c.type === "endTurn" || c.type === "fuse" || !allowed(next, c) ? [] : advance(next, c, depth + 1)));
       return [next, ...out];
     }
     if (a.type === "extraPp" && !next.pending && next.active === p) {
