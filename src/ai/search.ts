@@ -64,12 +64,14 @@ export interface SearchOptions {
   chain: boolean;
   /**
    * 融合を、続く自分の手とまとめて 1 手として展開する（融合だけで終える局面も残す。手札が 9 枚のとき融合して減らしておく手のため）。
-   * 融合は評価値を変えないので、融合を挟む手順がビームで切られていた（seed 472546500 の AFネメシス 5 ターン目。docs/ai-notes.md）
+   * 融合は評価値を変えないので、融合を挟む手順がビームで切られていた（seed 472546500 の AFネメシス 5 ターン目。docs/ai-notes.md）。
+   * 融合に融合は続けない（続けると、コアの多い局面で 1 手 20 秒かかった）
    */
   chainFuse: boolean;
   /**
    * ターン終了の局面の採点に、ターン終了時の処理（ターン終了時の能力等）を含める。
-   * "all" はビームの中の局面も、"terminal" は最初の手ごとの最善を選ぶときだけ。"none" は含めない
+   * "all" はビームの中の局面も、"terminal" は最初の手ごとの最善を選ぶときだけ。"none" は含めない。
+   * 既定は "all"（ターン終了時の能力は確定で起こるので、進めてから採点する。docs/ai-notes.md）
    */
   scoreTurnEnd: "none" | "terminal" | "all";
   /**
@@ -79,7 +81,7 @@ export interface SearchOptions {
   mulligan: "weights" | "cost";
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "none", mulligan: "weights" };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: true, scoreTurnEnd: "all", mulligan: "weights" };
 
 interface Node {
   state: GameState;
