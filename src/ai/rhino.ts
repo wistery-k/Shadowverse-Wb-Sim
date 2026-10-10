@@ -370,27 +370,45 @@ function boardAttack(s: GameState, p: PlayerIndex): number {
 }
 
 /**
+ * 出すと上限が相手の体力に届かなくなる手札のカード（ユーザーの案）。相手の体力に届く式のどれでも、出した後に届かなければ出さない。
+ * - バックウッド・リリィ: 引いたカードで上限を取り戻せない（山札に 0 コストのカードは無い）ので、出すと PP の分だけ上限が下がる。
+ *   1 PP の価値はリノセウス 1 回・2 回・3 回の式で 1・2・3 点、出した分のコンボで同じだけ戻るので、下がる分は 回数 ×（コスト − 1）
+ * - 燐光の岩: コンボ 2 以上で出せば森の神秘が付いて 1 コスト換算になる。そう出せる回数を超える分は、リリィと同じく 回数 ×（コスト − 1）下がる。
+ *   自由に使える PP = PP − リノセウスの回数 × 3（超進化できるベビーカーバンクルがあれば +1）、
+ *   コンボ 2 にするのに要る PP = max(0, 2 − 手札の森の神秘とベイル)、1 コスト換算で出せる回数 =（自由に使える PP − コンボ 2 にするのに要る PP）÷ 2（切り捨て）
+ */
+function uselessPlays(s: GameState, p: PlayerIndex, hp: number): number[] {
+  const pl = s.players[p];
+  const bounds: [number, number][] = [[1, rhinoOneDamageBound(s, p)], [2, rhinoDamageBound(s, p)]];
+  if (mayPlayThreeRhinos(s, p)) bounds.push([3, rhinoThreeDamageBound(s, p)]);
+  const reachable = bounds.filter(([, bound]) => bound >= hp);
+  const useless = (rhinos: number, bound: number, cost: number) => bound - rhinos * (cost - 1) < hp;
+  const out = pl.hand
+    .filter((h) => [BACKWOOD, LILY].includes(nameOf(h.cardId)))
+    .filter((h) => reachable.every(([rhinos, bound]) => useless(rhinos, bound, Math.max(0, cardOf(h.cardId).cost + h.costMod))))
+    .map((h) => h.iid);
+  const rocks = pl.hand.filter((h) => nameOf(h.cardId) === ROCK);
+  if (rocks.length === 0 || reachable.length === 0) return out;
+  const inHand = (name: string) => pl.hand.filter((h) => nameOf(h.cardId) === name).length;
+  const order = p === s.first ? 0 : 1;
+  const canSuper = !pl.evolvedThisTurn && pl.sep > 0 && pl.turnCount >= SUPER_EVOLVE_TURN[order];
+  const carbuncle = canSuper && inHand(CARBUNCLE) + boardCount(s, p, CARBUNCLE) > 0 ? 1 : 0;
+  const pp = pl.pp + (pl.extraPpAvailable ? 1 : 0) + carbuncle;
+  const toCombo2 = Math.max(0, 2 - inHand(MYSTERY) - inHand(BAIL));
+  // 出さない岩の数: 届く式のどれでも、1 コスト換算で出せる回数を超え、超えた分を出すと届かなくなる数
+  const excess = Math.min(
+    ...reachable.map(([rhinos, bound]) => {
+      const playable = Math.max(0, Math.floor((pp - rhinos * 3 - toCombo2) / 2));
+      return useless(rhinos, bound, Math.max(0, cardOf(rocks[0]!.cardId).cost + rocks[0]!.costMod)) ? Math.max(0, rocks.length - playable) : 0;
+    }),
+  );
+  return [...out, ...rocks.slice(0, excess).map((h) => h.iid)];
+}
+
+/**
  * 上限の式でリーダーへの攻撃として数えた場のフォロワーのうち、攻撃力が余裕（上限 − 相手の体力）より大きいもの。
  * これがフォロワーを攻撃すると、残りで出せるのは上限 − 攻撃力 < 相手の体力なので、リーダーしか攻撃させない（ユーザーの案）
  */
-/**
- * 出すと上限が相手の体力に届かなくなる手札のカード（バックウッド・リリィ。ユーザーの案）。
- * どちらも引いたカードで上限を取り戻せない（山札に 0 コストのカードは無い）ので、出すと PP の分だけ上限が下がる。
- * 1 PP の価値はリノセウス 1 回・2 回・3 回の式で 1・2・3 点、出した分のコンボで同じだけ戻るので、下がる分は 回数 ×（コスト − 1）。
- * 相手の体力に届く式のどれでも、下がった後に届かなければ出さない
- */
-function uselessPlays(s: GameState, p: PlayerIndex, hp: number): number[] {
-  const bounds: [number, number][] = [[1, rhinoOneDamageBound(s, p)], [2, rhinoDamageBound(s, p)]];
-  if (mayPlayThreeRhinos(s, p)) bounds.push([3, rhinoThreeDamageBound(s, p)]);
-  return s.players[p].hand
-    .filter((h) => [BACKWOOD, LILY].includes(nameOf(h.cardId)))
-    .filter((h) => {
-      const cost = Math.max(0, cardOf(h.cardId).cost + h.costMod);
-      return bounds.every(([rhinos, bound]) => bound - rhinos * (cost - 1) < hp);
-    })
-    .map((h) => h.iid);
-}
-
 function leaderOnlyAttackers(s: GameState, p: PlayerIndex, slack: number): number[] {
   return leaderAttackers(s, p).filter((c) => attackOf(c) > slack).map((c) => c.iid);
 }
