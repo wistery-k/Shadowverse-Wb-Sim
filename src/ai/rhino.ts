@@ -41,6 +41,8 @@ const CARBUNCLE = "ベビーカーバンクル";
 const BAIL = "煌撃の戦士・ベイル";
 const BUGS = "虫の知らせ";
 const LILY = "ピュアクリスタリア・リリィ";
+const OLIVIER = "勇壮の堕天使・オリヴィエ";
+const TAMER = "フェアリーテイマー";
 /** マリガンで1枚だけ残す序盤のカード（優先順） */
 const EARLY = ["フェアリーテイマー", "純粋なるウォーターフェアリー", "妖精の招集"];
 /** 上の2種（バックウッドと序盤のカード）がどちらもあるときに残すカード（優先順。杖は1枚まで） */
@@ -236,6 +238,7 @@ export const RHINO_EXACT: ExactLethalOptions = {
   ...DEFAULT_EXACT_LETHAL_OPTIONS,
   maxStates: 30_000,
   maxStatesPerTurn: 60_000,
+  ignoreExhaustedStats: true,
   // リノセウスでリーダー以外を攻撃する手は試さない（ユーザーの案。seed 900091 の 8 ターン目。docs/ai-notes.md）
   // エクストラPPは、使うと新しく出せる・アクトできるカードが増えるときだけ試す（ユーザーの案。docs/ai-notes.md）
   // 相手の場に守護がいる間はリノセウスを出さない（ユーザーの案。取りこぼしうるが稀。seed 900027 の 9 ターン目。docs/ai-notes.md）
@@ -261,15 +264,73 @@ export function searchLethalForRhinoTurn(root: GameState, p: PlayerIndex): Actio
   const hp = root.players[p === 0 ? 1 : 0].leaderHp;
   const bound = rhinoLethalBound(root, p);
   if (hp > bound) return found;
-  // リノセウス 1 回（2 回）の上限が届かなければ、2 回（3 回）以上出す手順だけを探す
-  const count = hp <= rhinoOneDamageBound(root, p) ? 0 : hp <= rhinoDamageBound(root, p) ? 2 : 3;
-  const opts: ExactLethalOptions = { ...RHINO_EXACT, leaderOnly: leaderOnlyAttackers(root, p, bound - hp), noPlay: uselessPlays(root, p, hp) };
-  if (count > 0) opts.mustPlay = { count, matches: isRhinoPlay, feasible: canStillPlayRhinos };
-  const exact = searchExactLethal(root, p, opts);
-  if (!exact) return found;
-  if (winsElsewhere(root, p, exact)) return exact;
-  // 乱数で結果が変わる手を除いて探し直す（seed 900234 のエルフ 7 ターン目。docs/ai-notes.md）
-  return searchExactLethal(root, p, { ...opts, deterministicOnly: true }) ?? exact;
+  // リノセウスを出す回数ごとに分けて探す（rhinoExactSearches）
+  let lucky: Action[] | null = null;
+  for (const { opts } of rhinoExactSearches(root, p, hp)) {
+    const exact = searchExactLethal(root, p, opts);
+    if (!exact) continue;
+    if (winsElsewhere(root, p, exact)) return exact;
+    // 乱数で結果が変わる手を除いて探し直す（seed 900234 のエルフ 7 ターン目。docs/ai-notes.md）
+    const sure = searchExactLethal(root, p, { ...opts, deterministicOnly: true });
+    if (sure) return sure;
+    lucky ??= exact;
+  }
+  return lucky ?? found;
+}
+
+/**
+ * 進化・超進化の対象を絞ってよい余裕の境目（このターンに進化か超進化ができれば 2、どちらもできなければ 0）。
+ * 適当なフォロワーに使っても 1 点は出るので、余裕（上限 − 相手の体力）が 2 より小さければ、
+ * 進化・超進化をリーダーへのダメージ以外に使う余地は無い（ユーザーの案。seed 900052 の 7 ターン目。docs/ai-notes.md）
+ */
+function evolveSlackLimit(s: GameState, p: PlayerIndex): number {
+  const pl = s.players[p];
+  const order = p === s.first ? 0 : 1;
+  if (pl.evolvedThisTurn) return 0;
+  const canSuper = pl.sep > 0 && pl.turnCount >= SUPER_EVOLVE_TURN[order];
+  const canEvolve = pl.ep > 0 && pl.turnCount >= EVOLVE_TURN[order];
+  return canSuper || canEvolve ? 2 : 0;
+}
+
+/**
+ * 上限の式で数えた分を出せない進化・超進化。対象がこのあとリーダーを攻撃できるフォロワー（リノセウス等）でなく、
+ * 超進化ならベビーカーバンクル（PP 3 回復）・オリヴィエ（他のフォロワーを超進化）でもないもの
+ */
+function wastedEvolve(s: GameState, p: PlayerIndex, a: Action): boolean {
+  if (a.type !== "evolve" && a.type !== "superEvolve") return false;
+  const c = s.players[p].board.find((x) => x.iid === a.iid);
+  if (!c || c.kind !== "follower") return false;
+  if (leaderAttackers(s, p).some((x) => x.iid === c.iid)) return false;
+  return !(a.type === "superEvolve" && [CARBUNCLE, OLIVIER].includes(nameOf(c.cardId)));
+}
+
+/**
+ * 全探索をリノセウスを出す回数ごと（1 回以下・2 回・3 回以上）に分けたときの、それぞれの設定。上限が相手の体力に届かない回数は含めない。
+ * 出さないカード・リーダーしか攻撃しないフォロワー・進化の対象は、回数ごとの上限で決める（ユーザーの案。docs/ai-notes.md）
+ */
+export function rhinoExactSearches(root: GameState, p: PlayerIndex, hp: number): { rhinos: number; bound: number; last: boolean; opts: ExactLethalOptions }[] {
+  const bounds = rhinoBounds(root, p);
+  const out: { rhinos: number; bound: number; last: boolean; opts: ExactLethalOptions }[] = [];
+  for (const [i, [rhinos, bound]] of bounds.entries()) {
+    if (bound < hp) continue;
+    const last = i === bounds.length - 1;
+    const opts: ExactLethalOptions = { ...RHINO_EXACT, leaderOnly: leaderOnlyAttackers(root, p, bound - hp), noPlay: uselessPlays(root, p, hp, [[rhinos, bound]]) };
+    if (rhinos >= 2) opts.mustPlay = { count: rhinos, matches: isRhinoPlay, feasible: canStillPlayRhinos };
+    if (!last) opts.maxPlay = { count: rhinos, matches: isRhinoPlay };
+    if (bound - hp < evolveSlackLimit(root, p)) {
+      opts.order = (s, q, actions) => RHINO_EXACT.order!(s, q, actions).filter((a) => !wastedEvolve(s, q, a));
+      opts.orderKey = "evolve";
+    }
+    out.push({ rhinos, bound, last, opts });
+  }
+  return out;
+}
+
+/** リノセウスを出す回数と、その回数での上限（1 回・2 回、3 回出せるかもしれなければ 3 回も） */
+export function rhinoBounds(s: GameState, p: PlayerIndex): [number, number][] {
+  const bounds: [number, number][] = [[1, rhinoOneDamageBound(s, p)], [2, rhinoDamageBound(s, p)]];
+  if (mayPlayThreeRhinos(s, p)) bounds.push([3, rhinoThreeDamageBound(s, p)]);
+  return bounds;
 }
 
 function isRhinoFollowerAttack(s: GameState, p: PlayerIndex, a: Action): boolean {
@@ -397,22 +458,29 @@ function boardAttack(s: GameState, p: PlayerIndex): number {
 
 /**
  * 出すと上限が相手の体力に届かなくなる手札のカード（ユーザーの案）。相手の体力に届く式のどれでも、出した後に届かなければ出さない。
- * - バックウッド・リリィ: 引いたカードで上限を取り戻せない（山札に 0 コストのカードは無い）ので、出すと PP の分だけ上限が下がる。
- *   1 PP の価値はリノセウス 1 回・2 回・3 回の式で 1・2・3 点、出した分のコンボで同じだけ戻るので、下がる分は 回数 ×（コスト − 1）
+ * - バックウッド・リリィ・手札の聖樹の杖・フェアリーテイマー: 引いたカード（テイマーのフェアリーも 1 コストなので同じ）で上限を取り戻せない（山札に 0 コストのカードは無い）ので、出すと PP の分だけ上限が下がる。
+ *   1 PP の価値はリノセウス 1 回・2 回・3 回の式で 1・2・3 点、出した分のコンボで同じだけ戻るので、下がる分は 回数 ×（コスト − 1）。
+ *   杖のアクトで戻して出し直すのは 1 コストのカードを出すのと同じ（2 回の式はアクトを 0 コストとして数えている）なので、杖も同じに扱う
+ * - 勇壮の堕天使・オリヴィエ: PP 2 回復で実質 コスト − 2。超進化すると他のフォロワー（リノセウス）も超進化し、リノセウスを直接超進化するより最大 1 点多い（ユーザーの見積もり）ので、
+ *   下がる分は 回数 ×（コスト − 2 − 1）から、超進化できれば 1 を引いたもの
  * - 燐光の岩: コンボ 2 以上で出せば森の神秘が付いて 1 コスト換算になる。そう出せる回数を超える分は、リリィと同じく 回数 ×（コスト − 1）下がる。
  *   自由に使える PP = PP − リノセウスの回数 × 3（超進化できるベビーカーバンクルがあれば +1）、
  *   コンボ 2 にするのに要る PP = max(0, 2 − 手札の森の神秘とベイル)、1 コスト換算で出せる回数 =（自由に使える PP − コンボ 2 にするのに要る PP）÷ 2（切り捨て）
  */
-function uselessPlays(s: GameState, p: PlayerIndex, hp: number): number[] {
+function uselessPlays(s: GameState, p: PlayerIndex, hp: number, bounds: readonly (readonly [number, number])[] = rhinoBounds(s, p)): number[] {
   const pl = s.players[p];
-  const bounds: [number, number][] = [[1, rhinoOneDamageBound(s, p)], [2, rhinoDamageBound(s, p)]];
-  if (mayPlayThreeRhinos(s, p)) bounds.push([3, rhinoThreeDamageBound(s, p)]);
   const reachable = bounds.filter(([, bound]) => bound >= hp);
   const useless = (rhinos: number, bound: number, cost: number) => bound - rhinos * (cost - 1) < hp;
   const out = pl.hand
-    .filter((h) => [BACKWOOD, LILY].includes(nameOf(h.cardId)))
+    .filter((h) => [BACKWOOD, LILY, ROD, TAMER].includes(nameOf(h.cardId)))
     .filter((h) => reachable.every(([rhinos, bound]) => useless(rhinos, bound, Math.max(0, cardOf(h.cardId).cost + h.costMod))))
     .map((h) => h.iid);
+  const order = p === s.first ? 0 : 1;
+  const superBonus = !pl.evolvedThisTurn && pl.sep > 0 && pl.turnCount >= SUPER_EVOLVE_TURN[order] ? 1 : 0;
+  for (const h of pl.hand.filter((x) => nameOf(x.cardId) === OLIVIER)) {
+    const cost = Math.max(0, cardOf(h.cardId).cost + h.costMod - 2);
+    if (reachable.every(([rhinos, bound]) => useless(rhinos, bound + superBonus, cost))) out.push(h.iid);
+  }
   const rocks = pl.hand.filter((h) => nameOf(h.cardId) === ROCK);
   if (rocks.length === 0 || reachable.length === 0) return out;
   const mysteries = pl.hand.filter((h) => nameOf(h.cardId) === MYSTERY).length;
