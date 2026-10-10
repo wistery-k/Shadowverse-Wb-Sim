@@ -817,3 +817,24 @@ progress {
   border-radius: 4px;
   font-size: 12px;
 }
+
+/* リノセウス比較 */
+.rhino-compare .setup {
+  margin-bottom: 1rem;
+}
+.rhino-records {
+  border-collapse: collapse;
+  width: 100%;
+}
+.rhino-records th,
+.rhino-records td {
+  border-bottom: 1px solid var(--line);
+  padding: 0.25rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+.turn-log {
+  margin: 0;
+  padding-left: 1.5rem;
+  font-size: 0.9em;
+}

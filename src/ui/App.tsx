@@ -2,10 +2,13 @@ import { useState } from "preact/hooks";
 import { CLASS_NAMES } from "../cards";
 import { DECK_CLASSES, type DeckClass } from "../cards/deck";
 import { DEFAULT_DECKS } from "../cards/defaultDecks";
-import { createGame, rngFrom, type GameState, type Rng } from "../engine";
+import { createGame, rngFrom, type Action, type GameState, type PlayerIndex, type Rng } from "../engine";
+import { buildHumanRecord } from "../sim/humanRecord";
+import { rhinoMatch, RHINO_OPPONENT_AGENT } from "../sim/rhinoCompare";
 import { randomDeck } from "../sim/decks";
 import { Decks, isPlayable } from "./Decks";
 import { Game } from "./Game";
+import { loadHumanRecords, RhinoCompare, saveHumanRecords, type RhinoMatchChoice } from "./RhinoCompare";
 import { Simulate } from "./Simulate";
 import { loadDecks, saveDecks, type SavedDeck } from "./storage";
 
@@ -58,10 +61,11 @@ function resolveDeck(choice: DeckChoice, saved: readonly SavedDeck[], rng: Rng):
 }
 
 export function App() {
-  const [tab, setTab] = useState<"play" | "decks" | "sim">("play");
+  const [tab, setTab] = useState<"play" | "decks" | "sim" | "rhino">("play");
   const [saved, setSaved] = useState<SavedDeck[]>(() => loadDecks());
   const [setup, setSetupState] = useState<Setup>(() => loadSetup());
-  const [game, setGame] = useState<{ state: GameState; agent: string } | null>(null);
+  const [game, setGame] = useState<{ state: GameState; agent: string; human?: PlayerIndex; rhino?: RhinoMatchChoice } | null>(null);
+  const [rhinoError, setRhinoError] = useState("");
   const [error, setError] = useState("");
 
   const setSetup = (s: Setup) => {
@@ -86,6 +90,21 @@ export function App() {
     setGame({ state: createGame({ decks: [me, ai], seed }), agent: OPPONENTS[setup.agent] ? setup.agent : "greedy" });
   }
 
+  function startRhino(m: RhinoMatchChoice) {
+    setRhinoError("");
+    setGame({ state: createGame(rhinoMatch(m.deck, m.g, m.elfSeat)), agent: RHINO_OPPONENT_AGENT, human: m.elfSeat, rhino: m });
+  }
+
+  // リノセウス比較の試合が終わったら記録を保存する
+  function recordRhino(m: RhinoMatchChoice, actions: Action[]) {
+    try {
+      const record = buildHumanRecord({ ...m, actions, commit: __BUILD_COMMIT__, playedAt: new Date().toISOString() });
+      if (!saveHumanRecords([...loadHumanRecords(), record])) setRhinoError("記録をブラウザに保存できませんでした（プライベートブラウズ等）");
+    } catch (e) {
+      setRhinoError(`記録を作れませんでした: ${String(e)}`);
+    }
+  }
+
   return (
     <div class="app">
       <header>
@@ -102,17 +121,28 @@ export function App() {
             <button type="button" class={tab === "sim" ? "active" : ""} onClick={() => setTab("sim")}>
               AI対戦
             </button>
+            <button type="button" class={tab === "rhino" ? "active" : ""} onClick={() => setTab("rhino")}>
+              リノセウス比較
+            </button>
           </nav>
         )}
       </header>
       {error && <p class="problems">{error}</p>}
       <main>
         {game ? (
-          <Game initial={game.state} ai={game.agent} onExit={() => setGame(null)} />
+          <Game
+            initial={game.state}
+            ai={game.agent}
+            human={game.human ?? 0}
+            onExit={() => setGame(null)}
+            {...(game.rhino ? { onEnd: (actions: Action[]) => recordRhino(game.rhino!, actions), exitLabel: "記録に戻る" } : {})}
+          />
         ) : tab === "decks" ? (
           <Decks decks={saved} onChange={updateDecks} />
         ) : tab === "sim" ? (
           <Simulate saved={saved} />
+        ) : tab === "rhino" ? (
+          <RhinoCompare onStart={startRhino} saveError={rhinoError} />
         ) : (
           <div class="setup panel">
             <label>

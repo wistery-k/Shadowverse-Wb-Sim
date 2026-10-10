@@ -8,7 +8,9 @@ import {
   cardOf,
   EP,
   HAND_LIMIT,
+  leaderId,
   legalActions,
+  opponent,
   rngFrom,
   SEP,
   type Action,
@@ -18,21 +20,32 @@ import {
 import { CardDetail, CardView } from "./CardView";
 import { crestName, describeAction, modeLabels } from "./describe";
 
-const HUMAN: PlayerIndex = 0;
-const AI: PlayerIndex = 1;
 const AI_DELAY_MS = 700;
 
 interface Props {
   initial: GameState;
   /** src/ai/registry.ts のキー */
   ai: string;
+  /** 人間の席（既定は 0） */
+  human?: PlayerIndex;
   onExit: () => void;
+  /** 試合が終わったときに、行われた行動の列を渡す */
+  onEnd?: (actions: Action[], final: GameState) => void;
+  /** 終わった後の「もう一度」ボタンの文言 */
+  exitLabel?: string;
 }
 
 const same = (a: Action, b: Action) => JSON.stringify(a) === JSON.stringify(b);
 
-export function Game({ initial, ai, onExit }: Props) {
+export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "もう一度" }: Props) {
+  const HUMAN = human;
+  const AI = opponent(human);
+  const MY_LEADER = leaderId(HUMAN);
+  const OPP_LEADER = leaderId(AI);
   const [state, setState] = useState(initial);
+  // 行われた行動の列（記録用）
+  const actionsRef = useRef<Action[]>([]);
+  const endedRef = useRef(false);
   const [log, setLog] = useState<string[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [picks, setPicks] = useState<number[]>([]);
@@ -49,9 +62,19 @@ export function Game({ initial, ai, onExit }: Props) {
   const acting = actingPlayer(state);
   const myTurn = state.phase !== "ended" && acting === HUMAN;
 
-  function act(action: Action) {
+  function advance(action: Action) {
+    const next = applyAction(state, action);
+    actionsRef.current.push(action);
     setLog((l) => [describeAction(state, action, HUMAN), ...l].slice(0, 200));
-    setState(applyAction(state, action));
+    setState(next);
+    if (next.phase === "ended" && !endedRef.current) {
+      endedRef.current = true;
+      onEnd?.([...actionsRef.current], next);
+    }
+  }
+
+  function act(action: Action) {
+    advance(action);
     setSelected(null);
     setPicks([]);
   }
@@ -73,8 +96,7 @@ export function Game({ initial, ai, onExit }: Props) {
       setTimeout(() => {
         if (cancelled) return;
         setAiThinking(false);
-        setLog((l) => [describeAction(state, action, HUMAN), ...l].slice(0, 200));
-        setState(applyAction(state, action));
+        advance(action);
       }, Math.max(0, AI_DELAY_MS - (Date.now() - started)));
     };
     const request: AgentRequest = { id, agent: ai, state, legal, seed: aiRng.int(2 ** 30) };
@@ -92,7 +114,7 @@ export function Game({ initial, ai, onExit }: Props) {
   // 選択中のカードでできる行動
   const selectedActions = selected === null ? [] : legal.filter((a) => actionSubject(a) === selected);
   const attackTargets = new Set(
-    selectedActions.flatMap((a) => (a.type === "attack" ? [a.target === "leader" ? -2 : a.target] : [])),
+    selectedActions.flatMap((a) => (a.type === "attack" ? [a.target === "leader" ? OPP_LEADER : a.target] : [])),
   );
   const candidates = new Set(pending?.kind === "choose" ? pending.candidates : []);
   const readyIds = new Set(myTurn && !pending && !mulligan ? legal.map(actionSubject).filter((x) => x !== null) : []);
@@ -106,7 +128,7 @@ export function Game({ initial, ai, onExit }: Props) {
     }
     if (pending) return;
     if (selected !== null && attackTargets.has(iid)) {
-      const target = iid === -2 ? "leader" : iid;
+      const target = iid === OPP_LEADER ? "leader" : iid;
       const a = selectedActions.find((x) => x.type === "attack" && x.target === target);
       if (a) act(a);
       return;
@@ -142,8 +164,8 @@ export function Game({ initial, ai, onExit }: Props) {
           ))}
         </div>
         <div
-          class={`leader ${attackTargets.has(-2) ? "targetable" : ""} ${candidates.has(-2) ? "targetable" : ""} ${picks.includes(-2) ? "selected" : ""}`}
-          onClick={() => clickEntity(-2)}
+          class={`leader ${attackTargets.has(OPP_LEADER) ? "targetable" : ""} ${candidates.has(OPP_LEADER) ? "targetable" : ""} ${picks.includes(OPP_LEADER) ? "selected" : ""}`}
+          onClick={() => clickEntity(OPP_LEADER)}
         >
           相手リーダー {opp.leaderHp}/{opp.leaderMaxHp}
         </div>
@@ -176,8 +198,8 @@ export function Game({ initial, ai, onExit }: Props) {
           ))}
         </div>
         <div
-          class={`leader ${candidates.has(-1) ? "targetable" : ""} ${picks.includes(-1) ? "selected" : ""}`}
-          onClick={() => clickEntity(-1)}
+          class={`leader ${candidates.has(MY_LEADER) ? "targetable" : ""} ${picks.includes(MY_LEADER) ? "selected" : ""}`}
+          onClick={() => clickEntity(MY_LEADER)}
         >
           あなたのリーダー {me.leaderHp}/{me.leaderMaxHp}
         </div>
@@ -203,7 +225,7 @@ export function Game({ initial, ai, onExit }: Props) {
           <div class="banner">
             {state.winner === HUMAN ? "あなたの勝利" : "あなたの敗北"}
             <button type="button" onClick={onExit}>
-              もう一度
+              {exitLabel}
             </button>
           </div>
         ) : !myTurn ? (
