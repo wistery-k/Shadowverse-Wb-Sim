@@ -41,6 +41,7 @@ const CARBUNCLE = "ベビーカーバンクル";
 const BAIL = "煌撃の戦士・ベイル";
 const BUGS = "虫の知らせ";
 const LILY = "ピュアクリスタリア・リリィ";
+const OLIVIER = "勇壮の堕天使・オリヴィエ";
 /** マリガンで1枚だけ残す序盤のカード（優先順） */
 const EARLY = ["フェアリーテイマー", "純粋なるウォーターフェアリー", "妖精の招集"];
 /** 上の2種（バックウッドと序盤のカード）がどちらもあるときに残すカード（優先順。杖は1枚まで） */
@@ -400,6 +401,8 @@ function boardAttack(s: GameState, p: PlayerIndex): number {
  * - バックウッド・リリィ・手札の聖樹の杖: 引いたカードで上限を取り戻せない（山札に 0 コストのカードは無い）ので、出すと PP の分だけ上限が下がる。
  *   1 PP の価値はリノセウス 1 回・2 回・3 回の式で 1・2・3 点、出した分のコンボで同じだけ戻るので、下がる分は 回数 ×（コスト − 1）。
  *   杖のアクトで戻して出し直すのは 1 コストのカードを出すのと同じ（2 回の式はアクトを 0 コストとして数えている）なので、杖も同じに扱う
+ * - 勇壮の堕天使・オリヴィエ: PP 2 回復で実質 コスト − 2。超進化すると他のフォロワー（リノセウス）も超進化し、リノセウスを直接超進化するより最大 1 点多い（ユーザーの見積もり）ので、
+ *   下がる分は 回数 ×（コスト − 2 − 1）から、超進化できれば 1 を引いたもの
  * - 燐光の岩: コンボ 2 以上で出せば森の神秘が付いて 1 コスト換算になる。そう出せる回数を超える分は、リリィと同じく 回数 ×（コスト − 1）下がる。
  *   自由に使える PP = PP − リノセウスの回数 × 3（超進化できるベビーカーバンクルがあれば +1）、
  *   コンボ 2 にするのに要る PP = max(0, 2 − 手札の森の神秘とベイル)、1 コスト換算で出せる回数 =（自由に使える PP − コンボ 2 にするのに要る PP）÷ 2（切り捨て）
@@ -414,6 +417,12 @@ function uselessPlays(s: GameState, p: PlayerIndex, hp: number): number[] {
     .filter((h) => [BACKWOOD, LILY, ROD].includes(nameOf(h.cardId)))
     .filter((h) => reachable.every(([rhinos, bound]) => useless(rhinos, bound, Math.max(0, cardOf(h.cardId).cost + h.costMod))))
     .map((h) => h.iid);
+  const order = p === s.first ? 0 : 1;
+  const superBonus = !pl.evolvedThisTurn && pl.sep > 0 && pl.turnCount >= SUPER_EVOLVE_TURN[order] ? 1 : 0;
+  for (const h of pl.hand.filter((x) => nameOf(x.cardId) === OLIVIER)) {
+    const cost = Math.max(0, cardOf(h.cardId).cost + h.costMod - 2);
+    if (reachable.every(([rhinos, bound]) => useless(rhinos, bound + superBonus, cost))) out.push(h.iid);
+  }
   const rocks = pl.hand.filter((h) => nameOf(h.cardId) === ROCK);
   if (rocks.length === 0 || reachable.length === 0) return out;
   const mysteries = pl.hand.filter((h) => nameOf(h.cardId) === MYSTERY).length;
