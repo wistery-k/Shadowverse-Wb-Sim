@@ -8,11 +8,11 @@
 // 自然の妖精姫・アリアを出した試合の数と、最初に出した自分のターン（平均）も出す。
 // --agent で、リノセウスエルフ側の AI を registry のキーで選べる（既定は rhino。例: search、rhino-lethal。--opts は rhino のときだけ使う）。
 // ベイル・ベビーカーバンクル・リノセウス・フェアリーテイマー・燐光の岩を出した回数と自分のターン（平均）も出す（手札の温存の点 hold を変えたときに比べる用。例: --opts '{"weights":{"hold":{"10113130":2}}}'）。
-// --out ファイル名 で、試合ごとの結果（相手デッキ・g・席・勝ち・全探索でリーサルを見つけた回数）を JSON Lines で書き出す（変更前後で試合ごとに比べる用）。
+// --out ファイル名 で、試合ごとの結果（相手デッキ・g・席・勝ち・全探索でリーサルを見つけた回数・出したカード・森の神秘の得た数と使った数・自分のターンの開始時の様子）を JSON Lines で書き出す（変更前後で試合ごとに比べる用）。
 
 import { writeFileSync } from "node:fs";
 import { exactLethalCounts } from "../src/ai/exactLethal";
-import { createRhinoAgent, RHINO_WEIGHTS } from "../src/ai/rhino";
+import { createRhinoAgent, rhinoLethalBound, RHINO_WEIGHTS } from "../src/ai/rhino";
 import { agentOf } from "../src/ai/registry";
 import { applyAction, cardOf, createGame } from "../src/engine";
 import { searchAgent, type SearchOptions } from "../src/ai/search";
@@ -25,6 +25,7 @@ const EXCLUDED_DECKS = [ELF, "ランプドラゴン"];
 const ARIA = "自然の妖精姫・アリア";
 /** 出した自分のターンを数えるカード（温存の点 hold を変えたときに、出し方がどう変わるかを見る） */
 const ROCK = "燐光の岩";
+const MYSTERY = "森の神秘";
 const TRACKED = ["煌撃の戦士・ベイル", "ベビーカーバンクル", "殺戮のリノセウス", "フェアリーテイマー", "燐光の岩"];
 
 export async function main(argv: string[]): Promise<number> {
@@ -63,7 +64,20 @@ export async function main(argv: string[]): Promise<number> {
     // TRACKED のカードを出した自分のターン（カードごと）と、試合の最後の自分のターン
     const plays: Record<string, number[]> = Object.fromEntries(TRACKED.map((name) => [name, []]));
     let rockCombo3 = 0;
+    // 自分のターンの開始時の様子（相手の体力・リノセウスで与えられるダメージの上限・手札の森の神秘とリノセウスの枚数・手札の枚数）
+    const turns: { turn: number; oppHp: number; bound: number; mystery: number; rhino: number; hand: number }[] = [];
+    // 自分の手札に森の神秘が加わった数と、プレイした数（差のうち手札に残っていない分は手札上限で溢れた）
+    let mysteryGained = 0;
+    let mysteryPlayed = 0;
+    const mysteries = (x: typeof s) => x.players[elfSeat].hand.filter((h) => cardOf(h.cardId).name === MYSTERY);
     for (const a of r.log ?? []) {
+      const me = s.players[elfSeat];
+      if (s.active === elfSeat && !s.pending && turns[turns.length - 1]?.turn !== me.turnCount) {
+        const count = (name: string) => me.hand.filter((h) => cardOf(h.cardId).name === name).length;
+        turns.push({ turn: me.turnCount, oppHp: s.players[1 - elfSeat]!.leaderHp, bound: rhinoLethalBound(s, elfSeat), mystery: count(MYSTERY), rhino: count("殺戮のリノセウス"), hand: me.hand.length });
+      }
+      const before = new Set(mysteries(s).map((h) => h.iid));
+      if (a.type === "play" && before.has(a.iid)) mysteryPlayed++;
       if (a.type === "play" && s.active === elfSeat && !s.pending) {
         const h = s.players[elfSeat].hand.find((c) => c.iid === a.iid);
         const name = h ? cardOf(h.cardId).name : null;
@@ -73,9 +87,10 @@ export async function main(argv: string[]): Promise<number> {
         if (name === ROCK && s.players[elfSeat].combo >= 2) rockCombo3++;
       }
       s = applyAction(s, a);
+      mysteryGained += mysteries(s).filter((h) => !before.has(h.iid)).length;
     }
     const lastTurn = r.final.players[elfSeat].turnCount;
-    return { deck: o, g, elfSeat, won: r.winner === elfSeat, ariaTurn, exactFound: exactLethalCounts.found, plays, lastTurn, rockCombo3 };
+    return { deck: o, g, elfSeat, won: r.winner === elfSeat, ariaTurn, exactFound: exactLethalCounts.found, plays, lastTurn, rockCombo3, turns, mysteryGained, mysteryPlayed, mysteryLeft: mysteries(s).length };
   });
   const perDeck = new Map<string, [number, number]>();
   for (const { deck, won } of results) {
@@ -98,6 +113,6 @@ export async function main(argv: string[]): Promise<number> {
   console.log(`燐光の岩をコンボ 3 で出した回数 ${results.reduce((t, r) => t + r.rockCombo3, 0)}`);
   const exact = results.filter((r) => r.exactFound > 0);
   console.log(`全探索でリーサルを見つけた試合 ${exact.length}/${n}（そのうち勝ち ${exact.filter((r) => r.won).length}）`);
-  if (out) writeFileSync(out, results.map((r) => JSON.stringify({ deck: r.deck, g: r.g, elfSeat: r.elfSeat, won: r.won, exactFound: r.exactFound, plays: r.plays, lastTurn: r.lastTurn })).join("\n") + "\n");
+  if (out) writeFileSync(out, results.map((r) => JSON.stringify({ deck: r.deck, g: r.g, elfSeat: r.elfSeat, won: r.won, exactFound: r.exactFound, plays: r.plays, lastTurn: r.lastTurn, rockCombo3: r.rockCombo3, mysteryGained: r.mysteryGained, mysteryPlayed: r.mysteryPlayed, mysteryLeft: r.mysteryLeft, turns: r.turns })).join("\n") + "\n");
   return 0;
 }
