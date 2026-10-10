@@ -24,7 +24,9 @@ import {
   type PlayerIndex,
 } from "../engine";
 import type { FollowerOnBoard } from "../engine/types";
+import { id } from "../cards/abilities/helpers";
 import { determinize } from "./determinize";
+import { SEARCH_WEIGHTS, type EvalWeights } from "./evaluate";
 import { DEFAULT_EXACT_LETHAL_OPTIONS, resetExactLethalCache, searchExactLethal, type ExactLethalOptions } from "./exactLethal";
 import { DEFAULT_LETHAL_OPTIONS, DIRECT_SCORING, findLethal, searchLethal } from "./lethal";
 import { searchRhinoLethal } from "./rhinoLethal";
@@ -543,6 +545,23 @@ function mayPlayThreeRhinos(s: GameState, p: PlayerIndex): boolean {
 const RHINO_PER_FIRST = 4;
 
 /**
+ * リノセウス用 AI の評価関数の重み。探索 AI の既定に、手札に持っておく価値（hold）を足したもの（ユーザー案。seed 2719862095 の 7 ターン目。docs/ai-notes.md）。
+ * ベイル・ベビーカーバンクル・森の神秘はリーサルの部品なので温存し、フェアリーテイマー・燐光の岩は温存しても使いにくいので出せるときに出す。
+ * 600 試合で勝率は 262 → 265（誤差の範囲）、カーバンクルをリーサルのターンに使う数 34 → 64、岩をコンボ 3 で出す数 149 → 270
+ */
+export const RHINO_WEIGHTS: EvalWeights = {
+  ...SEARCH_WEIGHTS,
+  hold: {
+    ...SEARCH_WEIGHTS.hold,
+    [id(BAIL)]: 2,
+    [id(CARBUNCLE)]: 2,
+    [id(MYSTERY)]: 1,
+    [id(TAMER)]: -0.6,
+    [id(ROCK)]: -0.6,
+  },
+};
+
+/**
  * リノセウス用 AI の構成（比較実験用）。rules が false なら、ルール（ルールのマリガン・最優先の手・禁じる手）を使わず、
  * マリガンは重み、リーサル探索（リノセウス用）で見つからなければ汎用の探索 AI に任せる
  */
@@ -556,7 +575,7 @@ export interface RhinoAgentMode {
  * （seed 2510273090 の 4 ターン目・seed 954874822 の 7 ターン目。docs/ai-notes.md）
  */
 export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}, mode: RhinoAgentMode = { rules: true }): Agent {
-  const search = createSearchAgent({ allow: allowAction, lethal: false, perFirst: RHINO_PER_FIRST, nextLethalSearch: (s, q) => searchLethalForRhino(s, q) !== null, ...searchOptions });
+  const search = createSearchAgent({ allow: allowAction, lethal: false, perFirst: RHINO_PER_FIRST, weights: RHINO_WEIGHTS, nextLethalSearch: (s, q) => searchLethalForRhino(s, q) !== null, ...searchOptions });
   const plainSearch = createSearchAgent();
   return {
     name: "rhino",
