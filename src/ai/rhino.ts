@@ -263,16 +263,9 @@ export function searchLethalForRhinoTurn(root: GameState, p: PlayerIndex): Actio
   const hp = root.players[p === 0 ? 1 : 0].leaderHp;
   const bound = rhinoLethalBound(root, p);
   if (hp > bound) return found;
-  // リノセウスを出す回数ごと（1 回以下・2 回・3 回以上）に分けて探す。上限が届かない回数は探さない。
-  // 回数ごとの上限で、出さないカードとリーダーしか攻撃しないフォロワーを決める（ユーザーの案。docs/ai-notes.md）
-  const bounds = rhinoBounds(root, p);
+  // リノセウスを出す回数ごとに分けて探す（rhinoExactSearches）
   let lucky: Action[] | null = null;
-  for (const [i, [rhinos, b]] of bounds.entries()) {
-    if (b < hp) continue;
-    const last = i === bounds.length - 1;
-    const opts: ExactLethalOptions = { ...RHINO_EXACT, leaderOnly: leaderOnlyAttackers(root, p, b - hp), noPlay: uselessPlays(root, p, hp, [[rhinos, b]]) };
-    if (rhinos >= 2) opts.mustPlay = { count: rhinos, matches: isRhinoPlay, feasible: canStillPlayRhinos };
-    if (!last) opts.maxPlay = { count: rhinos, matches: isRhinoPlay };
+  for (const { opts } of rhinoExactSearches(root, p, hp)) {
     const exact = searchExactLethal(root, p, opts);
     if (!exact) continue;
     if (winsElsewhere(root, p, exact)) return exact;
@@ -284,8 +277,54 @@ export function searchLethalForRhinoTurn(root: GameState, p: PlayerIndex): Actio
   return lucky ?? found;
 }
 
+/**
+ * 上限の式で数えている進化の分（超進化できれば 3、進化だけなら 2、どちらもできなければ 0）。
+ * 余裕（上限 − 相手の体力）がこれより小さければ、進化をリーダーへのダメージ以外に使う余地は無い（ユーザーの案。seed 900052 の 7 ターン目。docs/ai-notes.md）
+ */
+function evolveValue(s: GameState, p: PlayerIndex): number {
+  const pl = s.players[p];
+  const order = p === s.first ? 0 : 1;
+  if (pl.evolvedThisTurn) return 0;
+  if (pl.sep > 0 && pl.turnCount >= SUPER_EVOLVE_TURN[order]) return 3;
+  return pl.ep > 0 && pl.turnCount >= EVOLVE_TURN[order] ? 2 : 0;
+}
+
+/**
+ * 上限の式で数えた分を出せない進化・超進化。対象がこのあとリーダーを攻撃できるフォロワー（リノセウス等）でなく、
+ * 超進化ならベビーカーバンクル（PP 3 回復）・オリヴィエ（他のフォロワーを超進化）でもないもの
+ */
+function wastedEvolve(s: GameState, p: PlayerIndex, a: Action): boolean {
+  if (a.type !== "evolve" && a.type !== "superEvolve") return false;
+  const c = s.players[p].board.find((x) => x.iid === a.iid);
+  if (!c || c.kind !== "follower") return false;
+  if (leaderAttackers(s, p).some((x) => x.iid === c.iid)) return false;
+  return !(a.type === "superEvolve" && [CARBUNCLE, OLIVIER].includes(nameOf(c.cardId)));
+}
+
+/**
+ * 全探索をリノセウスを出す回数ごと（1 回以下・2 回・3 回以上）に分けたときの、それぞれの設定。上限が相手の体力に届かない回数は含めない。
+ * 出さないカード・リーダーしか攻撃しないフォロワー・進化の対象は、回数ごとの上限で決める（ユーザーの案。docs/ai-notes.md）
+ */
+export function rhinoExactSearches(root: GameState, p: PlayerIndex, hp: number): { rhinos: number; bound: number; last: boolean; opts: ExactLethalOptions }[] {
+  const bounds = rhinoBounds(root, p);
+  const out: { rhinos: number; bound: number; last: boolean; opts: ExactLethalOptions }[] = [];
+  for (const [i, [rhinos, bound]] of bounds.entries()) {
+    if (bound < hp) continue;
+    const last = i === bounds.length - 1;
+    const opts: ExactLethalOptions = { ...RHINO_EXACT, leaderOnly: leaderOnlyAttackers(root, p, bound - hp), noPlay: uselessPlays(root, p, hp, [[rhinos, bound]]) };
+    if (rhinos >= 2) opts.mustPlay = { count: rhinos, matches: isRhinoPlay, feasible: canStillPlayRhinos };
+    if (!last) opts.maxPlay = { count: rhinos, matches: isRhinoPlay };
+    if (bound - hp < evolveValue(root, p)) {
+      opts.order = (s, q, actions) => RHINO_EXACT.order!(s, q, actions).filter((a) => !wastedEvolve(s, q, a));
+      opts.orderKey = "evolve";
+    }
+    out.push({ rhinos, bound, last, opts });
+  }
+  return out;
+}
+
 /** リノセウスを出す回数と、その回数での上限（1 回・2 回、3 回出せるかもしれなければ 3 回も） */
-function rhinoBounds(s: GameState, p: PlayerIndex): [number, number][] {
+export function rhinoBounds(s: GameState, p: PlayerIndex): [number, number][] {
   const bounds: [number, number][] = [[1, rhinoOneDamageBound(s, p)], [2, rhinoDamageBound(s, p)]];
   if (mayPlayThreeRhinos(s, p)) bounds.push([3, rhinoThreeDamageBound(s, p)]);
   return bounds;

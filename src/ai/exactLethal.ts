@@ -12,8 +12,10 @@ import { legalActions, rngFrom, shuffle, tryApplyAction, type Action, type GameS
 import type { HandCard, OnBoard, PlayerState } from "../engine/types";
 
 export interface ExactLethalOptions {
-  /** 手を試す順番（省略時は legalActions の順） */
+  /** 手を試す順番（省略時は legalActions の順）。手を減らしてもよい */
   order?: (s: GameState, p: PlayerIndex, actions: Action[]) => Action[];
+  /** order が局面以外の条件で試す手を変えるとき、その条件を表す文字列（メモのキーに含める） */
+  orderKey?: string;
   /** 1 回に調べる局面の数の上限 */
   maxStates: number;
   /** 1 ターンに調べる局面の数の上限（ターン中は手を打つたびに探し直すため） */
@@ -167,7 +169,7 @@ export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLe
   const ids = (xs: Set<number>) => [...xs].sort((a, b) => a - b).join(",");
   const must = opts.mustPlay;
   const max = opts.maxPlay;
-  const keyPrefix = `${leaderOnly.size || noPlay.size ? `${ids(leaderOnly)}/${ids(noPlay)}/` : ""}${max ? `${must?.count ?? 0}<${max.count}/` : ""}`;
+  const keyPrefix = `${leaderOnly.size || noPlay.size ? `${ids(leaderOnly)}/${ids(noPlay)}/` : ""}${max ? `${must?.count ?? 0}<${max.count}/` : ""}${opts.orderKey ? `${opts.orderKey}/` : ""}`;
   /** played は mustPlay（なければ maxPlay）の手を打った回数 */
   const candidates = (s: GameState, played: number): Action[] => {
     const legal = legalActions(s).filter(
