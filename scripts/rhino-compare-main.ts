@@ -7,7 +7,7 @@
 //      試合は CPU のコア数だけ並列に行う）
 // 自然の妖精姫・アリアを出した試合の数と、最初に出した自分のターン（平均）も出す。
 // --agent で、リノセウスエルフ側の AI を registry のキーで選べる（既定は rhino。例: search、rhino-lethal。--opts は rhino のときだけ使う）。
-// ベイル・ベビーカーバンクル・リノセウスを出した回数と自分のターン（平均）も出す（手札の温存の点 hold を変えたときに比べる用。例: --opts '{"weights":{"hold":{"10113130":2}}}'）。
+// ベイル・ベビーカーバンクル・リノセウス・フェアリーテイマー・燐光の岩を出した回数と自分のターン（平均）も出す（手札の温存の点 hold を変えたときに比べる用。例: --opts '{"weights":{"hold":{"10113130":2}}}'）。
 // --out ファイル名 で、試合ごとの結果（相手デッキ・g・席・勝ち・全探索でリーサルを見つけた回数）を JSON Lines で書き出す（変更前後で試合ごとに比べる用）。
 
 import { SEARCH_WEIGHTS } from "../src/ai/evaluate";
@@ -25,7 +25,8 @@ const ELF = "リノセウスエルフ";
 const EXCLUDED_DECKS = [ELF, "ランプドラゴン"];
 const ARIA = "自然の妖精姫・アリア";
 /** 出した自分のターンを数えるカード（温存の点 hold を変えたときに、出し方がどう変わるかを見る） */
-const TRACKED = ["煌撃の戦士・ベイル", "ベビーカーバンクル", "殺戮のリノセウス"];
+const ROCK = "燐光の岩";
+const TRACKED = ["煌撃の戦士・ベイル", "ベビーカーバンクル", "殺戮のリノセウス", "フェアリーテイマー", "燐光の岩"];
 
 export async function main(argv: string[]): Promise<number> {
   let games = 50;
@@ -62,17 +63,20 @@ export async function main(argv: string[]): Promise<number> {
     let ariaTurn: number | null = null;
     // TRACKED のカードを出した自分のターン（カードごと）と、試合の最後の自分のターン
     const plays: Record<string, number[]> = Object.fromEntries(TRACKED.map((name) => [name, []]));
+    let rockCombo3 = 0;
     for (const a of r.log ?? []) {
       if (a.type === "play" && s.active === elfSeat && !s.pending) {
         const h = s.players[elfSeat].hand.find((c) => c.iid === a.iid);
         const name = h ? cardOf(h.cardId).name : null;
         if (name === ARIA && ariaTurn === null) ariaTurn = s.players[elfSeat].turnCount;
         if (name !== null && plays[name]) plays[name].push(s.players[elfSeat].turnCount);
+        // 燐光の岩をコンボ 3 で出した（森の神秘が付く）回数
+        if (name === ROCK && s.players[elfSeat].combo >= 2) rockCombo3++;
       }
       s = applyAction(s, a);
     }
     const lastTurn = r.final.players[elfSeat].turnCount;
-    return { deck: o, g, elfSeat, won: r.winner === elfSeat, ariaTurn, exactFound: exactLethalCounts.found, plays, lastTurn };
+    return { deck: o, g, elfSeat, won: r.winner === elfSeat, ariaTurn, exactFound: exactLethalCounts.found, plays, lastTurn, rockCombo3 };
   });
   const perDeck = new Map<string, [number, number]>();
   for (const { deck, won } of results) {
@@ -92,6 +96,7 @@ export async function main(argv: string[]): Promise<number> {
     const finishing = results.filter((r) => r.won).reduce((t, r) => t + (r.plays[name] ?? []).filter((x) => x === r.lastTurn).length, 0);
     console.log(`${name}: 出した回数 ${turns.length}（1 試合 ${(turns.length / n).toFixed(2)}）、平均の自分のターン ${(turns.reduce((x, y) => x + y, 0) / Math.max(1, turns.length)).toFixed(2)}、勝った試合の最後のターンに出した数 ${finishing}`);
   }
+  console.log(`燐光の岩をコンボ 3 で出した回数 ${results.reduce((t, r) => t + r.rockCombo3, 0)}`);
   const exact = results.filter((r) => r.exactFound > 0);
   console.log(`全探索でリーサルを見つけた試合 ${exact.length}/${n}（そのうち勝ち ${exact.filter((r) => r.won).length}）`);
   if (out) writeFileSync(out, results.map((r) => JSON.stringify({ deck: r.deck, g: r.g, elfSeat: r.elfSeat, won: r.won, exactFound: r.exactFound, plays: r.plays, lastTurn: r.lastTurn })).join("\n") + "\n");
