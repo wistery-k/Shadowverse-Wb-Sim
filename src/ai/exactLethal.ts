@@ -39,6 +39,12 @@ export interface ExactLethalOptions {
    */
   maxPlay?: { count: number; matches: (s: GameState, a: Action) => boolean };
   /**
+   * 攻撃し終えた自分のフォロワーの攻撃力・体力をメモのキーに含めない（ユーザー判断。docs/ai-notes.md）。
+   * もう攻撃しないので、リーダーへのダメージに関係しない。もう一度攻撃できるようになる効果（超進化で 2 回攻撃等）や、
+   * 攻撃力・体力を参照する効果を持つカードを使うデッキには使えない（リノセウスエルフには無い）。相手の効果で破壊されるかどうかの違いは捨てる
+   */
+  ignoreExhaustedStats?: boolean;
+  /**
    * リーダーしか攻撃させないフォロワー（インスタンス ID）。ターンの最初の上限の式で、フォロワーへ攻撃すると上限が相手の体力に届かなくなるもの（docs/ai-notes.md）。
    * 試す手が変わるので、メモのキーに含める
    */
@@ -60,25 +66,29 @@ function handKey(h: HandCard): string {
   return k;
 }
 
-function boardKey(c: OnBoard): string {
+function boardKey(c: OnBoard, ignoreExhaustedStats = false): string {
   let k = c.keywords.length || c.tempKeywords.length || c.granted.length ? json([c.keywords, c.tempKeywords, c.granted]) : "";
   if (c.kind === "amulet") return `A${c.cardId},${c.countdown},${c.sigils},${c.actedThisTurn ? 1 : 0}${k}`;
   if (Object.keys(c.usedOncePerTurn).length) k += json(c.usedOncePerTurn);
+  if (ignoreExhaustedStats && c.attacksThisTurn >= c.maxAttacks) return `F${c.cardId},-,${c.maxAttacks},${c.attacksThisTurn},${c.evolve}${k}`;
   return `F${c.cardId},${c.attack},${c.defense},${c.maxDefense},${c.tempAttack},${c.maxAttacks},${c.attacksThisTurn},${c.enteredTurn},${c.evolve},${c.cannotAttackUntil},${c.x}${k}`;
 }
 
 /** 相手（opponent）は体力と手札の中身を含めない */
-function playerKey(pl: PlayerState, opponent: boolean): string {
+function playerKey(pl: PlayerState, opponent: boolean, ignoreExhaustedStats: boolean): string {
   let k = `${opponent ? "" : pl.leaderHp},${pl.pp},${pl.maxPp},${pl.combo},${pl.ep},${pl.sep},${pl.evolvedThisTurn ? 1 : 0},${pl.extraPpAvailable ? 1 : 0},`;
   k += `${pl.deck.length},${pl.graveyard},${pl.graveyardFollowers.length},${pl.destroyedThisTurn.length},${pl.destroyedAmulets.length}`;
   if (pl.crests.length || Object.keys(pl.leaderOncePerTurn).length) k += json([pl.crests.map((c) => [c.crestId, c.countdown, c.usedOncePerTurn]), pl.leaderOncePerTurn]);
   const hand = opponent ? String(pl.hand.length) : pl.hand.map(handKey).sort().join(";");
-  return `${k}|${hand}|${pl.board.map(boardKey).sort().join(";")}`;
+  return `${k}|${hand}|${pl.board.map((c) => boardKey(c, !opponent && ignoreExhaustedStats)).sort().join(";")}`;
 }
 
-/** 局面のキー（相手 opp のリーダーの体力と手札の中身、手札・場の並び順、インスタンス ID を除く） */
-export function lethalKey(s: GameState, opp: PlayerIndex): string {
-  let k = `${s.active}#${playerKey(s.players[0], opp === 0)}#${playerKey(s.players[1], opp === 1)}`;
+/**
+ * 局面のキー（相手 opp のリーダーの体力と手札の中身、手札・場の並び順、インスタンス ID を除く）。
+ * ignoreExhaustedStats なら、攻撃し終えた opp でない側のフォロワーの攻撃力・体力も除く
+ */
+export function lethalKey(s: GameState, opp: PlayerIndex, ignoreExhaustedStats = false): string {
+  let k = `${s.active}#${playerKey(s.players[0], opp === 0, ignoreExhaustedStats)}#${playerKey(s.players[1], opp === 1, ignoreExhaustedStats)}`;
   if (s.pending || s.stack.length || s.queue.length) k += json([s.pending, s.stack, s.queue]);
   return k;
 }
@@ -195,7 +205,7 @@ export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLe
     const remaining = remainingOf(played);
     if (must && remaining > 0 && !isTransient(s) && !must.feasible(s, p, remaining)) return 0;
     // 選択待ち・解決中の局面はメモしない（キーが重く、すぐに次の局面に進むため）
-    const key = isTransient(s) ? null : `${keyPrefix}${max ? played : remaining}|${lethalKey(s, opp)}`;
+    const key = isTransient(s) ? null : `${keyPrefix}${max ? played : remaining}|${lethalKey(s, opp, opts.ignoreExhaustedStats)}`;
     const hit = key === null ? undefined : memo.get(key);
     if (hit && (hit.exact || hit.damage >= need)) return hit.damage;
     if (++visited > limit) throw new Abort();

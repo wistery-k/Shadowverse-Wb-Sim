@@ -238,6 +238,7 @@ export const RHINO_EXACT: ExactLethalOptions = {
   ...DEFAULT_EXACT_LETHAL_OPTIONS,
   maxStates: 30_000,
   maxStatesPerTurn: 60_000,
+  ignoreExhaustedStats: true,
   // リノセウスでリーダー以外を攻撃する手は試さない（ユーザーの案。seed 900091 の 8 ターン目。docs/ai-notes.md）
   // エクストラPPは、使うと新しく出せる・アクトできるカードが増えるときだけ試す（ユーザーの案。docs/ai-notes.md）
   // 相手の場に守護がいる間はリノセウスを出さない（ユーザーの案。取りこぼしうるが稀。seed 900027 の 9 ターン目。docs/ai-notes.md）
