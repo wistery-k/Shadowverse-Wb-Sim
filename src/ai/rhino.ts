@@ -278,15 +278,17 @@ export function searchLethalForRhinoTurn(root: GameState, p: PlayerIndex): Actio
 }
 
 /**
- * 上限の式で数えている進化の分（超進化できれば 3、進化だけなら 2、どちらもできなければ 0）。
- * 余裕（上限 − 相手の体力）がこれより小さければ、進化をリーダーへのダメージ以外に使う余地は無い（ユーザーの案。seed 900052 の 7 ターン目。docs/ai-notes.md）
+ * 進化・超進化の対象を絞ってよい余裕の境目（このターンに進化か超進化ができれば 2、どちらもできなければ 0）。
+ * 適当なフォロワーに使っても 1 点は出るので、余裕（上限 − 相手の体力）が 2 より小さければ、
+ * 進化・超進化をリーダーへのダメージ以外に使う余地は無い（ユーザーの案。seed 900052 の 7 ターン目。docs/ai-notes.md）
  */
-function evolveValue(s: GameState, p: PlayerIndex): number {
+function evolveSlackLimit(s: GameState, p: PlayerIndex): number {
   const pl = s.players[p];
   const order = p === s.first ? 0 : 1;
   if (pl.evolvedThisTurn) return 0;
-  if (pl.sep > 0 && pl.turnCount >= SUPER_EVOLVE_TURN[order]) return 3;
-  return pl.ep > 0 && pl.turnCount >= EVOLVE_TURN[order] ? 2 : 0;
+  const canSuper = pl.sep > 0 && pl.turnCount >= SUPER_EVOLVE_TURN[order];
+  const canEvolve = pl.ep > 0 && pl.turnCount >= EVOLVE_TURN[order];
+  return canSuper || canEvolve ? 2 : 0;
 }
 
 /**
@@ -314,7 +316,7 @@ export function rhinoExactSearches(root: GameState, p: PlayerIndex, hp: number):
     const opts: ExactLethalOptions = { ...RHINO_EXACT, leaderOnly: leaderOnlyAttackers(root, p, bound - hp), noPlay: uselessPlays(root, p, hp, [[rhinos, bound]]) };
     if (rhinos >= 2) opts.mustPlay = { count: rhinos, matches: isRhinoPlay, feasible: canStillPlayRhinos };
     if (!last) opts.maxPlay = { count: rhinos, matches: isRhinoPlay };
-    if (bound - hp < evolveValue(root, p)) {
+    if (bound - hp < evolveSlackLimit(root, p)) {
       opts.order = (s, q, actions) => RHINO_EXACT.order!(s, q, actions).filter((a) => !wastedEvolve(s, q, a));
       opts.orderKey = "evolve";
     }
