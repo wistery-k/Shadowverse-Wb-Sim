@@ -3,17 +3,16 @@
 // リノセウスエルフ（リノセウス用 AI）vs 他の 6 デッキ（探索 AI。ランプドラゴンは除く）を、両方の席で同じシードで打つ。
 // 設定を変えても同じシードの試合になるので、変更前後を同じ試合数で比べられる。
 // 例: npm run rhino-compare -- --games 50 --opts '{"nextLethal":10}'
-//     （--opts はリノセウス用 AI の探索の設定 SearchOptions の一部。"weights" にオブジェクトを渡すと SEARCH_WEIGHTS のその項目だけを変える。
+//     （--opts はリノセウス用 AI の探索の設定 SearchOptions の一部。"weights" にオブジェクトを渡すとリノセウス用 AI の重み RHINO_WEIGHTS のその項目だけを変える。hold を渡すと hold 全体を置き換える（hold 無しは '{"weights":{"hold":{}}}'）。
 //      試合は CPU のコア数だけ並列に行う）
 // 自然の妖精姫・アリアを出した試合の数と、最初に出した自分のターン（平均）も出す。
 // --agent で、リノセウスエルフ側の AI を registry のキーで選べる（既定は rhino。例: search、rhino-lethal。--opts は rhino のときだけ使う）。
 // ベイル・ベビーカーバンクル・リノセウス・フェアリーテイマー・燐光の岩を出した回数と自分のターン（平均）も出す（手札の温存の点 hold を変えたときに比べる用。例: --opts '{"weights":{"hold":{"10113130":2}}}'）。
 // --out ファイル名 で、試合ごとの結果（相手デッキ・g・席・勝ち・全探索でリーサルを見つけた回数）を JSON Lines で書き出す（変更前後で試合ごとに比べる用）。
 
-import { SEARCH_WEIGHTS } from "../src/ai/evaluate";
 import { writeFileSync } from "node:fs";
 import { exactLethalCounts } from "../src/ai/exactLethal";
-import { createRhinoAgent } from "../src/ai/rhino";
+import { createRhinoAgent, RHINO_WEIGHTS } from "../src/ai/rhino";
 import { agentOf } from "../src/ai/registry";
 import { applyAction, cardOf, createGame } from "../src/engine";
 import { searchAgent, type SearchOptions } from "../src/ai/search";
@@ -42,7 +41,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (key === "--agent") agentKey = v;
     else if (key === "--opts") {
       const raw = JSON.parse(v) as Record<string, unknown>;
-      if (typeof raw.weights === "object" && raw.weights !== null) raw.weights = { ...SEARCH_WEIGHTS, ...raw.weights };
+      if (typeof raw.weights === "object" && raw.weights !== null) raw.weights = { ...RHINO_WEIGHTS, ...raw.weights };
       opts = raw as Partial<SearchOptions>;
     }
     else throw new Error(`不明な引数: ${key}`);
