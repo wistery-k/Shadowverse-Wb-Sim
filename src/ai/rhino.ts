@@ -292,7 +292,7 @@ function winsElsewhere(root: GameState, p: PlayerIndex, seq: readonly Action[]):
  * リノセウスを 2 回出して与えられるダメージの上限（ユーザーの式。docs/ai-notes.md）。相手の体力がこれより大きければリーサルは無い。
  * - 基本は 2 ×（PP − 7）+ 8（超進化できる場合）。エクストラPP が使えれば PP に 1 を足す
  * - 超進化できればベビーカーバンクル（手札か場、1 枚まで）で +2。できなければ、進化できれば −1、どちらもできなければ −3
- * - 手札の森の神秘・煌撃の戦士・ベイル（コストを見ずに 0 コストとみなす。ターン中に安くなるため）1 枚につき +2、手札と場の燐光の岩 1 枚につき +1、溜まっているコンボ 1 につき +2
+ * - 手札の森の神秘と、0 コストまで下がりうる煌撃の戦士・ベイル（zeroCostBails）1 枚につき +2、手札と場の燐光の岩 1 枚につき +1、溜まっているコンボ 1 につき +2
  * - 場に残っていてリーダーを攻撃できるフォロワーの攻撃力（残りの攻撃回数分）を足す
  */
 export function rhinoDamageBound(s: GameState, p: PlayerIndex): number {
@@ -305,7 +305,7 @@ export function rhinoDamageBound(s: GameState, p: PlayerIndex): number {
   let bound = 2 * (pp - 7) + 8 + 2 * pl.combo;
   if (canSuper) bound += inHand(CARBUNCLE) + boardCount(s, p, CARBUNCLE) > 0 ? 2 : 0;
   else bound -= canEvolve ? 1 : 3;
-  bound += 2 * (inHand(MYSTERY) + inHand(BAIL)) + inHand(ROCK) + boardCount(s, p, ROCK);
+  bound += 2 * (inHand(MYSTERY) + zeroCostBails(s, p, 2)) + inHand(ROCK) + boardCount(s, p, ROCK);
   return bound + boardAttack(s, p);
 }
 
@@ -331,7 +331,7 @@ export function rhinoOneDamageBound(s: GameState, p: PlayerIndex): number {
   const canSuper = !pl.evolvedThisTurn && pl.sep > 0 && pl.turnCount >= SUPER_EVOLVE_TURN[order];
   const canEvolve = !pl.evolvedThisTurn && pl.ep > 0 && pl.turnCount >= EVOLVE_TURN[order];
   const pp = pl.pp + (pl.extraPpAvailable ? 1 : 0);
-  let bound = pp - 2 + pl.combo + inHand(MYSTERY) + inHand(BAIL) + inHand(ROCK) + boardCount(s, p, ROCK);
+  let bound = pp - 2 + pl.combo + inHand(MYSTERY) + zeroCostBails(s, p, 1) + inHand(ROCK) + boardCount(s, p, ROCK);
   bound += canSuper ? 3 : canEvolve ? 2 : 0;
   return bound + boardAttack(s, p);
 }
@@ -389,20 +389,37 @@ function uselessPlays(s: GameState, p: PlayerIndex, hp: number): number[] {
     .map((h) => h.iid);
   const rocks = pl.hand.filter((h) => nameOf(h.cardId) === ROCK);
   if (rocks.length === 0 || reachable.length === 0) return out;
-  const inHand = (name: string) => pl.hand.filter((h) => nameOf(h.cardId) === name).length;
-  const order = p === s.first ? 0 : 1;
-  const canSuper = !pl.evolvedThisTurn && pl.sep > 0 && pl.turnCount >= SUPER_EVOLVE_TURN[order];
-  const carbuncle = canSuper && inHand(CARBUNCLE) + boardCount(s, p, CARBUNCLE) > 0 ? 1 : 0;
-  const pp = pl.pp + (pl.extraPpAvailable ? 1 : 0) + carbuncle;
-  const toCombo2 = Math.max(0, 2 - inHand(MYSTERY) - inHand(BAIL));
+  const mysteries = pl.hand.filter((h) => nameOf(h.cardId) === MYSTERY).length;
   // 出さない岩の数: 届く式のどれでも、1 コスト換算で出せる回数を超え、超えた分を出すと届かなくなる数
   const excess = Math.min(
     ...reachable.map(([rhinos, bound]) => {
-      const playable = Math.max(0, Math.floor((pp - rhinos * 3 - toCombo2) / 2));
+      const toCombo2 = Math.max(0, 2 - mysteries - zeroCostBails(s, p, rhinos));
+      const playable = Math.max(0, Math.floor((freePp(s, p, rhinos) - toCombo2) / 2));
       return useless(rhinos, bound, Math.max(0, cardOf(rocks[0]!.cardId).cost + rocks[0]!.costMod)) ? Math.max(0, rocks.length - playable) : 0;
     }),
   );
   return [...out, ...rocks.slice(0, excess).map((h) => h.iid)];
+}
+
+/** リノセウスを rhinos 回出した残りで自由に使える PP（エクストラPP を含む。超進化できるベビーカーバンクルがあれば PP 3 回復からカーバンクルの 2 を引いた +1） */
+function freePp(s: GameState, p: PlayerIndex, rhinos: number): number {
+  const pl = s.players[p];
+  const order = p === s.first ? 0 : 1;
+  const canSuper = !pl.evolvedThisTurn && pl.sep > 0 && pl.turnCount >= SUPER_EVOLVE_TURN[order];
+  const carbuncle = canSuper && (pl.hand.some((h) => nameOf(h.cardId) === CARBUNCLE) || boardCount(s, p, CARBUNCLE) > 0) ? 1 : 0;
+  return pl.pp + (pl.extraPpAvailable ? 1 : 0) + carbuncle - rhinos * 3;
+}
+
+/**
+ * 手札の煌撃の戦士・ベイルのうち、リノセウスを rhinos 回出すターンに 0 コストまで下がりうるもの（ユーザーの見積もり）。
+ * 自分のフォロワーが場を離れるたびに 1 下がる。離れうるのは、場に残っているフォロワーと、自由に使える PP で出すフォロワー（1 PP につき 1 体）なので、
+ * max(0, 今のコスト − 場に残っているフォロワーの数 − 自由に使える PP) が 0 なら 0 コストとみなす
+ */
+function zeroCostBails(s: GameState, p: PlayerIndex, rhinos: number): number {
+  const pl = s.players[p];
+  const followers = pl.board.filter((c) => c.kind === "follower").length;
+  const free = Math.max(0, freePp(s, p, rhinos));
+  return pl.hand.filter((h) => nameOf(h.cardId) === BAIL && cardOf(h.cardId).cost + h.costMod - followers - free <= 0).length;
 }
 
 /**
