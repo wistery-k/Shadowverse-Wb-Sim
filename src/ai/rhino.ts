@@ -209,6 +209,13 @@ function exactOrderRank(s: GameState, p: PlayerIndex, a: Action): number {
 
 const spendActions = (s: GameState) => new Set(legalActions(s).filter((a) => a.type === "play" || a.type === "act").map((a) => JSON.stringify(a)));
 
+/** 相手の場に、攻撃先になる守護のフォロワーがいるか（attackTargets と同じ見方） */
+function opponentHasWard(s: GameState, p: PlayerIndex): boolean {
+  return s.players[p === 0 ? 1 : 0].board.some(
+    (c) => c.kind === "follower" && hasKeyword(c, "ward") && !hasKeyword(c, "ambush") && !hasKeyword(c, "intimidate"),
+  );
+}
+
 /**
  * エクストラPPを使うと、今は PP が足りずに出せない・アクトできないカードが出せるようになるか。
  * PP の値を見るのは支払い・PP 回復（PP 最大値で頭打ち）・エンハンスだけで、エルフのカードにエンハンスは無いので、
@@ -231,9 +238,10 @@ export const RHINO_EXACT: ExactLethalOptions = {
   maxStatesPerTurn: 60_000,
   // リノセウスでリーダー以外を攻撃する手は試さない（ユーザーの案。seed 900091 の 8 ターン目。docs/ai-notes.md）
   // エクストラPPは、使うと新しく出せる・アクトできるカードが増えるときだけ試す（ユーザーの案。docs/ai-notes.md）
+  // 相手の場に守護がいる間はリノセウスを出さない（ユーザーの案。取りこぼしうるが稀。seed 900027 の 9 ターン目。docs/ai-notes.md）
   order: (s, p, actions) =>
     actions
-      .filter((a) => !isRhinoFollowerAttack(s, p, a) && (a.type !== "extraPp" || extraPpEnablesSpend(s)))
+      .filter((a) => !isRhinoFollowerAttack(s, p, a) && (a.type !== "extraPp" || extraPpEnablesSpend(s)) && !(isRhinoPlay(s, a) && opponentHasWard(s, p)))
       .sort((x, y) => exactOrderRank(s, p, x) - exactOrderRank(s, p, y)),
   forced: (s, p, legal) => {
     const mystery = s.players[p].hand.find((h) => nameOf(h.cardId) === MYSTERY);
