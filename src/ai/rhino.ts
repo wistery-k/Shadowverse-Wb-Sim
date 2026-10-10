@@ -543,11 +543,19 @@ function mayPlayThreeRhinos(s: GameState, p: PlayerIndex): boolean {
 const RHINO_PER_FIRST = 4;
 
 /**
+ * リノセウス用 AI の構成（比較実験用）。rules が false なら、ルール（ルールのマリガン・最優先の手・禁じる手）を使わず、
+ * マリガンは重み、リーサル探索（リノセウス用）で見つからなければ汎用の探索 AI に任せる
+ */
+export interface RhinoAgentMode {
+  rules: boolean;
+}
+
+/**
  * リノセウス用 AI を作る。search は探索の設定（比較実験用。既定は汎用の探索 AI と同じ深さ 8・幅 32）。
  * 深さ 8・幅 32 はリノセウスエルフで先に採用し、後に汎用の探索 AI の既定にした
  * （seed 2510273090 の 4 ターン目・seed 954874822 の 7 ターン目。docs/ai-notes.md）
  */
-export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}): Agent {
+export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}, mode: RhinoAgentMode = { rules: true }): Agent {
   const search = createSearchAgent({ allow: allowAction, lethal: false, perFirst: RHINO_PER_FIRST, nextLethalSearch: (s, q) => searchLethalForRhino(s, q) !== null, ...searchOptions });
   const plainSearch = createSearchAgent();
   return {
@@ -560,6 +568,13 @@ export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}): Ag
       // マリガン中の active は先攻なので、マリガンするプレイヤーは actingPlayer で求める
       const p = actingPlayer(real);
       if (deckClassOf(real, p) !== "elf") return plainSearch.chooseAction(real, legal, rng);
+      if (!mode.rules) {
+        if (first.type !== "mulligan" && legal.length > 1 && real.active === p) {
+          const lethal = findLethal(real, p, rng, DEFAULT_LETHAL_OPTIONS, searchLethalForRhinoTurn);
+          if (lethal && legal.some((a) => keyOf(a) === keyOf(lethal))) return lethal;
+        }
+        return plainSearch.chooseAction(real, legal, rng);
+      }
       if (first.type === "mulligan") {
         const swap = mulliganSwap(real, p);
         return legal.find((a) => a.type === "mulligan" && sameSet(a.swap, swap)) ?? first;
@@ -593,3 +608,6 @@ export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}): Ag
 }
 
 export const rhinoAgent: Agent = createRhinoAgent();
+
+/** ルールを使わず、重みのマリガン＋探索に、リノセウス用のリーサル探索だけを足した AI（比較用） */
+export const rhinoLethalOnlyAgent: Agent = { ...createRhinoAgent({}, { rules: false }), name: "rhino-lethal" };
