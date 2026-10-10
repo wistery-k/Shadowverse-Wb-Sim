@@ -397,8 +397,9 @@ function boardAttack(s: GameState, p: PlayerIndex): number {
 
 /**
  * 出すと上限が相手の体力に届かなくなる手札のカード（ユーザーの案）。相手の体力に届く式のどれでも、出した後に届かなければ出さない。
- * - バックウッド・リリィ: 引いたカードで上限を取り戻せない（山札に 0 コストのカードは無い）ので、出すと PP の分だけ上限が下がる。
- *   1 PP の価値はリノセウス 1 回・2 回・3 回の式で 1・2・3 点、出した分のコンボで同じだけ戻るので、下がる分は 回数 ×（コスト − 1）
+ * - バックウッド・リリィ・手札の聖樹の杖: 引いたカードで上限を取り戻せない（山札に 0 コストのカードは無い）ので、出すと PP の分だけ上限が下がる。
+ *   1 PP の価値はリノセウス 1 回・2 回・3 回の式で 1・2・3 点、出した分のコンボで同じだけ戻るので、下がる分は 回数 ×（コスト − 1）。
+ *   杖のアクトで戻して出し直すのは 1 コストのカードを出すのと同じ（2 回の式はアクトを 0 コストとして数えている）なので、杖も同じに扱う
  * - 燐光の岩: コンボ 2 以上で出せば森の神秘が付いて 1 コスト換算になる。そう出せる回数を超える分は、リリィと同じく 回数 ×（コスト − 1）下がる。
  *   自由に使える PP = PP − リノセウスの回数 × 3（超進化できるベビーカーバンクルがあれば +1）、
  *   コンボ 2 にするのに要る PP = max(0, 2 − 手札の森の神秘とベイル)、1 コスト換算で出せる回数 =（自由に使える PP − コンボ 2 にするのに要る PP）÷ 2（切り捨て）
@@ -410,7 +411,7 @@ function uselessPlays(s: GameState, p: PlayerIndex, hp: number): number[] {
   const reachable = bounds.filter(([, bound]) => bound >= hp);
   const useless = (rhinos: number, bound: number, cost: number) => bound - rhinos * (cost - 1) < hp;
   const out = pl.hand
-    .filter((h) => [BACKWOOD, LILY].includes(nameOf(h.cardId)))
+    .filter((h) => [BACKWOOD, LILY, ROD].includes(nameOf(h.cardId)))
     .filter((h) => reachable.every(([rhinos, bound]) => useless(rhinos, bound, Math.max(0, cardOf(h.cardId).cost + h.costMod))))
     .map((h) => h.iid);
   const rocks = pl.hand.filter((h) => nameOf(h.cardId) === ROCK);
