@@ -10,13 +10,21 @@ import {
   abilitiesOf,
   actingPlayer,
   applyAction,
+  attackOf,
   cardOf,
+  EVOLVE_TURN,
   EXTRA_PP_REFRESH_TURN,
+  hasKeyword,
   legalActions,
+  rngFrom,
+  SUPER_EVOLVE_TURN,
+  tryApplyAction,
   type Action,
   type GameState,
   type PlayerIndex,
 } from "../engine";
+import { determinize } from "./determinize";
+import { DEFAULT_EXACT_LETHAL_OPTIONS, resetExactLethalCache, searchExactLethal, type ExactLethalOptions } from "./exactLethal";
 import { DEFAULT_LETHAL_OPTIONS, DIRECT_SCORING, findLethal, searchLethal } from "./lethal";
 import { searchRhinoLethal } from "./rhinoLethal";
 import { createSearchAgent, type SearchOptions } from "./search";
@@ -28,6 +36,9 @@ const ROCK = "燐光の岩";
 const MYSTERY = "森の神秘";
 const BACKWOOD = "薫交の天宮・バックウッド";
 const RHINO = "殺戮のリノセウス";
+const CARBUNCLE = "ベビーカーバンクル";
+const BAIL = "煌撃の戦士・ベイル";
+const BUGS = "虫の知らせ";
 /** マリガンで1枚だけ残す序盤のカード（優先順） */
 const EARLY = ["フェアリーテイマー", "純粋なるウォーターフェアリー", "妖精の招集"];
 /** 上の2種（バックウッドと序盤のカード）がどちらもあるときに残すカード（優先順。杖は1枚まで） */
@@ -175,9 +186,200 @@ const sameSet = (a: readonly number[], b: readonly number[]) => a.length === b.l
  * （汎用の「準備」重視の探索より、リノセウスの出し方を決め打ちする方がよく見つかる）
  */
 const DIRECT_ONLY = { ...DEFAULT_LETHAL_OPTIONS, scorings: [DIRECT_SCORING] };
-function searchLethalForRhino(root: GameState, p: PlayerIndex): Action[] | null {
+export function searchLethalForRhino(root: GameState, p: PlayerIndex): Action[] | null {
   return searchLethal(root, p, DIRECT_ONLY) ?? searchRhinoLethal(root, p);
 }
+
+/**
+ * 全探索で手を試す順番: リーダーへの攻撃 → カードのプレイ（コストの低い順）→ アクト → 進化 → フォロワーへの攻撃。
+ * リーサルがあるときに早く見つかる（問題集の 2 問目で 35641 → 4556 局面）
+ */
+function exactOrderRank(s: GameState, p: PlayerIndex, a: Action): number {
+  if (a.type === "attack") return a.target === "leader" ? 0 : 5;
+  if (a.type === "play") {
+    const h = s.players[p].hand.find((c) => c.iid === a.iid);
+    return 1 + (h ? cardOf(h.cardId).cost : 0) / 100;
+  }
+  if (a.type === "act") return 2;
+  if (a.type === "evolve" || a.type === "superEvolve") return 3;
+  return 4;
+}
+
+/**
+ * 全探索のリーサル探索の設定。手札の森の神秘を先に打つ（0 コストでコンボが増えるだけなので、先に打って損は無い）。
+ * リーサルが無い局面では上限まで調べるので、局面の数は少なめにする（docs/ai-notes.md）
+ */
+export const RHINO_EXACT: ExactLethalOptions = {
+  ...DEFAULT_EXACT_LETHAL_OPTIONS,
+  maxStates: 30_000,
+  maxStatesPerTurn: 60_000,
+  // リノセウスでリーダー以外を攻撃する手は試さない（ユーザーの案。seed 900091 の 8 ターン目。docs/ai-notes.md）
+  order: (s, p, actions) => actions.filter((a) => !isRhinoFollowerAttack(s, p, a)).sort((x, y) => exactOrderRank(s, p, x) - exactOrderRank(s, p, y)),
+  forced: (s, p, legal) => {
+    const mystery = s.players[p].hand.find((h) => nameOf(h.cardId) === MYSTERY);
+    return (mystery && legal.find((a) => a.type === "play" && a.iid === mystery.iid)) ?? null;
+  },
+};
+
+/**
+ * 自分のターンに実際に打つ手を決めるときのリーサル探索。上の 2 つで見つからなければ全探索する（ユーザーのリーサル問題集。docs/ai-notes.md）。
+ * 全探索は時間がかかるので、探索 AI の葉の局面（次のターンのリーサル）では使わない
+ */
+export function searchLethalForRhinoTurn(root: GameState, p: PlayerIndex): Action[] | null {
+  // 運頼みの手順（虫の知らせのランダムダメージで守護を倒す等）は findLethal の確認で捨てられるので、ここで確かめて次を探す
+  const found = searchLethalForRhino(root, p);
+  if (found && winsElsewhere(root, p, found)) return found;
+  if (!root.players[p].hand.some((h) => nameOf(h.cardId) === RHINO)) return found;
+  const hp = root.players[p === 0 ? 1 : 0].leaderHp;
+  if (hp > rhinoLethalBound(root, p)) return found;
+  // リノセウス 1 回（2 回）の上限が届かなければ、2 回（3 回）以上出す手順だけを探す
+  const count = hp <= rhinoOneDamageBound(root, p) ? 0 : hp <= rhinoDamageBound(root, p) ? 2 : 3;
+  const opts: ExactLethalOptions = count > 0 ? { ...RHINO_EXACT, mustPlay: { count, matches: isRhinoPlay, feasible: canStillPlayRhinos } } : RHINO_EXACT;
+  const exact = searchExactLethal(root, p, opts);
+  if (!exact) return found;
+  if (winsElsewhere(root, p, exact)) return exact;
+  // 乱数で結果が変わる手を除いて探し直す（seed 900234 のエルフ 7 ターン目。docs/ai-notes.md）
+  return searchExactLethal(root, p, { ...opts, deterministicOnly: true }) ?? exact;
+}
+
+function isRhinoFollowerAttack(s: GameState, p: PlayerIndex, a: Action): boolean {
+  if (a.type !== "attack" || a.target === "leader") return false;
+  const c = s.players[p].board.find((x) => x.iid === a.attacker);
+  return c !== undefined && nameOf(c.cardId) === RHINO;
+}
+
+export function isRhinoPlay(s: GameState, a: Action): boolean {
+  if (a.type !== "play") return false;
+  const h = s.players[s.active].hand.find((c) => c.iid === a.iid);
+  return h !== undefined && nameOf(h.cardId) === RHINO;
+}
+
+/**
+ * あと remaining 回リノセウスを出せるかもしれないか。PP（エクストラPP と、超進化できるならベビーカーバンクルの PP 3 回復を含む）が
+ * 3 × remaining 以上あり、出すリノセウス（手札と、戻す手段があれば場のもの）がある
+ */
+export function canStillPlayRhinos(s: GameState, p: PlayerIndex, remaining: number): boolean {
+  const pl = s.players[p];
+  const inHand = (name: string) => pl.hand.some((h) => nameOf(h.cardId) === name);
+  const order = p === s.first ? 0 : 1;
+  const canSuper = !pl.evolvedThisTurn && pl.sep > 0 && pl.turnCount >= SUPER_EVOLVE_TURN[order];
+  const refund = canSuper && (inHand(CARBUNCLE) || boardCount(s, p, CARBUNCLE) > 0) ? 3 : 0;
+  if (pl.pp + (pl.extraPpAvailable ? 1 : 0) + refund < 3 * remaining) return false;
+  const rhinos = pl.hand.filter((h) => nameOf(h.cardId) === RHINO).length;
+  if (rhinos >= remaining) return true;
+  const bounce = boardCount(s, p, ROD) > 0 || inHand(BUGS) || inHand(CARBUNCLE);
+  return bounce && rhinos + boardCount(s, p, RHINO) > 0;
+}
+
+/** 乱数・山札・相手の手札を決め直した局面（findLethal の確認と同じ考え方）でも勝てるか */
+const ELSEWHERE_SEEDS = [1, 2];
+function winsElsewhere(root: GameState, p: PlayerIndex, seq: readonly Action[]): boolean {
+  return ELSEWHERE_SEEDS.every((seed) => {
+    let s: GameState | null = determinize(root, p, rngFrom({ rng: (root.rng ^ (seed * 0x9e3779b9)) >>> 0 }));
+    for (const a of seq) {
+      if (!s || s.phase === "ended") break;
+      s = tryApplyAction(s, a);
+    }
+    return s !== null && s.phase === "ended" && s.winner === p;
+  });
+}
+
+/**
+ * リノセウスを 2 回出して与えられるダメージの上限（ユーザーの式。docs/ai-notes.md）。相手の体力がこれより大きければリーサルは無い。
+ * - 基本は 2 ×（PP − 7）+ 8（超進化できる場合）。エクストラPP が使えれば PP に 1 を足す
+ * - 超進化できればベビーカーバンクル（手札か場、1 枚まで）で +2。できなければ、進化できれば −1、どちらもできなければ −3
+ * - 手札の森の神秘・煌撃の戦士・ベイル（コストを見ずに 0 コストとみなす。ターン中に安くなるため）1 枚につき +2、手札と場の燐光の岩 1 枚につき +1、溜まっているコンボ 1 につき +2
+ * - 場に残っていてリーダーを攻撃できるフォロワーの攻撃力（残りの攻撃回数分）を足す
+ */
+export function rhinoDamageBound(s: GameState, p: PlayerIndex): number {
+  const pl = s.players[p];
+  const inHand = (name: string) => pl.hand.filter((h) => nameOf(h.cardId) === name).length;
+  const order = p === s.first ? 0 : 1;
+  const canSuper = !pl.evolvedThisTurn && pl.sep > 0 && pl.turnCount >= SUPER_EVOLVE_TURN[order];
+  const canEvolve = !pl.evolvedThisTurn && pl.ep > 0 && pl.turnCount >= EVOLVE_TURN[order];
+  const pp = pl.pp + (pl.extraPpAvailable ? 1 : 0);
+  let bound = 2 * (pp - 7) + 8 + 2 * pl.combo;
+  if (canSuper) bound += inHand(CARBUNCLE) + boardCount(s, p, CARBUNCLE) > 0 ? 2 : 0;
+  else bound -= canEvolve ? 1 : 3;
+  bound += 2 * (inHand(MYSTERY) + inHand(BAIL)) + inHand(ROCK) + boardCount(s, p, ROCK);
+  return bound + boardAttack(s, p);
+}
+
+/**
+ * リノセウスで与えられるダメージの上限。リノセウス 1 回と 2 回の式の大きい方（PP が少ないと 1 回の方が大きい）。
+ * 3 回出せるかもしれなければ 3 回の式も見る
+ */
+export function rhinoLethalBound(s: GameState, p: PlayerIndex): number {
+  const bound = Math.max(rhinoOneDamageBound(s, p), rhinoDamageBound(s, p));
+  return mayPlayThreeRhinos(s, p) ? Math.max(bound, rhinoThreeDamageBound(s, p)) : bound;
+}
+
+/**
+ * リノセウスを 1 回出して与えられるダメージの上限（seed 900001 のエルフ 6 ターン目でユーザーが示した数え方。docs/ai-notes.md）。
+ * - 残りの PP を 1 コストのカードに使い、最後にリノセウス（3 コスト）を出す: PP − 3 + 1（リノセウス自身のコンボ）。エクストラPP が使えれば PP に 1 を足す
+ * - 進化できれば +2、超進化できれば +3（ベビーカーバンクルを超進化して PP 3 回復しても、コンボ 2 と超進化の 1 点でリノセウスの超進化と変わらないので足さない。ユーザーの指摘）
+ * - 溜まっているコンボ、手札の森の神秘・ベイル、手札と場の燐光の岩 1 につき +1。場に残っていてリーダーを攻撃できるフォロワーの攻撃力を足す
+ */
+export function rhinoOneDamageBound(s: GameState, p: PlayerIndex): number {
+  const pl = s.players[p];
+  const inHand = (name: string) => pl.hand.filter((h) => nameOf(h.cardId) === name).length;
+  const order = p === s.first ? 0 : 1;
+  const canSuper = !pl.evolvedThisTurn && pl.sep > 0 && pl.turnCount >= SUPER_EVOLVE_TURN[order];
+  const canEvolve = !pl.evolvedThisTurn && pl.ep > 0 && pl.turnCount >= EVOLVE_TURN[order];
+  const pp = pl.pp + (pl.extraPpAvailable ? 1 : 0);
+  let bound = pp - 2 + pl.combo + inHand(MYSTERY) + inHand(BAIL) + inHand(ROCK) + boardCount(s, p, ROCK);
+  bound += canSuper ? 3 : canEvolve ? 2 : 0;
+  return bound + boardAttack(s, p);
+}
+
+/**
+ * リノセウスを 3 回出して与えられるダメージの上限（ユーザーの式。docs/ai-notes.md）。
+ * - 基本は 3 ×（PP − 9）+ 6。エクストラPP が使えれば PP に 1 を足す
+ * - 超進化できれば +3、できなければ進化できれば +2
+ * - 手札と場の燐光の岩 1 枚につき +1、場に残っていてリーダーを攻撃できるフォロワーの攻撃力を足す
+ * - 溜まっているコンボと手札の森の神秘（0 コストでコンボ +1）は、リノセウス 3 体の攻撃力に効くので 1 につき +3
+ */
+export function rhinoThreeDamageBound(s: GameState, p: PlayerIndex): number {
+  const pl = s.players[p];
+  const order = p === s.first ? 0 : 1;
+  const canSuper = !pl.evolvedThisTurn && pl.sep > 0 && pl.turnCount >= SUPER_EVOLVE_TURN[order];
+  const canEvolve = !pl.evolvedThisTurn && pl.ep > 0 && pl.turnCount >= EVOLVE_TURN[order];
+  const pp = pl.pp + (pl.extraPpAvailable ? 1 : 0);
+  const mystery = pl.hand.filter((h) => nameOf(h.cardId) === MYSTERY).length;
+  let bound = 3 * (pp - 9) + 6 + 3 * (pl.combo + mystery) + (canSuper ? 3 : canEvolve ? 2 : 0);
+  bound += pl.hand.filter((h) => nameOf(h.cardId) === ROCK).length + boardCount(s, p, ROCK) + boardAttack(s, p);
+  return bound;
+}
+
+/** 場に残っていてリーダーを攻撃できるフォロワーの攻撃力（残りの攻撃回数分） */
+function boardAttack(s: GameState, p: PlayerIndex): number {
+  let total = 0;
+  for (const c of s.players[p].board) {
+    if (c.kind !== "follower" || c.attacksThisTurn >= c.maxAttacks) continue;
+    if (c.cannotAttackUntil !== null && c.cannotAttackUntil >= s.turn) continue;
+    if (c.enteredTurn === s.turn && !hasKeyword(c, "storm")) continue;
+    total += attackOf(c) * (c.maxAttacks - c.attacksThisTurn);
+  }
+  return total;
+}
+
+/**
+ * リノセウスを 3 回出せるかもしれない（このときは rhinoThreeDamageBound も見る）。
+ * 手札に 2 枚以上あり、戻す手段（場の聖樹の杖・手札の虫の知らせかベビーカーバンクル）があって、PP が 9 以上（問題集の 4 問目）
+ */
+function mayPlayThreeRhinos(s: GameState, p: PlayerIndex): boolean {
+  const pl = s.players[p];
+  const inHand = (name: string) => pl.hand.some((h) => nameOf(h.cardId) === name);
+  const rhinos = pl.hand.filter((h) => nameOf(h.cardId) === RHINO).length;
+  const bounce = boardCount(s, p, ROD) > 0 || inHand(BUGS) || inHand(CARBUNCLE);
+  return rhinos >= 2 && bounce && pl.pp + (pl.extraPpAvailable ? 1 : 0) >= 9;
+}
+
+/**
+ * ビームに最初の手ごとに残す局面の数（SearchOptions.perFirst）。テイマーの並びがアリア等の並びに押し出されて途中で切れ、
+ * 燐光の岩をコンボ 1 で出していた（seed 2275116772 の 7 ターン目）。勝率は 242 → 248/600、1 試合 0.38 → 0.40 秒（docs/ai-notes.md）
+ */
+const RHINO_PER_FIRST = 4;
 
 /**
  * リノセウス用 AI を作る。search は探索の設定（比較実験用。既定は汎用の探索 AI と同じ深さ 8・幅 32）。
@@ -185,13 +387,15 @@ function searchLethalForRhino(root: GameState, p: PlayerIndex): Action[] | null 
  * （seed 2510273090 の 4 ターン目・seed 954874822 の 7 ターン目。docs/ai-notes.md）
  */
 export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}): Agent {
-  const search = createSearchAgent({ allow: allowAction, lethal: false, ...searchOptions });
+  const search = createSearchAgent({ allow: allowAction, lethal: false, perFirst: RHINO_PER_FIRST, nextLethalSearch: (s, q) => searchLethalForRhino(s, q) !== null, ...searchOptions });
   const plainSearch = createSearchAgent();
   return {
     name: "rhino",
     chooseAction(real, legal, rng) {
       const first = legal[0];
       if (!first) throw new Error("合法手がありません");
+      // 新しい試合では、全探索のリーサル探索のメモを捨てる（ターン番号で区別しているので、別の試合の同じターンと混ざらないように）
+      if (first.type === "mulligan") resetExactLethalCache();
       // マリガン中の active は先攻なので、マリガンするプレイヤーは actingPlayer で求める
       const p = actingPlayer(real);
       if (deckClassOf(real, p) !== "elf") return plainSearch.chooseAction(real, legal, rng);
@@ -204,7 +408,7 @@ export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}): Ag
       if (real.active !== p) return search.chooseAction(real, legal, rng);
       // リーサル（ルールより優先。手順の途中の選択も含む）
       const legalKeys = new Set(legal.map(keyOf));
-      const lethal = findLethal(real, p, rng, DEFAULT_LETHAL_OPTIONS, searchLethalForRhino);
+      const lethal = findLethal(real, p, rng, DEFAULT_LETHAL_OPTIONS, searchLethalForRhinoTurn);
       if (lethal && legalKeys.has(keyOf(lethal))) return lethal;
       // 自分の選択待ちは探索 AI に任せる（allowAction で最後の杖等を避ける）
       if (real.pending) return search.chooseAction(real, legal, rng);

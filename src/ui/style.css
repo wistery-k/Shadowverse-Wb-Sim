@@ -156,13 +156,30 @@ button.end-turn {
   font-weight: bold;
   cursor: pointer;
 }
-.board,
-.hand {
+.board {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  min-height: 100px;
+  min-height: 126px;
   align-items: flex-start;
+}
+/* 手札は上限の9枚まで1行に収める（足りない幅ではカードが縮む） */
+.hand {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 6px;
+  align-items: start;
+}
+.hand .card {
+  width: auto;
+  min-width: 0;
+}
+/* 手札の空き */
+.slot-empty {
+  aspect-ratio: 5 / 7;
+  border: 2px dashed var(--line);
+  border-radius: 6px;
+  box-sizing: border-box;
 }
 .hand-backs {
   display: flex;
@@ -176,8 +193,10 @@ button.end-turn {
 }
 
 .card {
-  width: 96px;
-  min-height: 92px;
+  width: 90px;
+  aspect-ratio: 5 / 7;
+  box-sizing: border-box;
+  overflow: hidden;
   display: grid;
   grid-template-rows: auto 1fr auto;
   gap: 2px;
@@ -252,6 +271,100 @@ button.end-turn {
 }
 .card.ready {
   box-shadow: 0 0 0 2px var(--ready);
+}
+/* 攻撃できるフォロワー: フォロワーにだけなら黄、リーダーにもなら緑 */
+.card.can-attack-follower {
+  box-shadow: 0 0 10px 3px color-mix(in oklab, #e8c22e 85%, transparent);
+}
+.card.can-attack-leader {
+  box-shadow: 0 0 10px 3px color-mix(in oklab, #3fbf6a 85%, transparent);
+}
+/* 守護: 盾の縁取り（二重線）と上部の小さな盾形 */
+.card.ward {
+  position: relative;
+  outline: 3px double #8d939c;
+  outline-offset: 1px;
+}
+.card.ward::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 14px;
+  height: 9px;
+  transform: translateX(-50%);
+  background: #8d939c;
+  clip-path: polygon(0 0, 100% 0, 100% 45%, 50% 100%, 0 45%);
+}
+/* 直前の行動の動き */
+.card.motion-summon {
+  animation: summon 0.35s ease-out;
+}
+.card.motion-attack-up {
+  animation: attack-up 0.4s ease-in-out;
+}
+.card.motion-attack-down {
+  animation: attack-down 0.4s ease-in-out;
+}
+.motion-hit {
+  animation: hit 0.4s ease-in-out 0.15s;
+}
+@keyframes summon {
+  from {
+    transform: translateY(-12px) scale(0.7);
+    opacity: 0;
+  }
+}
+@keyframes attack-up {
+  40% {
+    transform: translateY(-28px) scale(1.05);
+  }
+}
+@keyframes attack-down {
+  40% {
+    transform: translateY(28px) scale(1.05);
+  }
+}
+@keyframes hit {
+  20% {
+    transform: translateX(-5px);
+    background: color-mix(in oklab, var(--target) 25%, var(--panel));
+  }
+  50% {
+    transform: translateX(5px);
+  }
+  80% {
+    transform: translateX(-2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .card[class*="motion-"],
+  .motion-hit {
+    animation: none;
+  }
+}
+/* EP（黄）・SEP（紫） */
+.points {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.point {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.point.ep {
+  background: #e8c22e;
+  border: 2px solid #e8c22e;
+}
+.point.sep {
+  background: #9b4fd6;
+  border: 2px solid #9b4fd6;
+}
+.point.used {
+  background: transparent;
 }
 .card.targetable,
 .leader.targetable {

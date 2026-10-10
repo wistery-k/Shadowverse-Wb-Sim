@@ -13,12 +13,20 @@ interface Props {
   targetable?: boolean;
   /** 行動できる */
   ready?: boolean;
+  /** 攻撃できる（follower: フォロワーのみ、leader: リーダーにも） */
+  attackable?: "follower" | "leader" | null;
+  /** 直前の行動の動き */
+  motion?: Motion | null;
   onClick?: () => void;
   onHover?: () => void;
 }
 
-export function CardView({ cardId, board, hand, selected, targetable, ready, onClick, onHover }: Props) {
+/** summon: 場に出た / attack-up・attack-down: その向きへ攻撃した / hit: 攻撃された */
+export type Motion = "summon" | "attack-up" | "attack-down" | "hit";
+
+export function CardView({ cardId, board, hand, selected, targetable, ready, attackable, motion, onClick, onHover }: Props) {
   const card = cardOf(cardId);
+  const keywords = board ? [...board.keywords, ...board.tempKeywords] : (hand?.keywords ?? []);
   const classes = [
     "card",
     `class-${card.class}`,
@@ -26,9 +34,11 @@ export function CardView({ cardId, board, hand, selected, targetable, ready, onC
     targetable ? "targetable" : "",
     ready ? "ready" : "",
     onClick ? "clickable" : "",
+    board?.kind === "follower" && keywords.includes("ward") ? "ward" : "",
+    attackable ? `can-attack-${attackable}` : "",
+    motion ? `motion-${motion}` : "",
   ].join(" ");
 
-  const keywords = board ? [...board.keywords, ...board.tempKeywords] : (hand?.keywords ?? []);
   const cost = hand ? handCost(hand) : card.cost;
 
   return (

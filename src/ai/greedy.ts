@@ -5,6 +5,7 @@
 
 import {
   applyAction,
+  tryApplyAction,
   cardOf,
   legalActions,
   type Action,
@@ -21,12 +22,13 @@ export { evaluate } from "./evaluate";
 
 /** 選択待ちを含め、手を適用した後の最善の評価値（選択待ちは再帰的に最善の選択をする） */
 function valueAfter(state: GameState, action: Action, p: PlayerIndex, w: EvalWeights, depth = 0): number {
-  let next: GameState;
+  let next: GameState | null;
   try {
-    next = applyAction(state, action);
+    next = tryApplyAction(state, action);
   } catch {
     return -Infinity;
   }
+  if (!next) return -Infinity;
   if (next.pending && next.pending.player === p && depth < 3) {
     return Math.max(...legalActions(next).map((a) => valueAfter(next, a, p, w, depth + 1)));
   }
