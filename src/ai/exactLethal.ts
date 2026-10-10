@@ -32,6 +32,11 @@ export interface ExactLethalOptions {
    */
   mustPlay?: { count: number; matches: (s: GameState, a: Action) => boolean; feasible: (s: GameState, p: PlayerIndex, remaining: number) => boolean };
   /**
+   * 手順の中で高々 count 回しか打たない手（matches）。リノセウスを出す回数ごとに分けて探すときに、回数の上限に使う（docs/ai-notes.md）。
+   * mustPlay と一緒に使うときは、matches は同じ手を数えるものにする。打った回数をメモのキーに含める
+   */
+  maxPlay?: { count: number; matches: (s: GameState, a: Action) => boolean };
+  /**
    * リーダーしか攻撃させないフォロワー（インスタンス ID）。ターンの最初の上限の式で、フォロワーへ攻撃すると上限が相手の体力に届かなくなるもの（docs/ai-notes.md）。
    * 試す手が変わるので、メモのキーに含める
    */
@@ -160,35 +165,46 @@ export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLe
   const leaderOnly = new Set(opts.leaderOnly ?? []);
   const noPlay = new Set(opts.noPlay ?? []);
   const ids = (xs: Set<number>) => [...xs].sort((a, b) => a - b).join(",");
-  const keyPrefix = leaderOnly.size || noPlay.size ? `${ids(leaderOnly)}/${ids(noPlay)}/` : "";
-  const candidates = (s: GameState): Action[] => {
+  const must = opts.mustPlay;
+  const max = opts.maxPlay;
+  const keyPrefix = `${leaderOnly.size || noPlay.size ? `${ids(leaderOnly)}/${ids(noPlay)}/` : ""}${max ? `${must?.count ?? 0}<${max.count}/` : ""}`;
+  /** played は mustPlay（なければ maxPlay）の手を打った回数 */
+  const candidates = (s: GameState, played: number): Action[] => {
     const legal = legalActions(s).filter(
-      (a) => a.type !== "endTurn" && !(a.type === "attack" && a.target !== "leader" && leaderOnly.has(a.attacker)) && !(a.type === "play" && noPlay.has(a.iid)),
+      (a) =>
+        a.type !== "endTurn" &&
+        !(a.type === "attack" && a.target !== "leader" && leaderOnly.has(a.attacker)) &&
+        !(a.type === "play" && noPlay.has(a.iid)) &&
+        !(max && played >= max.count && max.matches(s, a)),
     );
     const forced = s.pending ? null : (opts.forced?.(s, p, legal) ?? null);
     return forced ? [forced] : opts.order ? opts.order(s, p, legal) : legal;
   };
 
-  const must = opts.mustPlay;
-  const remainingAfter = (s: GameState, a: Action, remaining: number) => (must && remaining > 0 && must.matches(s, a) ? remaining - 1 : remaining);
+  const counted = must?.matches ?? max?.matches;
+  // mustPlay だけなら、打った回数は count で頭打ちにしてキーをまとめる
+  const playedAfter = (s: GameState, a: Action, played: number) =>
+    counted && (max || played < (must?.count ?? 0)) && counted(s, a) ? played + 1 : played;
+  const remainingOf = (played: number) => Math.max(0, (must?.count ?? 0) - played);
 
-  /** s から与えられる最大のダメージ（need 以上が見つかればそこで打ち切った値）。remaining は mustPlay の残り回数 */
-  const dfs = (s: GameState, need: number, remaining: number): number => {
+  /** s から与えられる最大のダメージ（need 以上が見つかればそこで打ち切った値）。played は mustPlay（なければ maxPlay）の手を打った回数 */
+  const dfs = (s: GameState, need: number, played: number): number => {
     if (s.phase !== "main" || actorOf(s) !== p) return 0;
+    const remaining = remainingOf(played);
     if (must && remaining > 0 && !isTransient(s) && !must.feasible(s, p, remaining)) return 0;
     // 選択待ち・解決中の局面はメモしない（キーが重く、すぐに次の局面に進むため）
-    const key = isTransient(s) ? null : `${keyPrefix}${remaining}|${lethalKey(s, opp)}`;
+    const key = isTransient(s) ? null : `${keyPrefix}${max ? played : remaining}|${lethalKey(s, opp)}`;
     const hit = key === null ? undefined : memo.get(key);
     if (hit && (hit.exact || hit.damage >= need)) return hit.damage;
     if (++visited > limit) throw new Abort();
     let best = 0;
     if (key !== null) memo.set(key, { damage: 0, exact: false });
-    for (const a of candidates(s)) {
+    for (const a of candidates(s, played)) {
       const next = tryApplyAction(s, a);
       if (!next || (next.phase === "ended" && next.winner !== p)) continue;
       if (opts.deterministicOnly && variesWithRandom(s, a, next, p)) continue;
       const dealt = s.players[opp].leaderHp - next.players[opp].leaderHp;
-      const damage = dealt + dfs(next, need - dealt, remainingAfter(s, a, remaining));
+      const damage = dealt + dfs(next, need - dealt, playedAfter(s, a, played));
       if (damage > best) best = damage;
       if (best >= need) break;
     }
@@ -199,27 +215,27 @@ export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLe
   };
 
   let need = root.players[opp].leaderHp;
-  let remaining = must?.count ?? 0;
+  let played = 0;
   const seq: Action[] = [];
   try {
-    if (dfs(root, need, remaining) < need) return null;
+    if (dfs(root, need, played) < need) return null;
     // ダメージが足りる手を順にたどる（キーにインスタンス ID を含めないので、手そのものはメモしない）
     let s = root;
     while (s.phase !== "ended") {
       let found: { a: Action; next: GameState; dealt: number } | null = null;
-      for (const a of candidates(s)) {
+      for (const a of candidates(s, played)) {
         const next = tryApplyAction(s, a);
         if (!next || (next.phase === "ended" && next.winner !== p)) continue;
         if (opts.deterministicOnly && variesWithRandom(s, a, next, p)) continue;
         const dealt = s.players[opp].leaderHp - next.players[opp].leaderHp;
-        if (dealt + dfs(next, need - dealt, remainingAfter(s, a, remaining)) >= need) {
+        if (dealt + dfs(next, need - dealt, playedAfter(s, a, played)) >= need) {
           found = { a, next, dealt };
           break;
         }
       }
       if (!found) return null;
       seq.push(found.a);
-      remaining = remainingAfter(s, found.a, remaining);
+      played = playedAfter(s, found.a, played);
       s = found.next;
       need -= found.dealt;
     }

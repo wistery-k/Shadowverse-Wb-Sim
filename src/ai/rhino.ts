@@ -263,15 +263,32 @@ export function searchLethalForRhinoTurn(root: GameState, p: PlayerIndex): Actio
   const hp = root.players[p === 0 ? 1 : 0].leaderHp;
   const bound = rhinoLethalBound(root, p);
   if (hp > bound) return found;
-  // リノセウス 1 回（2 回）の上限が届かなければ、2 回（3 回）以上出す手順だけを探す
-  const count = hp <= rhinoOneDamageBound(root, p) ? 0 : hp <= rhinoDamageBound(root, p) ? 2 : 3;
-  const opts: ExactLethalOptions = { ...RHINO_EXACT, leaderOnly: leaderOnlyAttackers(root, p, bound - hp), noPlay: uselessPlays(root, p, hp) };
-  if (count > 0) opts.mustPlay = { count, matches: isRhinoPlay, feasible: canStillPlayRhinos };
-  const exact = searchExactLethal(root, p, opts);
-  if (!exact) return found;
-  if (winsElsewhere(root, p, exact)) return exact;
-  // 乱数で結果が変わる手を除いて探し直す（seed 900234 のエルフ 7 ターン目。docs/ai-notes.md）
-  return searchExactLethal(root, p, { ...opts, deterministicOnly: true }) ?? exact;
+  // リノセウスを出す回数ごと（1 回以下・2 回・3 回以上）に分けて探す。上限が届かない回数は探さない。
+  // 回数ごとの上限で、出さないカードとリーダーしか攻撃しないフォロワーを決める（ユーザーの案。docs/ai-notes.md）
+  const bounds = rhinoBounds(root, p);
+  let lucky: Action[] | null = null;
+  for (const [i, [rhinos, b]] of bounds.entries()) {
+    if (b < hp) continue;
+    const last = i === bounds.length - 1;
+    const opts: ExactLethalOptions = { ...RHINO_EXACT, leaderOnly: leaderOnlyAttackers(root, p, b - hp), noPlay: uselessPlays(root, p, hp, [[rhinos, b]]) };
+    if (rhinos >= 2) opts.mustPlay = { count: rhinos, matches: isRhinoPlay, feasible: canStillPlayRhinos };
+    if (!last) opts.maxPlay = { count: rhinos, matches: isRhinoPlay };
+    const exact = searchExactLethal(root, p, opts);
+    if (!exact) continue;
+    if (winsElsewhere(root, p, exact)) return exact;
+    // 乱数で結果が変わる手を除いて探し直す（seed 900234 のエルフ 7 ターン目。docs/ai-notes.md）
+    const sure = searchExactLethal(root, p, { ...opts, deterministicOnly: true });
+    if (sure) return sure;
+    lucky ??= exact;
+  }
+  return lucky ?? found;
+}
+
+/** リノセウスを出す回数と、その回数での上限（1 回・2 回、3 回出せるかもしれなければ 3 回も） */
+function rhinoBounds(s: GameState, p: PlayerIndex): [number, number][] {
+  const bounds: [number, number][] = [[1, rhinoOneDamageBound(s, p)], [2, rhinoDamageBound(s, p)]];
+  if (mayPlayThreeRhinos(s, p)) bounds.push([3, rhinoThreeDamageBound(s, p)]);
+  return bounds;
 }
 
 function isRhinoFollowerAttack(s: GameState, p: PlayerIndex, a: Action): boolean {
@@ -408,10 +425,8 @@ function boardAttack(s: GameState, p: PlayerIndex): number {
  *   自由に使える PP = PP − リノセウスの回数 × 3（超進化できるベビーカーバンクルがあれば +1）、
  *   コンボ 2 にするのに要る PP = max(0, 2 − 手札の森の神秘とベイル)、1 コスト換算で出せる回数 =（自由に使える PP − コンボ 2 にするのに要る PP）÷ 2（切り捨て）
  */
-function uselessPlays(s: GameState, p: PlayerIndex, hp: number): number[] {
+function uselessPlays(s: GameState, p: PlayerIndex, hp: number, bounds: readonly (readonly [number, number])[] = rhinoBounds(s, p)): number[] {
   const pl = s.players[p];
-  const bounds: [number, number][] = [[1, rhinoOneDamageBound(s, p)], [2, rhinoDamageBound(s, p)]];
-  if (mayPlayThreeRhinos(s, p)) bounds.push([3, rhinoThreeDamageBound(s, p)]);
   const reachable = bounds.filter(([, bound]) => bound >= hp);
   const useless = (rhinos: number, bound: number, cost: number) => bound - rhinos * (cost - 1) < hp;
   const out = pl.hand
