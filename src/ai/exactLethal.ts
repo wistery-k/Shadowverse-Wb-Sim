@@ -36,6 +36,8 @@ export interface ExactLethalOptions {
    * 試す手が変わるので、メモのキーに含める
    */
   leaderOnly?: readonly number[];
+  /** 出さない手札のカード（インスタンス ID）。出すと上限が相手の体力に届かなくなるもの（docs/ai-notes.md）。メモのキーに含める */
+  noPlay?: readonly number[];
   /** 調べた局面の数を書き込む（計測用） */
   stats?: { visited: number; memo: number };
 }
@@ -156,9 +158,13 @@ export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLe
   let visited = 0;
 
   const leaderOnly = new Set(opts.leaderOnly ?? []);
-  const keyPrefix = leaderOnly.size ? `${[...leaderOnly].sort((a, b) => a - b).join(",")}/` : "";
+  const noPlay = new Set(opts.noPlay ?? []);
+  const ids = (xs: Set<number>) => [...xs].sort((a, b) => a - b).join(",");
+  const keyPrefix = leaderOnly.size || noPlay.size ? `${ids(leaderOnly)}/${ids(noPlay)}/` : "";
   const candidates = (s: GameState): Action[] => {
-    const legal = legalActions(s).filter((a) => a.type !== "endTurn" && !(a.type === "attack" && a.target !== "leader" && leaderOnly.has(a.attacker)));
+    const legal = legalActions(s).filter(
+      (a) => a.type !== "endTurn" && !(a.type === "attack" && a.target !== "leader" && leaderOnly.has(a.attacker)) && !(a.type === "play" && noPlay.has(a.iid)),
+    );
     const forced = s.pending ? null : (opts.forced?.(s, p, legal) ?? null);
     return forced ? [forced] : opts.order ? opts.order(s, p, legal) : legal;
   };

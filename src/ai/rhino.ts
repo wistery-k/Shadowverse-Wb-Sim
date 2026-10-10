@@ -40,6 +40,7 @@ const RHINO = "殺戮のリノセウス";
 const CARBUNCLE = "ベビーカーバンクル";
 const BAIL = "煌撃の戦士・ベイル";
 const BUGS = "虫の知らせ";
+const LILY = "ピュアクリスタリア・リリィ";
 /** マリガンで1枚だけ残す序盤のカード（優先順） */
 const EARLY = ["フェアリーテイマー", "純粋なるウォーターフェアリー", "妖精の招集"];
 /** 上の2種（バックウッドと序盤のカード）がどちらもあるときに残すカード（優先順。杖は1枚まで） */
@@ -236,7 +237,7 @@ export function searchLethalForRhinoTurn(root: GameState, p: PlayerIndex): Actio
   if (hp > bound) return found;
   // リノセウス 1 回（2 回）の上限が届かなければ、2 回（3 回）以上出す手順だけを探す
   const count = hp <= rhinoOneDamageBound(root, p) ? 0 : hp <= rhinoDamageBound(root, p) ? 2 : 3;
-  const opts: ExactLethalOptions = { ...RHINO_EXACT, leaderOnly: leaderOnlyAttackers(root, p, bound - hp) };
+  const opts: ExactLethalOptions = { ...RHINO_EXACT, leaderOnly: leaderOnlyAttackers(root, p, bound - hp), noPlay: uselessPlays(root, p, hp) };
   if (count > 0) opts.mustPlay = { count, matches: isRhinoPlay, feasible: canStillPlayRhinos };
   const exact = searchExactLethal(root, p, opts);
   if (!exact) return found;
@@ -372,6 +373,24 @@ function boardAttack(s: GameState, p: PlayerIndex): number {
  * 上限の式でリーダーへの攻撃として数えた場のフォロワーのうち、攻撃力が余裕（上限 − 相手の体力）より大きいもの。
  * これがフォロワーを攻撃すると、残りで出せるのは上限 − 攻撃力 < 相手の体力なので、リーダーしか攻撃させない（ユーザーの案）
  */
+/**
+ * 出すと上限が相手の体力に届かなくなる手札のカード（バックウッド・リリィ。ユーザーの案）。
+ * どちらも引いたカードで上限を取り戻せない（山札に 0 コストのカードは無い）ので、出すと PP の分だけ上限が下がる。
+ * 1 PP の価値はリノセウス 1 回・2 回・3 回の式で 1・2・3 点、出した分のコンボで同じだけ戻るので、下がる分は 回数 ×（コスト − 1）。
+ * 相手の体力に届く式のどれでも、下がった後に届かなければ出さない
+ */
+function uselessPlays(s: GameState, p: PlayerIndex, hp: number): number[] {
+  const bounds: [number, number][] = [[1, rhinoOneDamageBound(s, p)], [2, rhinoDamageBound(s, p)]];
+  if (mayPlayThreeRhinos(s, p)) bounds.push([3, rhinoThreeDamageBound(s, p)]);
+  return s.players[p].hand
+    .filter((h) => [BACKWOOD, LILY].includes(nameOf(h.cardId)))
+    .filter((h) => {
+      const cost = Math.max(0, cardOf(h.cardId).cost + h.costMod);
+      return bounds.every(([rhinos, bound]) => bound - rhinos * (cost - 1) < hp);
+    })
+    .map((h) => h.iid);
+}
+
 function leaderOnlyAttackers(s: GameState, p: PlayerIndex, slack: number): number[] {
   return leaderAttackers(s, p).filter((c) => attackOf(c) > slack).map((c) => c.iid);
 }
