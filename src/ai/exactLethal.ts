@@ -31,6 +31,11 @@ export interface ExactLethalOptions {
    * feasible は局面と remaining だけで決まるので、メモのキーに remaining を足せば相手の体力によらず使い回せる
    */
   mustPlay?: { count: number; matches: (s: GameState, a: Action) => boolean; feasible: (s: GameState, p: PlayerIndex, remaining: number) => boolean };
+  /**
+   * リーダーしか攻撃させないフォロワー（インスタンス ID）。ターンの最初の上限の式で、フォロワーへ攻撃すると上限が相手の体力に届かなくなるもの（docs/ai-notes.md）。
+   * 試す手が変わるので、メモのキーに含める
+   */
+  leaderOnly?: readonly number[];
   /** 調べた局面の数を書き込む（計測用） */
   stats?: { visited: number; memo: number };
 }
@@ -150,8 +155,10 @@ export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLe
   exactLethalCounts.searched++;
   let visited = 0;
 
+  const leaderOnly = new Set(opts.leaderOnly ?? []);
+  const keyPrefix = leaderOnly.size ? `${[...leaderOnly].sort((a, b) => a - b).join(",")}/` : "";
   const candidates = (s: GameState): Action[] => {
-    const legal = legalActions(s).filter((a) => a.type !== "endTurn");
+    const legal = legalActions(s).filter((a) => a.type !== "endTurn" && !(a.type === "attack" && a.target !== "leader" && leaderOnly.has(a.attacker)));
     const forced = s.pending ? null : (opts.forced?.(s, p, legal) ?? null);
     return forced ? [forced] : opts.order ? opts.order(s, p, legal) : legal;
   };
@@ -164,7 +171,7 @@ export function searchExactLethal(root: GameState, p: PlayerIndex, opts: ExactLe
     if (s.phase !== "main" || actorOf(s) !== p) return 0;
     if (must && remaining > 0 && !isTransient(s) && !must.feasible(s, p, remaining)) return 0;
     // 選択待ち・解決中の局面はメモしない（キーが重く、すぐに次の局面に進むため）
-    const key = isTransient(s) ? null : `${remaining}|${lethalKey(s, opp)}`;
+    const key = isTransient(s) ? null : `${keyPrefix}${remaining}|${lethalKey(s, opp)}`;
     const hit = key === null ? undefined : memo.get(key);
     if (hit && (hit.exact || hit.damage >= need)) return hit.damage;
     if (++visited > limit) throw new Abort();

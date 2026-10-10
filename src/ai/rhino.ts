@@ -23,6 +23,7 @@ import {
   type GameState,
   type PlayerIndex,
 } from "../engine";
+import type { FollowerOnBoard } from "../engine/types";
 import { determinize } from "./determinize";
 import { DEFAULT_EXACT_LETHAL_OPTIONS, resetExactLethalCache, searchExactLethal, type ExactLethalOptions } from "./exactLethal";
 import { DEFAULT_LETHAL_OPTIONS, DIRECT_SCORING, findLethal, searchLethal } from "./lethal";
@@ -231,10 +232,12 @@ export function searchLethalForRhinoTurn(root: GameState, p: PlayerIndex): Actio
   if (found && winsElsewhere(root, p, found)) return found;
   if (!root.players[p].hand.some((h) => nameOf(h.cardId) === RHINO)) return found;
   const hp = root.players[p === 0 ? 1 : 0].leaderHp;
-  if (hp > rhinoLethalBound(root, p)) return found;
+  const bound = rhinoLethalBound(root, p);
+  if (hp > bound) return found;
   // リノセウス 1 回（2 回）の上限が届かなければ、2 回（3 回）以上出す手順だけを探す
   const count = hp <= rhinoOneDamageBound(root, p) ? 0 : hp <= rhinoDamageBound(root, p) ? 2 : 3;
-  const opts: ExactLethalOptions = count > 0 ? { ...RHINO_EXACT, mustPlay: { count, matches: isRhinoPlay, feasible: canStillPlayRhinos } } : RHINO_EXACT;
+  const opts: ExactLethalOptions = { ...RHINO_EXACT, leaderOnly: leaderOnlyAttackers(root, p, bound - hp) };
+  if (count > 0) opts.mustPlay = { count, matches: isRhinoPlay, feasible: canStillPlayRhinos };
   const exact = searchExactLethal(root, p, opts);
   if (!exact) return found;
   if (winsElsewhere(root, p, exact)) return exact;
@@ -351,16 +354,26 @@ export function rhinoThreeDamageBound(s: GameState, p: PlayerIndex): number {
   return bound;
 }
 
+/** 場に残っていてリーダーを攻撃できるフォロワー */
+function leaderAttackers(s: GameState, p: PlayerIndex): FollowerOnBoard[] {
+  return s.players[p].board.filter((c): c is FollowerOnBoard => {
+    if (c.kind !== "follower" || c.attacksThisTurn >= c.maxAttacks) return false;
+    if (c.cannotAttackUntil !== null && c.cannotAttackUntil >= s.turn) return false;
+    return c.enteredTurn !== s.turn || hasKeyword(c, "storm");
+  });
+}
+
 /** 場に残っていてリーダーを攻撃できるフォロワーの攻撃力（残りの攻撃回数分） */
 function boardAttack(s: GameState, p: PlayerIndex): number {
-  let total = 0;
-  for (const c of s.players[p].board) {
-    if (c.kind !== "follower" || c.attacksThisTurn >= c.maxAttacks) continue;
-    if (c.cannotAttackUntil !== null && c.cannotAttackUntil >= s.turn) continue;
-    if (c.enteredTurn === s.turn && !hasKeyword(c, "storm")) continue;
-    total += attackOf(c) * (c.maxAttacks - c.attacksThisTurn);
-  }
-  return total;
+  return leaderAttackers(s, p).reduce((total, c) => total + attackOf(c) * (c.maxAttacks - c.attacksThisTurn), 0);
+}
+
+/**
+ * 上限の式でリーダーへの攻撃として数えた場のフォロワーのうち、攻撃力が余裕（上限 − 相手の体力）より大きいもの。
+ * これがフォロワーを攻撃すると、残りで出せるのは上限 − 攻撃力 < 相手の体力なので、リーダーしか攻撃させない（ユーザーの案）
+ */
+function leaderOnlyAttackers(s: GameState, p: PlayerIndex, slack: number): number[] {
+  return leaderAttackers(s, p).filter((c) => attackOf(c) > slack).map((c) => c.iid);
 }
 
 /**
