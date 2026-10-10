@@ -18,6 +18,11 @@ interface Cell {
   deck: string;
   cardId: string;
   diffs: number[];
+  /** 持っておく続きで PP が 2 以上余った局面 / それ以外の局面での差 */
+  wasteDiffs: number[];
+  fullDiffs: number[];
+  /** エンハンスできるまで禁じた続きとの差（今出す − エンハンスまで待つ） */
+  enhanceDiffs: number[];
   played: number;
   /** AI が出さなかった局面での、出さなかった続き（hold）と何も変えない続き（normal）の勝敗の一致（確かめ用） */
   holdSame: number;
@@ -55,8 +60,11 @@ export async function main(argv: string[]): Promise<number> {
       if (d !== 0) discordant++;
       const key = `${deck}|${c.cardId}`;
       let cell = cells.get(key);
-      if (!cell) cells.set(key, (cell = { deck, cardId: c.cardId, diffs: [], played: 0, holdSame: 0, holdN: 0 }));
+      if (!cell) cells.set(key, (cell = { deck, cardId: c.cardId, diffs: [], wasteDiffs: [], fullDiffs: [], enhanceDiffs: [], played: 0, holdSame: 0, holdN: 0 }));
       cell.diffs.push(d);
+      if (c.holdPpLeft !== null && c.holdPpLeft >= 2) cell.wasteDiffs.push(d);
+      else cell.fullDiffs.push(d);
+      if (c.holdEnhanceWin !== null && c.holdEnhanceWin !== undefined) cell.enhanceDiffs.push((c.playWin ? 1 : 0) - (c.holdEnhanceWin ? 1 : 0));
       if (c.normalPlayed) cell.played++;
       else if (r.normalWin !== null) {
         cell.holdN++;
@@ -71,8 +79,11 @@ export async function main(argv: string[]): Promise<number> {
   const allDiffs = all.flatMap((c) => c.diffs);
   console.log(`全カード: 今出す − 持っておく ${pct(mean(allDiffs))} ± ${pct(se(allDiffs))}`);
   console.log();
-  console.log("| デッキ | カード | コスト | 対 | 今出す − 持っておく | SE | AI が出した割合 | z |");
-  console.log("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |");
+  console.log("持っておく続きで PP が 2 以上余った局面と、それ以外の局面に分けた差も出す（余った局面では今出す方が良く見えやすい）。");
+  console.log("エンハンスは、エンハンスのコストに PP が届くまで禁じた続きとの差（今出す − 待つ）。");
+  console.log();
+  console.log("| デッキ | カード | コスト | 対 | 今出す − 持っておく | SE | AI が出した割合 | z | PP が余った局面 | 余らなかった局面 | エンハンスまで待つのと比べて |");
+  console.log("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |");
   const rows = all
     .filter((c) => c.diffs.length >= min)
     .map((c) => ({ c, m: mean(c.diffs), s: se(c.diffs), rate: c.played / c.diffs.length }))
@@ -80,7 +91,9 @@ export async function main(argv: string[]): Promise<number> {
     .sort((a, b) => Math.abs(b.z) - Math.abs(a.z));
   for (const { c, m, s, rate, z } of rows) {
     const card = cardOf(c.cardId);
-    console.log(`| ${c.deck} | ${card.name} | ${card.cost} | ${c.diffs.length} | ${pct(m)} | ${pct(s)} | ${(rate * 100).toFixed(0)}% | ${z.toFixed(2)} |`);
+    const sub = (xs: number[]) => (xs.length < 10 ? `（${xs.length} 対）` : `${pct(mean(xs))} ± ${pct(se(xs))}（${xs.length}）`);
+    const enh = c.enhanceDiffs.length > 0 ? sub(c.enhanceDiffs) : "";
+    console.log(`| ${c.deck} | ${card.name} | ${card.cost} | ${c.diffs.length} | ${pct(m)} | ${pct(s)} | ${(rate * 100).toFixed(0)}% | ${z.toFixed(2)} | ${sub(c.wasteDiffs)} | ${sub(c.fullDiffs)} | ${enh} |`);
   }
   return 0;
 }
