@@ -246,10 +246,27 @@ export function findLethal(
   }
   current = null;
 
+  const line = findLethalLine(real, p, rng, opts.samples, search);
+  if (!line) return null;
+  current = { player: p, steps: line.steps, expected: line.expected, index: 1 };
+  return line.steps[0] ?? null;
+}
+
+/**
+ * 実際の局面から、確実に勝てる行動の並び全体を探す（見えない情報は determinization で扱う）。
+ * expected は各手を打つ前に p から見えているはずの局面（visibleKey）。対戦画面の「リーサルを取る」でも使う
+ */
+export function findLethalLine(
+  real: GameState,
+  p: PlayerIndex,
+  rng: Rng,
+  samples: number,
+  search: (root: GameState, p: PlayerIndex) => Action[] | null,
+): { steps: Action[]; expected: string[] } | null {
   const det = determinize(real, p, rng);
   const seq = search(det, p);
   if (!seq || seq.length === 0) return null;
-  for (let i = 1; i < opts.samples; i++) {
+  for (let i = 1; i < samples; i++) {
     if (!replayWins(determinize(real, p, rng), seq, p)) return null;
   }
   // 手順の各手を打つ前に見えているはずの局面を記録する
@@ -259,8 +276,7 @@ export function findLethal(
     expected.push(s ? visibleKey(s, p) : "");
     s = s ? tryApply(s, a) : null;
   }
-  current = { player: p, steps: seq, expected, index: 1 };
-  return seq[0] ?? null;
+  return { steps: seq, expected };
 }
 
 /** 実行中のリーサルの手順（findLethal が次の呼び出しで続けるため） */

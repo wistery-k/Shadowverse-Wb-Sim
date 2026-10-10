@@ -8,20 +8,21 @@
 // 自然の妖精姫・アリアを出した試合の数と、最初に出した自分のターン（平均）も出す。
 // --agent で、リノセウスエルフ側の AI を registry のキーで選べる（既定は rhino。例: search、rhino-lethal。--opts は rhino のときだけ使う）。
 // --out ファイル名 で、試合ごとの結果（相手デッキ・g・席・勝ち・全探索でリーサルを見つけた回数）を JSON Lines で書き出す（変更前後で試合ごとに比べる用）。
+// --matches ファイル名 で、JSON Lines の各行の（deck・g・elfSeat）の試合だけを打つ（web の「リノセウス比較」で人間が打った記録を渡すと、
+// 人間と同じ試合で AI の勝率を出し、人間の勝敗と並べて表示する。--games は使わない）。
+// 試合のシードと相手は src/sim/rhinoCompare.ts で決める（web と共通）。
 
 import { SEARCH_WEIGHTS } from "../src/ai/evaluate";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { exactLethalCounts } from "../src/ai/exactLethal";
 import { createRhinoAgent } from "../src/ai/rhino";
 import { agentOf } from "../src/ai/registry";
 import { applyAction, cardOf, createGame } from "../src/engine";
 import { searchAgent, type SearchOptions } from "../src/ai/search";
-import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { playMatch } from "../src/sim/match";
+import { rhinoMatch, rhinoOpponents } from "../src/sim/rhinoCompare";
 import { parallelMap } from "./parallel";
 
-const ELF = "リノセウスエルフ";
-const EXCLUDED_DECKS = [ELF, "ランプドラゴン"];
 const ARIA = "自然の妖精姫・アリア";
 
 export async function main(argv: string[]): Promise<number> {
@@ -29,6 +30,7 @@ export async function main(argv: string[]): Promise<number> {
   let opts: Partial<SearchOptions> = {};
   let out: string | null = null;
   let agentKey = "rhino";
+  let matches: string | null = null;
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
     const v = argv[++i];
@@ -36,6 +38,7 @@ export async function main(argv: string[]): Promise<number> {
     if (key === "--games") games = Number(v);
     else if (key === "--out") out = v;
     else if (key === "--agent") agentKey = v;
+    else if (key === "--matches") matches = v;
     else if (key === "--opts") {
       const raw = JSON.parse(v) as Record<string, unknown>;
       if (typeof raw.weights === "object" && raw.weights !== null) raw.weights = { ...SEARCH_WEIGHTS, ...raw.weights };
@@ -43,16 +46,14 @@ export async function main(argv: string[]): Promise<number> {
     }
     else throw new Error(`不明な引数: ${key}`);
   }
-  const elf = DEFAULT_DECKS.find((d) => d.name === ELF);
-  if (!elf) throw new Error(`${ELF} がありません`);
-  const opponents = DEFAULT_DECKS.filter((d) => !EXCLUDED_DECKS.includes(d.name));
   const agent = agentKey === "rhino" ? createRhinoAgent(opts) : agentOf(agentKey);
-  const tasks = opponents.flatMap((o) => Array.from({ length: games }, (_, g) => ([0, 1] as const).map((elfSeat) => ({ o: o.name, g, elfSeat }))).flat());
+  const given = matches === null ? null : readMatches(matches);
+  const tasks =
+    given?.map(({ deck, g, elfSeat }) => ({ o: deck, g, elfSeat })) ??
+    rhinoOpponents().flatMap((o) => Array.from({ length: games }, (_, g) => ([0, 1] as const).map((elfSeat) => ({ o: o.name, g, elfSeat }))).flat());
   const t0 = Date.now();
   const results = await parallelMap(tasks, ({ o, g, elfSeat }) => {
-    const opp = opponents.find((d) => d.name === o)!;
-    const seed = 900000 + g * 13 + elfSeat;
-    const decks: [string[], string[]] = elfSeat === 0 ? [elf.cards, opp.cards] : [opp.cards, elf.cards];
+    const { decks, seed } = rhinoMatch(o, g, elfSeat);
     const r = playMatch(elfSeat === 0 ? [agent, searchAgent] : [searchAgent, agent], { decks, seed, record: true });
     // アリアを最初に出した自分のターン
     let s = createGame({ decks, seed });
@@ -83,6 +84,27 @@ export async function main(argv: string[]): Promise<number> {
   console.log([...perDeck].map(([name, [w, t]]) => `${name} ${w}/${t}`).join(", "));
   const exact = results.filter((r) => r.exactFound > 0);
   console.log(`全探索でリーサルを見つけた試合 ${exact.length}/${n}（そのうち勝ち ${exact.filter((r) => r.won).length}）`);
+  if (given) {
+    const humanWins = given.filter((m) => m.won === true).length;
+    console.log(`同じ試合の --matches の勝ち ${humanWins}/${given.length} = ${((humanWins / Math.max(1, given.length)) * 100).toFixed(1)}%`);
+    for (const [i, m] of given.entries()) {
+      const r = results[i]!;
+      console.log(`  ${m.deck} g=${m.g} 席${m.elfSeat}: ${m.won === undefined ? "-" : m.won ? "勝ち" : "負け"} / AI ${r.won ? "勝ち" : "負け"}`);
+    }
+  }
   if (out) writeFileSync(out, results.map((r) => JSON.stringify({ deck: r.deck, g: r.g, elfSeat: r.elfSeat, won: r.won, exactFound: r.exactFound })).join("\n") + "\n");
   return 0;
+}
+
+/** --matches のファイル（JSON Lines。各行に deck・g・elfSeat、あれば won） */
+function readMatches(file: string): { deck: string; g: number; elfSeat: 0 | 1; won?: boolean }[] {
+  return readFileSync(file, "utf8")
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((line, i) => {
+      const v = JSON.parse(line) as Record<string, unknown>;
+      if (typeof v.deck !== "string" || typeof v.g !== "number" || (v.elfSeat !== 0 && v.elfSeat !== 1))
+        throw new Error(`${file} の ${i + 1} 行目に deck・g・elfSeat がありません`);
+      return { deck: v.deck, g: v.g, elfSeat: v.elfSeat, ...(typeof v.won === "boolean" ? { won: v.won } : {}) };
+    });
 }

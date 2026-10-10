@@ -1,6 +1,7 @@
 // 対戦画面（プレイヤー vs AI）
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import type { LethalRequest, LethalResponse } from "../ai/lethalWorker";
 import type { AgentRequest, AgentResponse } from "../ai/worker";
 import {
   actingPlayer,
@@ -8,7 +9,9 @@ import {
   cardOf,
   EP,
   HAND_LIMIT,
+  leaderId,
   legalActions,
+  opponent,
   rngFrom,
   SEP,
   type Action,
@@ -18,21 +21,46 @@ import {
 import { CardDetail, CardView } from "./CardView";
 import { crestName, describeAction, modeLabels } from "./describe";
 
-const HUMAN: PlayerIndex = 0;
-const AI: PlayerIndex = 1;
 const AI_DELAY_MS = 700;
+const AUTO_DELAY_MS = 400;
 
 interface Props {
   initial: GameState;
   /** src/ai/registry.ts のキー */
   ai: string;
+  /** 人間の席（既定は 0） */
+  human?: PlayerIndex;
   onExit: () => void;
+  /** 試合が終わったときに、行われた行動の列を渡す */
+  onEnd?: (actions: Action[], final: GameState, autoActions: number[]) => void;
+  /** このターンのリーサルの有無を表示し、「リーサルを取る」ボタンを出す */
+  lethalHelper?: boolean;
+  /** 終わった後の「もう一度」ボタンの文言 */
+  exitLabel?: string;
 }
 
 const same = (a: Action, b: Action) => JSON.stringify(a) === JSON.stringify(b);
 
-export function Game({ initial, ai, onExit }: Props) {
+/** リーサル探索の状況 */
+type LethalInfo = { status: "searching" } | { status: "found"; steps: Action[] } | { status: "none" } | { status: "broken" };
+
+export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "もう一度", lethalHelper = false }: Props) {
+  const HUMAN = human;
+  const AI = opponent(human);
+  const MY_LEADER = leaderId(HUMAN);
+  const OPP_LEADER = leaderId(AI);
   const [state, setState] = useState(initial);
+  // 行われた行動の列（記録用）
+  const actionsRef = useRef<Action[]>([]);
+  const endedRef = useRef(false);
+  // 「リーサルを取る」で自動で行った行動の番号（actionsRef の添字）
+  const autoRef = useRef<number[]>([]);
+  const [lethal, setLethal] = useState<LethalInfo | null>(null);
+  // 自動で行う残りの手順
+  const [autoSteps, setAutoSteps] = useState<Action[]>([]);
+  const [lethalRng] = useState(() => rngFrom({ rng: (initial.rng ^ 0x27d4eb2f) >>> 0 }));
+  const lethalWorker = useRef<Worker | null>(null);
+  useEffect(() => () => lethalWorker.current?.terminate(), []);
   const [log, setLog] = useState<string[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [picks, setPicks] = useState<number[]>([]);
@@ -49,9 +77,21 @@ export function Game({ initial, ai, onExit }: Props) {
   const acting = actingPlayer(state);
   const myTurn = state.phase !== "ended" && acting === HUMAN;
 
-  function act(action: Action) {
+  function advance(action: Action, auto = false) {
+    const next = applyAction(state, action);
+    if (auto) autoRef.current.push(actionsRef.current.length);
+    actionsRef.current.push(action);
     setLog((l) => [describeAction(state, action, HUMAN), ...l].slice(0, 200));
-    setState(applyAction(state, action));
+    setState(next);
+    if (next.phase === "ended" && !endedRef.current) {
+      endedRef.current = true;
+      onEnd?.([...actionsRef.current], next, [...autoRef.current]);
+    }
+  }
+
+  function act(action: Action) {
+    setAutoSteps([]);
+    advance(action);
     setSelected(null);
     setPicks([]);
   }
@@ -73,8 +113,7 @@ export function Game({ initial, ai, onExit }: Props) {
       setTimeout(() => {
         if (cancelled) return;
         setAiThinking(false);
-        setLog((l) => [describeAction(state, action, HUMAN), ...l].slice(0, 200));
-        setState(applyAction(state, action));
+        advance(action);
       }, Math.max(0, AI_DELAY_MS - (Date.now() - started)));
     };
     const request: AgentRequest = { id, agent: ai, state, legal, seed: aiRng.int(2 ** 30) };
@@ -84,6 +123,49 @@ export function Game({ initial, ai, onExit }: Props) {
     };
   }, [state]);
 
+  // 自分の手番では、局面が変わるたびにこのターンのリーサルを探す（前の探索は Worker ごと止める）
+  useEffect(() => {
+    lethalWorker.current?.terminate();
+    lethalWorker.current = null;
+    if (!lethalHelper || !myTurn || state.phase !== "main" || state.active !== HUMAN) {
+      setLethal(null);
+      return;
+    }
+    if (autoSteps.length > 0) return;
+    const w = new Worker(new URL("../ai/lethalWorker.ts", import.meta.url), { type: "module" });
+    lethalWorker.current = w;
+    const id = lethalRng.int(2 ** 30);
+    setLethal((l) => (l?.status === "broken" ? l : { status: "searching" }));
+    w.onmessage = (e: MessageEvent<LethalResponse>) => {
+      if (e.data.id !== id) return;
+      if (e.data.error) console.error("リーサル探索でエラー:", e.data.error);
+      setLethal(e.data.steps ? { status: "found", steps: e.data.steps } : { status: "none" });
+      w.terminate();
+      if (lethalWorker.current === w) lethalWorker.current = null;
+    };
+    const request: LethalRequest = { id, state, player: HUMAN, seed: lethalRng.int(2 ** 30) };
+    w.postMessage(request);
+  }, [state, autoSteps.length === 0]);
+
+  // 「リーサルを取る」: 見つけた手順を、操作を目で追えるよう間をあけて 1 手ずつ行う。
+  // 実際の局面では手順どおりに打てないことがある（ランダムな効果・見えない情報）ので、そのときは止めて探し直す
+  useEffect(() => {
+    const step = autoSteps[0];
+    if (!step || !myTurn) return;
+    const t = setTimeout(() => {
+      if (!legal.some((a) => same(a, step))) {
+        setAutoSteps([]);
+        setLethal({ status: "broken" });
+        return;
+      }
+      setAutoSteps(autoSteps.slice(1));
+      setSelected(null);
+      setPicks([]);
+      advance(step, true);
+    }, AUTO_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [state, autoSteps]);
+
   const me = state.players[HUMAN];
   const opp = state.players[AI];
   const pending = myTurn ? state.pending : null;
@@ -92,7 +174,7 @@ export function Game({ initial, ai, onExit }: Props) {
   // 選択中のカードでできる行動
   const selectedActions = selected === null ? [] : legal.filter((a) => actionSubject(a) === selected);
   const attackTargets = new Set(
-    selectedActions.flatMap((a) => (a.type === "attack" ? [a.target === "leader" ? -2 : a.target] : [])),
+    selectedActions.flatMap((a) => (a.type === "attack" ? [a.target === "leader" ? OPP_LEADER : a.target] : [])),
   );
   const candidates = new Set(pending?.kind === "choose" ? pending.candidates : []);
   const readyIds = new Set(myTurn && !pending && !mulligan ? legal.map(actionSubject).filter((x) => x !== null) : []);
@@ -106,7 +188,7 @@ export function Game({ initial, ai, onExit }: Props) {
     }
     if (pending) return;
     if (selected !== null && attackTargets.has(iid)) {
-      const target = iid === -2 ? "leader" : iid;
+      const target = iid === OPP_LEADER ? "leader" : iid;
       const a = selectedActions.find((x) => x.type === "attack" && x.target === target);
       if (a) act(a);
       return;
@@ -142,8 +224,8 @@ export function Game({ initial, ai, onExit }: Props) {
           ))}
         </div>
         <div
-          class={`leader ${attackTargets.has(-2) ? "targetable" : ""} ${candidates.has(-2) ? "targetable" : ""} ${picks.includes(-2) ? "selected" : ""}`}
-          onClick={() => clickEntity(-2)}
+          class={`leader ${attackTargets.has(OPP_LEADER) ? "targetable" : ""} ${candidates.has(OPP_LEADER) ? "targetable" : ""} ${picks.includes(OPP_LEADER) ? "selected" : ""}`}
+          onClick={() => clickEntity(OPP_LEADER)}
         >
           相手リーダー {opp.leaderHp}/{opp.leaderMaxHp}
         </div>
@@ -176,8 +258,8 @@ export function Game({ initial, ai, onExit }: Props) {
           ))}
         </div>
         <div
-          class={`leader ${candidates.has(-1) ? "targetable" : ""} ${picks.includes(-1) ? "selected" : ""}`}
-          onClick={() => clickEntity(-1)}
+          class={`leader ${candidates.has(MY_LEADER) ? "targetable" : ""} ${picks.includes(MY_LEADER) ? "selected" : ""}`}
+          onClick={() => clickEntity(MY_LEADER)}
         >
           あなたのリーダー {me.leaderHp}/{me.leaderMaxHp}
         </div>
@@ -199,11 +281,31 @@ export function Game({ initial, ai, onExit }: Props) {
       </section>
 
       <section class="controls">
+        {lethal && myTurn && (
+          <div class="banner lethal">
+            {autoSteps.length > 0 ? (
+              <span>リーサルを取っています…（残り {autoSteps.length} 手）</span>
+            ) : lethal.status === "searching" ? (
+              <span class="muted">このターンのリーサルを調べています…</span>
+            ) : lethal.status === "found" ? (
+              <>
+                <strong>リーサルがあります（{lethal.steps.length} 手）</strong>
+                <button type="button" class="primary" onClick={() => setAutoSteps(lethal.steps)}>
+                  リーサルを取る
+                </button>
+              </>
+            ) : lethal.status === "broken" ? (
+              <span>手順どおりに打てなかったので止めました</span>
+            ) : (
+              <span class="muted">このターンのリーサルは見つかりません</span>
+            )}
+          </div>
+        )}
         {state.phase === "ended" ? (
           <div class="banner">
             {state.winner === HUMAN ? "あなたの勝利" : "あなたの敗北"}
             <button type="button" onClick={onExit}>
-              もう一度
+              {exitLabel}
             </button>
           </div>
         ) : !myTurn ? (
