@@ -1,6 +1,7 @@
 // 対戦画面（プレイヤー vs AI）
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import type { LethalRequest, LethalResponse } from "../ai/lethalWorker";
 import type { AgentRequest, AgentResponse } from "../ai/worker";
 import {
   actingPlayer,
@@ -21,6 +22,7 @@ import { CardDetail, CardView } from "./CardView";
 import { crestName, describeAction, modeLabels } from "./describe";
 
 const AI_DELAY_MS = 700;
+const AUTO_DELAY_MS = 400;
 
 interface Props {
   initial: GameState;
@@ -30,14 +32,19 @@ interface Props {
   human?: PlayerIndex;
   onExit: () => void;
   /** 試合が終わったときに、行われた行動の列を渡す */
-  onEnd?: (actions: Action[], final: GameState) => void;
+  onEnd?: (actions: Action[], final: GameState, autoActions: number[]) => void;
+  /** このターンのリーサルの有無を表示し、「リーサルを取る」ボタンを出す */
+  lethalHelper?: boolean;
   /** 終わった後の「もう一度」ボタンの文言 */
   exitLabel?: string;
 }
 
 const same = (a: Action, b: Action) => JSON.stringify(a) === JSON.stringify(b);
 
-export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "もう一度" }: Props) {
+/** リーサル探索の状況 */
+type LethalInfo = { status: "searching" } | { status: "found"; steps: Action[] } | { status: "none" } | { status: "broken" };
+
+export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "もう一度", lethalHelper = false }: Props) {
   const HUMAN = human;
   const AI = opponent(human);
   const MY_LEADER = leaderId(HUMAN);
@@ -46,6 +53,14 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
   // 行われた行動の列（記録用）
   const actionsRef = useRef<Action[]>([]);
   const endedRef = useRef(false);
+  // 「リーサルを取る」で自動で行った行動の番号（actionsRef の添字）
+  const autoRef = useRef<number[]>([]);
+  const [lethal, setLethal] = useState<LethalInfo | null>(null);
+  // 自動で行う残りの手順
+  const [autoSteps, setAutoSteps] = useState<Action[]>([]);
+  const [lethalRng] = useState(() => rngFrom({ rng: (initial.rng ^ 0x27d4eb2f) >>> 0 }));
+  const lethalWorker = useRef<Worker | null>(null);
+  useEffect(() => () => lethalWorker.current?.terminate(), []);
   const [log, setLog] = useState<string[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [picks, setPicks] = useState<number[]>([]);
@@ -62,18 +77,20 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
   const acting = actingPlayer(state);
   const myTurn = state.phase !== "ended" && acting === HUMAN;
 
-  function advance(action: Action) {
+  function advance(action: Action, auto = false) {
     const next = applyAction(state, action);
+    if (auto) autoRef.current.push(actionsRef.current.length);
     actionsRef.current.push(action);
     setLog((l) => [describeAction(state, action, HUMAN), ...l].slice(0, 200));
     setState(next);
     if (next.phase === "ended" && !endedRef.current) {
       endedRef.current = true;
-      onEnd?.([...actionsRef.current], next);
+      onEnd?.([...actionsRef.current], next, [...autoRef.current]);
     }
   }
 
   function act(action: Action) {
+    setAutoSteps([]);
     advance(action);
     setSelected(null);
     setPicks([]);
@@ -105,6 +122,49 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
       cancelled = true;
     };
   }, [state]);
+
+  // 自分の手番では、局面が変わるたびにこのターンのリーサルを探す（前の探索は Worker ごと止める）
+  useEffect(() => {
+    lethalWorker.current?.terminate();
+    lethalWorker.current = null;
+    if (!lethalHelper || !myTurn || state.phase !== "main" || state.active !== HUMAN) {
+      setLethal(null);
+      return;
+    }
+    if (autoSteps.length > 0) return;
+    const w = new Worker(new URL("../ai/lethalWorker.ts", import.meta.url), { type: "module" });
+    lethalWorker.current = w;
+    const id = lethalRng.int(2 ** 30);
+    setLethal((l) => (l?.status === "broken" ? l : { status: "searching" }));
+    w.onmessage = (e: MessageEvent<LethalResponse>) => {
+      if (e.data.id !== id) return;
+      if (e.data.error) console.error("リーサル探索でエラー:", e.data.error);
+      setLethal(e.data.steps ? { status: "found", steps: e.data.steps } : { status: "none" });
+      w.terminate();
+      if (lethalWorker.current === w) lethalWorker.current = null;
+    };
+    const request: LethalRequest = { id, state, player: HUMAN, seed: lethalRng.int(2 ** 30) };
+    w.postMessage(request);
+  }, [state, autoSteps.length === 0]);
+
+  // 「リーサルを取る」: 見つけた手順を、操作を目で追えるよう間をあけて 1 手ずつ行う。
+  // 実際の局面では手順どおりに打てないことがある（ランダムな効果・見えない情報）ので、そのときは止めて探し直す
+  useEffect(() => {
+    const step = autoSteps[0];
+    if (!step || !myTurn) return;
+    const t = setTimeout(() => {
+      if (!legal.some((a) => same(a, step))) {
+        setAutoSteps([]);
+        setLethal({ status: "broken" });
+        return;
+      }
+      setAutoSteps(autoSteps.slice(1));
+      setSelected(null);
+      setPicks([]);
+      advance(step, true);
+    }, AUTO_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [state, autoSteps]);
 
   const me = state.players[HUMAN];
   const opp = state.players[AI];
@@ -221,6 +281,26 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
       </section>
 
       <section class="controls">
+        {lethal && myTurn && (
+          <div class="banner lethal">
+            {autoSteps.length > 0 ? (
+              <span>リーサルを取っています…（残り {autoSteps.length} 手）</span>
+            ) : lethal.status === "searching" ? (
+              <span class="muted">このターンのリーサルを調べています…</span>
+            ) : lethal.status === "found" ? (
+              <>
+                <strong>リーサルがあります（{lethal.steps.length} 手）</strong>
+                <button type="button" class="primary" onClick={() => setAutoSteps(lethal.steps)}>
+                  リーサルを取る
+                </button>
+              </>
+            ) : lethal.status === "broken" ? (
+              <span>手順どおりに打てなかったので止めました</span>
+            ) : (
+              <span class="muted">このターンのリーサルは見つかりません</span>
+            )}
+          </div>
+        )}
         {state.phase === "ended" ? (
           <div class="banner">
             {state.winner === HUMAN ? "あなたの勝利" : "あなたの敗北"}

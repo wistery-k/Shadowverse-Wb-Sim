@@ -96,9 +96,9 @@ export function App() {
   }
 
   // リノセウス比較の試合が終わったら記録を保存する
-  function recordRhino(m: RhinoMatchChoice, actions: Action[]) {
+  function recordRhino(m: RhinoMatchChoice, actions: Action[], autoActions: number[]) {
     try {
-      const record = buildHumanRecord({ ...m, actions, commit: __BUILD_COMMIT__, playedAt: new Date().toISOString() });
+      const record = buildHumanRecord({ ...m, actions, autoActions, commit: __BUILD_COMMIT__, playedAt: new Date().toISOString() });
       if (!saveHumanRecords([...loadHumanRecords(), record])) setRhinoError("記録をブラウザに保存できませんでした（プライベートブラウズ等）");
     } catch (e) {
       setRhinoError(`記録を作れませんでした: ${String(e)}`);
@@ -135,7 +135,9 @@ export function App() {
             ai={game.agent}
             human={game.human ?? 0}
             onExit={() => setGame(null)}
-            {...(game.rhino ? { onEnd: (actions: Action[]) => recordRhino(game.rhino!, actions), exitLabel: "記録に戻る" } : {})}
+            {...(game.rhino
+              ? { onEnd: (actions: Action[], _final: GameState, auto: number[]) => recordRhino(game.rhino!, actions, auto), exitLabel: "記録に戻る", lethalHelper: true }
+              : {})}
           />
         ) : tab === "decks" ? (
           <Decks decks={saved} onChange={updateDecks} />

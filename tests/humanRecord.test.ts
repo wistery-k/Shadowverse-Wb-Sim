@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { randomAgent } from "../src/ai/random";
-import { createGame } from "../src/engine";
+import { resetExactLethalCache } from "../src/ai/exactLethal";
+import { lethalHint } from "../src/ai/lethalHint";
+import { applyAction, createGame } from "../src/engine";
 import { buildHumanRecord, parseHumanRecord, toJsonLines } from "../src/sim/humanRecord";
 import { playMatch } from "../src/sim/match";
 import { rhinoMatch, rhinoOpponents, RHINO_ELF } from "../src/sim/rhinoCompare";
+import { PUZZLES, puzzleState } from "./rhinoPuzzles";
 
 describe("リノセウス比較の人間の記録", () => {
   it("rhino-compare と同じシード・席でデッキを並べる", () => {
@@ -36,5 +39,30 @@ describe("リノセウス比較の人間の記録", () => {
   it("終わっていない試合は記録しない", () => {
     expect(() => buildHumanRecord({ deck: rhinoOpponents()[0]!.name, g: 0, elfSeat: 0, actions: [], commit: "", playedAt: "" })).toThrow();
     expect(parseHumanRecord({ kind: "other" })).toBeNull();
+  });
+});
+
+describe("対戦画面のリーサル表示", () => {
+  it("リーサルがあれば勝てる手順を返し、相手の体力が 1 多ければ見つけない", () => {
+    resetExactLethalCache();
+    const puzzle = PUZZLES[0]!;
+    const yes = puzzleState(puzzle, puzzle.expected);
+    const steps = lethalHint(yes, 0, 1);
+    expect(steps).not.toBeNull();
+    let s = yes;
+    for (const a of steps!) s = applyAction(s, a);
+    expect(s.winner).toBe(0);
+    resetExactLethalCache();
+    expect(lethalHint(puzzleState(puzzle, puzzle.expected + 1), 0, 1)).toBeNull();
+  });
+
+  it("自動で行った行動に印をつけて記録する", () => {
+    const deck = rhinoOpponents()[0]!.name;
+    const m = rhinoMatch(deck, 0, 0);
+    const r = playMatch([randomAgent, randomAgent], { ...m, record: true });
+    const last = r.log!.length - 1;
+    const rec = buildHumanRecord({ deck, g: 0, elfSeat: 0, actions: r.log!, autoActions: [last], commit: "", playedAt: "" });
+    expect(rec.autoActions).toEqual([last]);
+    expect(rec.turnLog.at(-1)!.choices.at(-1)).toMatch(/（自動）$/);
   });
 });

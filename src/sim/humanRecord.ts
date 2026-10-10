@@ -38,17 +38,20 @@ export interface HumanGameRecord {
   playedAt: string;
   turnLog: TurnChoices[];
   actions: Action[];
+  /** 「リーサルを取る」ボタンで自動で行った行動の番号（actions の添字） */
+  autoActions: number[];
 }
 
 /** 行動の列をターンごとにまとめ、文章にする */
-export function turnLog(initial: GameState, actions: readonly Action[], human: PlayerIndex): TurnChoices[] {
+export function turnLog(initial: GameState, actions: readonly Action[], human: PlayerIndex, autoActions: readonly number[] = []): TurnChoices[] {
   const out: TurnChoices[] = [];
+  const auto = new Set(autoActions);
   let s = initial;
-  for (const a of actions) {
+  for (const [i, a] of actions.entries()) {
     const actor = actingPlayer(s);
     const by = actor === human ? "you" : "opponent";
     const last = out[out.length - 1];
-    const text = describeAction(s, a, human);
+    const text = describeAction(s, a, human) + (auto.has(i) ? "（自動）" : "");
     if (last && last.turn === s.turn && last.by === by) last.choices.push(text);
     else out.push({ turn: s.turn, by, choices: [text] });
     s = applyAction(s, a);
@@ -61,6 +64,7 @@ export function buildHumanRecord(args: {
   g: number;
   elfSeat: PlayerIndex;
   actions: readonly Action[];
+  autoActions?: readonly number[];
   commit: string;
   playedAt: string;
 }): HumanGameRecord {
@@ -83,8 +87,9 @@ export function buildHumanRecord(args: {
     opponentAgent: RHINO_OPPONENT_AGENT,
     commit: args.commit,
     playedAt: args.playedAt,
-    turnLog: turnLog(initial, actions, elfSeat),
+    turnLog: turnLog(initial, actions, elfSeat, args.autoActions),
     actions: [...actions],
+    autoActions: [...(args.autoActions ?? [])],
   };
 }
 
@@ -105,7 +110,7 @@ export function parseHumanRecord(v: unknown): HumanGameRecord | null {
     !Array.isArray(r.turnLog)
   )
     return null;
-  return v as HumanGameRecord;
+  return { ...(v as HumanGameRecord), autoActions: Array.isArray(r.autoActions) ? (r.autoActions as number[]) : [] };
 }
 
 export const toJsonLines = (records: readonly HumanGameRecord[]) => records.map((r) => JSON.stringify(r)).join("\n") + (records.length ? "\n" : "");
