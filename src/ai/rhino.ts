@@ -207,6 +207,20 @@ function exactOrderRank(s: GameState, p: PlayerIndex, a: Action): number {
   return 4;
 }
 
+const spendActions = (s: GameState) => new Set(legalActions(s).filter((a) => a.type === "play" || a.type === "act").map((a) => JSON.stringify(a)));
+
+/**
+ * エクストラPPを使うと、今は PP が足りずに出せない・アクトできないカードが出せるようになるか。
+ * PP の値を見るのは支払い・PP 回復（PP 最大値で頭打ち）・エンハンスだけで、エルフのカードにエンハンスは無いので、
+ * 使うのを後回しにしてもできることは減らない（全探索で試す順番を減らすため）
+ */
+function extraPpEnablesSpend(s: GameState): boolean {
+  const next = tryApplyAction(s, { type: "extraPp" });
+  if (!next) return false;
+  const before = spendActions(s);
+  return [...spendActions(next)].some((k) => !before.has(k));
+}
+
 /**
  * 全探索のリーサル探索の設定。手札の森の神秘を先に打つ（0 コストでコンボが増えるだけなので、先に打って損は無い）。
  * リーサルが無い局面では上限まで調べるので、局面の数は少なめにする（docs/ai-notes.md）
@@ -216,7 +230,11 @@ export const RHINO_EXACT: ExactLethalOptions = {
   maxStates: 30_000,
   maxStatesPerTurn: 60_000,
   // リノセウスでリーダー以外を攻撃する手は試さない（ユーザーの案。seed 900091 の 8 ターン目。docs/ai-notes.md）
-  order: (s, p, actions) => actions.filter((a) => !isRhinoFollowerAttack(s, p, a)).sort((x, y) => exactOrderRank(s, p, x) - exactOrderRank(s, p, y)),
+  // エクストラPPは、使うと新しく出せる・アクトできるカードが増えるときだけ試す（ユーザーの案。docs/ai-notes.md）
+  order: (s, p, actions) =>
+    actions
+      .filter((a) => !isRhinoFollowerAttack(s, p, a) && (a.type !== "extraPp" || extraPpEnablesSpend(s)))
+      .sort((x, y) => exactOrderRank(s, p, x) - exactOrderRank(s, p, y)),
   forced: (s, p, legal) => {
     const mystery = s.players[p].hand.find((h) => nameOf(h.cardId) === MYSTERY);
     return (mystery && legal.find((a) => a.type === "play" && a.iid === mystery.iid)) ?? null;
