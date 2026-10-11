@@ -111,9 +111,14 @@ export interface SearchOptions {
    * reusePlan ではその短い並びをそのまま打つ（seed 2275116772 のエルフ 7 ターン目、燐光の岩をコンボ 1 で出した。docs/ai-notes.md）
    */
   perFirst: number;
+  /**
+   * ビームで残す局面を選ぶときだけ、残り PP 1 につきこの点を足す（0 なら足さない）。ターンを終える局面の点数には足さない。
+   * ターン末の採点は使い残した PP を数えないため、コンボを稼ぐだけの手（すぐ戻すリノセウス等）と、PP を残して後で使う手順の途中の局面との比べ方が偏る
+   */
+  beamPp: number;
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0 };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0 };
 
 /** 打った手の並び（後ろから前へのリスト）。各手を打った後の局面も持つ */
 interface Step {
@@ -277,7 +282,10 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
         for (const next of advance(node.state, a, node.path)) children.push({ ...next, first: node.first, value: score(next.state) });
       }
     }
-    children.sort((x, y) => y.value - x.value);
+    if (opts.beamPp !== 0) {
+      const key = (n: Node) => n.value + opts.beamPp * n.state.players[p].pp;
+      children.sort((x, y) => key(y) - key(x));
+    } else children.sort((x, y) => y.value - x.value);
     frontier = opts.dedup ? uniqueStates(children, opts.beamWidth, opts.perFirst) : children.slice(0, opts.beamWidth);
   }
   terminals.push(...frontier);
