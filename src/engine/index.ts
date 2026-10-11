@@ -7,6 +7,7 @@ export {
   applyAction,
   illegalReason,
   tryApplyAction,
+  fusionCandidates,
   resolveTurnEnd,
   attackTargets,
   attackReach,

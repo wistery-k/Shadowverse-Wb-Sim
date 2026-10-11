@@ -389,6 +389,14 @@ function fusionMaterials(state: GameState, p: PlayerIndex, host: HandCard): Hand
   });
 }
 
+/** 手札のカード hostIid に今融合できる素材の候補（手番のプレイヤーのみ。UI で素材を選ばせるのに使う） */
+export function fusionCandidates(state: GameState, hostIid: number): number[] {
+  if (state.phase !== "main" || state.pending) return [];
+  const p = state.active;
+  const host = state.players[p].hand.find((c) => c.iid === hostIid);
+  return host ? fusionMaterials(state, p, host).map((c) => c.iid) : [];
+}
+
 /** マリガンを行うべきプレイヤー（先攻から） */
 function mulliganPlayer(state: GameState): PlayerIndex | null {
   for (const p of [state.first, opponent(state.first)]) {
