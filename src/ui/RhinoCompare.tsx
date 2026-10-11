@@ -45,21 +45,32 @@ function download(fileName: string, text: string, type: string) {
 const matchKey = (m: RhinoMatchChoice) => `${m.deck}/${m.g}/${m.elfSeat}`;
 const seatLabel = (p: PlayerIndex) => (p === 0 ? "P1" : "P2");
 
-/** まだ打っていない最初の試合（g の小さい順、相手デッキ、席の順） */
-function nextUnplayed(records: readonly HumanGameRecord[]): RhinoMatchChoice {
-  const played = new Set(records.map(matchKey));
-  const decks = rhinoOpponents();
-  for (let g = 0; ; g++)
-    for (const d of decks)
-      for (const elfSeat of [0, 1] as const) {
-        const m = { deck: d.name, g, elfSeat };
-        if (!played.has(matchKey(m))) return m;
+/**
+ * 次に打つ試合。g はまだどの記録にも使っていない最小の番号にする（同じ g だと席が同じなら自分の山札の順番・初手が
+ * 相手デッキによらず同じなので、毎回変えて引きを覚えられないようにする）。相手デッキと席は、記録の少ない組み合わせ
+ * （同数なら相手デッキ、席の順）にする。
+ */
+function nextMatch(records: readonly HumanGameRecord[]): RhinoMatchChoice {
+  const usedG = new Set(records.map((r) => r.g));
+  let g = 0;
+  while (usedG.has(g)) g++;
+  let best: RhinoMatchChoice | null = null;
+  let bestCount = Infinity;
+  for (const d of rhinoOpponents())
+    for (const elfSeat of [0, 1] as const) {
+      const count = records.filter((r) => r.deck === d.name && r.elfSeat === elfSeat).length;
+      if (count < bestCount) {
+        best = { deck: d.name, g, elfSeat };
+        bestCount = count;
       }
+    }
+  if (!best) throw new Error("相手デッキがありません");
+  return best;
 }
 
 export function RhinoCompare({ onStart, saveError }: { onStart: (m: RhinoMatchChoice) => void; saveError: string }) {
   const [records, setRecords] = useState<HumanGameRecord[]>(() => loadHumanRecords());
-  const [choice, setChoice] = useState<RhinoMatchChoice>(() => nextUnplayed(records));
+  const [choice, setChoice] = useState<RhinoMatchChoice>(() => nextMatch(records));
   const [copied, setCopied] = useState(false);
   const decks = rhinoOpponents();
   const { seed, first } = useMemo(() => {
@@ -89,6 +100,7 @@ export function RhinoCompare({ onStart, saveError }: { onStart: (m: RhinoMatchCh
       <p>
         <code>npm run rhino-compare</code> と同じシードの試合を、あなたが{RHINO_ELF}で打ちます。相手は探索 AI です。
         同じ（相手デッキ・試合番号・席）なら、AI が打ったときと同じ初期局面（先攻・山札の順番・初手）から始まります。
+        試合番号 g は、まだ打っていない番号に毎回自動で変わります（相手デッキが違っても、g と席が同じなら自分の初手は同じになるため）。
       </p>
       <div class="setup">
         <label>
@@ -126,8 +138,8 @@ export function RhinoCompare({ onStart, saveError }: { onStart: (m: RhinoMatchCh
           {played > 0 && ` / この試合は ${played} 回打っています`}
         </p>
         <div class="row-buttons">
-          <button type="button" onClick={() => setChoice(nextUnplayed(records))}>
-            まだ打っていない試合を選ぶ
+          <button type="button" onClick={() => setChoice(nextMatch(records))}>
+            次の試合（新しい g）を選ぶ
           </button>
           <button type="button" class="primary" onClick={() => onStart(choice)}>
             対戦開始
