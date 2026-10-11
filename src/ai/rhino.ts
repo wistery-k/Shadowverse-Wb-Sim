@@ -186,6 +186,11 @@ function rhinoPotentialEval(potential: number) {
   return (s: GameState, p: PlayerIndex) => potential * Math.min(0, nextTurnRhinoBound(s, p) - s.players[p === 0 ? 1 : 0].leaderHp);
 }
 
+/**
+ * rhinoPotentialEval の係数の既定。600 試合で 0 → 262 勝、0.3 → 268、0.6 → 288、1.0 → 291、1.5 → 279、2.0 → 278（docs/ai-notes.md）
+ */
+const RHINO_POTENTIAL = 1;
+
 /** リノセウス用 AI の設定。potential は rhinoPotentialEval の係数（0 なら足さない） */
 export type RhinoOptions = Partial<SearchOptions> & { potential?: number };
 
@@ -582,7 +587,7 @@ export interface RhinoAgentMode {
  * （seed 2510273090 の 4 ターン目・seed 954874822 の 7 ターン目。docs/ai-notes.md）
  */
 export function createRhinoAgent(options: RhinoOptions = {}, mode: RhinoAgentMode = { rules: true }): Agent {
-  const { potential = 0, ...searchOptions } = options;
+  const { potential = RHINO_POTENTIAL, ...searchOptions } = options;
   const search = createSearchAgent({
     allow: allowAction,
     lethal: false,
