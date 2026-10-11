@@ -36,6 +36,11 @@ export interface EvalWeights {
   lethalRange: number;
   lethalAttack: number;
   /**
+   * 手札にあるデストロイアーティファクト α・β・γ の種類 1 つあたり（同じ種類の 2 枚目以降は数えない）。
+   * 3 種類そろうとイクシードアーティファクトΩを作れる。0 なら見ない
+   */
+  fusionSet: number;
+  /**
    * カードごとの「手札に持っておく価値」（カードID → 点数）。切り札を温存させるために使う。
    * 手札1枚の価値（myHand）に加算する
    */
@@ -67,6 +72,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   graveyard: 0.05,
   lethalRange: 10,
   lethalAttack: 0.3,
+  fusionSet: 0,
   hold: {},
 };
 
@@ -87,6 +93,9 @@ const FUSION_HOLD: Readonly<Record<string, number>> = Object.fromEntries(
     ] as const
   ).map(([name, cards]) => [id(name), cards * DEFAULT_WEIGHTS.myHand]),
 );
+
+/** Ω の素材（fusionSet で種類を数える） */
+const FUSION_SET: ReadonlySet<string> = new Set(["デストロイアーティファクトα", "デストロイアーティファクトβ", "デストロイアーティファクトγ"].map(id));
 
 /**
  * 探索 AI の既定の重み（基準の重み＋PP 最大値＋SEP＋融合で作るカードの価値）。
@@ -132,6 +141,11 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
   v -= oppBoard * w.oppBoard;
   v += me.hand.length * w.myHand - opp.hand.length * w.oppHand;
   for (const h of me.hand) v += w.hold[h.cardId] ?? 0;
+  if (w.fusionSet !== 0) {
+    const kinds = new Set<string>();
+    for (const h of me.hand) if (FUSION_SET.has(h.cardId)) kinds.add(h.cardId);
+    v += kinds.size * w.fusionSet;
+  }
   v += me.ep * w.ep + me.sep * w.sep;
   if (me.extraPpAvailable) v += w.extraPp;
   // 自然に増えた分は数えない（PP を増やさないデッキの評価値を変えないため）
