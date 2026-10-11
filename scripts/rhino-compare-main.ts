@@ -91,8 +91,11 @@ export async function main(argv: string[]): Promise<number> {
     const solved = sum("searches") - sum("overflow");
     console.log(`全探索 ${sum("searches")} 回（サンプルごと）: 上限超え ${sum("overflow")}、読み切り ${solved}（平均 ${(sum("states") / Math.max(1, solved)).toFixed(0)} 局面、最大 ${Math.max(...results.map((r) => r.ex.maxStates))}）`);
     console.log(`  ビームより良いターン末を見つけた ${sum("better")}/${solved}（差の平均 ${(sum("gain") / Math.max(1, sum("better"))).toFixed(2)}）、そのうち最初の手も違う ${sum("firstDiffers")}`);
-    const byTurn = new Map<number, number[]>();
-    for (const r of results) for (const [t, v] of Object.entries(r.ex.byTurn)) byTurn.set(Number(t), (byTurn.get(Number(t)) ?? [0, 0, 0, 0]).map((x, i) => x + v[i]!));
+    const byTurn = new Map<number, [number, number, number, number]>();
+    for (const r of results) for (const [t, v] of Object.entries(r.ex.byTurn)) {
+      const c = byTurn.get(Number(t)) ?? [0, 0, 0, 0];
+      byTurn.set(Number(t), [c[0] + v[0], c[1] + v[1], c[2] + v[2], c[3] + v[3]]);
+    }
     for (const [t, [n, over, better, states]] of [...byTurn].sort((a, b) => a[0] - b[0]))
       console.log(`  自分の ${t} ターン目: 全探索 ${n}、上限超え ${over}、ビームより良い ${better}/${n - over}、平均 ${(states / Math.max(1, n - over)).toFixed(0)} 局面`);
     for (const r of results) console.log(`  ${r.deck} g${r.g} 席${r.elfSeat}: ${r.won ? "勝ち" : "負け"} ${r.sec.toFixed(1)}秒 全探索${r.ex.searches} 上限超え${r.ex.overflow} 良い${r.ex.better} 最大${r.ex.maxStates}`);
