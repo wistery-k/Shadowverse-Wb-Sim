@@ -3,6 +3,7 @@ import { ALL_CARDS } from "../src/cards";
 import {
   applyAction,
   createGame,
+  fusionCandidates,
   legalActions,
   newBoardCard,
   newHandCard,
@@ -340,6 +341,17 @@ describe("リソース・キーワード能力", () => {
     // 1枚目が融合済みでも、同じカードの2枚目は融合できる
     const t = applyAction(s, fuses.find((a) => a.type === "fuse" && a.host === hosts[0])!);
     expect(legalActions(t).some((a) => a.type === "fuse" && a.host === hosts[1])).toBe(true);
+  });
+
+  it("融合の素材の候補は、手札の各カードごとに同じカードの2枚目も含めて返す", () => {
+    const { s, me } = setup();
+    const hosts = [toHand(s, me, "フューチャー・コア"), toHand(s, me, "フューチャー・コア")];
+    const past = toHand(s, me, "パスト・コア");
+    toHand(s, me, "キャラバンマンモス");
+    expect(fusionCandidates(s, hosts[1]!)).toEqual([hosts[0], past]);
+    // 合法手に出てこない組み合わせ（2枚目のコアを融合先にする）も打てる
+    const t = applyAction(s, { type: "fuse", host: hosts[1]!, materials: [hosts[0]!] });
+    expect(t.players[me].hand.find((h) => h.iid === hosts[1])?.cardId).toBe(id("アタックアーティファクト"));
   });
 
   it("デストロイアーティファクトαは融合した種類が累計2でΩに変身する", () => {

@@ -10,6 +10,7 @@ import {
   BOARD_LIMIT,
   EP,
   evolveTurnReached,
+  fusionCandidates,
   HAND_LIMIT,
   leaderId,
   legalActions,
@@ -17,6 +18,7 @@ import {
   rngFrom,
   SEP,
   superEvolveTurnReached,
+  tryApplyAction,
   type Action,
   type GameState,
   type PlayerIndex,
@@ -68,6 +70,8 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
   const [log, setLog] = useState<string[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [picks, setPicks] = useState<number[]>([]);
+  // 選択中の手札のカードに融合する素材を選んでいるところか（素材は picks）
+  const [fusing, setFusing] = useState(false);
   const [detail, setDetail] = useState<string | null>(null);
   const [aiRng] = useState(() => rngFrom({ rng: (initial.rng ^ 0x5bd1e995) >>> 0 }));
   const [aiThinking, setAiThinking] = useState(false);
@@ -99,6 +103,7 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
     advance(action);
     setSelected(null);
     setPicks([]);
+    setFusing(false);
   }
 
   // AI の手番（思考は Worker で行う。最低でも AI_DELAY_MS は待って、操作を目で追えるようにする）
@@ -166,6 +171,7 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
       setAutoSteps(autoSteps.slice(1));
       setSelected(null);
       setPicks([]);
+      setFusing(false);
       advance(step, true);
     }, AUTO_DELAY_MS);
     return () => clearTimeout(t);
@@ -181,9 +187,24 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
   const attackTargets = new Set(
     selectedActions.flatMap((a) => (a.type === "attack" ? [a.target === "leader" ? OPP_LEADER : a.target] : [])),
   );
-  const candidates = new Set(pending?.kind === "choose" ? pending.candidates : []);
+  // 融合できる手札のカード（合法手は同じカードの融合先を1枚にまとめているので、手札の各カードで調べる）
+  const fusible = new Set(myTurn && !pending && !mulligan ? me.hand.filter((h) => fusionCandidates(state, h.iid).length > 0).map((h) => h.iid) : []);
+  const fuseHost = fusing && selected !== null && fusible.has(selected) ? selected : null;
+  const fuseCandidates = fuseHost === null ? [] : fusionCandidates(state, fuseHost);
+  const fuseAction: Action | null = fuseHost === null ? null : { type: "fuse", host: fuseHost, materials: picks };
+  const fusePreview = useMemo(() => {
+    if (!fuseAction || picks.length === 0) return null;
+    try {
+      const next = tryApplyAction(state, fuseAction);
+      const after = next?.players[HUMAN].hand.find((h) => h.iid === fuseAction.host);
+      return next ? { legal: true, cardId: after?.cardId ?? null } : { legal: false, cardId: null };
+    } catch {
+      return { legal: false, cardId: null };
+    }
+  }, [state, fuseHost, picks.join(",")]);
+  const candidates = new Set([...(pending?.kind === "choose" ? pending.candidates : []), ...fuseCandidates]);
   const attackable = myTurn && !mulligan ? attackStatuses(state) : new Map<number, AttackStatus>();
-  const readyIds = new Set(myTurn && !pending && !mulligan ? legal.map(actionSubject).filter((x) => x !== null) : []);
+  const readyIds = new Set([...(myTurn && !pending && !mulligan ? legal.map(actionSubject).filter((x) => x !== null) : []), ...fusible]);
 
   function clickEntity(iid: number) {
     setDetailFor(iid);
@@ -193,6 +214,18 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
       return;
     }
     if (pending) return;
+    if (fuseHost !== null) {
+      if (fuseCandidates.includes(iid)) {
+        setPicks((p) => (p.includes(iid) ? p.filter((x) => x !== iid) : [...p, iid]));
+        return;
+      }
+      // 融合先をもう一度クリックしたら融合をやめる。素材にできないカードのクリックは、選んだ素材を残すため無視する
+      if (iid === fuseHost) {
+        setFusing(false);
+        setPicks([]);
+      }
+      return;
+    }
     if (selected !== null && attackTargets.has(iid)) {
       const target = iid === OPP_LEADER ? "leader" : iid;
       const a = selectedActions.find((x) => x.type === "attack" && x.target === target);
@@ -342,15 +375,50 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
               </button>
             ))}
           </div>
+        ) : fuseHost !== null ? (
+          <div class="banner">
+            融合する素材を1枚以上選んでください（{picks.length}枚）
+            {fusePreview?.legal &&
+              (fusePreview.cardId && fusePreview.cardId !== me.hand.find((h) => h.iid === fuseHost)?.cardId ? (
+                <button type="button" title="クリックで詳細を表示" onClick={() => setDetail(fusePreview.cardId)}>
+                  → {cardOf(fusePreview.cardId).name}に変身
+                </button>
+              ) : (
+                <span class="muted">→ 変身しません</span>
+              ))}
+            <button type="button" class="primary" disabled={!fusePreview?.legal} onClick={() => fuseAction && act(fuseAction)}>
+              確定
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setFusing(false);
+                setPicks([]);
+              }}
+            >
+              キャンセル
+            </button>
+          </div>
         ) : (
           <div class="banner">
             {selectedActions
-              .filter((a) => a.type !== "attack")
+              .filter((a) => a.type !== "attack" && a.type !== "fuse")
               .map((a) => (
                 <button type="button" key={JSON.stringify(a)} onClick={() => act(a)}>
                   {actionLabel(state, a)}
                 </button>
               ))}
+            {selected !== null && fusible.has(selected) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFusing(true);
+                  setPicks([]);
+                }}
+              >
+                融合
+              </button>
+            )}
             {selectedActions.some((a) => a.type === "attack") && <span class="muted">攻撃先をクリック</span>}
             {extraPp && (
               <button type="button" class="extra-pp usable" onClick={() => act(extraPp)}>
