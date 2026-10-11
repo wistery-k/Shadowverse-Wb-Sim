@@ -9,6 +9,7 @@ export {
   tryApplyAction,
   resolveTurnEnd,
   attackTargets,
+  attackReach,
   playCost,
   actingPlayer,
   cardOf,

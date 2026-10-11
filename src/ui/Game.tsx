@@ -182,7 +182,7 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "ã‚‚ã
     selectedActions.flatMap((a) => (a.type === "attack" ? [a.target === "leader" ? OPP_LEADER : a.target] : [])),
   );
   const candidates = new Set(pending?.kind === "choose" ? pending.candidates : []);
-  const attackable = myTurn && !mulligan ? attackStatuses(state, legal) : new Map<number, AttackStatus>();
+  const attackable = myTurn && !mulligan ? attackStatuses(state) : new Map<number, AttackStatus>();
   const readyIds = new Set(myTurn && !pending && !mulligan ? legal.map(actionSubject).filter((x) => x !== null) : []);
 
   function clickEntity(iid: number) {

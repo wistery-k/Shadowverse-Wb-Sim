@@ -321,9 +321,9 @@ button.end-turn {
 .card.attack-none .stats .atk {
   color: var(--muted);
 }
-/* 攻撃の可否の帯があるときは、守護の盾形を帯の下に出す */
+/* 攻撃の可否の帯があるときは守護の盾形を出さない（名前に重なるため。二重線の縁取りとバッジは残る） */
 .card.ward[class*="attack-"]::before {
-  top: 15px;
+  display: none;
 }
 /* 守護: 盾の縁取り（二重線）と上部の小さな盾形 */
 .card.ward {

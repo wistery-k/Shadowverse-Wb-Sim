@@ -82,7 +82,7 @@ export function Replay({ record, entrants, onClose }: Props) {
   const winnerName = record.seats ? names[record.seats.winner] : "なし";
 
   // 手番のフォロワーの攻撃の可否
-  const attackable = useMemo(() => attackStatuses(state, legalActions(state)), [state]);
+  const attackable = useMemo(() => attackStatuses(state), [state]);
 
   // 直前の行動の動き: 場に出たフォロワー・攻撃したフォロワーと攻撃されたもの
   const { motions, leaderHit } = useMemo(() => {
