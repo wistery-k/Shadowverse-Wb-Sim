@@ -7,8 +7,8 @@ import { replayStates } from "../sim/replay";
 import { reproduceCommand } from "../sim/reproduce";
 import { seatDecks, type Entrant, type GameRecord } from "../sim/tournament";
 import { CardDetail, CardView, type Motion } from "./CardView";
-import { describeAction, leaderClasses } from "./describe";
-import { EmptySlots, PlayerInfo } from "./Game";
+import { attackStatuses, describeAction, leaderClasses } from "./describe";
+import { BoardSlots, EmptySlots, PlayerInfo } from "./Game";
 
 interface Props {
   record: GameRecord;
@@ -81,17 +81,8 @@ export function Replay({ record, entrants, onClose }: Props) {
   const state = states[step]!;
   const winnerName = record.seats ? names[record.seats.winner] : "なし";
 
-  // 攻撃できるフォロワー（リーダーにも攻撃できるか）
-  const attackable = useMemo(() => {
-    const m = new Map<number, "follower" | "leader">();
-    if (state.phase !== "main" || state.pending) return m;
-    for (const a of legalActions(state)) {
-      if (a.type !== "attack") continue;
-      if (a.target === "leader") m.set(a.attacker, "leader");
-      else if (!m.has(a.attacker)) m.set(a.attacker, "follower");
-    }
-    return m;
-  }, [state]);
+  // 手番のフォロワーの攻撃の可否
+  const attackable = useMemo(() => attackStatuses(state, legalActions(state)), [state]);
 
   // 直前の行動の動き: 場に出たフォロワー・攻撃したフォロワーと攻撃されたもの
   const { motions, leaderHit } = useMemo(() => {
@@ -131,6 +122,7 @@ export function Replay({ record, entrants, onClose }: Props) {
             />
           );
         })}
+        <BoardSlots count={pl.board.length} />
       </div>
     );
     const leader = (

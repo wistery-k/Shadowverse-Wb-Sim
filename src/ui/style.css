@@ -16,6 +16,9 @@
   --bishop: #8aa2b8;
   --nemesis: #3aa6b8;
   --neutral: #8c8c8c;
+  /* 攻撃の可否（リーダーにも: 緑 / フォロワーにだけ: 黄） */
+  --attack-leader: #23a455;
+  --attack-follower: #f0c419;
   /* エクストラPP（明るい橙） */
   --expp: #ff8c1a;
   /* 勝率表の発散配色（青 = 勝ち越し、赤 = 負け越し、灰 = 五分） */
@@ -158,12 +161,17 @@ button.end-turn {
   font-weight: bold;
   cursor: pointer;
 }
+/* 場は上限の5枠を中央に並べ、空きは点線の枠にする */
 .board {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  justify-content: center;
+  gap: 8px;
   min-height: 126px;
   align-items: flex-start;
+}
+.board .board-slot {
+  width: 90px;
 }
 /* 手札は上限の9枚まで1行に収める（足りない幅ではカードが縮む） */
 .hand {
@@ -274,12 +282,48 @@ button.end-turn {
 .card.ready {
   box-shadow: 0 0 0 2px var(--ready);
 }
-/* 攻撃できるフォロワー: フォロワーにだけなら黄、リーダーにもなら緑 */
-.card.can-attack-follower {
-  box-shadow: 0 0 10px 3px color-mix(in oklab, #e8c22e 85%, transparent);
+/* 手番のフォロワーの攻撃の可否: リーダーにもなら緑、フォロワーにだけなら黄、できなければ灰。
+   カード上端の帯（文字）と外側の光で示す */
+.card.attack-leader,
+.card.attack-follower,
+.card.attack-none {
+  grid-template-rows: auto auto 1fr auto;
+  padding-top: 0;
 }
-.card.can-attack-leader {
-  box-shadow: 0 0 10px 3px color-mix(in oklab, #3fbf6a 85%, transparent);
+.attack-tag {
+  margin: 0 -4px;
+  padding: 1px 2px;
+  font-size: 10px;
+  font-weight: bold;
+  text-align: center;
+  line-height: 1.3;
+}
+.attack-tag.leader {
+  background: var(--attack-leader);
+  color: #fff;
+}
+.attack-tag.follower {
+  background: var(--attack-follower);
+  color: #1d1d1f;
+}
+.attack-tag.none {
+  background: var(--line);
+  color: var(--muted);
+}
+.card.attack-leader {
+  border-color: var(--attack-leader);
+  box-shadow: 0 0 10px 3px color-mix(in oklab, var(--attack-leader) 80%, transparent);
+}
+.card.attack-follower {
+  border-color: var(--attack-follower);
+  box-shadow: 0 0 10px 3px color-mix(in oklab, var(--attack-follower) 80%, transparent);
+}
+.card.attack-none .stats .atk {
+  color: var(--muted);
+}
+/* 攻撃の可否の帯があるときは、守護の盾形を帯の下に出す */
+.card.ward[class*="attack-"]::before {
+  top: 15px;
 }
 /* 守護: 盾の縁取り（二重線）と上部の小さな盾形 */
 .card.ward {

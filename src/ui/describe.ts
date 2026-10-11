@@ -32,6 +32,22 @@ export const TYPE_NAMES: Record<Card["type"], string> = {
 
 export const classLabel = (card: Card) => CLASS_NAMES[card.class];
 
+/** 攻撃の可否（leader: リーダーにも攻撃できる / follower: フォロワーにだけ攻撃できる / none: 攻撃できない） */
+export type AttackStatus = "leader" | "follower" | "none";
+
+/** 手番のプレイヤーの場のフォロワーごとの攻撃の可否。行動を選べる局面でなければ空 */
+export function attackStatuses(state: GameState, legal: readonly Action[]): Map<number, AttackStatus> {
+  const m = new Map<number, AttackStatus>();
+  if (state.phase !== "main" || state.pending) return m;
+  for (const c of state.players[state.active].board) if (c.kind === "follower") m.set(c.iid, "none");
+  for (const a of legal) {
+    if (a.type !== "attack") continue;
+    if (a.target === "leader") m.set(a.attacker, "leader");
+    else if (m.get(a.attacker) !== "leader") m.set(a.attacker, "follower");
+  }
+  return m;
+}
+
 /** 各プレイヤーのクラス（試合開始時の局面の山札・手札にあるニュートラル以外のカードから決める） */
 export function leaderClasses(state: GameState): [ClassId, ClassId] {
   const classOf = (p: PlayerIndex): ClassId => {
