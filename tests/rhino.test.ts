@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowAction, createRhinoAgent, mulliganSwap, nextTurnRhinoBound, rhinoAgent } from "../src/ai/rhino";
+import { allowAction, createRhinoAgent, mulliganSwap, rhinoAgent } from "../src/ai/rhino";
 import { searchAgent } from "../src/ai/search";
 import { searchRhinoLethal } from "../src/ai/rhinoLethal";
 import { ALL_CARDS } from "../src/cards";
@@ -122,17 +122,6 @@ describe("リノセウス用ルール: 禁じる手", () => {
     expect(allowAction(s, { type: "play", iid: rhino.iid }, 0)).toBe(false);
     s.players[0].hand.push(newHandCard(s, id("殺戮のリノセウス")));
     expect(allowAction(s, { type: "play", iid: rhino.iid }, 0)).toBe(true);
-  });
-
-  it("2枚以上でも、次のターンにリノセウスで倒せるかもしれない体力なら温存する", () => {
-    const s = mainPhase();
-    s.players[0].pp = s.players[0].maxPp = 5;
-    const rhino = newHandCard(s, id("殺戮のリノセウス"));
-    s.players[0].hand = [rhino, newHandCard(s, id("殺戮のリノセウス"))];
-    s.players[1].leaderHp = 20;
-    expect(allowAction(s, { type: "play", iid: rhino.iid }, 0)).toBe(true);
-    s.players[1].leaderHp = nextTurnRhinoBound(s, 0);
-    expect(allowAction(s, { type: "play", iid: rhino.iid }, 0)).toBe(false);
   });
 
   it("エクストラPP: 2つ目は使わない。1つ目は杖を置けるようになるときに使う", () => {

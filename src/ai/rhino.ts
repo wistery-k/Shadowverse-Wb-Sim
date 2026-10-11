@@ -16,7 +16,6 @@ import {
   EXTRA_PP_REFRESH_TURN,
   hasKeyword,
   legalActions,
-  MAX_PP,
   rngFrom,
   SUPER_EVOLVE_TURN,
   tryApplyAction,
@@ -140,9 +139,8 @@ export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolea
     case "play": {
       const name = playedName(state, a, p);
       if (name === MYSTERY) return false; // リーサルまで温存
-      // 手札に1枚しかないリノセウスはリーサルまで温存（2枚以上なら1枚は残る）。
-      // 2枚以上でも、次のターンにリノセウスで倒せるかもしれない体力なら温存する（届かないなら1枚を出して削る。docs/ai-notes.md）
-      if (name === RHINO && (handCount(state, p, RHINO) < 2 || state.players[p === 0 ? 1 : 0].leaderHp <= nextTurnRhinoBound(state, p))) return false;
+      // 手札に1枚しかないリノセウスはリーサルまで温存（2枚以上なら1枚は残る）
+      if (name === RHINO && handCount(state, p, RHINO) < 2) return false;
       if (forcesKeeperChoice(state, a, p)) return false;
       // 杖の2枚目以降と燐光の岩は、相手の盤面を全処理できた（フォロワーがいない）ときだけ
       if (name === ROD) return boardCount(state, p, ROD) === 0 || !oppHasFollowers(state, p);
@@ -163,18 +161,6 @@ export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolea
     default:
       return true;
   }
-}
-
-/**
- * 次の自分のターンにリノセウスで与えられるダメージの上限の見積もり。PP は最大値 +1、コンボ 0、進化は未使用とし、
- * 場のフォロワーは相手に処理されるかもしれないので数えない
- */
-export function nextTurnRhinoBound(s: GameState, p: PlayerIndex): number {
-  const pl = s.players[p];
-  const pp = Math.min(pl.maxPp + 1, MAX_PP);
-  const next = { ...pl, pp, maxPp: pp, combo: 0, evolvedThisTurn: false, turnCount: pl.turnCount + 1, board: pl.board.filter((c) => c.kind !== "follower") };
-  const players: GameState["players"] = p === 0 ? [next, s.players[1]] : [s.players[0], next];
-  return rhinoLethalBound({ ...s, players }, p);
 }
 
 /** マリガンで入れ替えるカードの iid */
