@@ -114,14 +114,14 @@ describe("リノセウス用ルール: 禁じる手", () => {
     expect(allowAction(s, { type: "play", iid: mystery.iid }, 0)).toBe(false);
   });
 
-  it("手札に1枚しかないリノセウスはプレイしない（2枚以上ならよい）", () => {
+  it("リノセウスはリーサル以外ではプレイしない（2枚以上でも）", () => {
     const s = mainPhase();
     s.players[0].pp = s.players[0].maxPp = 5;
     const rhino = newHandCard(s, id("殺戮のリノセウス"));
     s.players[0].hand = [rhino];
     expect(allowAction(s, { type: "play", iid: rhino.iid }, 0)).toBe(false);
     s.players[0].hand.push(newHandCard(s, id("殺戮のリノセウス")));
-    expect(allowAction(s, { type: "play", iid: rhino.iid }, 0)).toBe(true);
+    expect(allowAction(s, { type: "play", iid: rhino.iid }, 0)).toBe(false);
   });
 
   it("エクストラPP: 2つ目は使わない。1つ目は杖を置けるようになるときに使う", () => {

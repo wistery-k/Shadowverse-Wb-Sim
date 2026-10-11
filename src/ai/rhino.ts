@@ -57,10 +57,6 @@ function boardCount(state: GameState, p: PlayerIndex, name: string): number {
   return state.players[p].board.filter((c) => nameOf(c.cardId) === name).length;
 }
 
-function handCount(state: GameState, p: PlayerIndex, name: string): number {
-  return state.players[p].hand.filter((h) => nameOf(h.cardId) === name).length;
-}
-
 function oppHasFollowers(state: GameState, p: PlayerIndex): boolean {
   return state.players[p === 0 ? 1 : 0].board.some((c) => c.kind === "follower");
 }
@@ -139,8 +135,8 @@ export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolea
     case "play": {
       const name = playedName(state, a, p);
       if (name === MYSTERY) return false; // リーサルまで温存
-      // 手札に1枚しかないリノセウスはリーサルまで温存（2枚以上なら1枚は残る）
-      if (name === RHINO && handCount(state, p, RHINO) < 2) return false;
+      // リノセウスは何枚あってもリーサルまで温存（人間の対戦記録では 2 枚でも温存して 1 ターンでまとめて出していた）
+      if (name === RHINO) return false;
       if (forcesKeeperChoice(state, a, p)) return false;
       // 杖の2枚目以降と燐光の岩は、相手の盤面を全処理できた（フォロワーがいない）ときだけ
       if (name === ROD) return boardCount(state, p, ROD) === 0 || !oppHasFollowers(state, p);
