@@ -3,7 +3,7 @@
 // リノセウスエルフ（リノセウス用 AI）vs 他の 6 デッキ（探索 AI。ランプドラゴンは除く）を、両方の席で同じシードで打つ。
 // 設定を変えても同じシードの試合になるので、変更前後を同じ試合数で比べられる。
 // 例: npm run rhino-compare -- --games 50 --opts '{"nextLethal":10}'
-//     （--opts はリノセウス用 AI の探索の設定 SearchOptions の一部。"weights" にオブジェクトを渡すと SEARCH_WEIGHTS のその項目だけを変える。
+//     （--opts はリノセウス用 AI の探索の設定 SearchOptions の一部。"weights" にオブジェクトを渡すと SEARCH_WEIGHTS のその項目だけを変える。"potential" は次のターンのリノセウスの打点の不足分を評価に足す係数。
 //      試合は CPU のコア数だけ並列に行う）
 // 自然の妖精姫・アリアを出した試合の数と、最初に出した自分のターン（平均）も出す。
 // --agent で、リノセウスエルフ側の AI を registry のキーで選べる（既定は rhino。例: search、rhino-lethal。--opts は rhino のときだけ使う）。
@@ -15,10 +15,10 @@
 import { SEARCH_WEIGHTS } from "../src/ai/evaluate";
 import { readFileSync, writeFileSync } from "node:fs";
 import { exactLethalCounts } from "../src/ai/exactLethal";
-import { createRhinoAgent } from "../src/ai/rhino";
+import { createRhinoAgent, type RhinoOptions } from "../src/ai/rhino";
 import { agentOf } from "../src/ai/registry";
 import { applyAction, cardOf, createGame } from "../src/engine";
-import { searchAgent, type SearchOptions } from "../src/ai/search";
+import { searchAgent } from "../src/ai/search";
 import { playMatch } from "../src/sim/match";
 import { rhinoMatch, rhinoOpponents } from "../src/sim/rhinoCompare";
 import { parallelMap } from "./parallel";
@@ -27,7 +27,7 @@ const ARIA = "自然の妖精姫・アリア";
 
 export async function main(argv: string[]): Promise<number> {
   let games = 50;
-  let opts: Partial<SearchOptions> = {};
+  let opts: RhinoOptions = {};
   let out: string | null = null;
   let agentKey = "rhino";
   let matches: string | null = null;
@@ -42,7 +42,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (key === "--opts") {
       const raw = JSON.parse(v) as Record<string, unknown>;
       if (typeof raw.weights === "object" && raw.weights !== null) raw.weights = { ...SEARCH_WEIGHTS, ...raw.weights };
-      opts = raw as Partial<SearchOptions>;
+      opts = raw as RhinoOptions;
     }
     else throw new Error(`不明な引数: ${key}`);
   }

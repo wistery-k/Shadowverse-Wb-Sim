@@ -16,6 +16,7 @@ import {
   EXTRA_PP_REFRESH_TURN,
   hasKeyword,
   legalActions,
+  MAX_PP,
   rngFrom,
   SUPER_EVOLVE_TURN,
   tryApplyAction,
@@ -162,6 +163,31 @@ export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolea
       return true;
   }
 }
+
+/**
+ * 次の自分のターンにリノセウスで与えられるダメージの上限の見積もり（足切りの式 rhinoLethalBound を使い、探索はしない）。
+ * PP は最大値 +1、コンボ 0、進化は未使用とし、場のフォロワーは相手に処理されるかもしれないので数えない。
+ * 手札にリノセウスが無ければ 0、1 枚で戻す手段（場の杖・手札の虫の知らせかベビーカーバンクル）が無ければ 1 回の式
+ */
+export function nextTurnRhinoBound(s: GameState, p: PlayerIndex): number {
+  const pl = s.players[p];
+  const rhinos = pl.hand.filter((h) => nameOf(h.cardId) === RHINO).length;
+  if (rhinos === 0) return 0;
+  const pp = Math.min(pl.maxPp + 1, MAX_PP);
+  const next = { ...pl, pp, maxPp: pp, combo: 0, evolvedThisTurn: false, turnCount: pl.turnCount + 1, board: pl.board.filter((c) => c.kind !== "follower") };
+  const players: GameState["players"] = p === 0 ? [next, s.players[1]] : [s.players[0], next];
+  const ns = { ...s, players };
+  const bounce = boardCount(ns, p, ROD) > 0 || pl.hand.some((h) => [BUGS, CARBUNCLE].includes(nameOf(h.cardId)));
+  return rhinos === 1 && !bounce ? rhinoOneDamageBound(ns, p) : rhinoLethalBound(ns, p);
+}
+
+/** 評価に足す項: 次のターンのリノセウスの打点の上限が相手の体力に足りない分 × potential（足りていれば 0） */
+function rhinoPotentialEval(potential: number) {
+  return (s: GameState, p: PlayerIndex) => potential * Math.min(0, nextTurnRhinoBound(s, p) - s.players[p === 0 ? 1 : 0].leaderHp);
+}
+
+/** リノセウス用 AI の設定。potential は rhinoPotentialEval の係数（0 なら足さない） */
+export type RhinoOptions = Partial<SearchOptions> & { potential?: number };
 
 /** マリガンで入れ替えるカードの iid */
 export function mulliganSwap(state: GameState, p: PlayerIndex): number[] {
@@ -555,8 +581,16 @@ export interface RhinoAgentMode {
  * 深さ 8・幅 32 はリノセウスエルフで先に採用し、後に汎用の探索 AI の既定にした
  * （seed 2510273090 の 4 ターン目・seed 954874822 の 7 ターン目。docs/ai-notes.md）
  */
-export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}, mode: RhinoAgentMode = { rules: true }): Agent {
-  const search = createSearchAgent({ allow: allowAction, lethal: false, perFirst: RHINO_PER_FIRST, nextLethalSearch: (s, q) => searchLethalForRhino(s, q) !== null, ...searchOptions });
+export function createRhinoAgent(options: RhinoOptions = {}, mode: RhinoAgentMode = { rules: true }): Agent {
+  const { potential = 0, ...searchOptions } = options;
+  const search = createSearchAgent({
+    allow: allowAction,
+    lethal: false,
+    perFirst: RHINO_PER_FIRST,
+    nextLethalSearch: (s, q) => searchLethalForRhino(s, q) !== null,
+    ...(potential !== 0 ? { extraEval: rhinoPotentialEval(potential) } : {}),
+    ...searchOptions,
+  });
   const plainSearch = createSearchAgent();
   return {
     name: "rhino",
