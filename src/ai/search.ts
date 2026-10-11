@@ -103,6 +103,8 @@ export interface SearchOptions {
    */
   nextLethal: number;
   nextLethalSearch?: (state: GameState, p: PlayerIndex) => boolean;
+  /** 評価関数に足す項（デッキ専用の AI 用。ターン末の採点と、相手のターンを読んだ後の評価の両方に足す） */
+  extraEval?: (state: GameState, p: PlayerIndex) => number;
   /**
    * ビームに、最初の手ごとに少なくともこの数の局面を残す（幅を超えてもよい。0 なら幅だけで切る）。
    * 点数の高い最初の手の局面でビームが埋まると、他の最初の手の並びが途中で切れ、短い並びのまま相手のターンまで読まれる。
@@ -219,8 +221,10 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
 
   /** ターンを終える局面（合流する相打ちを打った後） */
   const settle = (state: GameState) => (opts.settleTrades ? settleConvergingTrades(state, p) : state);
-  const endScore = (state: GameState) => evaluateWith(resolveTurnEnd(settle(state)), p, w);
-  const score = opts.scoreTurnEnd === "all" ? endScore : (state: GameState) => evaluateWith(settle(state), p, w);
+  const extra = opts.extraEval;
+  const evalState = extra ? (state: GameState) => evaluateWith(state, p, w) + extra(state, p) : (state: GameState) => evaluateWith(state, p, w);
+  const endScore = (state: GameState) => evalState(resolveTurnEnd(settle(state)));
+  const score = opts.scoreTurnEnd === "all" ? endScore : (state: GameState) => evalState(settle(state));
   const allowed = (state: GameState, a: Action) => !opts.allow || a.type === "endTurn" || opts.allow(state, a, p);
   const expand = (state: GameState) => (opts.sameHandOnce ? distinctPlays(state, legalActions(state)) : legalActions(state));
   /** 手 a を打った局面（と、そこまでの並び）。chain なら、続く自分の選択とエクストラPP の後の手まで進めた局面すべて */
@@ -307,7 +311,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   for (const best of ranked) {
     for (const node of candidatesOf(best)) {
       const after = node.state.phase === "ended" ? node.state : simulateOpponentTurn(settle(node.state), p, rng);
-      let value = evaluateWith(after, p, w);
+      let value = evalState(after);
       if (opts.nextLethal !== 0 && after.phase !== "ended" && after.players[p === 0 ? 1 : 0].leaderHp <= w.lethalRange && hasNextLethal(after, p)) value += opts.nextLethal;
       const k = keyOf(node.first);
       const cur = result.get(k);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowAction, createRhinoAgent, mulliganSwap, rhinoAgent } from "../src/ai/rhino";
+import { allowAction, createRhinoAgent, mulliganSwap, nextTurnRhinoBound, rhinoAgent } from "../src/ai/rhino";
 import { searchAgent } from "../src/ai/search";
 import { searchRhinoLethal } from "../src/ai/rhinoLethal";
 import { ALL_CARDS } from "../src/cards";
@@ -112,6 +112,18 @@ describe("リノセウス用ルール: 禁じる手", () => {
     expect(allowAction(s, { type: "play", iid: rod.iid }, 0)).toBe(true);
     expect(allowAction(s, { type: "play", iid: rock.iid }, 0)).toBe(true);
     expect(allowAction(s, { type: "play", iid: mystery.iid }, 0)).toBe(false);
+  });
+
+  it("次のターンのリノセウスの打点の見積もりは、手札にリノセウスが無ければ 0、増えれば上がる", () => {
+    const s = mainPhase();
+    s.players[0].pp = s.players[0].maxPp = 7;
+    s.players[0].hand = [];
+    expect(nextTurnRhinoBound(s, 0)).toBe(0);
+    s.players[0].hand.push(newHandCard(s, id("殺戮のリノセウス")));
+    const one = nextTurnRhinoBound(s, 0);
+    expect(one).toBeGreaterThan(0);
+    s.players[0].hand.push(newHandCard(s, id("殺戮のリノセウス")), newHandCard(s, id("森の神秘")));
+    expect(nextTurnRhinoBound(s, 0)).toBeGreaterThan(one);
   });
 
   it("手札に1枚しかないリノセウスはプレイしない（2枚以上ならよい）", () => {
