@@ -14,12 +14,14 @@ import {
   opponent,
   rngFrom,
   SEP,
+  superEvolveTurnReached,
   type Action,
   type GameState,
   type PlayerIndex,
 } from "../engine";
 import { CardDetail, CardView } from "./CardView";
-import { crestName, describeAction, modeLabels } from "./describe";
+import { CLASS_NAMES, type ClassId } from "../cards";
+import { crestName, describeAction, leaderClasses, modeLabels } from "./describe";
 
 const AI_DELAY_MS = 700;
 const AUTO_DELAY_MS = 400;
@@ -73,6 +75,7 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
     return () => worker.current?.terminate();
   }, []);
 
+  const classes = useMemo(() => leaderClasses(initial), [initial]);
   const legal = useMemo(() => legalActions(state), [state]);
   const acting = actingPlayer(state);
   const myTurn = state.phase !== "ended" && acting === HUMAN;
@@ -217,14 +220,14 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
   return (
     <div class="game">
       <section class="side opponent">
-        <PlayerInfo label="相手" state={state} p={AI} />
+        <PlayerInfo label="相手" state={state} p={AI} cls={classes[AI]} />
         <div class="hand-backs">
           {opp.hand.map((h) => (
             <span class="card-back" key={h.iid} />
           ))}
         </div>
         <div
-          class={`leader ${attackTargets.has(OPP_LEADER) ? "targetable" : ""} ${candidates.has(OPP_LEADER) ? "targetable" : ""} ${picks.includes(OPP_LEADER) ? "selected" : ""}`}
+          class={`leader class-${classes[AI]} ${attackTargets.has(OPP_LEADER) ? "targetable" : ""} ${candidates.has(OPP_LEADER) ? "targetable" : ""} ${picks.includes(OPP_LEADER) ? "selected" : ""}`}
           onClick={() => clickEntity(OPP_LEADER)}
         >
           相手リーダー {opp.leaderHp}/{opp.leaderMaxHp}
@@ -258,12 +261,12 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
           ))}
         </div>
         <div
-          class={`leader ${candidates.has(MY_LEADER) ? "targetable" : ""} ${picks.includes(MY_LEADER) ? "selected" : ""}`}
+          class={`leader class-${classes[HUMAN]} ${candidates.has(MY_LEADER) ? "targetable" : ""} ${picks.includes(MY_LEADER) ? "selected" : ""}`}
           onClick={() => clickEntity(MY_LEADER)}
         >
           あなたのリーダー {me.leaderHp}/{me.leaderMaxHp}
         </div>
-        <PlayerInfo label="あなた" state={state} p={HUMAN} />
+        <PlayerInfo label="あなた" state={state} p={HUMAN} cls={classes[HUMAN]} extraPpUsable={!!extraPp && myTurn} />
         <div class="hand">
           {me.hand.map((h) => (
             <CardView
@@ -344,7 +347,7 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
               ))}
             {selectedActions.some((a) => a.type === "attack") && <span class="muted">攻撃先をクリック</span>}
             {extraPp && (
-              <button type="button" class="extra-pp" onClick={() => act(extraPp)}>
+              <button type="button" class="extra-pp usable" onClick={() => act(extraPp)}>
                 エクストラPP（+1）
               </button>
             )}
@@ -407,11 +410,12 @@ function actionLabel(state: GameState, a: Action): string {
   }
 }
 
-/** EP（黄）・SEP（紫）を丸で表示する。使ったぶんは中抜き */
-function Points({ kind, left, max }: { kind: "ep" | "sep"; left: number; max: number }) {
+/** EP（黄）・SEP（紫）を丸で表示する。使ったぶんは中抜き。まだ使えるターンでなければ薄く表示する */
+function Points({ kind, left, max, locked = false }: { kind: "ep" | "sep"; left: number; max: number; locked?: boolean }) {
   const label = kind === "ep" ? "EP" : "SEP";
+  const note = locked ? (kind === "sep" ? "（超進化可能なターンになるまで使えません）" : "（進化可能なターンになるまで使えません）") : "";
   return (
-    <span class="points" title={`${label} ${left}/${max}`}>
+    <span class={`points ${locked ? "locked" : ""}`} title={`${label} ${left}/${max}${note}`}>
       {label}
       {Array.from({ length: Math.max(max, left) }, (_, i) => (
         <span key={i} class={`point ${kind} ${i < left ? "" : "used"}`} />
@@ -431,18 +435,33 @@ export function EmptySlots({ count }: { count: number }) {
   );
 }
 
-export function PlayerInfo({ label, state, p }: { label: string; state: GameState; p: PlayerIndex }) {
+export function PlayerInfo({
+  label,
+  state,
+  p,
+  cls,
+  extraPpUsable = false,
+}: {
+  label: string;
+  state: GameState;
+  p: PlayerIndex;
+  /** プレイヤーのクラス（表示する場合） */
+  cls?: ClassId;
+  /** エクストラPPを今使えるか（強調する） */
+  extraPpUsable?: boolean;
+}) {
   const pl = state.players[p];
   const active = state.active === p && state.phase === "main";
   return (
     <div class={`player-info ${active ? "active" : ""}`}>
       <strong>{label}</strong>
+      {cls && <span class={`class-tag class-${cls}`}>{CLASS_NAMES[cls]}</span>}
       <span>
         PP {pl.pp}/{pl.maxPp}
       </span>
-      {pl.extraPpAvailable && <span class="badge">エクストラPP</span>}
+      {pl.extraPpAvailable && <span class={`expp-badge ${extraPpUsable ? "usable" : ""}`}>エクストラPP</span>}
       <Points kind="ep" left={pl.ep} max={EP} />
-      <Points kind="sep" left={pl.sep} max={SEP} />
+      <Points kind="sep" left={pl.sep} max={SEP} locked={!superEvolveTurnReached(state, p)} />
       <span>手札 {pl.hand.length}</span>
       <span>山札 {pl.deck.length}</span>
       <span>墓場 {pl.graveyard}</span>

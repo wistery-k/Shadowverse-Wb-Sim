@@ -1,6 +1,6 @@
 // UI 表示用の文言
 
-import { CLASS_NAMES, type Card } from "../cards";
+import { CLASS_NAMES, type Card, type ClassId } from "../cards";
 import {
   cardOf,
   crestOf,
@@ -31,6 +31,19 @@ export const TYPE_NAMES: Record<Card["type"], string> = {
 };
 
 export const classLabel = (card: Card) => CLASS_NAMES[card.class];
+
+/** 各プレイヤーのクラス（試合開始時の局面の山札・手札にあるニュートラル以外のカードから決める） */
+export function leaderClasses(state: GameState): [ClassId, ClassId] {
+  const classOf = (p: PlayerIndex): ClassId => {
+    const pl = state.players[p];
+    for (const c of [...pl.deck, ...pl.hand, ...pl.board]) {
+      const cls = cardOf(c.cardId).class;
+      if (cls !== "neutral") return cls;
+    }
+    return "neutral";
+  };
+  return [classOf(0), classOf(1)];
+}
 
 /** 文言の視点: 人間のプレイヤー（「あなた」「相手」と呼ぶ）か、各プレイヤーの名前 */
 export type Viewer = PlayerIndex | readonly [string, string];
