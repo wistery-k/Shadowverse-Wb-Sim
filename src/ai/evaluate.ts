@@ -79,7 +79,8 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
 /**
  * 融合で作るカードの「手札に持っておく価値」。融合した素材の枚数 × 手札 1 枚の価値。
  * 手札を枚数だけで数えると、融合は手札が減る損に見え、AFネメシスがコアを手札に余らせたまま
- * デストロイアーティファクトを作らなかった（ロイヤル戦 7%。docs/ai-notes.md）
+ * デストロイアーティファクトを作らなかった（ロイヤル戦 7%。docs/ai-notes.md）。
+ * Ω は α＋β＋γ の合計（8 枚分）。それより低いと、Ω を作ると評価が下がる
  */
 const FUSION_HOLD: Readonly<Record<string, number>> = Object.fromEntries(
   (
@@ -89,7 +90,7 @@ const FUSION_HOLD: Readonly<Record<string, number>> = Object.fromEntries(
       ["デストロイアーティファクトα", 2],
       ["デストロイアーティファクトβ", 3],
       ["デストロイアーティファクトγ", 3],
-      ["イクシードアーティファクトΩ", 5],
+      ["イクシードアーティファクトΩ", 8],
     ] as const
   ).map(([name, cards]) => [id(name), cards * DEFAULT_WEIGHTS.myHand]),
 );
@@ -103,8 +104,9 @@ const FUSION_SET: ReadonlySet<string> = new Set(["デストロイアーティフ
  * 重み 0/1/2/4/6/8/12/16 で比べて 8 が最も勝った（docs/ai-notes.md）。
  * SEP が 2.5 だと +3/+3（5.4）より安く、超進化しなくても倒せる相手にもジェノを超進化した（docs/ai-notes.md）。
  * クレストは 1.5 だとアリアのクレスト（妖精に疾走）を安く見て、出すべき局面でアリアを出さなかったため 3（ユーザー判断。docs/ai-notes.md）
+ * fusionSet（手札の α・β・γ の種類 1 つにつき）は 0/1.2/2.4/3.6/4.8 で比べて 3.6（AFネメシスの勝率 38.7% → 46.8%。docs/ai-notes.md）
  */
-export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, crest: 3, hold: FUSION_HOLD };
+export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, crest: 3, fusionSet: 3.6, hold: FUSION_HOLD };
 
 const KEYWORD_VALUE: Partial<Record<string, number>> = {
   ward: 1,
