@@ -3,7 +3,7 @@
 // リノセウスエルフ（リノセウス用 AI）vs 他の 6 デッキ（探索 AI。ランプドラゴンは除く）を、両方の席で同じシードで打つ。
 // 設定を変えても同じシードの試合になるので、変更前後を同じ試合数で比べられる。
 // 例: npm run rhino-compare -- --games 50 --opts '{"nextLethal":10}'
-//     （--opts はリノセウス用 AI の探索の設定 SearchOptions の一部。"weights" にオブジェクトを渡すと SEARCH_WEIGHTS のその項目だけを変える。"potential" は次のターンのリノセウスの打点の不足分を評価に足す係数。"holds" は温存のルールを外す（例: {"mystery":false}）。
+//     （--opts はリノセウス用 AI の探索の設定 SearchOptions の一部。"weights" にオブジェクトを渡すと SEARCH_WEIGHTS のその項目だけを変える。"potential" は次のターンのリノセウスの打点の不足分を評価に足す係数。"holds" は温存のルールを外す（例: {"mystery":false}）。"beamPp" はビームで残す局面を選ぶときに残り PP 1 につき足す点。
 //      試合は CPU のコア数だけ並列に行う）
 // 自然の妖精姫・アリアを出した試合の数と、最初に出した自分のターン（平均）も出す。
 // --agent で、リノセウスエルフ側の AI を registry のキーで選べる（既定は rhino。例: search、rhino-lethal。--opts は rhino のときだけ使う）。
