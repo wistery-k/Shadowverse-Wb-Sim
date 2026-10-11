@@ -37,7 +37,7 @@ export interface EvalWeights {
   lethalAttack: number;
   /**
    * 手札にあるデストロイアーティファクト α・β・γ の種類 1 つあたり（同じ種類の 2 枚目以降は数えない）。
-   * 3 種類そろうとイクシードアーティファクトΩを作れる。Ω が手札か場にあれば 3 種類と数える（Ω を作って出すと評価が下がらないように）。0 なら見ない
+   * 3 種類そろうとイクシードアーティファクトΩを作れる。0 なら見ない
    */
   fusionSet: number;
   /**
@@ -95,7 +95,6 @@ const FUSION_HOLD: Readonly<Record<string, number>> = Object.fromEntries(
   ).map(([name, cards]) => [id(name), cards * DEFAULT_WEIGHTS.myHand]),
 );
 
-const OMEGA = id("イクシードアーティファクトΩ");
 /** Ω の素材（fusionSet で種類を数える） */
 const FUSION_SET: ReadonlySet<string> = new Set(["デストロイアーティファクトα", "デストロイアーティファクトβ", "デストロイアーティファクトγ"].map(id));
 
@@ -147,8 +146,7 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
   if (w.fusionSet !== 0) {
     const kinds = new Set<string>();
     for (const h of me.hand) if (FUSION_SET.has(h.cardId)) kinds.add(h.cardId);
-    const omega = me.hand.some((h) => h.cardId === OMEGA) || me.board.some((c) => c.cardId === OMEGA);
-    v += (omega ? FUSION_SET.size : kinds.size) * w.fusionSet;
+    v += kinds.size * w.fusionSet;
   }
   v += me.ep * w.ep + me.sep * w.sep;
   if (me.extraPpAvailable) v += w.extraPp;
