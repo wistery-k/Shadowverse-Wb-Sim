@@ -126,8 +126,23 @@ function forcesKeeperChoice(state: GameState, a: Action, p: PlayerIndex): boolea
   return legalActions(after).every((c) => c.type === "choose" && c.targets.some((t) => keepers.has(t)));
 }
 
+/** 温存のルール（リーサルまで出さない・使わない）。比較実験で 1 つずつ外せるようにする */
+export interface RhinoHolds {
+  /** 森の神秘 */
+  mystery: boolean;
+  /** 手札に 1 枚しかないリノセウス */
+  rhino: boolean;
+  /** 2 つ目のエクストラPP */
+  extraPp: boolean;
+}
+const ALL_HOLDS: RhinoHolds = { mystery: true, rhino: true, extraPp: true };
+
 /** ルールで打ってよい手か（リーサル以外の場面に使う） */
 export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolean {
+  return allowActionWith(ALL_HOLDS, state, a, p);
+}
+
+function allowActionWith(holds: RhinoHolds, state: GameState, a: Action, p: PlayerIndex): boolean {
   const pl = state.players[p];
   switch (a.type) {
     case "choose": {
@@ -138,9 +153,9 @@ export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolea
     }
     case "play": {
       const name = playedName(state, a, p);
-      if (name === MYSTERY) return false; // リーサルまで温存
+      if (holds.mystery && name === MYSTERY) return false; // リーサルまで温存
       // 手札に1枚しかないリノセウスはリーサルまで温存（2枚以上なら1枚は残る）
-      if (name === RHINO && handCount(state, p, RHINO) < 2) return false;
+      if (holds.rhino && name === RHINO && handCount(state, p, RHINO) < 2) return false;
       if (forcesKeeperChoice(state, a, p)) return false;
       // 燐光の岩は、相手の盤面を全処理できた（フォロワーがいない）ときだけ（杖は何枚目でもよい。ユーザーの判断）
       if (name === ROCK) return !oppHasFollowers(state, p);
@@ -155,7 +170,7 @@ export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolea
     }
     case "extraPp":
       // 2つ目はリーサルまで温存。1つ目は使う理由があるときだけ
-      if (pl.turnCount >= EXTRA_PP_REFRESH_TURN) return false;
+      if (holds.extraPp && pl.turnCount >= EXTRA_PP_REFRESH_TURN) return false;
       return extraPpEnablesKeyPlay(state, p);
     default:
       return true;
@@ -190,7 +205,7 @@ function rhinoPotentialEval(potential: number) {
 const RHINO_POTENTIAL = 1;
 
 /** リノセウス用 AI の設定。potential は rhinoPotentialEval の係数（0 なら足さない） */
-export type RhinoOptions = Partial<SearchOptions> & { potential?: number };
+export type RhinoOptions = Partial<SearchOptions> & { potential?: number; holds?: Partial<RhinoHolds> };
 
 /** マリガンで入れ替えるカードの iid */
 export function mulliganSwap(state: GameState, p: PlayerIndex): number[] {
@@ -585,9 +600,10 @@ export interface RhinoAgentMode {
  * （seed 2510273090 の 4 ターン目・seed 954874822 の 7 ターン目。docs/ai-notes.md）
  */
 export function createRhinoAgent(options: RhinoOptions = {}, mode: RhinoAgentMode = { rules: true }): Agent {
-  const { potential = RHINO_POTENTIAL, ...searchOptions } = options;
+  const { potential = RHINO_POTENTIAL, holds, ...searchOptions } = options;
+  const allHolds = { ...ALL_HOLDS, ...holds };
   const search = createSearchAgent({
-    allow: allowAction,
+    allow: (s, a, q) => allowActionWith(allHolds, s, a, q),
     lethal: false,
     perFirst: RHINO_PER_FIRST,
     nextLethalSearch: (s, q) => searchLethalForRhino(s, q) !== null,
