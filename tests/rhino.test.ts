@@ -97,7 +97,7 @@ describe("リノセウス用ルール: 禁じる手", () => {
     expect(rhinoAgent.chooseAction(after, legalActions(after), rngFrom({ rng: 1 }))).toEqual({ type: "choose", targets: [fairy.iid] });
   });
 
-  it("2枚目の杖と燐光の岩は、相手の場にフォロワーがいないときだけ置く。森の神秘は使わない", () => {
+  it("燐光の岩は相手の場にフォロワーがいないときだけ置く。杖は2枚目でも置いてよい。森の神秘は使わない", () => {
     const s = mainPhase();
     const rod = newHandCard(s, id("聖樹の杖"));
     const rock = newHandCard(s, id("燐光の岩"));
@@ -106,7 +106,7 @@ describe("リノセウス用ルール: 禁じる手", () => {
     expect(allowAction(s, { type: "play", iid: rod.iid }, 0)).toBe(true); // 1枚目
     s.players[0].board = [newBoardCard(s, id("聖樹の杖"))];
     s.players[1].board = [newBoardCard(s, id("ナイト"))];
-    expect(allowAction(s, { type: "play", iid: rod.iid }, 0)).toBe(false);
+    expect(allowAction(s, { type: "play", iid: rod.iid }, 0)).toBe(true);
     expect(allowAction(s, { type: "play", iid: rock.iid }, 0)).toBe(false);
     s.players[1].board = [];
     expect(allowAction(s, { type: "play", iid: rod.iid }, 0)).toBe(true);
@@ -136,7 +136,7 @@ describe("リノセウス用ルール: 禁じる手", () => {
     expect(allowAction(s, { type: "play", iid: rhino.iid }, 0)).toBe(true);
   });
 
-  it("エクストラPP: 2つ目は使わない。1つ目は杖を置けるようになるときに使う", () => {
+  it("エクストラPP: 2つ目は使わない。1つ目は杖を置くためには使わない（バックウッドなら使う）", () => {
     const s = mainPhase();
     const pl = s.players[0];
     pl.extraPpAvailable = true;
@@ -144,12 +144,14 @@ describe("リノセウス用ルール: 禁じる手", () => {
     pl.maxPp = 2;
     pl.pp = 2;
     pl.hand = [newHandCard(s, id("聖樹の杖"))];
+    expect(allowAction(s, { type: "extraPp" }, 0)).toBe(false);
+    pl.maxPp = pl.pp = 4;
+    pl.hand = [newHandCard(s, id("薫交の天宮・バックウッド"))];
     expect(allowAction(s, { type: "extraPp" }, 0)).toBe(true);
-    expect(rhinoAgent.chooseAction(s, legalActions(s), rngFrom({ rng: 1 }))).toEqual({ type: "extraPp" });
     pl.hand = [newHandCard(s, id("殺戮のリノセウス"))];
     expect(allowAction(s, { type: "extraPp" }, 0)).toBe(false);
     pl.turnCount = 6;
-    pl.hand = [newHandCard(s, id("聖樹の杖"))];
+    pl.hand = [newHandCard(s, id("薫交の天宮・バックウッド"))];
     expect(allowAction(s, { type: "extraPp" }, 0)).toBe(false);
   });
 });

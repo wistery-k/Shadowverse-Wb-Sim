@@ -91,7 +91,6 @@ function extraPpEnablesKeyPlay(state: GameState, p: PlayerIndex): boolean {
     if (a.type !== "play" || now.has(keyOf(a))) return false;
     const name = playedName(after, a, p);
     const cardId = after.players[p].hand.find((c) => c.iid === a.iid)?.cardId;
-    if (name === ROD) return allowAction(after, a, p);
     if (name === BACKWOOD) return true;
     // プレイすると【コンボ_3】を満たす（プレイしたカード自身も数える）
     return cardId !== undefined && hasComboFanfare(cardId) && combo + 1 >= 3;
@@ -143,8 +142,7 @@ export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolea
       // 手札に1枚しかないリノセウスはリーサルまで温存（2枚以上なら1枚は残る）
       if (name === RHINO && handCount(state, p, RHINO) < 2) return false;
       if (forcesKeeperChoice(state, a, p)) return false;
-      // 杖の2枚目以降と燐光の岩は、相手の盤面を全処理できた（フォロワーがいない）ときだけ
-      if (name === ROD) return boardCount(state, p, ROD) === 0 || !oppHasFollowers(state, p);
+      // 燐光の岩は、相手の盤面を全処理できた（フォロワーがいない）ときだけ（杖は何枚目でもよい。ユーザーの判断）
       if (name === ROCK) return !oppHasFollowers(state, p);
       return true;
     }
@@ -632,14 +630,10 @@ export function createRhinoAgent(options: RhinoOptions = {}, mode: RhinoAgentMod
       const extraPp = legal.find((a) => a.type === "extraPp");
       // 1つ目のエクストラPP が期限のターンに残っていれば、ターン開始時に使う
       if (extraPp && pl.turnCount === FIRST_EXTRA_PP_DEADLINE) return extraPp;
-      // 1枚目の杖は最優先で置く（エクストラPP で置けるなら使う）
+      // 1枚目の杖は最優先で置く（エクストラPP を使ってまでは置かない。ユーザーの判断）
       if (boardCount(real, p, ROD) === 0) {
         const rod = legal.find((a) => playedName(real, a, p) === ROD);
         if (rod) return rod;
-        if (extraPp && pl.hand.some((h) => nameOf(h.cardId) === ROD) && allowAction(real, extraPp, p)) {
-          const after = applyAction(real, extraPp);
-          if (legalActions(after).some((a) => playedName(after, a, p) === ROD)) return extraPp;
-        }
       }
       return search.chooseAction(real, legal, rng);
     },
