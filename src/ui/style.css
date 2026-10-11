@@ -16,6 +16,8 @@
   --bishop: #8aa2b8;
   --nemesis: #3aa6b8;
   --neutral: #8c8c8c;
+  /* エクストラPP（明るい橙） */
+  --expp: #ff8c1a;
   /* 勝率表の発散配色（青 = 勝ち越し、赤 = 負け越し、灰 = 五分） */
   --div-win: #2a78d6;
   --div-lose: #e34948;
@@ -365,6 +367,61 @@ button.end-turn {
 }
 .point.used {
   background: transparent;
+}
+/* まだ使えるターンでない EP・SEP は薄く灰色にする */
+.points.locked {
+  opacity: 0.35;
+  filter: grayscale(1);
+}
+/* クラス表示（色＋文字） */
+.class-tag {
+  font-size: 11px;
+  font-weight: bold;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--class-color);
+  border-left-width: 6px;
+}
+.leader.class-elf,
+.leader.class-royal,
+.leader.class-witch,
+.leader.class-dragon,
+.leader.class-nightmare,
+.leader.class-bishop,
+.leader.class-nemesis {
+  border-color: var(--class-color);
+}
+/* エクストラPP: 残っているあいだは目立たせ、今使えるときはさらに光らせる */
+.expp-badge {
+  font-size: 11px;
+  font-weight: bold;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--expp);
+  border: 1px solid var(--expp);
+}
+.expp-badge.usable {
+  background: var(--expp);
+  color: #1d1d1f;
+  box-shadow: 0 0 6px var(--expp);
+}
+button.extra-pp.usable {
+  background: var(--expp);
+  border-color: var(--expp);
+  color: #1d1d1f;
+  font-weight: bold;
+  animation: expp-glow 1.6s ease-in-out infinite;
+}
+@keyframes expp-glow {
+  50% {
+    box-shadow: 0 0 10px 2px var(--expp);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  button.extra-pp.usable {
+    animation: none;
+    box-shadow: 0 0 8px var(--expp);
+  }
 }
 .card.targetable,
 .leader.targetable {

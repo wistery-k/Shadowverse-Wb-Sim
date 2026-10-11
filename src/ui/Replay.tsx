@@ -7,7 +7,7 @@ import { replayStates } from "../sim/replay";
 import { reproduceCommand } from "../sim/reproduce";
 import { seatDecks, type Entrant, type GameRecord } from "../sim/tournament";
 import { CardDetail, CardView, type Motion } from "./CardView";
-import { describeAction } from "./describe";
+import { describeAction, leaderClasses } from "./describe";
 import { EmptySlots, PlayerInfo } from "./Game";
 
 interface Props {
@@ -25,6 +25,7 @@ const SPEEDS = [
 export function Replay({ record, entrants, onClose }: Props) {
   const actions = record.actions ?? [];
   const states = useMemo(() => replayStates(seatDecks(record, entrants), record.seed, actions), [record, entrants]);
+  const classes = useMemo(() => leaderClasses(states[0]!), [states]);
   const names = useMemo((): [string, string] => {
     const ea = entrants[record.a]!.name;
     const eb = entrants[record.b]!.name;
@@ -133,11 +134,11 @@ export function Replay({ record, entrants, onClose }: Props) {
       </div>
     );
     const leader = (
-      <div key={leaderHit === p ? `leader-${step}` : "leader"} class={`leader ${leaderHit === p ? "motion-hit" : ""}`}>
+      <div key={leaderHit === p ? `leader-${step}` : "leader"} class={`leader class-${classes[p]} ${leaderHit === p ? "motion-hit" : ""}`}>
         リーダー {pl.leaderHp}/{pl.leaderMaxHp}
       </div>
     );
-    const info = <PlayerInfo label={`${names[p]}${state.first === p ? "（先攻）" : "（後攻）"}`} state={state} p={p} />;
+    const info = <PlayerInfo label={`${names[p]}${state.first === p ? "（先攻）" : "（後攻）"}`} state={state} p={p} cls={classes[p]} />;
     const hand = (
       <div class="hand">
         {pl.hand.map((h) => (
