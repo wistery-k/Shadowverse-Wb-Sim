@@ -4,11 +4,11 @@ import { DECK_CLASSES, type DeckClass } from "../cards/deck";
 import { DEFAULT_DECKS } from "../cards/defaultDecks";
 import { createGame, rngFrom, type Action, type GameState, type PlayerIndex, type Rng } from "../engine";
 import { buildHumanRecord } from "../sim/humanRecord";
-import { rhinoMatch, RHINO_OPPONENT_AGENT } from "../sim/rhinoCompare";
+import { compareMatch, OPPONENT_AGENT } from "../sim/humanCompare";
 import { randomDeck } from "../sim/decks";
 import { Decks, isPlayable } from "./Decks";
 import { Game } from "./Game";
-import { loadHumanRecords, RhinoCompare, saveHumanRecords, type RhinoMatchChoice } from "./RhinoCompare";
+import { HumanCompare, loadHumanRecords, saveHumanRecords, type HumanMatchChoice } from "./HumanCompare";
 import { Simulate } from "./Simulate";
 import { loadDecks, saveDecks, type SavedDeck } from "./storage";
 
@@ -61,11 +61,11 @@ function resolveDeck(choice: DeckChoice, saved: readonly SavedDeck[], rng: Rng):
 }
 
 export function App() {
-  const [tab, setTab] = useState<"play" | "decks" | "sim" | "rhino">("play");
+  const [tab, setTab] = useState<"play" | "decks" | "sim" | "compare">("play");
   const [saved, setSaved] = useState<SavedDeck[]>(() => loadDecks());
   const [setup, setSetupState] = useState<Setup>(() => loadSetup());
-  const [game, setGame] = useState<{ state: GameState; agent: string; human?: PlayerIndex; rhino?: RhinoMatchChoice } | null>(null);
-  const [rhinoError, setRhinoError] = useState("");
+  const [game, setGame] = useState<{ state: GameState; agent: string; human?: PlayerIndex; compare?: HumanMatchChoice } | null>(null);
+  const [compareError, setCompareError] = useState("");
   const [error, setError] = useState("");
 
   const setSetup = (s: Setup) => {
@@ -90,18 +90,18 @@ export function App() {
     setGame({ state: createGame({ decks: [me, ai], seed }), agent: OPPONENTS[setup.agent] ? setup.agent : "greedy" });
   }
 
-  function startRhino(m: RhinoMatchChoice) {
-    setRhinoError("");
-    setGame({ state: createGame(rhinoMatch(m.deck, m.g, m.elfSeat)), agent: RHINO_OPPONENT_AGENT, human: m.elfSeat, rhino: m });
+  function startCompare(m: HumanMatchChoice) {
+    setCompareError("");
+    setGame({ state: createGame(compareMatch(m.subject, m.deck, m.g, m.seat)), agent: OPPONENT_AGENT, human: m.seat, compare: m });
   }
 
-  // リノセウス比較の試合が終わったら記録を保存する
-  function recordRhino(m: RhinoMatchChoice, actions: Action[], autoActions: number[]) {
+  // 人間との比較の試合が終わったら記録を保存する
+  function recordCompare(m: HumanMatchChoice, actions: Action[], autoActions: number[]) {
     try {
       const record = buildHumanRecord({ ...m, actions, autoActions, commit: __BUILD_COMMIT__, playedAt: new Date().toISOString() });
-      if (!saveHumanRecords([...loadHumanRecords(), record])) setRhinoError("記録をブラウザに保存できませんでした（プライベートブラウズ等）");
+      if (!saveHumanRecords(m.subject, [...loadHumanRecords(m.subject), record])) setCompareError("記録をブラウザに保存できませんでした（プライベートブラウズ等）");
     } catch (e) {
-      setRhinoError(`記録を作れませんでした: ${String(e)}`);
+      setCompareError(`記録を作れませんでした: ${String(e)}`);
     }
   }
 
@@ -121,8 +121,8 @@ export function App() {
             <button type="button" class={tab === "sim" ? "active" : ""} onClick={() => setTab("sim")}>
               AI対戦
             </button>
-            <button type="button" class={tab === "rhino" ? "active" : ""} onClick={() => setTab("rhino")}>
-              リノセウス比較
+            <button type="button" class={tab === "compare" ? "active" : ""} onClick={() => setTab("compare")}>
+              人間との比較
             </button>
           </nav>
         )}
@@ -135,16 +135,16 @@ export function App() {
             ai={game.agent}
             human={game.human ?? 0}
             onExit={() => setGame(null)}
-            {...(game.rhino
-              ? { onEnd: (actions: Action[], _final: GameState, auto: number[]) => recordRhino(game.rhino!, actions, auto), exitLabel: "記録に戻る", lethalHelper: true }
+            {...(game.compare
+              ? { onEnd: (actions: Action[], _final: GameState, auto: number[]) => recordCompare(game.compare!, actions, auto), exitLabel: "記録に戻る", lethalHelper: true }
               : {})}
           />
         ) : tab === "decks" ? (
           <Decks decks={saved} onChange={updateDecks} />
         ) : tab === "sim" ? (
           <Simulate saved={saved} />
-        ) : tab === "rhino" ? (
-          <RhinoCompare onStart={startRhino} saveError={rhinoError} />
+        ) : tab === "compare" ? (
+          <HumanCompare onStart={startCompare} saveError={compareError} />
         ) : (
           <div class="setup panel">
             <label>

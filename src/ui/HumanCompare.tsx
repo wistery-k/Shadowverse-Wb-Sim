@@ -1,36 +1,55 @@
-// 「リノセウス比較」: npm run rhino-compare と同じシードの試合を、人間がリノセウスエルフで打つ画面。
-// 打った試合の記録（勝敗・各ターンの選択・行動の列）はブラウザに保存し、JSON Lines で書き出せる。
+// 「人間との比較」: npm run rhino-compare / af-compare と同じシードの試合を、人間が比べるデッキ（リノセウスエルフ・AFネメシス）で打つ画面。
+// 打った試合の記録（勝敗・各ターンの選択・行動の列）はデッキごとにブラウザに保存し、JSON Lines で書き出せる。
 
 import { useMemo, useState } from "preact/hooks";
 import { createGame, type PlayerIndex } from "../engine";
 import { parseHumanRecord, toJsonLines, type HumanGameRecord } from "../sim/humanRecord";
-import { rhinoMatch, rhinoOpponents, RHINO_ELF } from "../sim/rhinoCompare";
+import { compareMatch, isSubjectId, opponentsOf, SUBJECT_IDS, SUBJECTS, type SubjectId } from "../sim/humanCompare";
 
-const KEY = "svwb-sim:rhino-human:v1";
+/** 最後に選んだ比べるデッキ */
+const SUBJECT_KEY = "svwb-sim:human-compare-subject:v1";
 
-export function loadHumanRecords(): HumanGameRecord[] {
+function loadSubject(): SubjectId {
   try {
-    const data: unknown = JSON.parse(localStorage.getItem(KEY) ?? "[]");
-    return Array.isArray(data) ? data.flatMap((v) => parseHumanRecord(v) ?? []) : [];
+    const v = localStorage.getItem(SUBJECT_KEY);
+    return isSubjectId(v) ? v : "rhino";
+  } catch {
+    return "rhino";
+  }
+}
+
+function saveSubject(subject: SubjectId): void {
+  try {
+    localStorage.setItem(SUBJECT_KEY, subject);
+  } catch {
+    // 保存できなくても動作には影響しない
+  }
+}
+
+export function loadHumanRecords(subject: SubjectId): HumanGameRecord[] {
+  try {
+    const data: unknown = JSON.parse(localStorage.getItem(SUBJECTS[subject].storageKey) ?? "[]");
+    return Array.isArray(data) ? data.flatMap((v) => parseHumanRecord(v) ?? []).filter((r) => r.subject === subject) : [];
   } catch {
     return [];
   }
 }
 
 /** 保存する。失敗したら false */
-export function saveHumanRecords(records: readonly HumanGameRecord[]): boolean {
+export function saveHumanRecords(subject: SubjectId, records: readonly HumanGameRecord[]): boolean {
   try {
-    localStorage.setItem(KEY, JSON.stringify(records));
+    localStorage.setItem(SUBJECTS[subject].storageKey, JSON.stringify(records));
     return true;
   } catch {
     return false;
   }
 }
 
-export interface RhinoMatchChoice {
+export interface HumanMatchChoice {
+  subject: SubjectId;
   deck: string;
   g: number;
-  elfSeat: PlayerIndex;
+  seat: PlayerIndex;
 }
 
 function download(fileName: string, text: string, type: string) {
@@ -42,7 +61,7 @@ function download(fileName: string, text: string, type: string) {
   URL.revokeObjectURL(url);
 }
 
-const matchKey = (m: RhinoMatchChoice) => `${m.deck}/${m.g}/${m.elfSeat}`;
+const matchKey = (m: HumanMatchChoice) => `${m.subject}/${m.deck}/${m.g}/${m.seat}`;
 const seatLabel = (p: PlayerIndex) => (p === 0 ? "P1" : "P2");
 
 /**
@@ -50,17 +69,17 @@ const seatLabel = (p: PlayerIndex) => (p === 0 ? "P1" : "P2");
  * 相手デッキによらず同じなので、毎回変えて引きを覚えられないようにする）。相手デッキと席は、記録の少ない組み合わせ
  * （同数なら相手デッキ、席の順）にする。
  */
-function nextMatch(records: readonly HumanGameRecord[]): RhinoMatchChoice {
+function nextMatch(subject: SubjectId, records: readonly HumanGameRecord[]): HumanMatchChoice {
   const usedG = new Set(records.map((r) => r.g));
   let g = 0;
   while (usedG.has(g)) g++;
-  let best: RhinoMatchChoice | null = null;
+  let best: HumanMatchChoice | null = null;
   let bestCount = Infinity;
-  for (const d of rhinoOpponents())
-    for (const elfSeat of [0, 1] as const) {
-      const count = records.filter((r) => r.deck === d.name && r.elfSeat === elfSeat).length;
+  for (const d of opponentsOf(subject))
+    for (const seat of [0, 1] as const) {
+      const count = records.filter((r) => r.deck === d.name && r.seat === seat).length;
       if (count < bestCount) {
-        best = { deck: d.name, g, elfSeat };
+        best = { subject, deck: d.name, g, seat };
         bestCount = count;
       }
     }
@@ -68,14 +87,16 @@ function nextMatch(records: readonly HumanGameRecord[]): RhinoMatchChoice {
   return best;
 }
 
-export function RhinoCompare({ onStart, saveError }: { onStart: (m: RhinoMatchChoice) => void; saveError: string }) {
-  const [records, setRecords] = useState<HumanGameRecord[]>(() => loadHumanRecords());
-  const [choice, setChoice] = useState<RhinoMatchChoice>(() => nextMatch(records));
+export function HumanCompare({ onStart, saveError }: { onStart: (m: HumanMatchChoice) => void; saveError: string }) {
+  const [subject, setSubjectState] = useState<SubjectId>(() => loadSubject());
+  const [records, setRecords] = useState<HumanGameRecord[]>(() => loadHumanRecords(subject));
+  const [choice, setChoice] = useState<HumanMatchChoice>(() => nextMatch(subject, records));
   const [copied, setCopied] = useState(false);
-  const decks = rhinoOpponents();
+  const decks = opponentsOf(subject);
+  const me = SUBJECTS[subject].deck;
   const { seed, first } = useMemo(() => {
-    const m = rhinoMatch(choice.deck, choice.g, choice.elfSeat);
-    return { seed: m.seed, first: createGame(m).first === choice.elfSeat };
+    const m = compareMatch(choice.subject, choice.deck, choice.g, choice.seat);
+    return { seed: m.seed, first: createGame(m).first === choice.seat };
   }, [choice]);
   const played = records.filter((r) => matchKey(r) === matchKey(choice)).length;
   const wins = records.filter((r) => r.won).length;
@@ -83,8 +104,17 @@ export function RhinoCompare({ onStart, saveError }: { onStart: (m: RhinoMatchCh
 
   const update = (next: HumanGameRecord[]) => {
     setRecords(next);
-    saveHumanRecords(next);
+    saveHumanRecords(subject, next);
   };
+  const setSubject = (next: SubjectId) => {
+    const loaded = loadHumanRecords(next);
+    setSubjectState(next);
+    saveSubject(next);
+    setRecords(loaded);
+    setChoice(nextMatch(next, loaded));
+  };
+  const script = subject === "rhino" ? "rhino-compare" : `${subject}-compare`;
+  const fileBase = `${subject}-human`;
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(jsonl);
@@ -96,13 +126,23 @@ export function RhinoCompare({ onStart, saveError }: { onStart: (m: RhinoMatchCh
   };
 
   return (
-    <div class="panel rhino-compare">
+    <div class="panel human-compare">
       <p>
-        <code>npm run rhino-compare</code> と同じシードの試合を、あなたが{RHINO_ELF}で打ちます。相手は探索 AI です。
+        <code>npm run {script}</code> と同じシードの試合を、あなたが{me}で打ちます。相手は探索 AI です。
         同じ（相手デッキ・試合番号・席）なら、AI が打ったときと同じ初期局面（先攻・山札の順番・初手）から始まります。
         試合番号 g は、まだ打っていない番号に毎回自動で変わります（相手デッキが違っても、g と席が同じなら自分の初手は同じになるため）。
       </p>
       <div class="setup">
+        <label>
+          あなたのデッキ
+          <select value={subject} onChange={(e) => isSubjectId(e.currentTarget.value) && setSubject(e.currentTarget.value)}>
+            {SUBJECT_IDS.map((id) => (
+              <option key={id} value={id}>
+                {SUBJECTS[id].deck}
+              </option>
+            ))}
+          </select>
+        </label>
         <label>
           相手デッキ
           <select value={choice.deck} onChange={(e) => setChoice({ ...choice, deck: e.currentTarget.value })}>
@@ -127,8 +167,8 @@ export function RhinoCompare({ onStart, saveError }: { onStart: (m: RhinoMatchCh
           />
         </label>
         <label>
-          {RHINO_ELF}の席
-          <select value={choice.elfSeat} onChange={(e) => setChoice({ ...choice, elfSeat: Number(e.currentTarget.value) as PlayerIndex })}>
+          あなたの席
+          <select value={choice.seat} onChange={(e) => setChoice({ ...choice, seat: Number(e.currentTarget.value) as PlayerIndex })}>
             <option value={0}>P1</option>
             <option value={1}>P2</option>
           </select>
@@ -138,7 +178,7 @@ export function RhinoCompare({ onStart, saveError }: { onStart: (m: RhinoMatchCh
           {played > 0 && ` / この試合は ${played} 回打っています`}
         </p>
         <div class="row-buttons">
-          <button type="button" onClick={() => setChoice(nextMatch(records))}>
+          <button type="button" onClick={() => setChoice(nextMatch(subject, records))}>
             次の試合（新しい g）を選ぶ
           </button>
           <button type="button" class="primary" onClick={() => onStart(choice)}>
@@ -149,13 +189,13 @@ export function RhinoCompare({ onStart, saveError }: { onStart: (m: RhinoMatchCh
       {saveError && <p class="problems">{saveError}</p>}
 
       <h3>
-        打った試合 {records.length} 件（勝ち {wins}
+        {me}で打った試合 {records.length} 件（勝ち {wins}
         {records.length > 0 && ` = ${((wins / records.length) * 100).toFixed(1)}%`}）
       </h3>
       {records.length > 0 && (
         <>
           <div class="row-buttons">
-            <button type="button" onClick={() => download("rhino-human.jsonl", jsonl, "application/x-ndjson")}>
+            <button type="button" onClick={() => download(`${fileBase}.jsonl`, jsonl, "application/x-ndjson")}>
               全部を JSON Lines で保存
             </button>
             <button type="button" onClick={copy}>
@@ -163,9 +203,9 @@ export function RhinoCompare({ onStart, saveError }: { onStart: (m: RhinoMatchCh
             </button>
           </div>
           <p class="muted">
-            1 行 1 試合です。<code>npm run rhino-compare -- --matches rhino-human.jsonl</code> で、同じ試合を AI に打たせて勝敗を並べられます。
+            1 行 1 試合です。<code>npm run {script} -- --matches {fileBase}.jsonl</code> で、同じ試合を AI に打たせて勝敗を並べられます。
           </p>
-          <table class="rhino-records">
+          <table class="human-records">
             <thead>
               <tr>
                 <th>相手</th>
@@ -204,7 +244,7 @@ function RecordRow({ record: r, onDelete }: { record: HumanGameRecord; onDelete:
       <tr>
         <td>{r.deck}</td>
         <td>{r.g}</td>
-        <td>{seatLabel(r.elfSeat)}</td>
+        <td>{seatLabel(r.seat)}</td>
         <td>{r.first ? "先攻" : "後攻"}</td>
         <td>{r.won ? "勝ち" : "負け"}</td>
         <td>{r.turns}</td>
@@ -213,7 +253,7 @@ function RecordRow({ record: r, onDelete }: { record: HumanGameRecord; onDelete:
           <button type="button" onClick={() => setOpen(!open)}>
             {open ? "閉じる" : "選択の列"}
           </button>
-          <button type="button" onClick={() => download(`rhino-human-${r.deck}-g${r.g}-${seatLabel(r.elfSeat)}.json`, JSON.stringify(r, null, 2), "application/json")}>
+          <button type="button" onClick={() => download(`${r.subject}-human-${r.deck}-g${r.g}-${seatLabel(r.seat)}.json`, JSON.stringify(r, null, 2), "application/json")}>
             保存
           </button>
           <button type="button" onClick={onDelete}>
