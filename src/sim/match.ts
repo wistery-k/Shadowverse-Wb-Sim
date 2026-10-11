@@ -34,7 +34,12 @@ export interface MatchOptions {
 }
 
 export function playMatch(agents: [Agent, Agent], opts: MatchOptions): MatchResult {
-  let state = createGame({ decks: opts.decks, seed: opts.seed });
+  return playFrom(agents, createGame({ decks: opts.decks, seed: opts.seed }), opts);
+}
+
+/** 途中の局面から最後まで対戦させる（AI の乱数は seed から作る。decks は使わない） */
+export function playFrom(agents: [Agent, Agent], start: GameState, opts: Omit<MatchOptions, "decks">): MatchResult {
+  let state = start;
   const agentRng = rngFrom({ rng: (opts.seed ^ 0x9e3779b9) >>> 0 });
   const maxActions = opts.maxActions ?? 10000;
   let actions = 0;
