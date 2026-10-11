@@ -13,6 +13,7 @@ import {
   attackOf,
   cardOf,
   EVOLVE_TURN,
+  EXTRA_PP_REFRESH_TURN,
   hasKeyword,
   legalActions,
   MAX_PP,
@@ -55,6 +56,10 @@ const keyOf = (a: Action) => JSON.stringify(a);
 
 function boardCount(state: GameState, p: PlayerIndex, name: string): number {
   return state.players[p].board.filter((c) => nameOf(c.cardId) === name).length;
+}
+
+function handCount(state: GameState, p: PlayerIndex, name: string): number {
+  return state.players[p].hand.filter((h) => nameOf(h.cardId) === name).length;
 }
 
 function oppHasFollowers(state: GameState, p: PlayerIndex): boolean {
@@ -133,6 +138,9 @@ export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolea
     }
     case "play": {
       const name = playedName(state, a, p);
+      if (name === MYSTERY) return false; // リーサルまで温存
+      // 手札に1枚しかないリノセウスはリーサルまで温存（2枚以上なら1枚は残る）
+      if (name === RHINO && handCount(state, p, RHINO) < 2) return false;
       if (forcesKeeperChoice(state, a, p)) return false;
       // 燐光の岩は、相手の盤面を全処理できた（フォロワーがいない）ときだけ（杖は何枚目でもよい。ユーザーの判断）
       if (name === ROCK) return !oppHasFollowers(state, p);
@@ -146,7 +154,8 @@ export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolea
       return !forcesKeeperChoice(state, a, p);
     }
     case "extraPp":
-      // 使う理由があるときだけ（森の神秘・リノセウス・2つ目のエクストラPP の温存は、次のターンの打点の評価に任せる）
+      // 2つ目はリーサルまで温存。1つ目は使う理由があるときだけ
+      if (pl.turnCount >= EXTRA_PP_REFRESH_TURN) return false;
       return extraPpEnablesKeyPlay(state, p);
     default:
       return true;
