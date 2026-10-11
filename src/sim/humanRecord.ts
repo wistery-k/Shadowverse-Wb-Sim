@@ -1,31 +1,35 @@
-// 人間が「リノセウス比較」の試合を打った記録（web で保存・書き出しする形式）
+// 人間が「人間との比較」の試合を打った記録（web で保存・書き出しする形式）
 //
-// 1 試合 1 行の JSON Lines で書き出す。deck・g・elfSeat・won は npm run rhino-compare の --out と同じ意味なので、
+// 1 試合 1 行の JSON Lines で書き出す。subject・deck・g・seat・won は npm run rhino-compare の --out と同じ意味なので、
 // AI の結果と試合ごとに突き合わせられる。actions は行動の列そのもので、同じ decks・seed から再生できる（src/sim/replay.ts）。
+// version 1（リノセウスエルフだけの頃）は席を elfSeat に持っていた。読むときに version 2 の形にする。
 
 import { actingPlayer, applyAction, createGame, type Action, type GameState, type PlayerIndex } from "../engine";
 import { describeAction } from "../ui/describe";
-import { rhinoMatch, RHINO_OPPONENT_AGENT } from "./rhinoCompare";
+import { compareMatch, isSubjectId, OPPONENT_AGENT, type SubjectId } from "./humanCompare";
 
-export const HUMAN_RECORD_KIND = "rhino-compare-human";
+export const HUMAN_RECORD_KIND = "human-compare";
+const HUMAN_RECORD_KIND_V1 = "rhino-compare-human";
 
 /** 1 ターン（同じプレイヤーが続けて行った行動）の選択 */
 export interface TurnChoices {
   /** ゲーム全体のターン番号（マリガンは 0） */
   turn: number;
-  /** "you"（人間＝リノセウスエルフ）か "opponent"（AI） */
+  /** "you"（人間＝比べるデッキ）か "opponent"（AI） */
   by: "you" | "opponent";
   choices: string[];
 }
 
 export interface HumanGameRecord {
   kind: typeof HUMAN_RECORD_KIND;
-  version: 1;
+  version: 2;
+  /** 人間が使ったデッキ（src/sim/humanCompare.ts の SUBJECTS のキー） */
+  subject: SubjectId;
   /** 相手デッキの名前 */
   deck: string;
   g: number;
-  /** リノセウスエルフ（人間）の席 */
-  elfSeat: PlayerIndex;
+  /** 人間の席 */
+  seat: PlayerIndex;
   seed: number;
   won: boolean;
   /** 人間が先攻か */
@@ -60,49 +64,54 @@ export function turnLog(initial: GameState, actions: readonly Action[], human: P
 }
 
 export function buildHumanRecord(args: {
+  subject: SubjectId;
   deck: string;
   g: number;
-  elfSeat: PlayerIndex;
+  seat: PlayerIndex;
   actions: readonly Action[];
   autoActions?: readonly number[];
   commit: string;
   playedAt: string;
 }): HumanGameRecord {
-  const { deck, g, elfSeat, actions } = args;
-  const { decks, seed } = rhinoMatch(deck, g, elfSeat);
+  const { subject, deck, g, seat, actions } = args;
+  const { decks, seed } = compareMatch(subject, deck, g, seat);
   const initial = createGame({ decks, seed });
   let final = initial;
   for (const a of actions) final = applyAction(final, a);
   if (final.phase !== "ended" || final.winner === null) throw new Error("試合が終わっていません");
   return {
     kind: HUMAN_RECORD_KIND,
-    version: 1,
+    version: 2,
+    subject,
     deck,
     g,
-    elfSeat,
+    seat,
     seed,
-    won: final.winner === elfSeat,
-    first: initial.first === elfSeat,
+    won: final.winner === seat,
+    first: initial.first === seat,
     turns: final.turn,
-    opponentAgent: RHINO_OPPONENT_AGENT,
+    opponentAgent: OPPONENT_AGENT,
     commit: args.commit,
     playedAt: args.playedAt,
-    turnLog: turnLog(initial, actions, elfSeat, args.autoActions),
+    turnLog: turnLog(initial, actions, seat, args.autoActions),
     actions: [...actions],
     autoActions: [...(args.autoActions ?? [])],
   };
 }
 
-/** 保存した値を検証する（形が違うものは null） */
+/** 保存した値を検証する（形が違うものは null）。version 1 はリノセウスエルフの記録として読む */
 export function parseHumanRecord(v: unknown): HumanGameRecord | null {
   if (typeof v !== "object" || v === null) return null;
   const r = v as Record<string, unknown>;
+  const v1 = r.kind === HUMAN_RECORD_KIND_V1 && r.version === 1;
+  if (!v1 && !(r.kind === HUMAN_RECORD_KIND && r.version === 2)) return null;
+  const subject = v1 ? "rhino" : r.subject;
+  const seat = v1 ? r.elfSeat : r.seat;
   if (
-    r.kind !== HUMAN_RECORD_KIND ||
-    r.version !== 1 ||
+    !isSubjectId(subject) ||
+    (seat !== 0 && seat !== 1) ||
     typeof r.deck !== "string" ||
     typeof r.g !== "number" ||
-    (r.elfSeat !== 0 && r.elfSeat !== 1) ||
     typeof r.seed !== "number" ||
     typeof r.won !== "boolean" ||
     typeof r.turns !== "number" ||
@@ -110,7 +119,15 @@ export function parseHumanRecord(v: unknown): HumanGameRecord | null {
     !Array.isArray(r.turnLog)
   )
     return null;
-  return { ...(v as HumanGameRecord), autoActions: Array.isArray(r.autoActions) ? (r.autoActions as number[]) : [] };
+  const { elfSeat: _elfSeat, ...rest } = r;
+  return {
+    ...(rest as Omit<HumanGameRecord, "kind" | "version" | "subject" | "seat" | "autoActions">),
+    kind: HUMAN_RECORD_KIND,
+    version: 2,
+    subject,
+    seat,
+    autoActions: Array.isArray(r.autoActions) ? (r.autoActions as number[]) : [],
+  };
 }
 
 export const toJsonLines = (records: readonly HumanGameRecord[]) => records.map((r) => JSON.stringify(r)).join("\n") + (records.length ? "\n" : "");

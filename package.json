@@ -15,6 +15,7 @@
     "tune": "node scripts/vite-run.mjs scripts/tune-main.ts",
     "compare": "node scripts/vite-run.mjs scripts/compare-main.ts",
     "rhino-compare": "node scripts/vite-run.mjs scripts/rhino-compare-main.ts",
+    "af-compare": "node scripts/vite-run.mjs scripts/rhino-compare-main.ts --subject af",
     "bench": "node scripts/vite-run.mjs scripts/bench-main.ts",
     "mulligan-data": "node scripts/vite-run.mjs scripts/mulligan-data-main.ts",
     "mulligan-fit": "node scripts/vite-run.mjs scripts/mulligan-fit-main.ts",

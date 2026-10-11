@@ -919,16 +919,16 @@ progress {
   font-size: 12px;
 }
 
-/* リノセウス比較 */
-.rhino-compare .setup {
+/* 人間との比較 */
+.human-compare .setup {
   margin-bottom: 1rem;
 }
-.rhino-records {
+.human-records {
   border-collapse: collapse;
   width: 100%;
 }
-.rhino-records th,
-.rhino-records td {
+.human-records th,
+.human-records td {
   border-bottom: 1px solid var(--line);
   padding: 0.25rem 0.5rem;
   text-align: left;
