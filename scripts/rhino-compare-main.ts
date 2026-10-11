@@ -1,7 +1,7 @@
-// リノセウス用 AI の設定を変えたときの勝率（npm run rhino-compare）。--subject af（npm run af-compare）で AFネメシスの AI を同じ形で比べる
+// リノセウス用 AI の設定を変えたときの勝率（npm run rhino-compare）。--subject af（npm run af-compare）で AFネメシスの AI を、--subject spellwitch（npm run spellwitch-compare）でスペルウィッチの AI を同じ形で比べる
 //
 // リノセウスエルフ（リノセウス用 AI）vs 他の 6 デッキ（探索 AI。ランプドラゴンは除く）を、両方の席で同じシードで打つ。
-// --subject af のときは AFネメシス（既定は探索 AI。--opts は探索 AI の設定 SearchOptions の一部）vs 他の 6 デッキ。
+// --subject af・spellwitch のときは AFネメシス・スペルウィッチ（既定は探索 AI。--opts は探索 AI の設定 SearchOptions の一部）vs 他の 6 デッキ。
 // 設定を変えても同じシードの試合になるので、変更前後を同じ試合数で比べられる。
 // 例: npm run rhino-compare -- --games 50 --opts '{"nextLethal":10}'
 //     （--opts はリノセウス用 AI の探索の設定 SearchOptions の一部。"weights" にオブジェクトを渡すと SEARCH_WEIGHTS のその項目だけを変える。"potential" は次のターンのリノセウスの打点の不足分を評価に足す係数。"holds" は温存のルールを外す（例: {"mystery":false}）。"beamPp" はビームで残す局面を選ぶときに残り PP 1 につき足す点。"exhaustive" は序盤のターンを全探索する（例: {"untilTurn":5,"maxStates":10000}）。

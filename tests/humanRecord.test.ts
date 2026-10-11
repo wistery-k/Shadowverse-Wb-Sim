@@ -28,6 +28,14 @@ describe("人間との比較の記録", () => {
     expect(m.decks[1]).toEqual(opp[0]!.cards);
   });
 
+  it("スペルウィッチも他の 6 デッキと別のシードで並べる", () => {
+    const opp = opponentsOf("spellwitch");
+    expect(opp).toHaveLength(6);
+    expect(opp.map((d) => d.name)).not.toContain("スペルウィッチ");
+    const seeds = SUBJECT_IDS.map((s) => compareMatch(s, opponentsOf(s)[0]!.name, 3, 0).seed);
+    expect(new Set(seeds).size).toBe(SUBJECT_IDS.length);
+  });
+
   it("勝敗・ターンごとの選択・行動の列を記録し、JSON Lines から読み戻せる", () => {
     for (const subject of SUBJECT_IDS)
       for (const seat of [0, 1] as const) {
