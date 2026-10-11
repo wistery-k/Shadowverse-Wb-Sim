@@ -54,7 +54,7 @@ export async function main(argv: string[]): Promise<number> {
   const t0 = Date.now();
   const results = await parallelMap(tasks, ({ o, g, elfSeat }) => {
     const { decks, seed } = rhinoMatch(o, g, elfSeat);
-    for (const k of Object.keys(exhaustiveCounts) as (keyof typeof exhaustiveCounts)[]) exhaustiveCounts[k] = 0;
+    Object.assign(exhaustiveCounts, { searches: 0, overflow: 0, states: 0, maxStates: 0, better: 0, gain: 0, firstDiffers: 0, byTurn: {} });
     const t = Date.now();
     const r = playMatch(elfSeat === 0 ? [agent, searchAgent] : [searchAgent, agent], { decks, seed, record: true });
     // アリアを最初に出した自分のターン
@@ -87,10 +87,14 @@ export async function main(argv: string[]): Promise<number> {
   const exact = results.filter((r) => r.exactFound > 0);
   console.log(`全探索でリーサルを見つけた試合 ${exact.length}/${n}（そのうち勝ち ${exact.filter((r) => r.won).length}）`);
   if (opts.exhaustive) {
-    const sum = (k: keyof typeof exhaustiveCounts) => results.reduce((x, r) => x + r.ex[k], 0);
+    const sum = (k: Exclude<keyof typeof exhaustiveCounts, "byTurn">) => results.reduce((x, r) => x + r.ex[k], 0);
     const solved = sum("searches") - sum("overflow");
     console.log(`全探索 ${sum("searches")} 回（サンプルごと）: 上限超え ${sum("overflow")}、読み切り ${solved}（平均 ${(sum("states") / Math.max(1, solved)).toFixed(0)} 局面、最大 ${Math.max(...results.map((r) => r.ex.maxStates))}）`);
     console.log(`  ビームより良いターン末を見つけた ${sum("better")}/${solved}（差の平均 ${(sum("gain") / Math.max(1, sum("better"))).toFixed(2)}）、そのうち最初の手も違う ${sum("firstDiffers")}`);
+    const byTurn = new Map<number, number[]>();
+    for (const r of results) for (const [t, v] of Object.entries(r.ex.byTurn)) byTurn.set(Number(t), (byTurn.get(Number(t)) ?? [0, 0, 0, 0]).map((x, i) => x + v[i]!));
+    for (const [t, [n, over, better, states]] of [...byTurn].sort((a, b) => a[0] - b[0]))
+      console.log(`  自分の ${t} ターン目: 全探索 ${n}、上限超え ${over}、ビームより良い ${better}/${n - over}、平均 ${(states / Math.max(1, n - over)).toFixed(0)} 局面`);
     for (const r of results) console.log(`  ${r.deck} g${r.g} 席${r.elfSeat}: ${r.won ? "勝ち" : "負け"} ${r.sec.toFixed(1)}秒 全探索${r.ex.searches} 上限超え${r.ex.overflow} 良い${r.ex.better} 最大${r.ex.maxStates}`);
   }
   if (given) {

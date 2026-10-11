@@ -137,6 +137,8 @@ export const exhaustiveCounts = {
   gain: 0,
   /** 全探索の方が高かったもののうち、最善の終局面の最初の手がビームサーチと違った回数 */
   firstDiffers: 0,
+  /** 自分のターン数ごとの [全探索した回数, 上限超え, ビームより良い, 読み切れたときの局面数の合計] */
+  byTurn: {} as Record<number, [number, number, number, number]>,
 };
 
 export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null };
@@ -350,8 +352,15 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   let terminals: Node[] | null = null;
   if (opts.exhaustive && root.players[p].turnCount <= opts.exhaustive.untilTurn) {
     exhaustiveCounts.searches++;
+    const turn = (exhaustiveCounts.byTurn[root.players[p].turnCount] ??= [0, 0, 0, 0]);
+    turn[0]++;
+    const before = exhaustiveCounts.states;
     terminals = exhaustiveTerminals(opts.exhaustive.maxStates);
-    if (!terminals) exhaustiveCounts.overflow++;
+    turn[3] += exhaustiveCounts.states - before;
+    if (!terminals) {
+      exhaustiveCounts.overflow++;
+      turn[1]++;
+    }
     else {
       // 比較用: 同じ局面のビームサーチの、ターン末の点数で最善の終局面
       const top = (ts: Node[]) => ts.reduce((a, b) => (b.value > a.value ? b : a));
@@ -359,6 +368,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
       const beam = top(beamTerminals());
       if (ex.value > beam.value + 1e-9) {
         exhaustiveCounts.better++;
+        turn[2]++;
         exhaustiveCounts.gain += ex.value - beam.value;
         if (keyOf(ex.first) !== keyOf(beam.first)) exhaustiveCounts.firstDiffers++;
       }
