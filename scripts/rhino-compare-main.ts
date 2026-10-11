@@ -3,7 +3,7 @@
 // リノセウスエルフ（リノセウス用 AI）vs 他の 6 デッキ（探索 AI。ランプドラゴンは除く）を、両方の席で同じシードで打つ。
 // 設定を変えても同じシードの試合になるので、変更前後を同じ試合数で比べられる。
 // 例: npm run rhino-compare -- --games 50 --opts '{"nextLethal":10}'
-//     （--opts はリノセウス用 AI の探索の設定 SearchOptions の一部。"weights" にオブジェクトを渡すと SEARCH_WEIGHTS のその項目だけを変える。"potential" は次のターンのリノセウスの打点の不足分を評価に足す係数。"holds" は温存のルールを外す（例: {"mystery":false}）。"beamPp" はビームで残す局面を選ぶときに残り PP 1 につき足す点。
+//     （--opts はリノセウス用 AI の探索の設定 SearchOptions の一部。"weights" にオブジェクトを渡すと SEARCH_WEIGHTS のその項目だけを変える。"potential" は次のターンのリノセウスの打点の不足分を評価に足す係数。"holds" は温存のルールを外す（例: {"mystery":false}）。"beamPp" はビームで残す局面を選ぶときに残り PP 1 につき足す点。"exhaustive" は序盤のターンを全探索する（例: {"untilTurn":5,"maxStates":10000}）。
 //      試合は CPU のコア数だけ並列に行う）
 // 自然の妖精姫・アリアを出した試合の数と、最初に出した自分のターン（平均）も出す。
 // --agent で、リノセウスエルフ側の AI を registry のキーで選べる（既定は rhino。例: search、rhino-lethal。--opts は rhino のときだけ使う）。
@@ -18,7 +18,7 @@ import { exactLethalCounts } from "../src/ai/exactLethal";
 import { createRhinoAgent, type RhinoOptions } from "../src/ai/rhino";
 import { agentOf } from "../src/ai/registry";
 import { applyAction, cardOf, createGame } from "../src/engine";
-import { searchAgent } from "../src/ai/search";
+import { exhaustiveCounts, searchAgent } from "../src/ai/search";
 import { playMatch } from "../src/sim/match";
 import { rhinoMatch, rhinoOpponents } from "../src/sim/rhinoCompare";
 import { parallelMap } from "./parallel";
@@ -54,6 +54,8 @@ export async function main(argv: string[]): Promise<number> {
   const t0 = Date.now();
   const results = await parallelMap(tasks, ({ o, g, elfSeat }) => {
     const { decks, seed } = rhinoMatch(o, g, elfSeat);
+    for (const k of Object.keys(exhaustiveCounts) as (keyof typeof exhaustiveCounts)[]) exhaustiveCounts[k] = 0;
+    const t = Date.now();
     const r = playMatch(elfSeat === 0 ? [agent, searchAgent] : [searchAgent, agent], { decks, seed, record: true });
     // アリアを最初に出した自分のターン
     let s = createGame({ decks, seed });
@@ -68,7 +70,7 @@ export async function main(argv: string[]): Promise<number> {
       }
       s = applyAction(s, a);
     }
-    return { deck: o, g, elfSeat, won: r.winner === elfSeat, ariaTurn, exactFound: exactLethalCounts.found };
+    return { deck: o, g, elfSeat, won: r.winner === elfSeat, ariaTurn, exactFound: exactLethalCounts.found, ex: { ...exhaustiveCounts }, sec: (Date.now() - t) / 1000 };
   });
   const perDeck = new Map<string, [number, number]>();
   for (const { deck, won } of results) {
@@ -84,6 +86,13 @@ export async function main(argv: string[]): Promise<number> {
   console.log([...perDeck].map(([name, [w, t]]) => `${name} ${w}/${t}`).join(", "));
   const exact = results.filter((r) => r.exactFound > 0);
   console.log(`全探索でリーサルを見つけた試合 ${exact.length}/${n}（そのうち勝ち ${exact.filter((r) => r.won).length}）`);
+  if (opts.exhaustive) {
+    const sum = (k: keyof typeof exhaustiveCounts) => results.reduce((x, r) => x + r.ex[k], 0);
+    const solved = sum("searches") - sum("overflow");
+    console.log(`全探索 ${sum("searches")} 回（サンプルごと）: 上限超え ${sum("overflow")}、読み切り ${solved}（平均 ${(sum("states") / Math.max(1, solved)).toFixed(0)} 局面、最大 ${Math.max(...results.map((r) => r.ex.maxStates))}）`);
+    console.log(`  ビームより良いターン末を見つけた ${sum("better")}/${solved}（差の平均 ${(sum("gain") / Math.max(1, sum("better"))).toFixed(2)}）、そのうち最初の手も違う ${sum("firstDiffers")}`);
+    for (const r of results) console.log(`  ${r.deck} g${r.g} 席${r.elfSeat}: ${r.won ? "勝ち" : "負け"} ${r.sec.toFixed(1)}秒 全探索${r.ex.searches} 上限超え${r.ex.overflow} 良い${r.ex.better} 最大${r.ex.maxStates}`);
+  }
   if (given) {
     const humanWins = given.filter((m) => m.won === true).length;
     console.log(`同じ試合の --matches の勝ち ${humanWins}/${given.length} = ${((humanWins / Math.max(1, given.length)) * 100).toFixed(1)}%`);

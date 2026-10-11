@@ -116,9 +116,30 @@ export interface SearchOptions {
    * ターン末の採点は使い残した PP を数えないため、コンボを稼ぐだけの手（すぐ戻すリノセウス等）と、PP を残して後で使う手順の途中の局面との比べ方が偏る
    */
   beamPp: number;
+  /**
+   * 自分のターン数が untilTurn 以下のとき、ビームサーチの代わりに、そのターンの手の並びを同じ局面をまとめて全て調べる（メモ化付きの全探索）。
+   * 調べた局面が maxStates を超えたらやめて、ビームサーチで探す。null なら使わない（実験用）
+   */
+  exhaustive: { untilTurn: number; maxStates: number } | null;
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0 };
+/** 全探索（SearchOptions.exhaustive）の集計（実験用。比較スクリプトが試合ごとに 0 に戻して読む） */
+export const exhaustiveCounts = {
+  /** 全探索した回数（サンプルごと） */
+  searches: 0,
+  /** 上限を超えてビームサーチに戻した回数 */
+  overflow: 0,
+  /** 読み切れたときに調べた局面の数の合計と最大 */
+  states: 0,
+  maxStates: 0,
+  /** 同じ局面でビームサーチも行い、ターン末の点数の最善を比べた結果（全探索の方が高かった回数と、その差の合計） */
+  better: 0,
+  gain: 0,
+  /** 全探索の方が高かったもののうち、最善の終局面の最初の手がビームサーチと違った回数 */
+  firstDiffers: 0,
+};
+
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null };
 
 /** 打った手の並び（後ろから前へのリスト）。各手を打った後の局面も持つ */
 interface Step {
@@ -221,8 +242,6 @@ function uniqueStates(children: Node[], width: number, perFirst = 0): Node[] {
 
 /** 1つの局面で、最初の手ごとの評価値を求める */
 function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalWeights, rng: Rng): Map<string, Plan> {
-  const terminals: Node[] = [];
-  let frontier: Node[] = [];
 
   /** ターンを終える局面（合流する相打ちを打った後） */
   const settle = (state: GameState) => (opts.settleTrades ? settleConvergingTrades(state, p) : state);
@@ -255,8 +274,44 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
     return self;
   };
 
-  // 深さ1: すべての手を展開する（最初の手の候補を落とさない）
   const rootConverges = opts.settleTrades && convergingAttacks(root, p).length > 0;
+
+  /** メモ化付きの全探索で、ターンを終えられる局面すべて（上限を超えたら null） */
+  const exhaustiveTerminals = (maxStates: number): Node[] | null => {
+    const out: Node[] = [];
+    const stack: Node[] = [];
+    for (const a of expand(root)) {
+      if (!allowed(root, a)) continue;
+      if (a.type === "endTurn") {
+        if (!rootConverges) out.push({ state: root, first: a, value: score(root), path: { action: a, state: root, prev: null } });
+        continue;
+      }
+      for (const next of advance(root, a, null)) stack.push({ ...next, first: a, value: 0 });
+    }
+    const seen = new KeySet();
+    let count = 0;
+    while (stack.length > 0) {
+      const node = stack.pop()!;
+      if (!seen.addLazy(() => turnOrderKey(node.state), turnOrderHash(node.state))) continue;
+      if (++count > maxStates) return null;
+      node.value = score(node.state);
+      out.push(node);
+      const actor = node.state.pending ? node.state.pending.player : node.state.active;
+      if (node.state.phase === "ended" || actor !== p) continue;
+      for (const a of expand(node.state)) {
+        if (a.type === "endTurn" || !allowed(node.state, a)) continue;
+        for (const next of advance(node.state, a, node.path)) stack.push({ ...next, first: node.first, value: 0 });
+      }
+    }
+    exhaustiveCounts.states += count;
+    exhaustiveCounts.maxStates = Math.max(exhaustiveCounts.maxStates, count);
+    return out;
+  };
+
+  const beamTerminals = (): Node[] => {
+  const terminals: Node[] = [];
+  let frontier: Node[] = [];
+  // 深さ1: すべての手を展開する（最初の手の候補を落とさない）
   for (const a of expand(root)) {
     if (!allowed(root, a)) continue;
     if (a.type === "endTurn") {
@@ -289,6 +344,27 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
     frontier = opts.dedup ? uniqueStates(children, opts.beamWidth, opts.perFirst) : children.slice(0, opts.beamWidth);
   }
   terminals.push(...frontier);
+  return terminals;
+  };
+
+  let terminals: Node[] | null = null;
+  if (opts.exhaustive && root.players[p].turnCount <= opts.exhaustive.untilTurn) {
+    exhaustiveCounts.searches++;
+    terminals = exhaustiveTerminals(opts.exhaustive.maxStates);
+    if (!terminals) exhaustiveCounts.overflow++;
+    else {
+      // 比較用: 同じ局面のビームサーチの、ターン末の点数で最善の終局面
+      const top = (ts: Node[]) => ts.reduce((a, b) => (b.value > a.value ? b : a));
+      const ex = top(terminals);
+      const beam = top(beamTerminals());
+      if (ex.value > beam.value + 1e-9) {
+        exhaustiveCounts.better++;
+        exhaustiveCounts.gain += ex.value - beam.value;
+        if (keyOf(ex.first) !== keyOf(beam.first)) exhaustiveCounts.firstDiffers++;
+      }
+    }
+  }
+  if (!terminals) terminals = beamTerminals();
   if (opts.scoreTurnEnd === "terminal") for (const t of terminals) t.value = endScore(t.state);
 
   // 最初の手ごとに最善の終局面を残し、上位を相手のターンまで読んで評価し直す
