@@ -337,6 +337,12 @@ function canAttackLeader(state: GameState, f: FollowerOnBoard): boolean {
   return !summonedThisTurn(state, f) || hasKeyword(f, "storm");
 }
 
+/** フォロワー自身の状態による攻撃の可否（相手の場は見ない）。leader: リーダーにも / follower: フォロワーにだけ / none: できない */
+export function attackReach(state: GameState, f: FollowerOnBoard): "leader" | "follower" | "none" {
+  if (canAttackLeader(state, f)) return "leader";
+  return canAttackFollowers(state, f) ? "follower" : "none";
+}
+
 /** 攻撃先の候補（守護を考慮済み） */
 export function attackTargets(state: GameState, attacker: FollowerOnBoard): AttackTarget[] {
   const opp = state.players[opponent(state.active)];

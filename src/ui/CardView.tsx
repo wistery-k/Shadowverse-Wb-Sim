@@ -2,7 +2,7 @@
 
 import { CLASS_NAMES, SET_NAMES, type Card } from "../cards";
 import { abilitiesOf, cardOf, handCost, type HandCard, type OnBoard } from "../engine";
-import { KEYWORD_NAMES, TYPE_NAMES } from "./describe";
+import { KEYWORD_NAMES, TYPE_NAMES, type AttackStatus } from "./describe";
 
 interface Props {
   cardId: string;
@@ -13,13 +13,19 @@ interface Props {
   targetable?: boolean;
   /** 行動できる */
   ready?: boolean;
-  /** 攻撃できる（follower: フォロワーのみ、leader: リーダーにも） */
-  attackable?: "follower" | "leader" | null;
+  /** 攻撃の可否（場のフォロワーに、手番のときだけ渡す） */
+  attackable?: AttackStatus | null;
   /** 直前の行動の動き */
   motion?: Motion | null;
   onClick?: () => void;
   onHover?: () => void;
 }
+
+const ATTACK_LABELS: Record<AttackStatus, string> = {
+  leader: "リーダー攻撃可",
+  follower: "フォロワーのみ",
+  none: "攻撃不可",
+};
 
 /** summon: 場に出た / attack-up・attack-down: その向きへ攻撃した / hit: 攻撃された */
 export type Motion = "summon" | "attack-up" | "attack-down" | "hit";
@@ -35,7 +41,7 @@ export function CardView({ cardId, board, hand, selected, targetable, ready, att
     ready ? "ready" : "",
     onClick ? "clickable" : "",
     board?.kind === "follower" && keywords.includes("ward") ? "ward" : "",
-    attackable ? `can-attack-${attackable}` : "",
+    attackable ? `attack-${attackable}` : "",
     motion ? `motion-${motion}` : "",
   ].join(" ");
 
@@ -43,6 +49,7 @@ export function CardView({ cardId, board, hand, selected, targetable, ready, att
 
   return (
     <button type="button" class={classes} onClick={onClick} onMouseEnter={onHover} title={card.text}>
+      {attackable && <div class={`attack-tag ${attackable}`}>{ATTACK_LABELS[attackable]}</div>}
       <div class="card-top">
         <span class={`cost ${hand && hand.costMod < 0 ? "reduced" : ""}`}>{cost}</span>
         <span class="card-name">{card.name}</span>

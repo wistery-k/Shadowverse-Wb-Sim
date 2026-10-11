@@ -7,7 +7,9 @@ import {
   actingPlayer,
   applyAction,
   cardOf,
+  BOARD_LIMIT,
   EP,
+  evolveTurnReached,
   HAND_LIMIT,
   leaderId,
   legalActions,
@@ -21,7 +23,7 @@ import {
 } from "../engine";
 import { CardDetail, CardView } from "./CardView";
 import { CLASS_NAMES, type ClassId } from "../cards";
-import { crestName, describeAction, leaderClasses, modeLabels } from "./describe";
+import { type AttackStatus, attackStatuses, crestName, describeAction, leaderClasses, modeLabels } from "./describe";
 
 const AI_DELAY_MS = 700;
 const AUTO_DELAY_MS = 400;
@@ -180,6 +182,7 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
     selectedActions.flatMap((a) => (a.type === "attack" ? [a.target === "leader" ? OPP_LEADER : a.target] : [])),
   );
   const candidates = new Set(pending?.kind === "choose" ? pending.candidates : []);
+  const attackable = myTurn && !mulligan ? attackStatuses(state) : new Map<number, AttackStatus>();
   const readyIds = new Set(myTurn && !pending && !mulligan ? legal.map(actionSubject).filter((x) => x !== null) : []);
 
   function clickEntity(iid: number) {
@@ -243,6 +246,7 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
               onClick={() => clickEntity(c.iid)}
             />
           ))}
+          <BoardSlots count={opp.board.length} />
         </div>
       </section>
 
@@ -256,9 +260,11 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
               selected={selected === c.iid || picks.includes(c.iid)}
               targetable={candidates.has(c.iid)}
               ready={readyIds.has(c.iid)}
+              attackable={attackable.get(c.iid) ?? null}
               onClick={() => clickEntity(c.iid)}
             />
           ))}
+          <BoardSlots count={me.board.length} />
         </div>
         <div
           class={`leader class-${classes[HUMAN]} ${candidates.has(MY_LEADER) ? "targetable" : ""} ${picks.includes(MY_LEADER) ? "selected" : ""}`}
@@ -424,6 +430,17 @@ function Points({ kind, left, max, locked = false }: { kind: "ep" | "sep"; left:
   );
 }
 
+/** 場の空き（上限まで点線の枠を並べる） */
+export function BoardSlots({ count }: { count: number }) {
+  return (
+    <>
+      {Array.from({ length: Math.max(0, BOARD_LIMIT - count) }, (_, i) => (
+        <span key={`empty-${i}`} class="slot-empty board-slot" />
+      ))}
+    </>
+  );
+}
+
 /** 手札の空き（上限まで点線の枠を並べる） */
 export function EmptySlots({ count }: { count: number }) {
   return (
@@ -460,7 +477,7 @@ export function PlayerInfo({
         PP {pl.pp}/{pl.maxPp}
       </span>
       {pl.extraPpAvailable && <span class={`expp-badge ${extraPpUsable ? "usable" : ""}`}>エクストラPP</span>}
-      <Points kind="ep" left={pl.ep} max={EP} />
+      <Points kind="ep" left={pl.ep} max={EP} locked={!evolveTurnReached(state, p)} />
       <Points kind="sep" left={pl.sep} max={SEP} locked={!superEvolveTurnReached(state, p)} />
       <span>手札 {pl.hand.length}</span>
       <span>山札 {pl.deck.length}</span>

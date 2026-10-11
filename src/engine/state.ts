@@ -2,6 +2,7 @@
 
 import {
   BOARD_LIMIT,
+  EVOLVE_TURN,
   HAND_LIMIT,
   SUPER_EVOLVE_TURN,
 } from "./constants";
@@ -104,6 +105,11 @@ export function boardAbilities(c: OnBoard): Ability[] {
 
 export function handCost(h: HandCard): number {
   return Math.max(0, cardOf(h.cardId).cost + h.costMod);
+}
+
+export function evolveTurnReached(state: GameState, p: PlayerIndex): boolean {
+  const order = p === state.first ? 0 : 1;
+  return state.players[p].turnCount >= EVOLVE_TURN[order];
 }
 
 export function superEvolveTurnReached(state: GameState, p: PlayerIndex): boolean {
