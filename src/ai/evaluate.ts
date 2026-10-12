@@ -41,13 +41,6 @@ export interface EvalWeights {
    */
   fusionSet: number;
   /**
-   * 手札に五行の果て・クオンがあり、超進化を 1 回以上残していて、PP 最大値が kuonFromPp 以上のときに足す点。
-   * PP 10 でエンハンス 10 のクオンを出し、超進化で式神・貴人に疾走を付けてとどめにするために、
-   * クオンと超進化を早く使わずに残す価値。0 なら見ない
-   */
-  kuonReserve: number;
-  kuonFromPp: number;
-  /**
    * カードごとの「手札に持っておく価値」（カードID → 点数）。切り札を温存させるために使う。
    * 手札1枚の価値（myHand）に加算する
    */
@@ -80,8 +73,6 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   lethalRange: 10,
   lethalAttack: 0.3,
   fusionSet: 0,
-  kuonReserve: 0,
-  kuonFromPp: 9,
   hold: {},
 };
 
@@ -106,8 +97,6 @@ const FUSION_HOLD: Readonly<Record<string, number>> = Object.fromEntries(
 
 /** Ω の素材（fusionSet で種類を数える） */
 const FUSION_SET: ReadonlySet<string> = new Set(["デストロイアーティファクトα", "デストロイアーティファクトβ", "デストロイアーティファクトγ"].map(id));
-
-const KUON = id("五行の果て・クオン");
 
 /**
  * 探索 AI の既定の重み（基準の重み＋PP 最大値＋SEP＋融合で作るカードの価値）。
@@ -159,7 +148,6 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
     for (const h of me.hand) if (FUSION_SET.has(h.cardId)) kinds.add(h.cardId);
     v += kinds.size * w.fusionSet;
   }
-  if (w.kuonReserve !== 0 && me.sep > 0 && me.maxPp >= w.kuonFromPp && me.hand.some((h) => h.cardId === KUON)) v += w.kuonReserve;
   v += me.ep * w.ep + me.sep * w.sep;
   if (me.extraPpAvailable) v += w.extraPp;
   // 自然に増えた分は数えない（PP を増やさないデッキの評価値を変えないため）
