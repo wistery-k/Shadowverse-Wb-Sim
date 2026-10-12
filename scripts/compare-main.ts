@@ -13,7 +13,7 @@ const EXCLUDED_DECKS = ["ランプドラゴン"];
 /**
  * 探索 AI の設定 A と B を対戦させる（npm run compare -- <試合数> '<Aの設定JSON>' '<Bの設定JSON>'）。
  * 同じデッキの組で席とデッキを入れ替えて2試合ずつ行い、A の勝率とデッキごとの A の勝率を出す。
- * 例: npm run compare -- 105 '{}' '{"lethal":false}'
+ * 例: npm run compare -- 105 '{}' '{"lethal":false}'（4 つ目に最初の試合番号を渡せる。既定 0）
  * "weights": "byClass" でクラスごとに調整した重み、"default" で基準の重みを使う。
  * 試合は CPU のコア数だけ並列に行う（環境変数 THREADS で変えられる。scripts/parallel.ts）。
  * デッキは各クラス1つずつ（ドラゴンは疾走ドラゴン）の 7 つを使う。
@@ -26,7 +26,9 @@ export async function main(argv: string[]): Promise<number> {
   const a: Agent = createSearchAgent(parseOptions(argv[1]));
   const b: Agent = createSearchAgent(parseOptions(argv[2]));
   const t0 = Date.now();
-  const tasks = Array.from({ length: games }, (_, g) => [false, true].map((swap) => ({ g, swap }))).flat();
+  // 4 つ目の引数で最初の試合番号を変えられる（例: 600 なら g600〜。前に回した試合と重ならない別の試合で確かめるため）
+  const start = Number(argv[3] ?? 0);
+  const tasks = Array.from({ length: games }, (_, k) => [false, true].map((swap) => ({ g: start + k, swap }))).flat();
   // 1 試合ずつ並列に行う（各試合はシードで決まるので、結果は並列数によらない）
   const results = await parallelMap(tasks, ({ g, swap }) => {
     const i = g % 7, j = (g * 3 + 1 + Math.floor(g / 7)) % 7;

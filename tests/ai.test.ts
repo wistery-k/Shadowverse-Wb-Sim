@@ -301,10 +301,15 @@ describe("評価関数の重み", () => {
     // 進化時能力を持たないフォロワーは数えない
     me.hand = [newHandCard(s, id("スティールナイト"))];
     expect(evaluateWith(s, 0, w)).toBeCloseTo(evaluateWith(s, 0, DEFAULT_WEIGHTS));
-    // 場の進化前のフォロワーは evoReserveBoard のときだけ数える
+    // 場の進化前のフォロワーは evoReserveBoard の倍率で、次の自分のターンに進化できるときだけ数える
     me.hand = [];
     me.board = [newBoardCard(s, id("楽朗の天宮・フィルドア"))];
+    const wb = { ...w, evoReserveBoard: 0.5 };
     expect(evaluateWith(s, 0, w)).toBeCloseTo(evaluateWith(s, 0, DEFAULT_WEIGHTS));
-    expect(evaluateWith(s, 0, { ...w, evoReserveBoard: 1 }) - evaluateWith(s, 0, DEFAULT_WEIGHTS)).toBeCloseTo(3);
+    me.turnCount = 1;
+    expect(evaluateWith(s, 0, wb)).toBeCloseTo(evaluateWith(s, 0, DEFAULT_WEIGHTS));
+    const evolveTurn = s.first === 0 ? 5 : 4;
+    me.turnCount = evolveTurn - 1;
+    expect(evaluateWith(s, 0, wb) - evaluateWith(s, 0, DEFAULT_WEIGHTS)).toBeCloseTo(1.5);
   });
 });
