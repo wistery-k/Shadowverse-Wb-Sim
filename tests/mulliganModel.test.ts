@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MODEL_FEATURES, MULLIGAN_ROLES, handFeatures, modelMulliganSwap, type MulliganModel } from "../src/ai/mulliganModel";
+import { MODEL_FEATURES, MULLIGAN_MODEL, MULLIGAN_ROLES, handFeatures, modelMulliganSwap, type MulliganModel } from "../src/ai/mulliganModel";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { createGame } from "../src/engine";
 
@@ -35,5 +35,13 @@ describe("手札の形のマリガン", () => {
     const second = hand.filter((h, i) => hand.findIndex((x) => x.cardId === h.cardId) !== i);
     expect(swap.sort()).toEqual(second.map((h) => h.iid).sort());
     expect(modelMulliganSwap(s, s.first, {})).toBeNull();
+  });
+
+  it("既定の係数は役割のあるデッキをすべて含み、特徴名は既知のもの", () => {
+    for (const name of Object.keys(MULLIGAN_ROLES)) {
+      const deck = MULLIGAN_MODEL[name];
+      expect(deck, name).toBeDefined();
+      for (const f of Object.keys(deck!.features)) expect(MODEL_FEATURES).toContain(f);
+    }
   });
 });

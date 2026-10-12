@@ -1,4 +1,4 @@
-// 手札の形でマリガンする（ユーザー案、実験中）。
+// 手札の形でマリガンする（ユーザー案。探索 AI の既定、docs/ai-notes.md）。
 // 残した手札を役割（1PP・2PP・3PP の動き、除去、リソース、展開、回復、ダメージ、進化、超進化、シナジー与・受）の枚数などの特徴で表し、
 // デッキごとに推定した係数で勝率を予測して、初手の残し方（最大 16 通り）から予測が最も高いものを選ぶ。
 // カードの役割は data/mulligan-roles.json（ユーザーと決めた表）、係数は scripts/mulligan-model-fit-main.ts で推定する。
@@ -6,6 +6,7 @@
 import { CARDS_BY_ID } from "../cards";
 import { type GameState, type PlayerIndex } from "../engine";
 import rolesTable from "../../data/mulligan-roles.json";
+import modelTable from "../../data/mulligan-model.json";
 import { defaultDeckNameOf } from "./mulligan";
 
 /** 役割（data/mulligan-roles.json の書き方のまま） */
@@ -111,3 +112,6 @@ export function modelMulliganSwap(state: GameState, p: PlayerIndex, model: Mulli
   }
   return best;
 }
+
+/** 探索 AI の既定の係数（npm run mulligan-model-fit で特徴 10 個に絞って推定したもの。docs/ai-notes.md） */
+export const MULLIGAN_MODEL: MulliganModel = modelTable as MulliganModel;
