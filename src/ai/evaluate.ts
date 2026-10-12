@@ -131,8 +131,9 @@ const EVOLVE_ABILITY: ReadonlySet<string> = new Set(
  * クレストは 1.5 だとアリアのクレスト（妖精に疾走）を安く見て、出すべき局面でアリアを出さなかったため 3（ユーザー判断。docs/ai-notes.md）
  * fusionSet（手札の α・β・γ の種類 1 つにつき）は 0/1.2/2.4/3.6/4.8 で比べて 3.6（AFネメシスの勝率 38.7% → 46.8%。docs/ai-notes.md）
  * kuonReserve は 0/8/12/16 で比べて 8（スペルウィッチの勝率 44.4% → 47.1%、1200 試合。docs/ai-notes.md）
+ * evoReserve 3 は勝率を変えない（今の AI と 50〜51%）が、進化時能力を持たないフォロワーへの進化が 30% → 20% に減るので採用（ユーザー判断。docs/ai-notes.md）
  */
-export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, crest: 3, fusionSet: 3.6, kuonReserve: 8, hold: FUSION_HOLD };
+export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, crest: 3, fusionSet: 3.6, kuonReserve: 8, evoReserve: 3, hold: FUSION_HOLD };
 
 const KEYWORD_VALUE: Partial<Record<string, number>> = {
   ward: 1,
