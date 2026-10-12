@@ -2,7 +2,7 @@
 
 import { id } from "../cards/abilities/helpers";
 import { CARDS_BY_ID } from "../cards";
-import { EVOLVE_TURN, MAX_PP, abilitiesOf, type FollowerOnBoard, type GameState, type OnBoard, type PlayerIndex } from "../engine";
+import { MAX_PP, abilitiesOf, type FollowerOnBoard, type GameState, type OnBoard, type PlayerIndex } from "../engine";
 
 export interface EvalWeights {
   /** 自分・相手のリーダー体力 1 点 */
@@ -48,16 +48,12 @@ export interface EvalWeights {
    */
   kuonReserve: number;
   /**
-   * EP が残っているとき、進化時能力（【進化時】・これが進化したとき）を持つフォロワー 1 枚あたりに足す点。
-   * 数えるのは EP の数まで。進化時能力を持たないフォロワーに EP を使わず、進化時能力持ちのために残す価値。0 なら見ない
+   * 進化時能力（【進化時】・これが進化したとき）を持つフォロワーのために EP を残す価値。
+   * 手札の進化時能力持ちを EP の数まで数え、このターンに EP で進化させたのが進化時能力持ちならさらに 1 枚分数えて、1 枚あたりこの点を足す。
+   * 進化時能力持ちを出してそのターンに進化させても点は変わらず、進化時能力のないフォロワーを進化させたり、
+   * 出して進化させずに場に残したりすると下がる。0 なら見ない
    */
   evoReserve: number;
-  /**
-   * evoReserve で、手札に加えて自分の場の進化前のフォロワーも数えるときの倍率（0 なら手札だけ）。
-   * 場のフォロワーは相手のターンを生き延びないと進化できないので割り引く。次の自分のターンに進化できるときだけ数え、
-   * EP の数から手札の分を引いた残りまで数える
-   */
-  evoReserveBoard: number;
   /**
    * カードごとの「手札に持っておく価値」（カードID → 点数）。切り札を温存させるために使う。
    * 手札1枚の価値（myHand）に加算する
@@ -93,7 +89,6 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   fusionSet: 0,
   kuonReserve: 0,
   evoReserve: 0,
-  evoReserveBoard: 0,
   hold: {},
 };
 
@@ -180,16 +175,11 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
     v += kinds.size * w.fusionSet;
   }
   if (w.kuonReserve !== 0 && me.sep > 0 && me.hand.some((h) => h.cardId === KUON)) v += w.kuonReserve;
-  if (w.evoReserve !== 0 && me.ep > 0) {
+  if (w.evoReserve !== 0) {
     let n = 0;
     for (const h of me.hand) if (EVOLVE_ABILITY.has(h.cardId)) n++;
-    const inHand = Math.min(n, me.ep);
-    v += inHand * w.evoReserve;
-    if (w.evoReserveBoard !== 0 && inHand < me.ep && me.turnCount + 1 >= EVOLVE_TURN[p === state.first ? 0 : 1]) {
-      let b = 0;
-      for (const c of me.board) if (c.kind === "follower" && c.evolve === "none" && EVOLVE_ABILITY.has(c.cardId)) b++;
-      v += Math.min(b, me.ep - inHand) * w.evoReserve * w.evoReserveBoard;
-    }
+    const used = me.epEvolvedThisTurn !== null && EVOLVE_ABILITY.has(me.epEvolvedThisTurn) ? 1 : 0;
+    v += (Math.min(n, me.ep) + used) * w.evoReserve;
   }
   v += me.ep * w.ep + me.sep * w.sep;
   if (me.extraPpAvailable) v += w.extraPp;

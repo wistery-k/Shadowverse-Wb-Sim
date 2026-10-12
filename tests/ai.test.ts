@@ -290,7 +290,7 @@ describe("評価関数の重み", () => {
     expect(evaluateWith(t, 0, SEARCH_WEIGHTS)).toBeGreaterThanOrEqual(before);
     expect(evaluateWith(t, 0, DEFAULT_WEIGHTS)).toBeLessThan(evaluateWith(s, 0, DEFAULT_WEIGHTS));
   });
-  it("evoReserve は EP の数まで、手札の進化時能力持ちを数える", () => {
+  it("evoReserve は EP の数まで手札の進化時能力持ちを数え、このターンに EP で進化させた進化時能力持ちも数える", () => {
     const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 4 });
     const me = s.players[0];
     me.ep = 2;
@@ -301,15 +301,12 @@ describe("評価関数の重み", () => {
     // 進化時能力を持たないフォロワーは数えない
     me.hand = [newHandCard(s, id("スティールナイト"))];
     expect(evaluateWith(s, 0, w)).toBeCloseTo(evaluateWith(s, 0, DEFAULT_WEIGHTS));
-    // 場の進化前のフォロワーは evoReserveBoard の倍率で、次の自分のターンに進化できるときだけ数える
+    // このターンに EP で進化させたのが進化時能力持ちなら 1 枚分数える（EP が残っていなくても）
     me.hand = [];
-    me.board = [newBoardCard(s, id("楽朗の天宮・フィルドア"))];
-    const wb = { ...w, evoReserveBoard: 0.5 };
+    me.ep = 0;
+    me.epEvolvedThisTurn = id("楽朗の天宮・フィルドア");
+    expect(evaluateWith(s, 0, w) - evaluateWith(s, 0, DEFAULT_WEIGHTS)).toBeCloseTo(3);
+    me.epEvolvedThisTurn = id("スティールナイト");
     expect(evaluateWith(s, 0, w)).toBeCloseTo(evaluateWith(s, 0, DEFAULT_WEIGHTS));
-    me.turnCount = 1;
-    expect(evaluateWith(s, 0, wb)).toBeCloseTo(evaluateWith(s, 0, DEFAULT_WEIGHTS));
-    const evolveTurn = s.first === 0 ? 5 : 4;
-    me.turnCount = evolveTurn - 1;
-    expect(evaluateWith(s, 0, wb) - evaluateWith(s, 0, DEFAULT_WEIGHTS)).toBeCloseTo(1.5);
   });
 });
