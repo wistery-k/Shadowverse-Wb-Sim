@@ -2,7 +2,7 @@
 
 import { id } from "../cards/abilities/helpers";
 import { CARDS_BY_ID } from "../cards";
-import { MAX_PP, abilitiesOf, type FollowerOnBoard, type GameState, type OnBoard, type PlayerIndex } from "../engine";
+import { MAX_PP, abilitiesOf, staticOf, type FollowerOnBoard, type GameState, type OnBoard, type PlayerIndex } from "../engine";
 
 export interface EvalWeights {
   /** 自分・相手のリーダー体力 1 点 */
@@ -23,6 +23,13 @@ export interface EvalWeights {
    * 基準は amulet と同じ。土の印を増やすだけの手（理光の証明の（1）等）が、印の数とは別にアミュレット 1 枚分得をする
    */
   sigilAmulet: number;
+  /**
+   * カウントダウンとラストワード（召喚・ドロー）を持つアミュレット（獣姫の誓約・穏やかなる教会等）を、
+   * 「割れたときに得るもの × countdownDecay^残りカウント」で数える（amulet の代わり）。
+   * 割れたときに得るものは、出すフォロワーの価値（攻撃力・体力・基礎点・キーワード）と引く枚数 × myHand。
+   * カウントを進めるアクトで点が上がり、割れると得るものと同じ点になる。0 なら見ない（amulet で数える）
+   */
+  countdownDecay: number;
   /** 相手の盤面の価値の倍率（自分の盤面に対して） */
   oppBoard: number;
   /** 手札 1 枚 */
@@ -89,6 +96,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   amulet: 1.5,
   sigil: 0.5,
   sigilAmulet: 1.5,
+  countdownDecay: 0,
   oppBoard: 1.1,
   myHand: 0.6,
   oppHand: 0.3,
@@ -171,6 +179,40 @@ const KEYWORD_VALUE: Partial<Record<string, number>> = {
   aura: 0.5,
 };
 
+/** カウントダウンのアミュレットが割れたときに得るもの（ラストワードで出すフォロワーと引く枚数） */
+interface CountdownPayoff {
+  followers: { attack: number; defense: number; keywords: readonly string[] }[];
+  draws: number;
+}
+
+/** カウントダウンとラストワード（召喚・ドローだけ）を持つアミュレット → 割れたときに得るもの */
+export const COUNTDOWN_PAYOFF: ReadonlyMap<string, CountdownPayoff> = new Map(
+  [...CARDS_BY_ID.values()].flatMap((c): [string, CountdownPayoff][] => {
+    if (c.type !== "amulet" || c.countdown === undefined || c.countdown === null) return [];
+    const effects = abilitiesOf(c.id).abilities.filter((a) => a.trigger.on === "lastWords").flatMap((a) => a.effects);
+    if (effects.length === 0) return [];
+    const payoff: CountdownPayoff = { followers: [], draws: 0 };
+    for (const e of effects) {
+      if (e.op === "summon" && typeof e.count === "number") {
+        const t = CARDS_BY_ID.get(e.cardId);
+        if (t?.type !== "follower") return [];
+        for (let i = 0; i < e.count; i++) payoff.followers.push({ attack: t.attack, defense: t.defense, keywords: staticOf(t.id).keywords });
+      } else if (e.op === "draw" && typeof e.count === "number" && !e.filter) payoff.draws += e.count;
+      else return [];
+    }
+    return [[c.id, payoff]];
+  }),
+);
+
+function countdownValue(p: CountdownPayoff, countdown: number, w: EvalWeights): number {
+  let v = p.draws * w.myHand;
+  for (const f of p.followers) {
+    v += f.attack * w.attack + f.defense * w.defense + w.followerBase;
+    for (const k of f.keywords) v += (KEYWORD_VALUE[k] ?? 0) * w.keywords;
+  }
+  return v * w.countdownDecay ** countdown;
+}
+
 function followerValue(f: FollowerOnBoard, w: EvalWeights): number {
   let v = f.attack * w.attack + f.tempAttack * w.tempAttack + f.defense * w.defense + w.followerBase;
   for (const k of f.keywords) v += (KEYWORD_VALUE[k] ?? 0) * w.keywords;
@@ -181,6 +223,10 @@ function followerValue(f: FollowerOnBoard, w: EvalWeights): number {
 function boardValue(c: OnBoard, w: EvalWeights): number {
   if (c.kind === "follower") return followerValue(c, w);
   if (c.sigils !== null) return w.sigilAmulet + c.sigils * w.sigil;
+  if (w.countdownDecay !== 0 && c.countdown !== null) {
+    const p = COUNTDOWN_PAYOFF.get(c.cardId);
+    if (p) return countdownValue(p, c.countdown, w);
+  }
   return w.amulet;
 }
 
