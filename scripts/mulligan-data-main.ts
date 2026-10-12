@@ -7,7 +7,9 @@ import { rhinoAgent } from "../src/ai/rhino";
 import { searchAgent } from "../src/ai/search";
 import type { Agent } from "../src/ai/types";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
-import { actingPlayer, nextRandom, type PlayerIndex } from "../src/engine";
+import { actingPlayer, nextRandom, type GameState, type PlayerIndex } from "../src/engine";
+import { MULLIGAN_WEIGHTS, costMulliganSwap, weightedMulliganSwap } from "../src/ai/mulligan";
+import { mulliganSwap as rhinoMulliganSwap } from "../src/ai/rhino";
 import { playMatch } from "../src/sim/match";
 
 /** 比較に使うデッキ（npm run compare と同じ 7 つ） */
@@ -31,8 +33,17 @@ function mix(seed: number, x: number): number {
   return nextRandom((seed ^ Math.imul(x + 1, 0x9e3779b1)) >>> 0)[1];
 }
 
-/** マリガンだけコインで決める AI。初手と判断を observed に書く */
-function randomMulligan(inner: Agent, coinSeed: number, observed: { hand: string[]; kept: boolean[] }): Agent {
+/**
+ * マリガンだけランダムに決める AI。初手と判断を observed に書く。
+ * 各カードを、base の判断から確率 flip で反転させる（flip 0.5 なら base によらずコイン。既定の base は全て返す）
+ */
+function randomMulligan(
+  inner: Agent,
+  coinSeed: number,
+  observed: { hand: string[]; kept: boolean[] },
+  flip = 0.5,
+  base: (state: GameState, p: PlayerIndex) => readonly number[] = (state, p) => state.players[p].hand.map((h) => h.iid),
+): Agent {
   let s = coinSeed;
   return {
     name: `${inner.name}+randomMulligan`,
@@ -40,12 +51,13 @@ function randomMulligan(inner: Agent, coinSeed: number, observed: { hand: string
       const first = legal[0];
       if (first?.type !== "mulligan") return inner.chooseAction(state, legal, rng);
       const hand = state.players[actingPlayer(state)].hand;
+      const baseSwap = base(state, actingPlayer(state));
       const swap: number[] = [];
       observed.hand = hand.map((h) => h.cardId);
       observed.kept = hand.map((h) => {
         const [v, next] = nextRandom(s);
         s = next;
-        const keep = v < 0.5;
+        const keep = !baseSwap.includes(h.iid) !== v < flip;
         if (!keep) swap.push(h.iid);
         return keep;
       });
@@ -57,17 +69,22 @@ function randomMulligan(inner: Agent, coinSeed: number, observed: { hand: string
 }
 
 /**
- * npm run mulligan-data -- --games <n> --seed <s> --shard <i>/<k> --out <file.jsonl>
+ * npm run mulligan-data -- --games <n> --seed <s> --shard <i>/<k> --out <file.jsonl> [--flip <p>]
+ * --flip を 0.5 未満にすると、今のマリガン（エルフはリノセウス用のルール）の判断を各カード確率 p で反転させる（今の方針のまわりのデータ）。
  * 試合番号 g（0 ≦ g < n）のうち g % k === i のものを行う。出力ファイルに既にある seed は飛ばす（再開用）。
  */
+/** 今の探索 AI のマリガン（--flip の基準） */
+const currentSwap = (state: GameState, p: PlayerIndex) => weightedMulliganSwap(state, p, MULLIGAN_WEIGHTS) ?? costMulliganSwap(state, p);
+
 export async function main(argv: string[]): Promise<number> {
-  let games = 100, seed = 1, shard = [0, 1], out = "mulligan-data.jsonl";
+  let games = 100, seed = 1, shard = [0, 1], out = "mulligan-data.jsonl", flip = 0.5;
   for (let i = 0; i < argv.length; i += 2) {
     const k = argv[i], v = argv[i + 1] ?? "";
     if (k === "--games") games = Number(v);
     else if (k === "--seed") seed = Number(v);
     else if (k === "--shard") shard = v.split("/").map(Number);
     else if (k === "--out") out = v;
+    else if (k === "--flip") flip = Number(v);
     else throw new Error(`不明な引数: ${k}`);
   }
   const decks = DEFAULT_DECKS.filter((d) => !EXCLUDED_DECKS.includes(d.name));
@@ -88,7 +105,7 @@ export async function main(argv: string[]): Promise<number> {
     const j = (i + 1 + Math.floor(r2 * (decks.length - 1))) % decks.length;
     const pair = [decks[i]!, decks[j]!];
     const obs = [{ hand: [] as string[], kept: [] as boolean[] }, { hand: [] as string[], kept: [] as boolean[] }];
-    const agents = pair.map((d, p) => randomMulligan(d.name === "リノセウスエルフ" ? rhinoAgent : searchAgent, mix(gameSeed, 100 + p), obs[p]!)) as [Agent, Agent];
+    const agents = pair.map((d, p) => randomMulligan(d.name === "リノセウスエルフ" ? rhinoAgent : searchAgent, mix(gameSeed, 100 + p), obs[p]!, flip, flip === 0.5 ? undefined : d.name === "リノセウスエルフ" ? rhinoMulliganSwap : currentSwap)) as [Agent, Agent];
     const r = playMatch(agents, { decks: [pair[0]!.cards, pair[1]!.cards], seed: gameSeed });
     const rec: MulliganRecord = {
       seed: gameSeed,

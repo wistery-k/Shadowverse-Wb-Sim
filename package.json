@@ -20,7 +20,8 @@
     "bench": "node scripts/vite-run.mjs scripts/bench-main.ts",
     "mulligan-data": "node scripts/vite-run.mjs scripts/mulligan-data-main.ts",
     "mulligan-fit": "node scripts/vite-run.mjs scripts/mulligan-fit-main.ts",
-    "mulligan-eval": "node scripts/vite-run.mjs scripts/mulligan-eval-main.ts"
+    "mulligan-eval": "node scripts/vite-run.mjs scripts/mulligan-eval-main.ts",
+    "mulligan-model-fit": "node scripts/vite-run.mjs scripts/mulligan-model-fit-main.ts"
   },
   "repository": {
     "type": "git",
