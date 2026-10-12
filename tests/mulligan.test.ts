@@ -3,7 +3,7 @@ import { MULLIGAN_WEIGHTS, costMulliganSwap, defaultDeckNameOf, weightedMulligan
 import { EVOLVE_ABILITY } from "../src/ai/evaluate";
 import { greedyAgent } from "../src/ai/greedy";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
-import { applyAction, createGame, legalActions } from "../src/engine";
+import { applyAction, cardOf, createGame, legalActions } from "../src/engine";
 
 const deck = DEFAULT_DECKS.find((d) => d.name === "AFネメシス")!;
 const other = DEFAULT_DECKS.find((d) => d.name === "アマリアロイヤル")!;
@@ -52,12 +52,34 @@ describe("マリガンの重み", () => {
     const w = { [deck.name]: table };
     expect(weightedMulliganSwap(s, q, w)!.length).toBe(h.length);
     // a の 1 枚目だけ残す（2 枚目と b は返す）
-    expect(weightedMulliganSwap(s, q, w, 0.015)!.sort()).toEqual(h.filter((x) => x !== a).map((x) => x.iid).sort());
+    expect(weightedMulliganSwap(s, q, w, { evoBonus: 0.015 })!.sort()).toEqual(h.filter((x) => x !== a).map((x) => x.iid).sort());
     // 足しても 0 を超えなければ返す
-    expect(weightedMulliganSwap(s, q, w, 0.005)!.length).toBe(h.length);
+    expect(weightedMulliganSwap(s, q, w, { evoBonus: 0.005 })!.length).toBe(h.length);
     // 他の進化時能力持ちを残すなら加点しない
     table[b!.cardId] = [0.01, -0.01];
-    expect(weightedMulliganSwap(s, q, w, 0.015)!.sort()).toEqual(weightedMulliganSwap(s, q, w)!.sort());
+    expect(weightedMulliganSwap(s, q, w, { evoBonus: 0.015 })!.sort()).toEqual(weightedMulliganSwap(s, q, w)!.sort());
+  });
+
+  it("oneCopy は同じカードの 2 枚目を返し、maxHighCost はコスト 4 以上を重みの大きい順に上限まで残す", () => {
+    const find = (ok: (h: readonly { cardId: string }[]) => boolean) => {
+      for (let seed = 1; ; seed++) {
+        const s = createGame({ decks: [deck.cards, deck.cards], seed });
+        if (ok(s.players[s.first].hand)) return s;
+      }
+    };
+    const keepAll = (h: readonly { cardId: string }[]) => ({ [deck.name]: Object.fromEntries(h.map((x, i) => [x.cardId, [0.01 * (i + 1), 0.01] as [number, number]])) });
+
+    const s1 = find((h) => new Set(h.map((x) => x.cardId)).size < h.length);
+    const h1 = s1.players[s1.first].hand;
+    const second = h1.filter((x, i) => h1.findIndex((y) => y.cardId === x.cardId) !== i).map((x) => x.iid);
+    expect(weightedMulliganSwap(s1, s1.first, keepAll(h1))).toEqual([]);
+    expect(weightedMulliganSwap(s1, s1.first, keepAll(h1), { oneCopy: true })!.sort()).toEqual(second.sort());
+
+    const s2 = find((h) => new Set(h.filter((x) => cardOf(x.cardId).cost >= 4).map((x) => x.cardId)).size >= 2);
+    const h2 = s2.players[s2.first].hand;
+    const w2 = keepAll(h2);
+    const high = h2.filter((x) => cardOf(x.cardId).cost >= 4).sort((a, b) => w2[deck.name]![b.cardId]![0] - w2[deck.name]![a.cardId]![0]);
+    expect(weightedMulliganSwap(s2, s2.first, w2, { maxHighCost: 1 })!.sort()).toEqual(high.slice(1).map((x) => x.iid).sort());
   });
 
   it("withMulligan はマリガンだけ差し替える", () => {

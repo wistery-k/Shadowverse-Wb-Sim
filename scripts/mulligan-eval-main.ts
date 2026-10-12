@@ -1,5 +1,6 @@
-// マリガンの重みの評価（npm run mulligan-eval -- --weights <file> --games <n> --seed <s> --shard <i>/<k> --out <file.jsonl> [--base weights] [--evo-bonus <b>] [--base-weights <file>]）。
+// マリガンの重みの評価（npm run mulligan-eval -- --weights <file> --games <n> --seed <s> --shard <i>/<k> --out <file.jsonl> [--base weights] [--evo-bonus <b>] [--base-weights <file>] [--one-copy] [--max-high <n>]）。
 // --base weights なら「今の方針」を重み（evoBonus なし）にし、新しい方針を重み＋--evo-bonus にする（進化時能力持ちの加点の評価）。
+// --one-copy・--max-high は新しい方針に「同じカードは 1 枚まで」「コスト 4 以上は n 枚まで」を足す（MulliganOptions）。
 // --base-weights <file> なら「今の方針」をそのファイルの重みにする（取り直した重みと今の重みの比較）。
 // 集計は npm run mulligan-eval -- --summary <file.jsonl ...>
 // 7 デッキの全ての組（ミラーを除く 42 通り）× 両方の席 × n シードについて、自分側だけマリガンを「今の方針」と「重み」で打ち分ける。
@@ -7,7 +8,7 @@
 // そのため判断が違う試合だけを両方の方針で打ち、勝ち負けが入れ替わった数を比べる。
 
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
-import { costMulliganSwap, weightedMulliganSwap, withMulligan, type MulliganWeights } from "../src/ai/mulligan";
+import { costMulliganSwap, weightedMulliganSwap, withMulligan, type MulliganOptions, type MulliganWeights } from "../src/ai/mulligan";
 import { mulliganSwap as rhinoMulliganSwap, rhinoAgent } from "../src/ai/rhino";
 import { searchAgent } from "../src/ai/search";
 import type { Agent } from "../src/ai/types";
@@ -80,7 +81,8 @@ export async function main(argv: string[]): Promise<number> {
     summarize(argv.slice(1));
     return 0;
   }
-  let games = 10, seed = 2, shard = [0, 1], out = "mulligan-eval.jsonl", weightsFile = "data/mulligan-weights.json", base = "rule", evoBonus = 0, baseWeightsFile: string | null = null;
+  const opts: MulliganOptions = {};
+  let games = 10, seed = 2, shard = [0, 1], out = "mulligan-eval.jsonl", weightsFile = "data/mulligan-weights.json", base = "rule", baseWeightsFile: string | null = null;
   for (let i = 0; i < argv.length; i += 2) {
     const k = argv[i], v = argv[i + 1] ?? "";
     if (k === "--games") games = Number(v);
@@ -89,7 +91,11 @@ export async function main(argv: string[]): Promise<number> {
     else if (k === "--out") out = v;
     else if (k === "--weights") weightsFile = v;
     else if (k === "--base") base = v;
-    else if (k === "--evo-bonus") evoBonus = Number(v);
+    else if (k === "--evo-bonus") opts.evoBonus = Number(v);
+    else if (k === "--one-copy") {
+      opts.oneCopy = true;
+      i--;
+    } else if (k === "--max-high") opts.maxHighCost = Number(v);
     else if (k === "--base-weights") {
       baseWeightsFile = v;
       base = "weights";
@@ -109,7 +115,7 @@ export async function main(argv: string[]): Promise<number> {
   if (base !== "rule" && base !== "weights") throw new Error(`不明な --base: ${base}`);
   const baseSwap = (deck: string) => (s: GameState, p: PlayerIndex) =>
     base === "weights" ? (weightedMulliganSwap(s, p, baseWeights) ?? costMulliganSwap(s, p)) : deck === ELF ? rhinoMulliganSwap(s, p) : costMulliganSwap(s, p);
-  const newSwap = (s: GameState, p: PlayerIndex) => weightedMulliganSwap(s, p, weights, evoBonus);
+  const newSwap = (s: GameState, p: PlayerIndex) => weightedMulliganSwap(s, p, weights, opts);
   const baseAgent = (deck: string): Agent => (deck === ELF ? rhinoAgent : searchAgent);
   const t0 = Date.now();
   let n = 0, played = 0;

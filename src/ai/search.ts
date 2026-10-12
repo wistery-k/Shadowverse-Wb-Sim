@@ -428,7 +428,7 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
       if (!first) throw new Error("合法手がありません");
       if (legal.length === 1) return first;
       if (first.type === "mulligan") {
-        const swap = opts.mulligan === "weights" ? weightedMulliganSwap(real, actingPlayer(real), MULLIGAN_WEIGHTS, opts.mulliganEvoBonus) : null;
+        const swap = opts.mulligan === "weights" ? weightedMulliganSwap(real, actingPlayer(real), MULLIGAN_WEIGHTS, { evoBonus: opts.mulliganEvoBonus }) : null;
         const action = swap && legal.find((a) => a.type === "mulligan" && a.swap.length === swap.length && a.swap.every((x) => swap.includes(x)));
         // 重みの無いデッキは貪欲法と同じ（コスト 4 以上を返す）
         return action || greedyAgent.chooseAction(real, legal, rng);

@@ -48,11 +48,19 @@ export function defaultDeckNameOf(state: GameState, p: PlayerIndex): string | nu
   return DECK_BY_CARDS.get(sortedKey([...pl.hand, ...pl.deck].map((c) => c.cardId))) ?? null;
 }
 
-/**
- * 重みでマリガンする。デッキの重みが無ければ null。
- * evoBonus > 0 なら、進化時能力持ちを 1 枚も残さない手札のとき、その中で重みが最も大きい 1 枚に evoBonus を足して判断し直す（ユーザー案、実験中）
- */
-export function weightedMulliganSwap(state: GameState, p: PlayerIndex, weights: MulliganWeights, evoBonus = 0): number[] | null {
+/** weightedMulliganSwap の追加の方針（どれも実験用。既定は今の挙動） */
+export interface MulliganOptions {
+  /** 進化時能力持ちを 1 枚も残さない手札のとき、その中で重みが最も大きい 1 枚に足す値（ユーザー案、不採用） */
+  evoBonus?: number;
+  /** 同じカードは 1 枚までしか残さない（ユーザー案） */
+  oneCopy?: boolean;
+  /** コスト 4 以上のカードを残す上限。超える分は重みの小さい方から返す（ユーザー案） */
+  maxHighCost?: number;
+}
+
+/** 重みでマリガンする。デッキの重みが無ければ null */
+export function weightedMulliganSwap(state: GameState, p: PlayerIndex, weights: MulliganWeights, opts: MulliganOptions = {}): number[] | null {
+  const { evoBonus = 0, oneCopy = false, maxHighCost = Infinity } = opts;
   const name = defaultDeckNameOf(state, p);
   const table = name === null ? undefined : weights[name];
   if (!table) return null;
@@ -67,7 +75,7 @@ export function weightedMulliganSwap(state: GameState, p: PlayerIndex, weights: 
       continue;
     }
     // 2 枚目は「2 枚とも残す」と「1 枚だけ残す」の差。1 枚目を返すなら 2 枚目も返す
-    const keep = copy === 0 ? w[0] > 0 : w[0] > 0 && w[1] > 0;
+    const keep = copy === 0 ? w[0] > 0 : !oneCopy && w[0] > 0 && w[1] > 0;
     if (!keep) swap.push(h.iid);
   }
   if (evoBonus > 0) {
@@ -78,8 +86,15 @@ export function weightedMulliganSwap(state: GameState, p: PlayerIndex, weights: 
       const firsts = evo.filter((h) => hand.find((x) => x.cardId === h.cardId) === h);
       const value = (id: string) => table[id]?.[0] ?? (cardOf(id).cost >= 4 ? -Infinity : 0);
       const best = firsts.reduce((a, b) => (value(b.cardId) > value(a.cardId) ? b : a));
-      if (value(best.cardId) + evoBonus > 0) return swap.filter((x) => x !== best.iid);
+      if (value(best.cardId) + evoBonus > 0) swap.splice(swap.indexOf(best.iid), 1);
     }
+  }
+  if (maxHighCost < Infinity) {
+    const value = (id: string) => table[id]?.[0] ?? 0;
+    const high = state.players[p].hand
+      .filter((h) => !swap.includes(h.iid) && cardOf(h.cardId).cost >= 4)
+      .sort((a, b) => value(b.cardId) - value(a.cardId));
+    for (const h of high.slice(maxHighCost)) swap.push(h.iid);
   }
   return swap;
 }
