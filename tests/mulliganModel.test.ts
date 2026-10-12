@@ -13,11 +13,12 @@ describe("手札の形のマリガン", () => {
   });
 
   it("特徴は役割の枚数（1 枚以上・2 枚以上）、重複、残した枚数", () => {
-    const roles = { a: ["2PP", "resource"], b: ["heavy"] } as const;
+    const roles = { a: ["2PP", "リソース"], b: ["除去", "除去"] } as const;
     const f = handFeatures(["a", "a", "b"], roles, true);
     const get = (n: string) => f[MODEL_FEATURES.indexOf(n)];
     expect(f.length).toBe(MODEL_FEATURES.length);
-    expect([get("2PP>=1"), get("2PP>=2"), get("resource>=2"), get("heavy>=1"), get("heavy>=2")]).toEqual([1, 1, 1, 1, 0]);
+    // 除去を 2 つ書いたカードは 1 枚で 2 枚分
+    expect([get("2PP>=1"), get("2PP>=2"), get("リソース>=2"), get("除去>=1"), get("除去>=2"), get("展開>=1")]).toEqual([1, 1, 1, 1, 1, 0]);
     expect([get("dup"), get("kept"), get("2PPxSecond"), get("1PPxRes")]).toEqual([1, 3, 1, 0]);
   });
 

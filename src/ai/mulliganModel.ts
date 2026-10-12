@@ -1,5 +1,5 @@
 // 手札の形でマリガンする（ユーザー案、実験中）。
-// 残した手札を「1PP・2PP・3PP の動き」「除去」「リソース」「返し」「重い」「キー」の枚数などの特徴で表し、
+// 残した手札を役割（1PP・2PP・3PP の動き、除去、リソース、展開、回復、ダメージ、進化、超進化、シナジー与・受）の枚数などの特徴で表し、
 // デッキごとに推定した係数で勝率を予測して、初手の残し方（最大 16 通り）から予測が最も高いものを選ぶ。
 // カードの役割は data/mulligan-roles.json（ユーザーと決めた表）、係数は scripts/mulligan-model-fit-main.ts で推定する。
 
@@ -8,10 +8,11 @@ import { type GameState, type PlayerIndex } from "../engine";
 import rolesTable from "../../data/mulligan-roles.json";
 import { defaultDeckNameOf } from "./mulligan";
 
-export const ROLES = ["1PP", "2PP", "3PP", "removal", "resource", "turnaround", "heavy", "key"] as const;
+/** 役割（data/mulligan-roles.json の書き方のまま）。返し・重いは古い表の書き方（ナイトメアを直すまで残す） */
+export const ROLES = ["1PP", "2PP", "3PP", "除去", "リソース", "展開", "回復", "ダメージ", "進化", "超進化", "シナジー与", "シナジー受", "返し", "重い"] as const;
 export type Role = (typeof ROLES)[number];
 
-/** デッキ名 → カードID → 役割 */
+/** デッキ名 → カードID → 役割（同じ役割を 2 つ書いたカードは 2 枚分に数える） */
 export type MulliganRoles = Record<string, Record<string, readonly Role[]>>;
 
 const ID_BY_NAME = new Map([...CARDS_BY_ID.values()].map((c) => [c.name, c.id]));
@@ -40,14 +41,18 @@ export const MULLIGAN_ROLES: MulliganRoles = parseMulliganRoles(rolesTable);
 
 /**
  * 特徴の名前。各役割は「1 枚以上」「2 枚以上」で数える（1 枚目は効くが 2 枚目は効きが落ちる、を表すため）。
- * dup は同じカードの重複（2 枚目以降）の枚数、kept は残した枚数。
- * 1PPxRes は 1PP の動きがある × リソースの枚数（1PP で手札を使う分とリソースの兼ね合い）、*xSecond は後攻との組み合わせ
+ * cost4+ はコスト 4 以上の枚数（役割とは別に自動で数える）、dup は同じカードの重複（2 枚目以降）の枚数、kept は残した枚数。
+ * 1PPxRes は 1PP の動きがある × リソースの枚数（1PP で手札を使う分とリソースの兼ね合い）、
+ * synergy はシナジー与とシナジー受が両方ある、*xSecond は後攻との組み合わせ
  */
 export const MODEL_FEATURES: readonly string[] = [
   ...ROLES.flatMap((r) => [`${r}>=1`, `${r}>=2`]),
+  "cost4+>=1",
+  "cost4+>=2",
   "dup",
   "kept",
   "1PPxRes",
+  "synergy",
   "1PPxSecond",
   "2PPxSecond",
   "3PPxSecond",
@@ -59,11 +64,15 @@ export function handFeatures(kept: readonly string[], roles: Record<string, read
   for (const id of kept) for (const r of roles[id] ?? []) count.set(r, (count.get(r) ?? 0) + 1);
   const n = (r: Role) => count.get(r) ?? 0;
   const s = second ? 1 : 0;
+  const high = kept.filter((id) => (CARDS_BY_ID.get(id)?.cost ?? 0) >= 4).length;
   return [
     ...ROLES.flatMap((r) => [n(r) >= 1 ? 1 : 0, n(r) >= 2 ? 1 : 0]),
+    high >= 1 ? 1 : 0,
+    high >= 2 ? 1 : 0,
     kept.length - new Set(kept).size,
     kept.length,
-    (n("1PP") >= 1 ? 1 : 0) * n("resource"),
+    (n("1PP") >= 1 ? 1 : 0) * n("リソース"),
+    n("シナジー与") >= 1 && n("シナジー受") >= 1 ? 1 : 0,
     (n("1PP") >= 1 ? 1 : 0) * s,
     (n("2PP") >= 1 ? 1 : 0) * s,
     (n("3PP") >= 1 ? 1 : 0) * s,
