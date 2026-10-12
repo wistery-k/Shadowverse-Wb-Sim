@@ -60,6 +60,14 @@ export interface EvalWeights {
    */
   evoReserve: number;
   /**
+   * 手札のスペルブーストで育つカード（【スペルブースト時】の能力を持つ。ストームブラスト・ウィリアム・宿題やるですぅ！・鬼呼びの術・オーバーディメンション等）1 枚あたり（myHand に加算）。
+   * 早く引くほどブーストを多く受けられる価値。0 なら見ない
+   */
+  boostCard: number;
+  /** 手札のスペルブーストで育つカードが受けたスペルブースト 1 回あたり（1 枚につき boostCap 回まで）。0 なら見ない */
+  boost: number;
+  boostCap: number;
+  /**
    * カードごとの「手札に持っておく価値」（カードID → 点数）。切り札を温存させるために使う。
    * 手札1枚の価値（myHand）に加算する
    */
@@ -95,6 +103,9 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   fusionSet: 0,
   kuonReserve: 0,
   evoReserve: 0,
+  boostCard: 0,
+  boost: 0,
+  boostCap: 5,
   hold: {},
 };
 
@@ -121,6 +132,14 @@ const FUSION_HOLD: Readonly<Record<string, number>> = Object.fromEntries(
 const FUSION_SET: ReadonlySet<string> = new Set(["デストロイアーティファクトα", "デストロイアーティファクトβ", "デストロイアーティファクトγ"].map(id));
 
 const KUON = id("五行の果て・クオン");
+
+/** 手札のスペルブーストで育つカード（boostCard・boost で数える） */
+export const BOOSTABLE: ReadonlySet<string> = new Set(
+  [...CARDS_BY_ID.values()].filter((c) => abilitiesOf(c.id).abilities.some((a) => a.trigger.on === "spellboost")).map((c) => c.id),
+);
+
+/** スペルブーストで育ち切って変身した後のカード（育ち切ったものとして数える） */
+const BOOST_GROWN: ReadonlySet<string> = new Set([id("成長したですぅ！")]);
 
 /** 進化時能力（EP で進化させたとき・これが進化したとき）を持つフォロワー（evoReserve で数える） */
 export const EVOLVE_ABILITY: ReadonlySet<string> = new Set(
@@ -188,6 +207,12 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
     for (const h of me.hand) if (EVOLVE_ABILITY.has(h.cardId)) n++;
     const used = me.epEvolvedThisTurn !== null && EVOLVE_ABILITY.has(me.epEvolvedThisTurn) ? 1 : 0;
     v += (Math.min(n, me.ep) + used) * w.evoReserve;
+  }
+  if (w.boostCard !== 0 || w.boost !== 0) {
+    for (const h of me.hand) {
+      if (BOOST_GROWN.has(h.cardId)) v += w.boostCard + w.boostCap * w.boost;
+      else if (BOOSTABLE.has(h.cardId)) v += w.boostCard + Math.min(h.boosts, w.boostCap) * w.boost;
+    }
   }
   v += me.ep * w.ep + me.sep * w.sep;
   if (me.extraPpAvailable) v += w.extraPp;
