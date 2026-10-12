@@ -7,16 +7,17 @@
 // 3. 相手に倒しきる手順が無い終わり方が 1 つでもあれば「防げた」
 // 局面は実際のもの（相手の手札・山札の順番・乱数の状態を知っている）を使う。防いでもその後に勝てたとは限らない。
 //
-// 使い方: npm run lethal-prevent -- <組の数> [最初の試合番号] [--out <file.jsonl>]
+// 使い方: npm run lethal-prevent -- <組の数> [最初の試合番号] [--out <file.jsonl>] [--continue <回数>]
+// --continue を付けると、防げる終わり方からその回数だけ試合を続けて、逆転できたかを数える
 // 1 組で席とデッキを入れ替えた 2 試合。試合は CPU のコア数だけ並列に行う（THREADS で変えられる）。
 
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { SEARCH_WEIGHTS, evaluateWith } from "../src/ai/evaluate";
 import { resetExactLethalCache, searchExactLethal } from "../src/ai/exactLethal";
 import { KeySet, turnOrderHash, turnOrderKey } from "../src/ai/keySet";
-import { searchAgent } from "../src/ai/search";
+import { createSearchAgent, searchAgent } from "../src/ai/search";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
-import { legalActions, resolveTurnEnd, tryApplyAction, type Action, type GameState, type PlayerIndex } from "../src/engine";
+import { actingPlayer, applyAction, legalActions, resolveTurnEnd, rngFrom, shuffle, tryApplyAction, type Action, type GameState, type PlayerIndex } from "../src/engine";
 import { playMatch } from "../src/sim/match";
 import { replayStates } from "../src/sim/replay";
 import { parallelMap } from "./parallel";
@@ -154,12 +155,42 @@ export interface PreventRecord {
   /** 防げる終わり方のうち評価関数が最も高いものの、全体の最善からの差と順位（1 始まり） */
   safeEvalGap: number | null;
   safeRank: number | null;
+  /** 防げる終わり方からターンを終えて試合を続けたとき、負けた側が勝ったか（続けた回数分。山札の順番と乱数を回ごとに変える） */
+  comebacks: boolean[];
   /** 実際の終わり方の、全体の最善からの評価の差 */
   actualEvalGap: number;
   ms: number;
 }
 
-function analyze(g: number, swap: boolean, decks: readonly { name: string; cards: readonly string[] }[]): PreventRecord {
+/**
+ * p がターンを終えた局面 end から、探索 AI どうしで試合を最後まで続けて勝者を返す。
+ * 先のドローは分からないので、両者の山札の順番を seed で並べ直す。ただし相手の次のドロー（山札の一番上）と局面の乱数の状態は
+ * そのままにする（防げるかはそのドローと乱数で調べたため）。回ごとの違いは山札の残りの順番と AI の乱数
+ */
+function continueGame(end: GameState, p: PlayerIndex, seed: number): PlayerIndex {
+  const rng = rngFrom({ rng: seed });
+  const opp: PlayerIndex = p === 0 ? 1 : 0;
+  const players = end.players.map((pl, i) => {
+    const keep = i === opp ? 1 : 0;
+    const rest = pl.deck.slice(keep);
+    shuffle(rest, rng);
+    return { ...pl, deck: [...pl.deck.slice(0, keep), ...rest] };
+  }) as unknown as GameState["players"];
+  let state: GameState = { ...end, players };
+  state = applyAction(state, { type: "endTurn" });
+  const agents = [createSearchAgent(), createSearchAgent()];
+  const agentRng = rngFrom({ rng: (seed ^ 0x9e3779b9) >>> 0 });
+  for (let n = 0; state.phase !== "ended"; n++) {
+    if (n > 10000) throw new Error(`続きの試合が終わりません (seed ${seed})`);
+    const legal = legalActions(state);
+    state = applyAction(state, agents[actingPlayer(state)]!.chooseAction(state, legal, agentRng));
+  }
+  if (state.winner === null) throw new Error("勝者がいません");
+  resetExactLethalCache();
+  return state.winner;
+}
+
+function analyze(g: number, swap: boolean, decks: readonly { name: string; cards: readonly string[] }[], continuations: number): PreventRecord {
   const i = g % 7, j = (g * 3 + 1 + Math.floor(g / 7)) % 7;
   const [da, db] = swap ? [decks[j]!, decks[i]!] : [decks[i]!, decks[j]!];
   const aSeat = (g + (swap ? 1 : 0)) % 2;
@@ -193,6 +224,7 @@ function analyze(g: number, swap: boolean, decks: readonly { name: string; cards
   const best = scored[0]?.v ?? 0;
   const hadOwnLethal = ends.some((s) => s.phase === "ended" && s.winner === loser);
   let safe = 0, unknown = 0, unchecked = 0;
+  let safeEnd: GameState | null = null;
   let safeEvalGap: number | null = null, safeRank: number | null = null;
   if (killedOnOppTurn && !hadOwnLethal) {
     // 評価の高い順に調べ、防げる終わり方が 1 つ見つかったら止める
@@ -208,11 +240,13 @@ function analyze(g: number, swap: boolean, decks: readonly { name: string; cards
         safe++;
         safeRank = k + 1;
         safeEvalGap = best - v;
+        safeEnd = s;
         break;
       } else if (res === "unknown") unknown++;
     }
   }
   const actual = lastAction.type === "endTurn" ? opponentLethal(actualEnd, loser) : "unknown";
+  const comebacks = safeEnd ? Array.from({ length: continuations }, (_, c) => continueGame(safeEnd!, loser, (seed * 31 + c + 1) >>> 0) === loser) : [];
   return {
     g, swap, seed,
     decks: [pair[0].name, pair[1].name],
@@ -230,6 +264,7 @@ function analyze(g: number, swap: boolean, decks: readonly { name: string; cards
     unchecked,
     safeEvalGap,
     safeRank,
+    comebacks,
     actualEvalGap: lastAction.type === "endTurn" ? best - value(actualEnd) : NaN,
     ms: Date.now() - t0,
   };
@@ -237,9 +272,11 @@ function analyze(g: number, swap: boolean, decks: readonly { name: string; cards
 
 export async function main(argv: string[]): Promise<number> {
   let out: string | null = null;
+  let continuations = 0;
   const pos: string[] = [];
   for (let k = 0; k < argv.length; k++) {
     if (argv[k] === "--out") out = argv[++k] ?? null;
+    else if (argv[k] === "--continue") continuations = Number(argv[++k] ?? 0);
     else pos.push(argv[k]!);
   }
   const games = Number(pos[0] ?? 7);
@@ -262,7 +299,7 @@ export async function main(argv: string[]): Promise<number> {
     ({ g, swap }) => {
       const prev = done.get(`${g}/${swap}`);
       if (prev) return prev;
-      const rec = analyze(g, swap, decks);
+      const rec = analyze(g, swap, decks, continuations);
       if (out) appendFileSync(out, JSON.stringify(rec) + "\n");
       return rec;
     },
@@ -286,6 +323,11 @@ function summarize(rs: PreventRecord[]): void {
   console.log(`相手のターンにとどめ: ${opp.length}、うち前のターンに自分のリーサルがあった: ${own.length}`);
   console.log(`防げる終わり方があった: ${safe.length}/${judged.length} = ${pct(safe.length, judged.length)}（見つからず、判定できないか時間切れの終わり方が残った: ${allUnknown.length}）`);
   console.log(`全探索できたターン: ${judged.filter((r) => r.exhaustive).length}/${judged.length}、実際の終わり方で相手のリーサルを確認: ${judged.filter((r) => r.actual === "lethal").length}`);
+  const tried = safe.filter((r) => r.comebacks.length > 0);
+  if (tried.length) {
+    const rate = tried.reduce((a, r) => a + r.comebacks.filter(Boolean).length / r.comebacks.length, 0);
+    console.log(`防いで続けた ${tried.length} 試合の、負けた側の勝ちの期待値: ${rate.toFixed(1)} 試合（${pct(rate, tried.length)}）。全試合の ${pct(rate, n)}`);
+  }
   const gaps = safe.map((r) => r.safeEvalGap!).sort((a, b) => a - b);
   if (gaps.length) console.log(`防げる最善の終わり方の評価の差（最善との差）: 中央値 ${gaps[gaps.length >> 1]!.toFixed(1)}、最初の 1/4 ${gaps[gaps.length >> 2]!.toFixed(1)}、3/4 ${gaps[(gaps.length * 3) >> 2]!.toFixed(1)}`);
 }
