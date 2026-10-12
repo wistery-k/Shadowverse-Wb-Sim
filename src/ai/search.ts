@@ -23,6 +23,7 @@ import { createGreedyAgent, greedyAgent } from "./greedy";
 import { KeySet, turnOrderHash, turnOrderKey, withoutIds } from "./keySet";
 import { findLethal, searchLethal, visibleKey } from "./lethal";
 import { MULLIGAN_WEIGHTS, weightedMulliganSwap } from "./mulligan";
+import { MULLIGAN_MODEL, modelMulliganSwap } from "./mulliganModel";
 import { weightsFor } from "./weights";
 import type { Agent } from "./types";
 
@@ -78,9 +79,13 @@ export interface SearchOptions {
   scoreTurnEnd: "none" | "terminal" | "all";
   /**
    * マリガン。"weights" はカードごとの重み（data/mulligan-weights.json。デフォルトデッキのみ、他はコストで決める）、
-   * "cost" はコスト 4 以上を返す（貪欲法と同じ）。重みは今のマリガンに +3.1%（4200 組、docs/ai-notes.md）
+   * "cost" はコスト 4 以上を返す（貪欲法と同じ）。重みは今のマリガンに +3.1%（4200 組、docs/ai-notes.md）。
+   * "model" は手札の形のマリガン（data/mulligan-model.json と data/mulligan-roles.json。役割の無いデッキは "weights" と同じ）。
+   * 既定は "model"（"weights" に +1.0%、12,600 組）
    */
-  mulligan: "weights" | "cost";
+  mulligan: "model" | "weights" | "cost";
+  /** マリガンの重みで進化時能力持ちを 1 枚も残さないとき、最も重みの大きい 1 枚に足す値（weightedMulliganSwap の evoBonus。実験中、既定 0） */
+  mulliganEvoBonus: number;
   /**
    * 合流する相打ち（convergingTrade.ts）を、ターンを終える前に打つものとして扱う。
    * ターン終了の局面はその攻撃を打ってから採点し、相手のターンもその局面から読む。
@@ -141,7 +146,7 @@ export const exhaustiveCounts = {
   byTurn: {} as Record<number, [number, number, number, number]>,
 };
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null };
 
 /** 打った手の並び（後ろから前へのリスト）。各手を打った後の局面も持つ */
 interface Step {
@@ -426,7 +431,9 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
       if (!first) throw new Error("合法手がありません");
       if (legal.length === 1) return first;
       if (first.type === "mulligan") {
-        const swap = opts.mulligan === "weights" ? weightedMulliganSwap(real, actingPlayer(real), MULLIGAN_WEIGHTS) : null;
+        const p0 = actingPlayer(real);
+        const modelSwap = opts.mulligan === "model" ? modelMulliganSwap(real, p0, MULLIGAN_MODEL) : null;
+        const swap = modelSwap ?? (opts.mulligan !== "cost" ? weightedMulliganSwap(real, p0, MULLIGAN_WEIGHTS, { evoBonus: opts.mulliganEvoBonus }) : null);
         const action = swap && legal.find((a) => a.type === "mulligan" && a.swap.length === swap.length && a.swap.every((x) => swap.includes(x)));
         // 重みの無いデッキは貪欲法と同じ（コスト 4 以上を返す）
         return action || greedyAgent.chooseAction(real, legal, rng);

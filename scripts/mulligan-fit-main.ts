@@ -11,7 +11,7 @@ import { cardOf } from "../src/engine";
 import type { MulliganWeights } from "../src/ai/mulligan";
 import type { MulliganRecord } from "./mulligan-data-main";
 
-interface Row {
+export interface Row {
   y: number;
   x: number[];
 }
@@ -38,7 +38,7 @@ function invert(a: number[][]): number[][] {
 }
 
 /** リッジ回帰。penalty[j] が列 j の正則化の強さ。係数と標準誤差を返す */
-function ridge(rows: Row[], penalty: number[]): { b: number[]; se: number[]; sigma2: number } {
+export function ridge(rows: Row[], penalty: number[]): { b: number[]; se: number[]; sigma2: number } {
   const d = penalty.length;
   const xtx = Array.from({ length: d }, () => new Array<number>(d).fill(0));
   const xty = new Array<number>(d).fill(0);

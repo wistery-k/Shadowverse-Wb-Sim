@@ -117,7 +117,7 @@ const FUSION_SET: ReadonlySet<string> = new Set(["デストロイアーティフ
 const KUON = id("五行の果て・クオン");
 
 /** 進化時能力（EP で進化させたとき・これが進化したとき）を持つフォロワー（evoReserve で数える） */
-const EVOLVE_ABILITY: ReadonlySet<string> = new Set(
+export const EVOLVE_ABILITY: ReadonlySet<string> = new Set(
   [...CARDS_BY_ID.values()]
     .filter((c) => c.type === "follower" && abilitiesOf(c.id).abilities.some((a) => a.trigger.on === "evolve" || a.trigger.on === "evolved"))
     .map((c) => c.id),
