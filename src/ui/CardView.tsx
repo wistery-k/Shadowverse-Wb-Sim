@@ -1,13 +1,15 @@
 // カード1枚の表示（場・手札・詳細）
 
 import { CLASS_NAMES, SET_NAMES, type Card } from "../cards";
-import { abilitiesOf, cardOf, handCost, type HandCard, type OnBoard } from "../engine";
+import { abilitiesOf, cardOf, handCost, playCost, type HandCard, type OnBoard } from "../engine";
 import { KEYWORD_NAMES, TYPE_NAMES, type AttackStatus } from "./describe";
 
 interface Props {
   cardId: string;
   board?: OnBoard;
   hand?: HandCard;
+  /** 手札のカードの持ち主の今の PP。渡すとエンハンスが有効なときにエンハンスのコストを表示する */
+  pp?: number | undefined;
   selected?: boolean;
   /** 攻撃先・選択の候補 */
   targetable?: boolean;
@@ -19,6 +21,10 @@ interface Props {
   motion?: Motion | null;
   onClick?: () => void;
   onHover?: () => void;
+  /** ドラッグの開始（手札からのプレイ） */
+  onPointerDown?: ((e: PointerEvent) => void) | undefined;
+  /** ドラッグ中なら、元の位置からのずれ */
+  dragOffset?: { x: number; y: number } | null;
 }
 
 const ATTACK_LABELS: Record<AttackStatus, string> = {
@@ -30,7 +36,7 @@ const ATTACK_LABELS: Record<AttackStatus, string> = {
 /** summon: 場に出た / attack-up・attack-down: その向きへ攻撃した / hit: 攻撃された */
 export type Motion = "summon" | "attack-up" | "attack-down" | "hit";
 
-export function CardView({ cardId, board, hand, selected, targetable, ready, attackable, motion, onClick, onHover }: Props) {
+export function CardView({ cardId, board, hand, pp, selected, targetable, ready, attackable, motion, onClick, onHover, onPointerDown, dragOffset }: Props) {
   const card = cardOf(cardId);
   const keywords = board ? [...board.keywords, ...board.tempKeywords] : (hand?.keywords ?? []);
   const classes = [
@@ -43,15 +49,35 @@ export function CardView({ cardId, board, hand, selected, targetable, ready, att
     board?.kind === "follower" && keywords.includes("ward") ? "ward" : "",
     attackable ? `attack-${attackable}` : "",
     motion ? `motion-${motion}` : "",
+    onPointerDown ? "draggable" : "",
+    dragOffset ? "dragging" : "",
   ].join(" ");
 
   const cost = hand ? handCost(hand) : card.cost;
+  // エンハンスが有効なら、エンハンスのコストを出し、元のコストをカッコで添える
+  const enhanced = hand && pp !== undefined && playCost(card, pp, hand) > cost ? playCost(card, pp, hand) : null;
+  const style = dragOffset ? { transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)` } : undefined;
 
   return (
-    <button type="button" class={classes} onClick={onClick} onMouseEnter={onHover} title={card.text}>
+    <button
+      type="button"
+      class={classes}
+      style={style}
+      onClick={onClick}
+      onMouseEnter={onHover}
+      onPointerDown={onPointerDown}
+      title={card.text}
+    >
       {attackable && <div class={`attack-tag ${attackable}`}>{ATTACK_LABELS[attackable]}</div>}
       <div class="card-top">
-        <span class={`cost ${hand && hand.costMod < 0 ? "reduced" : ""}`}>{cost}</span>
+        {enhanced !== null ? (
+          <span class="cost enhanced" title={`エンハンス（元のコスト ${cost}）`}>
+            {enhanced}
+            <span class="cost-base">({cost})</span>
+          </span>
+        ) : (
+          <span class={`cost ${hand && hand.costMod < 0 ? "reduced" : ""}`}>{cost}</span>
+        )}
         <span class="card-name">{card.name}</span>
       </div>
       <div class="card-badges">

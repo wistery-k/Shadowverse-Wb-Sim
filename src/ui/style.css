@@ -237,6 +237,41 @@ button.end-turn {
 .cost.reduced {
   background: var(--ready);
 }
+/* エンハンスが有効: エンハンスのコスト（元のコスト） */
+.cost.enhanced {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--expp);
+  line-height: 18px;
+}
+.cost-base {
+  font-size: 9px;
+  font-weight: normal;
+}
+/* 手札から場へドラッグしてプレイ */
+.card.draggable {
+  touch-action: none;
+  user-select: none;
+}
+.card.dragging {
+  position: relative;
+  z-index: 10;
+  pointer-events: none;
+  opacity: 0.9;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+.board.drop-target {
+  outline: 2px dashed var(--ready);
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+.board.drop-target.drop-hover {
+  outline-style: solid;
+  background: color-mix(in srgb, var(--ready) 12%, transparent);
+}
 .card-name {
   font-weight: bold;
   line-height: 1.2;
