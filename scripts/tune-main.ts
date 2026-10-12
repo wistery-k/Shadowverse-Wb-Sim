@@ -51,7 +51,7 @@ function parseArgs(argv: string[]): Args {
 const WEIGHTS_FILE = "data/ai-weights.json";
 
 /** 調整しない重み（閾値など、連続的に動かすと意味が変わるもの） */
-const FIXED: readonly NumericWeight[] = ["lethalRange", "fusionSet"];
+const FIXED: readonly NumericWeight[] = ["lethalRange", "fusionSet", "kuonReserve"];
 
 function gauss(rng: Rng): number {
   return (rng.int(1000) + rng.int(1000) + rng.int(1000) - 1498.5) / 500;
