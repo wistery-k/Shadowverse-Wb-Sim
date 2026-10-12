@@ -18,6 +18,11 @@ export interface EvalWeights {
   /** アミュレット1枚・土の印1つ */
   amulet: number;
   sigil: number;
+  /**
+   * 土の印を持つアミュレット（大地の魔片等）自体の価値（土の印の数は sigil で数える）。
+   * 基準は amulet と同じ。土の印を増やすだけの手（理光の証明の（1）等）が、印の数とは別にアミュレット 1 枚分得をする
+   */
+  sigilAmulet: number;
   /** 相手の盤面の価値の倍率（自分の盤面に対して） */
   oppBoard: number;
   /** 手札 1 枚 */
@@ -55,6 +60,14 @@ export interface EvalWeights {
    */
   evoReserve: number;
   /**
+   * 手札のスペルブーストで育つカード（【スペルブースト時】の能力を持つ。ストームブラスト・ウィリアム・宿題やるですぅ！・鬼呼びの術・オーバーディメンション等）1 枚あたり（myHand に加算）。
+   * 早く引くほどブーストを多く受けられる価値。0 なら見ない
+   */
+  boostCard: number;
+  /** 手札のスペルブーストで育つカードが受けたスペルブースト 1 回あたり（1 枚につき boostCap 回まで）。0 なら見ない */
+  boost: number;
+  boostCap: number;
+  /**
    * カードごとの「手札に持っておく価値」（カードID → 点数）。切り札を温存させるために使う。
    * 手札1枚の価値（myHand）に加算する
    */
@@ -75,6 +88,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   keywords: 1,
   amulet: 1.5,
   sigil: 0.5,
+  sigilAmulet: 1.5,
   oppBoard: 1.1,
   myHand: 0.6,
   oppHand: 0.3,
@@ -89,6 +103,9 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   fusionSet: 0,
   kuonReserve: 0,
   evoReserve: 0,
+  boostCard: 0,
+  boost: 0,
+  boostCap: 5,
   hold: {},
 };
 
@@ -116,6 +133,14 @@ const FUSION_SET: ReadonlySet<string> = new Set(["デストロイアーティフ
 
 const KUON = id("五行の果て・クオン");
 
+/** 手札のスペルブーストで育つカード（boostCard・boost で数える） */
+export const BOOSTABLE: ReadonlySet<string> = new Set(
+  [...CARDS_BY_ID.values()].filter((c) => abilitiesOf(c.id).abilities.some((a) => a.trigger.on === "spellboost")).map((c) => c.id),
+);
+
+/** スペルブーストで育ち切って変身した後のカード（育ち切ったものとして数える） */
+const BOOST_GROWN: ReadonlySet<string> = new Set([id("成長したですぅ！")]);
+
 /** 進化時能力（EP で進化させたとき・これが進化したとき）を持つフォロワー（evoReserve で数える） */
 export const EVOLVE_ABILITY: ReadonlySet<string> = new Set(
   [...CARDS_BY_ID.values()]
@@ -132,8 +157,9 @@ export const EVOLVE_ABILITY: ReadonlySet<string> = new Set(
  * fusionSet（手札の α・β・γ の種類 1 つにつき）は 0/1.2/2.4/3.6/4.8 で比べて 3.6（AFネメシスの勝率 38.7% → 46.8%。docs/ai-notes.md）
  * kuonReserve は 0/8/12/16 で比べて 8（スペルウィッチの勝率 44.4% → 47.1%、1200 試合。docs/ai-notes.md）
  * evoReserve 3 は勝率を変えない（今の AI と 50〜51%）が、進化時能力を持たないフォロワーへの進化が 30% → 20% に減るので採用（ユーザー判断。docs/ai-notes.md）
+ * boostCard 1・boost 0.2（スペルブーストで育つカード）はスペルウィッチの勝率 44.3% → 52.1%（1200 試合。docs/ai-notes.md）
  */
-export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, crest: 3, fusionSet: 3.6, kuonReserve: 8, evoReserve: 3, hold: FUSION_HOLD };
+export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, crest: 3, fusionSet: 3.6, kuonReserve: 8, evoReserve: 3, boostCard: 1, boost: 0.2, hold: FUSION_HOLD };
 
 const KEYWORD_VALUE: Partial<Record<string, number>> = {
   ward: 1,
@@ -154,7 +180,8 @@ function followerValue(f: FollowerOnBoard, w: EvalWeights): number {
 
 function boardValue(c: OnBoard, w: EvalWeights): number {
   if (c.kind === "follower") return followerValue(c, w);
-  return w.amulet + (c.sigils ?? 0) * w.sigil;
+  if (c.sigils !== null) return w.sigilAmulet + c.sigils * w.sigil;
+  return w.amulet;
 }
 
 /** プレイヤー p から見た盤面の評価値（大きいほど p に有利） */
@@ -181,6 +208,12 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
     for (const h of me.hand) if (EVOLVE_ABILITY.has(h.cardId)) n++;
     const used = me.epEvolvedThisTurn !== null && EVOLVE_ABILITY.has(me.epEvolvedThisTurn) ? 1 : 0;
     v += (Math.min(n, me.ep) + used) * w.evoReserve;
+  }
+  if (w.boostCard !== 0 || w.boost !== 0) {
+    for (const h of me.hand) {
+      if (BOOST_GROWN.has(h.cardId)) v += w.boostCard + w.boostCap * w.boost;
+      else if (BOOSTABLE.has(h.cardId)) v += w.boostCard + Math.min(h.boosts, w.boostCap) * w.boost;
+    }
   }
   v += me.ep * w.ep + me.sep * w.sep;
   if (me.extraPpAvailable) v += w.extraPp;
