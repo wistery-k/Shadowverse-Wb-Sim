@@ -8,8 +8,8 @@ import { type GameState, type PlayerIndex } from "../engine";
 import rolesTable from "../../data/mulligan-roles.json";
 import { defaultDeckNameOf } from "./mulligan";
 
-/** 役割（data/mulligan-roles.json の書き方のまま）。返し・重いは古い表の書き方（ナイトメアを直すまで残す） */
-export const ROLES = ["1PP", "2PP", "3PP", "除去", "リソース", "展開", "回復", "ダメージ", "進化", "超進化", "シナジー与", "シナジー受", "返し", "重い"] as const;
+/** 役割（data/mulligan-roles.json の書き方のまま） */
+export const ROLES = ["1PP", "2PP", "3PP", "除去", "リソース", "展開", "回復", "ダメージ", "進化", "超進化", "シナジー与", "シナジー受"] as const;
 export type Role = (typeof ROLES)[number];
 
 /** デッキ名 → カードID → 役割（同じ役割を 2 つ書いたカードは 2 枚分に数える） */
@@ -41,14 +41,14 @@ export const MULLIGAN_ROLES: MulliganRoles = parseMulliganRoles(rolesTable);
 
 /**
  * 特徴の名前。各役割は「1 枚以上」「2 枚以上」で数える（1 枚目は効くが 2 枚目は効きが落ちる、を表すため）。
- * cost4+ はコスト 4 以上の枚数（役割とは別に自動で数える）、dup は同じカードの重複（2 枚目以降）の枚数、kept は残した枚数。
+ * 重い はコスト 6 以上の枚数（役割とは別に自動で数える。ユーザー判断）、dup は同じカードの重複（2 枚目以降）の枚数、kept は残した枚数。
  * 1PPxRes は 1PP の動きがある × リソースの枚数（1PP で手札を使う分とリソースの兼ね合い）、
  * synergy はシナジー与とシナジー受が両方ある、*xSecond は後攻との組み合わせ
  */
 export const MODEL_FEATURES: readonly string[] = [
   ...ROLES.flatMap((r) => [`${r}>=1`, `${r}>=2`]),
-  "cost4+>=1",
-  "cost4+>=2",
+  "重い>=1",
+  "重い>=2",
   "dup",
   "kept",
   "1PPxRes",
@@ -64,7 +64,7 @@ export function handFeatures(kept: readonly string[], roles: Record<string, read
   for (const id of kept) for (const r of roles[id] ?? []) count.set(r, (count.get(r) ?? 0) + 1);
   const n = (r: Role) => count.get(r) ?? 0;
   const s = second ? 1 : 0;
-  const high = kept.filter((id) => (CARDS_BY_ID.get(id)?.cost ?? 0) >= 4).length;
+  const high = kept.filter((id) => (CARDS_BY_ID.get(id)?.cost ?? 0) >= 6).length;
   return [
     ...ROLES.flatMap((r) => [n(r) >= 1 ? 1 : 0, n(r) >= 2 ? 1 : 0]),
     high >= 1 ? 1 : 0,
