@@ -18,6 +18,11 @@ export interface EvalWeights {
   /** アミュレット1枚・土の印1つ */
   amulet: number;
   sigil: number;
+  /**
+   * 土の印を持つアミュレット（大地の魔片等）自体の価値（土の印の数は sigil で数える）。
+   * 基準は amulet と同じ。土の印を増やすだけの手（理光の証明の（1）等）が、印の数とは別にアミュレット 1 枚分得をする
+   */
+  sigilAmulet: number;
   /** 相手の盤面の価値の倍率（自分の盤面に対して） */
   oppBoard: number;
   /** 手札 1 枚 */
@@ -75,6 +80,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   keywords: 1,
   amulet: 1.5,
   sigil: 0.5,
+  sigilAmulet: 1.5,
   oppBoard: 1.1,
   myHand: 0.6,
   oppHand: 0.3,
@@ -154,7 +160,8 @@ function followerValue(f: FollowerOnBoard, w: EvalWeights): number {
 
 function boardValue(c: OnBoard, w: EvalWeights): number {
   if (c.kind === "follower") return followerValue(c, w);
-  return w.amulet + (c.sigils ?? 0) * w.sigil;
+  if (c.sigils !== null) return w.sigilAmulet + c.sigils * w.sigil;
+  return w.amulet;
 }
 
 /** プレイヤー p から見た盤面の評価値（大きいほど p に有利） */
