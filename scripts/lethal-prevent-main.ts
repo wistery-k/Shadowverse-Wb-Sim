@@ -10,7 +10,7 @@
 // 使い方: npm run lethal-prevent -- <組の数> [最初の試合番号] [--out <file.jsonl>]
 // 1 組で席とデッキを入れ替えた 2 試合。試合は CPU のコア数だけ並列に行う（THREADS で変えられる）。
 
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { SEARCH_WEIGHTS, evaluateWith } from "../src/ai/evaluate";
 import { resetExactLethalCache, searchExactLethal } from "../src/ai/exactLethal";
 import { KeySet, turnOrderHash, turnOrderKey } from "../src/ai/keySet";
@@ -27,7 +27,9 @@ const MAX_TURN_STATES = 30_000;
 const BEAM_WIDTH = 512;
 const BEAM_DEPTH = 12;
 /** 相手のリーサルの全探索の 1 回の上限 */
-const LETHAL_STATES = 200_000;
+const LETHAL_STATES = 50_000;
+/** 1 試合で相手のリーサルを調べる時間の上限（ミリ秒。超えたら残りの終わり方は調べない） */
+const CHECK_BUDGET_MS = 60_000;
 
 const actorOf = (s: GameState) => (s.pending ? s.pending.player : s.active);
 
@@ -90,7 +92,38 @@ function opponentLethal(end: GameState, p: PlayerIndex): LethalResult {
   const stats = { visited: 0, memo: 0 };
   const seq = searchExactLethal(next, opp, { maxStates: LETHAL_STATES, maxStatesPerTurn: Number.MAX_SAFE_INTEGER, stats });
   if (seq) return "lethal";
-  return stats.visited > LETHAL_STATES ? "unknown" : "none";
+  if (stats.visited > LETHAL_STATES) return "unknown";
+  // exactLethal はターン終了を試さないので、ターン終了時の能力（ララミア等）で倒しきる手順も調べる
+  return winsByTurnEnd(next, opp);
+}
+
+/** q のターンの手の並び（ターン終了まで）で q が勝つものがあるか。ターン終了時の処理も含める */
+function winsByTurnEnd(root: GameState, q: PlayerIndex): LethalResult {
+  const other: PlayerIndex = q === 0 ? 1 : 0;
+  const seen = new KeySet();
+  let count = 0;
+  const stack = [root];
+  while (stack.length > 0) {
+    const s = stack.pop()!;
+    if (s.phase === "ended") {
+      if (s.winner === q) return "lethal";
+      continue;
+    }
+    if (actorOf(s) !== q && s.active !== q) continue;
+    if (!seen.addLazy(() => [s.players[other].leaderHp, turnOrderKey(s)], turnOrderHash(s) ^ s.players[other].leaderHp)) continue;
+    if (++count > LETHAL_STATES) return "unknown";
+    if (actorOf(s) !== q) continue;
+    for (const a of legalActions(s)) {
+      const next = tryApply(s, a);
+      if (!next) continue;
+      if (a.type === "endTurn") {
+        if (next.phase === "ended" && next.winner === q) return "lethal";
+        continue;
+      }
+      stack.push(next);
+    }
+  }
+  return "none";
 }
 
 export interface PreventRecord {
@@ -114,9 +147,10 @@ export interface PreventRecord {
   hadOwnLethal: boolean;
   /** 実際の終わり方で、相手に倒しきる手順が見つかったか（確認用） */
   actual: LethalResult;
-  /** 相手に倒しきる手順が無い終わり方の数・判定できなかった数 */
+  /** 相手に倒しきる手順が無い終わり方が見つかったか（1 つ見つけたら止める。0 か 1）・判定できなかった数・時間切れで調べなかった数 */
   safe: number;
   unknown: number;
+  unchecked: number;
   /** 防げる終わり方のうち評価関数が最も高いものの、全体の最善からの差と順位（1 始まり） */
   safeEvalGap: number | null;
   safeRank: number | null;
@@ -158,18 +192,23 @@ function analyze(g: number, swap: boolean, decks: readonly { name: string; cards
   const scored = ends.map((s) => ({ s, v: value(s) })).sort((x, y) => y.v - x.v);
   const best = scored[0]?.v ?? 0;
   const hadOwnLethal = ends.some((s) => s.phase === "ended" && s.winner === loser);
-  let safe = 0, unknown = 0;
+  let safe = 0, unknown = 0, unchecked = 0;
   let safeEvalGap: number | null = null, safeRank: number | null = null;
   if (killedOnOppTurn && !hadOwnLethal) {
+    // 評価の高い順に調べ、防げる終わり方が 1 つ見つかったら止める
+    const tc = Date.now();
     for (const [k, { s, v }] of scored.entries()) {
       if (s.phase === "ended") continue;
+      if (Date.now() - tc > CHECK_BUDGET_MS) {
+        unchecked = scored.length - k;
+        break;
+      }
       const res = opponentLethal(s, loser);
       if (res === "none") {
         safe++;
-        if (safeRank === null) {
-          safeRank = k + 1;
-          safeEvalGap = best - v;
-        }
+        safeRank = k + 1;
+        safeEvalGap = best - v;
+        break;
       } else if (res === "unknown") unknown++;
     }
   }
@@ -188,6 +227,7 @@ function analyze(g: number, swap: boolean, decks: readonly { name: string; cards
     actual,
     safe,
     unknown,
+    unchecked,
     safeEvalGap,
     safeRank,
     actualEvalGap: lastAction.type === "endTurn" ? best - value(actualEnd) : NaN,
@@ -206,16 +246,30 @@ export async function main(argv: string[]): Promise<number> {
   const startG = Number(pos[1] ?? 0);
   const decks = DEFAULT_DECKS.filter((d) => !EXCLUDED_DECKS.includes(d.name));
   if (decks.length !== 7) throw new Error("比較用のデッキは 7 つの想定です");
+  const done = new Map<string, PreventRecord>();
+  if (out && existsSync(out)) {
+    for (const line of readFileSync(out, "utf8").split("\n")) {
+      if (!line) continue;
+      const rec = JSON.parse(line) as PreventRecord;
+      done.set(`${rec.g}/${rec.swap}`, rec);
+    }
+  }
   const tasks = Array.from({ length: games }, (_, k) => [false, true].map((swap) => ({ g: startG + k, swap }))).flat();
   const t0 = Date.now();
+  // 終わった試合はすぐに出力ファイルに追記する（途中で止めても使える。既にある試合は飛ばす）
   const results = await parallelMap(
     tasks,
-    ({ g, swap }) => analyze(g, swap, decks),
+    ({ g, swap }) => {
+      const prev = done.get(`${g}/${swap}`);
+      if (prev) return prev;
+      const rec = analyze(g, swap, decks);
+      if (out) appendFileSync(out, JSON.stringify(rec) + "\n");
+      return rec;
+    },
     (done, total) => {
       if (done % 20 === 0 || done === total) console.log(`${done}/${total}（${((Date.now() - t0) / 1000).toFixed(0)} 秒）`);
     },
   );
-  if (out) for (const rec of results) appendFileSync(out, JSON.stringify(rec) + "\n");
   summarize(results);
   return 0;
 }
@@ -226,11 +280,11 @@ function summarize(rs: PreventRecord[]): void {
   const own = opp.filter((r) => r.hadOwnLethal);
   const judged = opp.filter((r) => !r.hadOwnLethal);
   const safe = judged.filter((r) => r.safe > 0);
-  const allUnknown = judged.filter((r) => r.safe === 0 && r.unknown > 0);
+  const allUnknown = judged.filter((r) => r.safe === 0 && (r.unknown > 0 || r.unchecked > 0));
   const pct = (a: number, b: number) => (b ? `${((a / b) * 100).toFixed(1)}%` : "-");
   console.log(`試合 ${n}（負けた側を 1 試合 1 人ずつ調べる）`);
   console.log(`相手のターンにとどめ: ${opp.length}、うち前のターンに自分のリーサルがあった: ${own.length}`);
-  console.log(`防げる終わり方があった: ${safe.length}/${judged.length} = ${pct(safe.length, judged.length)}（判定できない終わり方だけ: ${allUnknown.length}）`);
+  console.log(`防げる終わり方があった: ${safe.length}/${judged.length} = ${pct(safe.length, judged.length)}（見つからず、判定できないか時間切れの終わり方が残った: ${allUnknown.length}）`);
   console.log(`全探索できたターン: ${judged.filter((r) => r.exhaustive).length}/${judged.length}、実際の終わり方で相手のリーサルを確認: ${judged.filter((r) => r.actual === "lethal").length}`);
   const gaps = safe.map((r) => r.safeEvalGap!).sort((a, b) => a - b);
   if (gaps.length) console.log(`防げる最善の終わり方の評価の差（最善との差）: 中央値 ${gaps[gaps.length >> 1]!.toFixed(1)}、最初の 1/4 ${gaps[gaps.length >> 2]!.toFixed(1)}、3/4 ${gaps[(gaps.length * 3) >> 2]!.toFixed(1)}`);
