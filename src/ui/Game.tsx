@@ -45,6 +45,22 @@ interface Props {
   exitLabel?: string;
 }
 
+/** これだけ動かしたらクリックではなくドラッグとみなす（px） */
+const DRAG_THRESHOLD = 8;
+
+/** 手札のカードのドラッグ */
+interface Drag {
+  iid: number;
+  startX: number;
+  startY: number;
+  x: number;
+  y: number;
+  /** しきい値を超えて動かした */
+  moved: boolean;
+  /** 自分の場の上にある */
+  overBoard: boolean;
+}
+
 const same = (a: Action, b: Action) => JSON.stringify(a) === JSON.stringify(b);
 
 /** リーサル探索の状況 */
@@ -73,6 +89,10 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
   // 選択中の手札のカードに融合する素材を選んでいるところか（素材は picks）
   const [fusing, setFusing] = useState(false);
   const [detail, setDetail] = useState<string | null>(null);
+  const [drag, setDrag] = useState<Drag | null>(null);
+  const myBoardRef = useRef<HTMLDivElement>(null);
+  // ドラッグを終えた直後のクリックを無視する
+  const suppressClick = useRef(false);
   const [aiRng] = useState(() => rngFrom({ rng: (initial.rng ^ 0x5bd1e995) >>> 0 }));
   const [aiThinking, setAiThinking] = useState(false);
   const worker = useRef<Worker | null>(null);
@@ -206,6 +226,59 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
   const attackable = myTurn && !mulligan ? attackStatuses(state) : new Map<number, AttackStatus>();
   const readyIds = new Set([...(myTurn && !pending && !mulligan ? legal.map(actionSubject).filter((x) => x !== null) : []), ...fusible]);
 
+  // ドラッグでプレイできる手札のカード
+  const canDrag = myTurn && !pending && !mulligan && fuseHost === null && autoSteps.length === 0;
+  const playOf = (iid: number) => (canDrag ? legal.find((a) => a.type === "play" && a.iid === iid) : undefined);
+
+  function startDrag(iid: number, e: PointerEvent) {
+    suppressClick.current = false;
+    if (e.button !== 0 || !playOf(iid)) return;
+    setDrag({ iid, startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, moved: false, overBoard: false });
+  }
+
+  const isOverBoard = (x: number, y: number) => {
+    const r = myBoardRef.current?.getBoundingClientRect();
+    return !!r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  };
+
+  // ドラッグ中はウィンドウ全体でポインタを追い、自分の場の上で離したらプレイする
+  useEffect(() => {
+    if (drag === null) return;
+    const move = (e: PointerEvent) => {
+      setDrag((d) => {
+        if (!d) return d;
+        const moved = d.moved || Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > DRAG_THRESHOLD;
+        return { ...d, x: e.clientX, y: e.clientY, moved, overBoard: moved && isOverBoard(e.clientX, e.clientY) };
+      });
+    };
+    const up = (e: PointerEvent) => {
+      const d = drag;
+      setDrag(null);
+      const moved = d.moved || Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > DRAG_THRESHOLD;
+      if (!moved) return;
+      suppressClick.current = true;
+      const play = playOf(d.iid);
+      if (play && isOverBoard(e.clientX, e.clientY)) act(play);
+    };
+    const cancel = () => setDrag(null);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+    };
+  }, [drag?.iid, drag?.moved, state]);
+
+  function clickHand(iid: number) {
+    if (suppressClick.current) {
+      suppressClick.current = false;
+      return;
+    }
+    clickEntity(iid);
+  }
+
   function clickEntity(iid: number) {
     setDetailFor(iid);
     if (!myTurn) return;
@@ -284,7 +357,7 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
       </section>
 
       <section class="side me">
-        <div class="board">
+        <div ref={myBoardRef} class={`board ${drag?.moved ? "drop-target" : ""} ${drag?.overBoard ? "drop-hover" : ""}`}>
           {me.board.map((c) => (
             <CardView
               key={c.iid}
@@ -312,10 +385,13 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
               key={h.iid}
               cardId={h.cardId}
               hand={h}
+              pp={myTurn && state.phase === "main" ? me.pp : undefined}
               selected={selected === h.iid || picks.includes(h.iid)}
               targetable={candidates.has(h.iid)}
               ready={readyIds.has(h.iid)}
-              onClick={() => clickEntity(h.iid)}
+              onClick={() => clickHand(h.iid)}
+              onPointerDown={playOf(h.iid) ? (e) => startDrag(h.iid, e) : undefined}
+              dragOffset={drag?.iid === h.iid && drag.moved ? { x: drag.x - drag.startX, y: drag.y - drag.startY } : null}
             />
           ))}
           <EmptySlots count={me.hand.length} />
