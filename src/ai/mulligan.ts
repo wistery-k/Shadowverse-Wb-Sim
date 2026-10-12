@@ -3,6 +3,7 @@
 import { DEFAULT_DECKS } from "../cards/defaultDecks";
 import { actingPlayer, cardOf, type Action, type GameState, type PlayerIndex } from "../engine";
 import table from "../../data/mulligan-weights.json";
+import { EVOLVE_ABILITY } from "./evaluate";
 import type { Agent } from "./types";
 
 /**
@@ -47,8 +48,11 @@ export function defaultDeckNameOf(state: GameState, p: PlayerIndex): string | nu
   return DECK_BY_CARDS.get(sortedKey([...pl.hand, ...pl.deck].map((c) => c.cardId))) ?? null;
 }
 
-/** 重みでマリガンする。デッキの重みが無ければ null */
-export function weightedMulliganSwap(state: GameState, p: PlayerIndex, weights: MulliganWeights): number[] | null {
+/**
+ * 重みでマリガンする。デッキの重みが無ければ null。
+ * evoBonus > 0 なら、進化時能力持ちを 1 枚も残さない手札のとき、その中で重みが最も大きい 1 枚に evoBonus を足して判断し直す（ユーザー案、実験中）
+ */
+export function weightedMulliganSwap(state: GameState, p: PlayerIndex, weights: MulliganWeights, evoBonus = 0): number[] | null {
   const name = defaultDeckNameOf(state, p);
   const table = name === null ? undefined : weights[name];
   if (!table) return null;
@@ -65,6 +69,17 @@ export function weightedMulliganSwap(state: GameState, p: PlayerIndex, weights: 
     // 2 枚目は「2 枚とも残す」と「1 枚だけ残す」の差。1 枚目を返すなら 2 枚目も返す
     const keep = copy === 0 ? w[0] > 0 : w[0] > 0 && w[1] > 0;
     if (!keep) swap.push(h.iid);
+  }
+  if (evoBonus > 0) {
+    const hand = state.players[p].hand;
+    const evo = hand.filter((h) => EVOLVE_ABILITY.has(h.cardId));
+    if (evo.length > 0 && evo.every((h) => swap.includes(h.iid))) {
+      // 残す候補は各カードの 1 枚目（2 枚目を残すのは 1 枚目を残すときだけ）
+      const firsts = evo.filter((h) => hand.find((x) => x.cardId === h.cardId) === h);
+      const value = (id: string) => table[id]?.[0] ?? (cardOf(id).cost >= 4 ? -Infinity : 0);
+      const best = firsts.reduce((a, b) => (value(b.cardId) > value(a.cardId) ? b : a));
+      if (value(best.cardId) + evoBonus > 0) return swap.filter((x) => x !== best.iid);
+    }
   }
   return swap;
 }

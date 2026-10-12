@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MULLIGAN_WEIGHTS, costMulliganSwap, defaultDeckNameOf, weightedMulliganSwap, withMulligan, type MulliganWeights } from "../src/ai/mulligan";
+import { EVOLVE_ABILITY } from "../src/ai/evaluate";
 import { greedyAgent } from "../src/ai/greedy";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { applyAction, createGame, legalActions } from "../src/engine";
@@ -32,6 +33,31 @@ describe("マリガンの重み", () => {
     expect(weightedMulliganSwap(state, p, {})).toBeNull();
     const name = defaultDeckNameOf(state, p)!;
     expect(weightedMulliganSwap(state, p, { [name]: {} })!.sort()).toEqual(costMulliganSwap(state, p).sort());
+  });
+
+  it("evoBonus: 進化時能力持ちを 1 枚も残さないときだけ、重みが最も大きい 1 枚に加点する", () => {
+    // 進化時能力持ちが 2 種以上ある初手を探す
+    let s = state;
+    for (let seed = 1; ; seed++) {
+      s = createGame({ decks: [deck.cards, deck.cards], seed });
+      if (new Set(s.players[s.first].hand.filter((h) => EVOLVE_ABILITY.has(h.cardId)).map((h) => h.cardId)).size >= 2) break;
+    }
+    const q = s.first;
+    const h = s.players[q].hand;
+    const evo = h.filter((x) => EVOLVE_ABILITY.has(x.cardId));
+    const [a, b] = evo.filter((x, i) => evo.findIndex((y) => y.cardId === x.cardId) === i);
+    const table: Record<string, [number, number]> = Object.fromEntries(h.map((x) => [x.cardId, [-0.05, -0.05]]));
+    table[a!.cardId] = [-0.01, -0.01];
+    table[b!.cardId] = [-0.02, -0.02];
+    const w = { [deck.name]: table };
+    expect(weightedMulliganSwap(s, q, w)!.length).toBe(h.length);
+    // a の 1 枚目だけ残す（2 枚目と b は返す）
+    expect(weightedMulliganSwap(s, q, w, 0.015)!.sort()).toEqual(h.filter((x) => x !== a).map((x) => x.iid).sort());
+    // 足しても 0 を超えなければ返す
+    expect(weightedMulliganSwap(s, q, w, 0.005)!.length).toBe(h.length);
+    // 他の進化時能力持ちを残すなら加点しない
+    table[b!.cardId] = [0.01, -0.01];
+    expect(weightedMulliganSwap(s, q, w, 0.015)!.sort()).toEqual(weightedMulliganSwap(s, q, w)!.sort());
   });
 
   it("withMulligan はマリガンだけ差し替える", () => {
