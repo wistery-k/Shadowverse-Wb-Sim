@@ -1,4 +1,5 @@
-// 手札の形のマリガン（src/ai/mulliganModel.ts）の係数の推定（npm run mulligan-model-fit -- <データ.jsonl ...> [--out <file.json>] [--feature-sd 0.05] [--card-sd 0.02]）。
+// 手札の形のマリガン（src/ai/mulliganModel.ts）の係数の推定（npm run mulligan-model-fit -- <データ.jsonl ...> [--out <file.json>] [--feature-sd 0.05] [--card-sd 0.02] [--features a,b,...]）。
+// --features で使う特徴を絞る（他の特徴は係数 0 で保存しない）。
 // データは npm run mulligan-data で取る（初手の各カードの残す・返すを、コインまたは今の方針からの反転で決めた試合）。
 // デッキごとに、勝敗 ~ 先後 + 相手デッキ + 初手にあったカード（調整） + 残した手札の特徴 + 残したカード の線形確率モデル（リッジ回帰）。
 // 残すかどうかはランダムに決めたので、「残した手札の特徴」と「残したカード」の係数は因果的な効果として読める。
@@ -15,10 +16,12 @@ export async function main(argv: string[]): Promise<number> {
   const files: string[] = [];
   let out: string | null = null;
   let featureSd = 0.05, cardSd = 0.02;
+  let only: string[] | null = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--out") out = argv[++i] ?? null;
     else if (argv[i] === "--feature-sd") featureSd = Number(argv[++i]);
     else if (argv[i] === "--card-sd") cardSd = Number(argv[++i]);
+    else if (argv[i] === "--features") only = (argv[++i] ?? "").split(",");
     else files.push(argv[i]!);
   }
   const records: MulliganRecord[] = [];
@@ -33,6 +36,8 @@ export async function main(argv: string[]): Promise<number> {
     }
   }
   console.log(`${records.length} 試合`);
+  for (const f of only ?? []) if (!MODEL_FEATURES.includes(f)) throw new Error(`不明な特徴: ${f}`);
+  const used = MODEL_FEATURES.map((f) => only === null || only.includes(f));
   const model: MulliganModel = {};
   const deckNames = [...new Set(records.flatMap((r) => r.decks))].sort();
   for (const deckName of deckNames) {
@@ -68,13 +73,16 @@ export async function main(argv: string[]): Promise<number> {
     }
     const win = rows.reduce((s, r) => s + r.y, 0) / rows.length;
     const sigma2 = win * (1 - win);
-    const penalty = Array.from({ length: d }, (_, j) => (j < base ? 0 : j < base + nf ? sigma2 / featureSd ** 2 : sigma2 / cardSd ** 2));
+    // 使わない特徴は列を 0 にしてごく強く縮める（係数は 0 になる）
+    for (const r of rows) used.forEach((u, i) => u || (r.x[base + i] = 0));
+    const penalty = Array.from({ length: d }, (_, j) => (j < base ? 0 : j < base + nf ? (used[j - base] ? sigma2 / featureSd ** 2 : 1e9) : sigma2 / cardSd ** 2));
     const fit = ridge(rows, penalty);
     const features: Record<string, number> = {};
     const cardCoef: Record<string, number> = {};
     console.log(`\n## ${deckName}（${rows.length} 試合、勝率 ${(win * 100).toFixed(1)}%）`);
     console.log("| 特徴 | 係数 |\n| --- | --- |");
     MODEL_FEATURES.forEach((name, i) => {
+      if (!used[i]) return;
       const b = fit.b[base + i]!;
       features[name] = Math.round(b * 1e4) / 1e4;
       console.log(`| ${name} | ${b >= 0 ? "+" : ""}${(b * 100).toFixed(1)}±${(fit.se[base + i]! * 100).toFixed(1)} |`);
