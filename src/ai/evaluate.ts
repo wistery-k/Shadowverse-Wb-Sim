@@ -1,7 +1,8 @@
 // 盤面の評価関数。重み（EvalWeights）はデータとして持ち、自己対戦で調整できるようにする（scripts/tune.ts）。
 
 import { id } from "../cards/abilities/helpers";
-import { MAX_PP, type FollowerOnBoard, type GameState, type OnBoard, type PlayerIndex } from "../engine";
+import { CARDS_BY_ID } from "../cards";
+import { MAX_PP, abilitiesOf, type FollowerOnBoard, type GameState, type OnBoard, type PlayerIndex } from "../engine";
 
 export interface EvalWeights {
   /** 自分・相手のリーダー体力 1 点 */
@@ -47,6 +48,13 @@ export interface EvalWeights {
    */
   kuonReserve: number;
   /**
+   * EP が残っているとき、進化時能力（【進化時】・これが進化したとき）を持つフォロワー 1 枚あたりに足す点。
+   * 数えるのは EP の数まで。進化時能力を持たないフォロワーに EP を使わず、進化時能力持ちのために残す価値。0 なら見ない
+   */
+  evoReserve: number;
+  /** 1 なら evoReserve で、手札に加えて自分の場の進化前のフォロワーも数える（0 なら手札だけ） */
+  evoReserveBoard: number;
+  /**
    * カードごとの「手札に持っておく価値」（カードID → 点数）。切り札を温存させるために使う。
    * 手札1枚の価値（myHand）に加算する
    */
@@ -80,6 +88,8 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   lethalAttack: 0.3,
   fusionSet: 0,
   kuonReserve: 0,
+  evoReserve: 0,
+  evoReserveBoard: 0,
   hold: {},
 };
 
@@ -106,6 +116,13 @@ const FUSION_HOLD: Readonly<Record<string, number>> = Object.fromEntries(
 const FUSION_SET: ReadonlySet<string> = new Set(["デストロイアーティファクトα", "デストロイアーティファクトβ", "デストロイアーティファクトγ"].map(id));
 
 const KUON = id("五行の果て・クオン");
+
+/** 進化時能力（EP で進化させたとき・これが進化したとき）を持つフォロワー（evoReserve で数える） */
+const EVOLVE_ABILITY: ReadonlySet<string> = new Set(
+  [...CARDS_BY_ID.values()]
+    .filter((c) => c.type === "follower" && abilitiesOf(c.id).abilities.some((a) => a.trigger.on === "evolve" || a.trigger.on === "evolved"))
+    .map((c) => c.id),
+);
 
 /**
  * 探索 AI の既定の重み（基準の重み＋PP 最大値＋SEP＋融合で作るカードの価値）。
@@ -159,6 +176,12 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
     v += kinds.size * w.fusionSet;
   }
   if (w.kuonReserve !== 0 && me.sep > 0 && me.hand.some((h) => h.cardId === KUON)) v += w.kuonReserve;
+  if (w.evoReserve !== 0 && me.ep > 0) {
+    let n = 0;
+    for (const h of me.hand) if (EVOLVE_ABILITY.has(h.cardId)) n++;
+    if (w.evoReserveBoard !== 0) for (const c of me.board) if (c.kind === "follower" && c.evolve === "none" && EVOLVE_ABILITY.has(c.cardId)) n++;
+    v += Math.min(n, me.ep) * w.evoReserve;
+  }
   v += me.ep * w.ep + me.sep * w.sep;
   if (me.extraPpAvailable) v += w.extraPp;
   // 自然に増えた分は数えない（PP を増やさないデッキの評価値を変えないため）
