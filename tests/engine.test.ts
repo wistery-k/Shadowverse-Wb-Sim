@@ -330,8 +330,10 @@ describe("進化・超進化", () => {
     const t = applyAction(s, { type: "evolve", iid: a.iid });
     expect(t.players[t.active].board[0]).toMatchObject({ attack: 12, defense: 12, maxDefense: 12, evolve: "evolved" });
     expect(t.players[t.active].ep).toBe(1);
+    expect(t.players[t.active].epEvolvedThisTurn).toBe(a.cardId);
     expect(legalActions(t).some((x) => x.type === "evolve" || x.type === "superEvolve")).toBe(false);
     const u = endTurn(endTurn(t));
+    expect(u.players[u.active].epEvolvedThisTurn).toBeNull();
     expect(has(u, { type: "evolve", iid: a.iid })).toBe(false);
     expect(has(u, { type: "superEvolve", iid: a.iid })).toBe(false);
     expect(has(u, { type: "superEvolve", iid: b.iid })).toBe(true);

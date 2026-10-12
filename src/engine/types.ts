@@ -127,6 +127,8 @@ export interface PlayerState {
   combo: number;
   /** このターンに進化または超進化したか */
   evolvedThisTurn: boolean;
+  /** このターンに EP を使って進化させたフォロワーのカードID（超進化は含まない。なければ null） */
+  epEvolvedThisTurn: string | null;
   /** 「自分のリーダーが回復したとき」等、リーダーのターンごとに1回の能力の使用記録 */
   leaderOncePerTurn: Record<string, number>;
   mulliganDone: boolean;

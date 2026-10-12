@@ -1,7 +1,8 @@
 // 盤面の評価関数。重み（EvalWeights）はデータとして持ち、自己対戦で調整できるようにする（scripts/tune.ts）。
 
 import { id } from "../cards/abilities/helpers";
-import { MAX_PP, type FollowerOnBoard, type GameState, type OnBoard, type PlayerIndex } from "../engine";
+import { CARDS_BY_ID } from "../cards";
+import { MAX_PP, abilitiesOf, type FollowerOnBoard, type GameState, type OnBoard, type PlayerIndex } from "../engine";
 
 export interface EvalWeights {
   /** 自分・相手のリーダー体力 1 点 */
@@ -47,6 +48,13 @@ export interface EvalWeights {
    */
   kuonReserve: number;
   /**
+   * 進化時能力（【進化時】・これが進化したとき）を持つフォロワーのために EP を残す価値。
+   * 手札の進化時能力持ちを EP の数まで数え、このターンに EP で進化させたのが進化時能力持ちならさらに 1 枚分数えて、1 枚あたりこの点を足す。
+   * 進化時能力持ちを出してそのターンに進化させても点は変わらず、進化時能力のないフォロワーを進化させたり、
+   * 出して進化させずに場に残したりすると下がる。0 なら見ない
+   */
+  evoReserve: number;
+  /**
    * カードごとの「手札に持っておく価値」（カードID → 点数）。切り札を温存させるために使う。
    * 手札1枚の価値（myHand）に加算する
    */
@@ -80,6 +88,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   lethalAttack: 0.3,
   fusionSet: 0,
   kuonReserve: 0,
+  evoReserve: 0,
   hold: {},
 };
 
@@ -107,6 +116,13 @@ const FUSION_SET: ReadonlySet<string> = new Set(["デストロイアーティフ
 
 const KUON = id("五行の果て・クオン");
 
+/** 進化時能力（EP で進化させたとき・これが進化したとき）を持つフォロワー（evoReserve で数える） */
+const EVOLVE_ABILITY: ReadonlySet<string> = new Set(
+  [...CARDS_BY_ID.values()]
+    .filter((c) => c.type === "follower" && abilitiesOf(c.id).abilities.some((a) => a.trigger.on === "evolve" || a.trigger.on === "evolved"))
+    .map((c) => c.id),
+);
+
 /**
  * 探索 AI の既定の重み（基準の重み＋PP 最大値＋SEP＋融合で作るカードの価値）。
  * PP 最大値の重みが 0 だと、竜の啓示を打つ手は手札が 1 枚減るだけに見え、初手にあっても 95% の試合で打たなかった。
@@ -115,8 +131,9 @@ const KUON = id("五行の果て・クオン");
  * クレストは 1.5 だとアリアのクレスト（妖精に疾走）を安く見て、出すべき局面でアリアを出さなかったため 3（ユーザー判断。docs/ai-notes.md）
  * fusionSet（手札の α・β・γ の種類 1 つにつき）は 0/1.2/2.4/3.6/4.8 で比べて 3.6（AFネメシスの勝率 38.7% → 46.8%。docs/ai-notes.md）
  * kuonReserve は 0/8/12/16 で比べて 8（スペルウィッチの勝率 44.4% → 47.1%、1200 試合。docs/ai-notes.md）
+ * evoReserve 3 は勝率を変えない（今の AI と 50〜51%）が、進化時能力を持たないフォロワーへの進化が 30% → 20% に減るので採用（ユーザー判断。docs/ai-notes.md）
  */
-export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, crest: 3, fusionSet: 3.6, kuonReserve: 8, hold: FUSION_HOLD };
+export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, crest: 3, fusionSet: 3.6, kuonReserve: 8, evoReserve: 3, hold: FUSION_HOLD };
 
 const KEYWORD_VALUE: Partial<Record<string, number>> = {
   ward: 1,
@@ -159,6 +176,12 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
     v += kinds.size * w.fusionSet;
   }
   if (w.kuonReserve !== 0 && me.sep > 0 && me.hand.some((h) => h.cardId === KUON)) v += w.kuonReserve;
+  if (w.evoReserve !== 0) {
+    let n = 0;
+    for (const h of me.hand) if (EVOLVE_ABILITY.has(h.cardId)) n++;
+    const used = me.epEvolvedThisTurn !== null && EVOLVE_ABILITY.has(me.epEvolvedThisTurn) ? 1 : 0;
+    v += (Math.min(n, me.ep) + used) * w.evoReserve;
+  }
   v += me.ep * w.ep + me.sep * w.sep;
   if (me.extraPpAvailable) v += w.extraPp;
   // 自然に増えた分は数えない（PP を増やさないデッキの評価値を変えないため）
