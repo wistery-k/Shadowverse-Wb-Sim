@@ -22,6 +22,7 @@
     "mulligan-data": "node scripts/vite-run.mjs scripts/mulligan-data-main.ts",
     "mulligan-fit": "node scripts/vite-run.mjs scripts/mulligan-fit-main.ts",
     "mulligan-eval": "node scripts/vite-run.mjs scripts/mulligan-eval-main.ts",
+    "lethal-prevent": "node scripts/vite-run.mjs scripts/lethal-prevent-main.ts",
     "mulligan-model-fit": "node scripts/vite-run.mjs scripts/mulligan-model-fit-main.ts"
   },
   "repository": {
