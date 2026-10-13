@@ -2,7 +2,7 @@
 //
 // 1. 見えない情報は determinization（determinize.ts）で複数の「ありうる局面」を作って平均する
 // 2. 各局面で、自分のターン終了までの行動の並びをビームサーチで探索する
-// 3. 有望な並び（最初の手ごとの最善）について、相手のターンを貪欲法 AI で進めた後の局面を評価する
+// 3. 有望な並び（最初の手ごとの最善）について、相手のターンを貪欲法 AI（opponentSearch なら軽いビームサーチ）で進めた後の局面を評価する
 // 4. 平均の評価が最も良い「最初の手」を選ぶ（行動するたびに探索し直す）
 // ただし、このターンで勝てる並び（リーサル、lethal.ts）が見つかれば、それを最優先する
 
@@ -126,6 +126,12 @@ export interface SearchOptions {
    * 調べた局面が maxStates を超えたらやめて、ビームサーチで探す。null なら使わない（実験用）
    */
   exhaustive: { untilTurn: number; maxStates: number } | null;
+  /**
+   * 上位の手を相手のターンまで読むとき、相手のターンを貪欲法ではなく、局面をそのまま見たビームサーチ（幅 beamWidth・深さ maxDepth、
+   * 相手のターン末の採点で最善の並び。相手の次のターンは読まない）で打つ。null なら貪欲法（実験中）。
+   * 貪欲法の読みは、消える人形を倒しに行く・タダで消える 1/1 を出さない等、相手の手を読み違える（docs/ai-notes.md）
+   */
+  opponentSearch: { beamWidth: number; maxDepth: number } | null;
 }
 
 /** 全探索（SearchOptions.exhaustive）の集計（実験用。比較スクリプトが試合ごとに 0 に戻して読む） */
@@ -146,7 +152,7 @@ export const exhaustiveCounts = {
   byTurn: {} as Record<number, [number, number, number, number]>,
 };
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: null };
 
 /** 打った手の並び（後ろから前へのリスト）。各手を打った後の局面も持つ */
 interface Step {
@@ -212,6 +218,52 @@ export function simulateOpponentTurn(state: GameState, p: PlayerIndex, rng: Rng,
   return s ?? state;
 }
 
+/**
+ * simulateOpponentTurn の、相手のターンをビームサーチで打つ版（SearchOptions.opponentSearch）。
+ * 自分のターンを終え、相手のターンは相手から見て最善の並び（ターン末の採点）を打ってから終える。
+ * 相手のターン中の選択待ちなど、並びの外の手は貪欲法で進める
+ */
+function simulateOpponentTurnBySearch(state: GameState, p: PlayerIndex, rng: Rng, opts: SearchOptions, w: EvalWeights): GameState {
+  const q: PlayerIndex = p === 0 ? 1 : 0;
+  const policy = createGreedyAgent({ omniscient: true, weights: { ...DEFAULT_WEIGHTS, doomed: w.doomed } });
+  const { allow: _allow, extraEval: _extra, ...rest } = opts;
+  const oppOpts: SearchOptions = {
+    ...rest,
+    beamWidth: opts.opponentSearch?.beamWidth ?? opts.beamWidth,
+    maxDepth: opts.opponentSearch?.maxDepth ?? opts.maxDepth,
+    exhaustive: null,
+    nextLethal: 0,
+    opponentSearch: null,
+  };
+  let s: GameState | null = state;
+  let ended = false;
+  let searched = false;
+  for (let guard = 0; s && s.phase !== "ended" && guard < 80; guard++) {
+    if (!s.pending && s.active === p) {
+      if (ended) break;
+      s = tryApply(s, { type: "endTurn" });
+      ended = true;
+      continue;
+    }
+    if (ended && !searched && !s.pending && s.active === q) {
+      searched = true;
+      let best: Plan | null = null;
+      for (const plan of planTurn(s, q, oppOpts, w, rng, false).values()) if (!best || plan.value > best.value) best = plan;
+      const last = best?.steps[best.steps.length - 1];
+      if (last && last.action.type !== "endTurn") {
+        s = opts.settleTrades ? settleConvergingTrades(last.state, q) : last.state;
+        if (s.phase === "ended") break;
+      }
+      if (!s.pending && s.active === q) {
+        s = tryApply(s, { type: "endTurn" });
+        continue;
+      }
+    }
+    s = tryApply(s, policy.chooseAction(s, legalActions(s), rng));
+  }
+  return s ?? state;
+}
+
 /** 手札の同じカードのプレイを1つに絞った手の一覧 */
 function distinctPlays(state: GameState, actions: readonly Action[]): Action[] {
   const p = state.active;
@@ -249,8 +301,11 @@ function uniqueStates(children: Node[], width: number, perFirst = 0): Node[] {
   return out;
 }
 
-/** 1つの局面で、最初の手ごとの評価値を求める */
-function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalWeights, rng: Rng): Map<string, Plan> {
+/**
+ * 1つの局面で、最初の手ごとの評価値を求める。
+ * rescore が false なら相手のターンを読まず、最初の手ごとのターン末の最善の並びとその点数を返す（相手のターンを打つとき用）
+ */
+function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalWeights, rng: Rng, rescore = true): Map<string, Plan> {
 
   /** ターンを終える局面（合流する相打ちを打った後） */
   const settle = (state: GameState) => (opts.settleTrades ? settleConvergingTrades(state, p) : state);
@@ -393,6 +448,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
     const cur = bestByFirst.get(k);
     if (!cur || t.value > cur.value) bestByFirst.set(k, t);
   }
+  if (!rescore) return new Map([...bestByFirst].map(([k, t]) => [k, { action: t.first, value: t.value, steps: stepsOf(t.path) }]));
   const ranked = [...bestByFirst.values()].sort((x, y) => y.value - x.value).slice(0, opts.rescoreTop);
   /** 最初の手 first の、評価の高い順に異なる終局面（最善の終局面 best を含めて planCandidates 個まで） */
   const candidatesOf = (best: Node): Node[] => {
@@ -411,7 +467,12 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   const result = new Map<string, Plan>();
   for (const best of ranked) {
     for (const node of candidatesOf(best)) {
-      const after = node.state.phase === "ended" ? node.state : simulateOpponentTurn(settle(node.state), p, rng, w.doomed);
+      const after =
+        node.state.phase === "ended"
+          ? node.state
+          : opts.opponentSearch
+            ? simulateOpponentTurnBySearch(settle(node.state), p, rng, opts, w)
+            : simulateOpponentTurn(settle(node.state), p, rng, w.doomed);
       let value = evalState(after);
       if (opts.nextLethal !== 0 && after.phase !== "ended" && after.players[p === 0 ? 1 : 0].leaderHp <= w.lethalRange && hasNextLethal(after, p)) value += opts.nextLethal;
       const k = keyOf(node.first);
