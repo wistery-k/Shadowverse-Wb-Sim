@@ -8,6 +8,7 @@
 //      試合は CPU のコア数だけ並列に行う）
 // 自然の妖精姫・アリアを出した試合の数と、最初に出した自分のターン（平均）も出す。
 // --agent で、リノセウスエルフ側の AI を registry のキーで選べる（既定は rhino。例: search、rhino-lethal。--opts は rhino のときだけ使う）。
+// --start N で、最初の試合番号を N にする（既定 0。前に回した試合と重ならない別の試合で確かめるため）。
 // --out ファイル名 で、試合ごとの結果（相手デッキ・g・席・勝ち・全探索でリーサルを見つけた回数）を JSON Lines で書き出す（変更前後で試合ごとに比べる用）。
 // --matches ファイル名 で、JSON Lines の各行の（deck・g・seat）の試合だけを打つ（web の「人間との比較」で人間が打った記録を渡すと、
 // 人間と同じ試合で AI の勝率を出し、人間の勝敗と並べて表示する。--games は使わない）。
@@ -34,11 +35,13 @@ export async function main(argv: string[]): Promise<number> {
   let agentKey: string | null = null;
   let subject: SubjectId = "rhino";
   let matches: string | null = null;
+  let start = 0;
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
     const v = argv[++i];
     if (v === undefined) throw new Error(`${key} の値がありません`);
     if (key === "--games") games = Number(v);
+    else if (key === "--start") start = Number(v);
     else if (key === "--out") out = v;
     else if (key === "--agent") agentKey = v;
     else if (key === "--matches") matches = v;
@@ -59,7 +62,7 @@ export async function main(argv: string[]): Promise<number> {
   const given = matches === null ? null : readMatches(matches, subject);
   const tasks =
     given?.map(({ deck, g, seat }) => ({ o: deck, g, elfSeat: seat })) ??
-    opponentsOf(subject).flatMap((o) => Array.from({ length: games }, (_, g) => ([0, 1] as const).map((elfSeat) => ({ o: o.name, g, elfSeat }))).flat());
+    opponentsOf(subject).flatMap((o) => Array.from({ length: games }, (_, k) => ([0, 1] as const).map((elfSeat) => ({ o: o.name, g: start + k, elfSeat }))).flat());
   const t0 = Date.now();
   const results = await parallelMap(tasks, ({ o, g, elfSeat }) => {
     const { decks, seed } = compareMatch(subject, o, g, elfSeat);
