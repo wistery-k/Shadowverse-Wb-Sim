@@ -84,6 +84,12 @@ export interface EvalWeights {
    */
   kerberosReserve: number;
   /**
+   * 場のフォロワーのラストワードの「相手のリーダーに N ダメージ」「自分のリーダーを N 回復」（番犬の右腕・ミミ、番犬の左腕・ココ、
+   * 人形に付与されたもの等）を、いずれ得るものとして数える倍率。ダメージは N × oppHp、回復は減っている分までの N × myHp にこの倍率を掛ける。
+   * 相手の場のものは逆向きに引く。0 なら見ない
+   */
+  lastWords: number;
+  /**
    * 相手の体力が lethalRange 以下のとき、手札の「アミュレットをアクトすると疾走を得るフォロワー」（セイクリッドグリフォン）を、
    * 次のターンに出せて（コスト ≤ 次のターンの PP）、自分の場にアクトできるアミュレットがあれば、攻撃力 × この値を足す。
    * 次のターンの疾走の打点（リノセウスの potential と同じ考え）。0 なら見ない
@@ -148,6 +154,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   evoReserve: 0,
   sevoReserve: 0,
   kerberosReserve: 0,
+  lastWords: 0,
   handStorm: 0,
   boostCard: 0,
   boost: 0,
@@ -292,6 +299,44 @@ const DOOMED: ReadonlySet<string> = new Set(
 /** 相手のターン終了時に自壊するフォロワーか（改境の再動で付与されたものも含む） */
 export const isDoomed = (f: FollowerOnBoard): boolean => DOOMED.has(f.cardId) || f.granted.some(isSelfDestroyAtOpponentTurnEnd);
 
+/** ラストワードで得るもの（相手のリーダーへのダメージ・自分のリーダーの回復。定数のものだけ） */
+function lastWordsPayoff(abilities: readonly Ability[]): { damage: number; heal: number } {
+  let damage = 0;
+  let heal = 0;
+  for (const a of abilities) {
+    if (a.trigger.on !== "lastWords") continue;
+    for (const e of a.effects) {
+      if (e.op === "damage" && typeof e.amount === "number" && e.target.kind === "leader" && e.target.side === "opponent") damage += e.amount;
+      else if (e.op === "heal" && typeof e.amount === "number" && e.target.kind === "leader" && e.target.side === "self") heal += e.amount;
+    }
+  }
+  return { damage, heal };
+}
+
+const LAST_WORDS_PAYOFF: ReadonlyMap<string, { damage: number; heal: number }> = new Map(
+  [...CARDS_BY_ID.values()].flatMap((c): [string, { damage: number; heal: number }][] => {
+    if (c.type !== "follower") return [];
+    const p = lastWordsPayoff(abilitiesOf(c.id).abilities);
+    return p.damage > 0 || p.heal > 0 ? [[c.id, p]] : [];
+  }),
+);
+
+/** プレイヤー（owner）の場のフォロワーのラストワードで、相手のリーダーに与えるダメージと自分のリーダーの回復（相手の体力・減っている分まで） */
+function lastWordsAmount(state: GameState, owner: PlayerIndex): { damage: number; heal: number } {
+  const me = state.players[owner];
+  const opp = state.players[owner === 0 ? 1 : 0];
+  let damage = 0;
+  let heal = 0;
+  for (const c of me.board) {
+    if (c.kind !== "follower") continue;
+    const base = LAST_WORDS_PAYOFF.get(c.cardId);
+    const extra = c.granted.length > 0 ? lastWordsPayoff(c.granted) : null;
+    damage += (base?.damage ?? 0) + (extra?.damage ?? 0);
+    heal += (base?.heal ?? 0) + (extra?.heal ?? 0);
+  }
+  return { damage: Math.min(damage, Math.max(0, opp.leaderHp)), heal: Math.min(heal, Math.max(0, me.leaderMaxHp - me.leaderHp)) };
+}
+
 function followerValue(f: FollowerOnBoard, w: EvalWeights): number {
   let v = f.attack * w.attack + f.tempAttack * w.tempAttack + f.defense * w.defense + w.followerBase;
   for (const k of f.keywords) v += (KEYWORD_VALUE[k] ?? 0) * w.keywords;
@@ -340,6 +385,11 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
   let oppBoard = 0;
   for (const c of opp.board) oppBoard += discountedBoardValue(c, w);
   v -= oppBoard * w.oppBoard;
+  if (w.lastWords !== 0) {
+    const mine = lastWordsAmount(state, p);
+    const theirs = lastWordsAmount(state, p === 0 ? 1 : 0);
+    v += (mine.damage * w.oppHp + mine.heal * w.myHp - theirs.damage * w.myHp - theirs.heal * w.oppHp) * w.lastWords;
+  }
   v += me.hand.length * w.myHand - opp.hand.length * w.oppHand;
   for (const h of me.hand) v += w.hold[h.cardId] ?? 0;
   if (w.fusionSet !== 0) {

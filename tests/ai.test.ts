@@ -446,3 +446,24 @@ describe("reanimateGuard", () => {
     expect(reanimateWorthwhile(s, sevo(kerberos.iid), p)).toBe(true);
   });
 });
+
+
+describe("lastWords の評価", () => {
+  it("ミミは相手のリーダーへの 2 点、ココは減っている分までの回復を数える。相手の場のものは引く", () => {
+    const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 3 });
+    const p = s.active;
+    const q = p === 0 ? 1 : 0;
+    const id = (name: string) => ALL_CARDS.find((c) => c.name === name)!.id;
+    const w0 = { ...SEARCH_WEIGHTS, lastWords: 0 };
+    const w1 = { ...SEARCH_WEIGHTS, lastWords: 1 };
+    const diff = () => evaluateWith(s, p, w1) - evaluateWith(s, p, w0);
+    s.players[p].board.push(newBoardCard(s, id("番犬の右腕・ミミ")));
+    expect(diff()).toBeCloseTo(2 * SEARCH_WEIGHTS.oppHp);
+    s.players[p].board.push(newBoardCard(s, id("番犬の左腕・ココ")));
+    expect(diff()).toBeCloseTo(2 * SEARCH_WEIGHTS.oppHp); // 体力が減っていないので回復は 0
+    s.players[p].leaderHp = 19;
+    expect(diff()).toBeCloseTo(2 * SEARCH_WEIGHTS.oppHp + 1 * SEARCH_WEIGHTS.myHp);
+    s.players[q].board.push(newBoardCard(s, id("番犬の右腕・ミミ")));
+    expect(diff()).toBeCloseTo(2 * SEARCH_WEIGHTS.oppHp + 1 * SEARCH_WEIGHTS.myHp - 2 * SEARCH_WEIGHTS.myHp);
+  });
+});
