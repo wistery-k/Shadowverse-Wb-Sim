@@ -2,7 +2,7 @@
 
 import { id } from "../cards/abilities/helpers";
 import { CARDS_BY_ID } from "../cards";
-import { MAX_PP, abilitiesOf, staticOf, type FollowerOnBoard, type GameState, type OnBoard, type PlayerIndex } from "../engine";
+import { EXTRA_PP_REFRESH_TURN, MAX_PP, abilitiesOf, staticOf, type FollowerOnBoard, type GameState, type OnBoard, type PlayerIndex } from "../engine";
 
 export interface EvalWeights {
   /** 自分・相手のリーダー体力 1 点 */
@@ -30,6 +30,12 @@ export interface EvalWeights {
    * カウントを進めるアクトで点が上がり、割れると得るものと同じ点になる。0 なら見ない（amulet で数える）
    */
   countdownDecay: number;
+  /**
+   * 手札に純白の聖女・ジャンヌがあり、フォロワーを出すカウントダウンのアミュレットがジャンヌを出せるターン
+   * （自分のターン数＋残りカウント＝8。エクストラPP を使えるなら 7 も）に割れるとき、出るフォロワーを +2/+4 して数える（countdownDecay のとき）。
+   * 0 なら見ない、1 なら見る
+   */
+  jeanneSync: number;
   /** 相手の盤面の価値の倍率（自分の盤面に対して） */
   oppBoard: number;
   /** 手札 1 枚 */
@@ -97,6 +103,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   sigil: 0.5,
   sigilAmulet: 1.5,
   countdownDecay: 0,
+  jeanneSync: 0,
   oppBoard: 1.1,
   myHand: 0.6,
   oppHand: 0.3,
@@ -140,6 +147,8 @@ const FUSION_HOLD: Readonly<Record<string, number>> = Object.fromEntries(
 const FUSION_SET: ReadonlySet<string> = new Set(["デストロイアーティファクトα", "デストロイアーティファクトβ", "デストロイアーティファクトγ"].map(id));
 
 const KUON = id("五行の果て・クオン");
+const JEANNE = id("純白の聖女・ジャンヌ");
+const JEANNE_COST = 8;
 
 /** 手札のスペルブーストで育つカード（boostCard・boost で数える） */
 export const BOOSTABLE: ReadonlySet<string> = new Set(
@@ -205,10 +214,12 @@ export const COUNTDOWN_PAYOFF: ReadonlyMap<string, CountdownPayoff> = new Map(
   }),
 );
 
-function countdownValue(p: CountdownPayoff, countdown: number, w: EvalWeights): number {
+/** ジャンヌに合わせて割れるか（turns: ジャンヌを出せる自分のターン数の集合。手札にジャンヌがなければ null） */
+function countdownValue(p: CountdownPayoff, countdown: number, w: EvalWeights, jeanneTurns: ReadonlySet<number> | null): number {
   let v = p.draws * w.myHand;
+  const synced = jeanneTurns !== null && jeanneTurns.has(countdown);
   for (const f of p.followers) {
-    v += f.attack * w.attack + f.defense * w.defense + w.followerBase;
+    v += (f.attack + (synced ? 2 : 0)) * w.attack + (f.defense + (synced ? 4 : 0)) * w.defense + w.followerBase;
     for (const k of f.keywords) v += (KEYWORD_VALUE[k] ?? 0) * w.keywords;
   }
   return v * w.countdownDecay ** countdown;
@@ -221,14 +232,27 @@ function followerValue(f: FollowerOnBoard, w: EvalWeights): number {
   return v;
 }
 
-function boardValue(c: OnBoard, w: EvalWeights): number {
+function boardValue(c: OnBoard, w: EvalWeights, jeanneTurns: ReadonlySet<number> | null = null): number {
   if (c.kind === "follower") return followerValue(c, w);
   if (c.sigils !== null) return w.sigilAmulet + c.sigils * w.sigil;
   if (w.countdownDecay !== 0 && c.countdown !== null) {
     const p = COUNTDOWN_PAYOFF.get(c.cardId);
-    if (p) return countdownValue(p, c.countdown, w);
+    if (p) return countdownValue(p, c.countdown, w, jeanneTurns);
   }
   return w.amulet;
+}
+
+/**
+ * ジャンヌを出せるターンに割れる残りカウントの集合。カウントは自分のターン開始時に減るので、残りカウント c なら
+ * 自分のターン数＋c のターンの開始時に割れる。そのターンが 8（PP 最大値 8）、エクストラPP を使えるなら 7 のとき
+ */
+function jeanneCountdowns(state: GameState, p: PlayerIndex): ReadonlySet<number> {
+  const me = state.players[p];
+  const out = new Set<number>([JEANNE_COST - me.turnCount]);
+  // 後攻のエクストラPP は EXTRA_PP_REFRESH_TURN に使えるようになる（それより前に使っても戻る）
+  const extra = p !== state.first && (me.extraPpAvailable || me.turnCount < EXTRA_PP_REFRESH_TURN);
+  if (extra) out.add(JEANNE_COST - 1 - me.turnCount);
+  return out;
 }
 
 /** プレイヤー p から見た盤面の評価値（大きいほど p に有利） */
@@ -238,7 +262,8 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
   const opp = state.players[p === 0 ? 1 : 0];
   let v = 0;
   v += me.leaderHp * w.myHp - opp.leaderHp * w.oppHp;
-  for (const c of me.board) v += boardValue(c, w);
+  const jeanneTurns = w.jeanneSync !== 0 && me.hand.some((h) => h.cardId === JEANNE) ? jeanneCountdowns(state, p) : null;
+  for (const c of me.board) v += boardValue(c, w, jeanneTurns);
   let oppBoard = 0;
   for (const c of opp.board) oppBoard += boardValue(c, w);
   v -= oppBoard * w.oppBoard;

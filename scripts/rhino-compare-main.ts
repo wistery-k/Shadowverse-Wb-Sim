@@ -9,6 +9,7 @@
 // 自然の妖精姫・アリアを出した試合の数と、最初に出した自分のターン（平均）も出す。
 // --agent で、リノセウスエルフ側の AI を registry のキーで選べる（既定は rhino。例: search、rhino-lethal。--opts は rhino のときだけ使う）。
 // --start N で、最初の試合番号を N にする（既定 0。前に回した試合と重ならない別の試合で確かめるため）。
+// --subject bishop のときは、ジャンヌを出した回数と、そのときアミュレットから出たフォロワーが場にいた回数も出す。
 // --out ファイル名 で、試合ごとの結果（相手デッキ・g・席・勝ち・全探索でリーサルを見つけた回数）を JSON Lines で書き出す（変更前後で試合ごとに比べる用）。
 // --matches ファイル名 で、JSON Lines の各行の（deck・g・seat）の試合だけを打つ（web の「人間との比較」で人間が打った記録を渡すと、
 // 人間と同じ試合で AI の勝率を出し、人間の勝敗と並べて表示する。--games は使わない）。
@@ -27,6 +28,9 @@ import { compareMatch, isSubjectId, opponentsOf, SUBJECTS, type SubjectId } from
 import { parallelMap } from "./parallel";
 
 const ARIA = "自然の妖精姫・アリア";
+const JEANNE = "純白の聖女・ジャンヌ";
+/** フォロワーを出すカウントダウンのアミュレットから出るフォロワー（ホーリーファルコンはフェザーレインでも出るので数えない） */
+const AMULET_TOKENS = ["ホーリーフレイムタイガー", "壮麗なる隼"];
 
 export async function main(argv: string[]): Promise<number> {
   let games = 50;
@@ -82,7 +86,22 @@ export async function main(argv: string[]): Promise<number> {
       }
       s = applyAction(s, a);
     }
-    return { deck: o, g, elfSeat, won: r.winner === elfSeat, ariaTurn, exactFound: exactLethalCounts.found, ex: { ...exhaustiveCounts }, sec: (Date.now() - t) / 1000 };
+    // ビショップ: ジャンヌを出した回数と、そのときアミュレットから出たフォロワーが場にいて +2/+4 された回数
+    let jeanne = 0, jeanneTokens = 0;
+    if (subject === "bishop") {
+      let b = createGame({ decks, seed });
+      for (const a of r.log ?? []) {
+        if (a.type === "play" && b.active === elfSeat && !b.pending) {
+          const h = b.players[elfSeat].hand.find((c) => c.iid === a.iid);
+          if (h && cardOf(h.cardId).name === JEANNE) {
+            jeanne++;
+            if (b.players[elfSeat].board.some((c) => AMULET_TOKENS.includes(cardOf(c.cardId).name))) jeanneTokens++;
+          }
+        }
+        b = applyAction(b, a);
+      }
+    }
+    return { deck: o, g, elfSeat, won: r.winner === elfSeat, ariaTurn, jeanne, jeanneTokens, exactFound: exactLethalCounts.found, ex: { ...exhaustiveCounts }, sec: (Date.now() - t) / 1000 };
   });
   const perDeck = new Map<string, [number, number]>();
   for (const { deck, won } of results) {
@@ -94,6 +113,10 @@ export async function main(argv: string[]): Promise<number> {
   console.log(`${SUBJECTS[subject].deck} agent ${agentKey} opts ${JSON.stringify(opts)}: ${wins}/${n} = ${((wins / n) * 100).toFixed(1)}%  ${((Date.now() - t0) / Math.max(1, n) / 1000).toFixed(2)}s/試合`);
   const aria = results.flatMap((r) => (r.ariaTurn === null ? [] : [r.ariaTurn]));
   const ariaWins = results.filter((r) => r.ariaTurn !== null && r.won).length;
+  if (subject === "bishop") {
+    const sum = (k: "jeanne" | "jeanneTokens") => results.reduce((x, r) => x + r[k], 0);
+    console.log(`ジャンヌを出した回数 ${sum("jeanne")}、そのうちアミュレットから出たフォロワー（${AMULET_TOKENS.join("・")}）が場にいた回数 ${sum("jeanneTokens")}`);
+  }
   if (subject === "rhino") console.log(`アリアを出した試合 ${aria.length}/${n}（そのうち勝ち ${ariaWins}）、最初に出した自分のターン 平均 ${(aria.reduce((x, y) => x + y, 0) / Math.max(1, aria.length)).toFixed(2)}`);
   console.log([...perDeck].map(([name, [w, t]]) => `${name} ${w}/${t}`).join(", "));
   const exact = results.filter((r) => r.exactFound > 0);
