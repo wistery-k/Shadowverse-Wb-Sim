@@ -128,7 +128,7 @@ export interface SearchOptions {
   exhaustive: { untilTurn: number; maxStates: number } | null;
   /**
    * 上位の手を相手のターンまで読むとき、相手のターンを貪欲法ではなく、局面をそのまま見たビームサーチ（幅 beamWidth・深さ maxDepth、
-   * 相手のターン末の採点で最善の並び。相手の次のターンは読まない）で打つ。null なら貪欲法（実験中）。
+   * 相手のターン末の採点で最善の並び。相手の次のターンは読まない）で打つ。null なら貪欲法（既定。幅 4 で 52.3%・思考時間 約 3.7 倍のため保留）。
    * 貪欲法の読みは、消える人形を倒しに行く・タダで消える 1/1 を出さない等、相手の手を読み違える（docs/ai-notes.md）
    */
   opponentSearch: { beamWidth: number; maxDepth: number } | null;
