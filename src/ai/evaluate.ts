@@ -92,7 +92,7 @@ export interface EvalWeights {
   /**
    * 場のフォロワーのラストワードで出すフォロワー（ボーンガールのスケルトン 2 体、王家の御者のナイト等）の価値の倍率。
    * 出すフォロワーの攻撃力・体力・キーワード・基本点（カウントダウンのアミュレットが割れたときと同じ数え方）にこの値を掛けて、そのフォロワーの価値に足す。
-   * 死ぬまで出ず、出るのは早くても次のターンなので割り引く。0 なら見ない
+   * 死ぬまで出ず、出るのは早くても次のターンなので割り引く。0 なら見ない（探索 AI は 0.5。docs/ai-notes.md）
    */
   lastWordsSummon: number;
   /**
@@ -248,7 +248,7 @@ const HAS_ACT: ReadonlySet<string> = new Set(
  * doomed 0.3（相手のターン終了時に自壊するフォロワー）は勝率を変えない（3000 試合で 49.6%）が、改良型・操り人形で攻撃せずに終えたり
  * アンの大英霊を進化させたりするのが直るので採用（ユーザー判断。docs/ai-notes.md）
  */
-export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, crest: 3, fusionSet: 3.6, kuonReserve: 8, evoReserve: 3, sevoReserve: 6, lastWords: 1, boostCard: 1, boost: 0.2, countdownDecay: 0.8, doomed: 0.3, hold: FUSION_HOLD };
+export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, crest: 3, fusionSet: 3.6, kuonReserve: 8, evoReserve: 3, sevoReserve: 6, lastWords: 1, lastWordsSummon: 0.5, boostCard: 1, boost: 0.2, countdownDecay: 0.8, doomed: 0.3, hold: FUSION_HOLD };
 
 const KEYWORD_VALUE: Partial<Record<string, number>> = {
   ward: 1,
