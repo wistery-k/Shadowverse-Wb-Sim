@@ -92,6 +92,21 @@ export function predictKeep(kept: readonly string[], deck: MulliganModel[string]
   return v;
 }
 
+/** カード名ごとの「残した」の係数を置き換えたモデル（すべてのデッキの、その名前のカードに当てる） */
+export function overrideMulliganCards(model: MulliganModel, byName: Record<string, number>): MulliganModel {
+  const out: MulliganModel = {};
+  for (const [deck, m] of Object.entries(model)) {
+    const cards = { ...m.cards };
+    for (const [name, v] of Object.entries(byName)) {
+      const id = ID_BY_NAME.get(name);
+      if (id === undefined) throw new Error(`mulliganCards: 不明なカード名 ${name}`);
+      if (id in cards) cards[id] = v;
+    }
+    out[deck] = { features: m.features, cards };
+  }
+  return out;
+}
+
 /** 手札の形でマリガンする。デッキの係数か役割が無ければ null */
 export function modelMulliganSwap(state: GameState, p: PlayerIndex, model: MulliganModel, roles: MulliganRoles = MULLIGAN_ROLES): number[] | null {
   const name = defaultDeckNameOf(state, p);

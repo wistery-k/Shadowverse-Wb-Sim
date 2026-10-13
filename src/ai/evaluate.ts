@@ -73,6 +73,12 @@ export interface EvalWeights {
    */
   evoReserve: number;
   /**
+   * 進化時・超進化時能力（【進化時】・これが進化したとき・【超進化時】）を持つフォロワーのために SEP を残す価値。
+   * evoReserve の超進化版: 手札の該当カードを SEP の数まで数え、このターンに超進化させたのが該当カードならさらに 1 枚分数えて、1 枚あたりこの点を足す。
+   * 能力のないフォロワー（アミュレットから出るトークン等）に超進化を使うと下がる。0 なら見ない
+   */
+  sevoReserve: number;
+  /**
    * 手札のスペルブーストで育つカード（【スペルブースト時】の能力を持つ。ストームブラスト・ウィリアム・宿題やるですぅ！・鬼呼びの術・オーバーディメンション等）1 枚あたり（myHand に加算）。
    * 早く引くほどブーストを多く受けられる価値。0 なら見ない
    */
@@ -124,6 +130,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   fusionSet: 0,
   kuonReserve: 0,
   evoReserve: 0,
+  sevoReserve: 0,
   boostCard: 0,
   boost: 0,
   boostCap: 5,
@@ -172,6 +179,13 @@ export const EVOLVE_ABILITY: ReadonlySet<string> = new Set(
     .map((c) => c.id),
 );
 
+/** 進化時・超進化時能力を持つフォロワー（sevoReserve で数える） */
+export const SUPER_EVOLVE_ABILITY: ReadonlySet<string> = new Set(
+  [...CARDS_BY_ID.values()]
+    .filter((c) => c.type === "follower" && abilitiesOf(c.id).abilities.some((a) => a.trigger.on === "evolve" || a.trigger.on === "evolved" || a.trigger.on === "superEvolve"))
+    .map((c) => c.id),
+);
+
 /**
  * 探索 AI の既定の重み（基準の重み＋PP 最大値＋SEP＋融合で作るカードの価値）。
  * PP 最大値の重みが 0 だと、竜の啓示を打つ手は手札が 1 枚減るだけに見え、初手にあっても 95% の試合で打たなかった。
@@ -180,13 +194,14 @@ export const EVOLVE_ABILITY: ReadonlySet<string> = new Set(
  * クレストは 1.5 だとアリアのクレスト（妖精に疾走）を安く見て、出すべき局面でアリアを出さなかったため 3（ユーザー判断。docs/ai-notes.md）
  * fusionSet（手札の α・β・γ の種類 1 つにつき）は 0/1.2/2.4/3.6/4.8 で比べて 3.6（AFネメシスの勝率 38.7% → 46.8%。docs/ai-notes.md）
  * kuonReserve は 0/8/12/16 で比べて 8（スペルウィッチの勝率 44.4% → 47.1%、1200 試合。docs/ai-notes.md）
+ * sevoReserve 6 はアミュレット疾走ビショップの勝率 53.3% → 57.0%（2400 試合）、全デッキの compare で 52.4%（1200 試合）（docs/ai-notes.md）
  * evoReserve 3 は勝率を変えない（今の AI と 50〜51%）が、進化時能力を持たないフォロワーへの進化が 30% → 20% に減るので採用（ユーザー判断。docs/ai-notes.md）
  * boostCard 1・boost 0.2（スペルブーストで育つカード）はスペルウィッチの勝率 44.3% → 52.1%（1200 試合。docs/ai-notes.md）
  * countdownDecay 0.8（カウントダウンのアミュレット）はアミュレット疾走ビショップの勝率 50.1% → 54.5%（2400 試合。docs/ai-notes.md）
  * doomed 0.3（相手のターン終了時に自壊するフォロワー）は勝率を変えない（3000 試合で 49.6%）が、改良型・操り人形で攻撃せずに終えたり
  * アンの大英霊を進化させたりするのが直るので採用（ユーザー判断。docs/ai-notes.md）
  */
-export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, crest: 3, fusionSet: 3.6, kuonReserve: 8, evoReserve: 3, boostCard: 1, boost: 0.2, countdownDecay: 0.8, doomed: 0.3, hold: FUSION_HOLD };
+export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, crest: 3, fusionSet: 3.6, kuonReserve: 8, evoReserve: 3, sevoReserve: 6, boostCard: 1, boost: 0.2, countdownDecay: 0.8, doomed: 0.3, hold: FUSION_HOLD };
 
 const KEYWORD_VALUE: Partial<Record<string, number>> = {
   ward: 1,
@@ -306,6 +321,12 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
     for (const h of me.hand) if (EVOLVE_ABILITY.has(h.cardId)) n++;
     const used = me.epEvolvedThisTurn !== null && EVOLVE_ABILITY.has(me.epEvolvedThisTurn) ? 1 : 0;
     v += (Math.min(n, me.ep) + used) * w.evoReserve;
+  }
+  if (w.sevoReserve !== 0) {
+    let n = 0;
+    for (const h of me.hand) if (SUPER_EVOLVE_ABILITY.has(h.cardId)) n++;
+    const used = me.sepEvolvedThisTurn !== null && SUPER_EVOLVE_ABILITY.has(me.sepEvolvedThisTurn) ? 1 : 0;
+    v += (Math.min(n, me.sep) + used) * w.sevoReserve;
   }
   if (w.boostCard !== 0 || w.boost !== 0) {
     for (const h of me.hand) {
