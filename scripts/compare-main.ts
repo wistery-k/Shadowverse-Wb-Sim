@@ -18,6 +18,7 @@ const EXCLUDED_DECKS = ["ランプドラゴン"];
  * 試合は CPU のコア数だけ並列に行う（環境変数 THREADS で変えられる。scripts/parallel.ts）。
  * デッキは各クラス1つずつ（ドラゴンは疾走ドラゴン）の 7 つを使う。
  * "weights" にオブジェクトを渡すと、探索 AI の既定の重み（SEARCH_WEIGHTS）のその項目だけを変える（例: '{"weights":{"myHand":0.8}}'）。
+ * "weights" の "holdScale" は、融合で作るカードの手札の価値（hold）を何倍にするか（例: '{"weights":{"myHand":1.2,"holdScale":2}}'）。
  */
 export async function main(argv: string[]): Promise<number> {
   const games = Number(argv[0] ?? 28);
@@ -53,6 +54,12 @@ export async function main(argv: string[]): Promise<number> {
 function parseOptions(json: string | undefined): Partial<SearchOptions> {
   const raw = JSON.parse(json ?? "{}") as Record<string, unknown>;
   if (raw.weights === "default") raw.weights = DEFAULT_WEIGHTS;
-  else if (typeof raw.weights === "object" && raw.weights !== null) raw.weights = { ...SEARCH_WEIGHTS, ...raw.weights };
+  else if (typeof raw.weights === "object" && raw.weights !== null) {
+    // "holdScale" は融合で作るカードの手札の価値（hold）を何倍にするか（myHand を変えるとき、素材の枚数 × 手札 1 枚の価値に合わせる用）
+    const { holdScale, ...rest } = raw.weights as Record<string, unknown>;
+    const scale = typeof holdScale === "number" ? holdScale : 1;
+    const hold = Object.fromEntries(Object.entries(SEARCH_WEIGHTS.hold).map(([k, v]) => [k, v * scale]));
+    raw.weights = { ...SEARCH_WEIGHTS, hold, ...rest };
+  }
   return raw as Partial<SearchOptions>;
 }

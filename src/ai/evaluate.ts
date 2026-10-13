@@ -103,6 +103,11 @@ export interface EvalWeights {
    * 突進で攻撃せずに残したり、意味の薄い進化をしたりした。残るのは相手のターンに守る分だけなので割り引く。1 なら普通のフォロワーと同じ
    */
   doomed: number;
+  /**
+   * 自分のターンを終えるときに残った PP 1 につき引く点（探索 AI のターン末の採点と、上位の手を読み直した点数だけに使う。evaluateWith では見ない）。
+   * 同じ局面の手順どうしを比べると（plan-value、docs/ai-notes.md）、評価が同じでも PP を余らせた手順ほど勝率が低かった。0 なら見ない
+   */
+  ppLeft: number;
 }
 
 /** 数値の重みの名前（hold を除く） */
@@ -143,6 +148,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   boostCap: 5,
   hold: {},
   doomed: 1,
+  ppLeft: 0,
 };
 
 /**
