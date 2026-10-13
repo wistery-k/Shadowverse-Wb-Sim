@@ -503,6 +503,18 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   return result;
 }
 
+/**
+ * 分析用: 局面 root（決定化しない）で、最初の手ごとのターン末の最善の並びを、ターン末の点数の高い順に返す。
+ * 相手のターンは読まない（探索 AI が上位 rescoreTop 手を読み直す前の候補）
+ */
+export function turnCandidates(root: GameState, p: PlayerIndex, rng: Rng, options: Partial<SearchOptions> = {}): { actions: Action[]; state: GameState; value: number }[] {
+  const opts = { ...DEFAULT_SEARCH_OPTIONS, ...options };
+  const w = opts.weights === "byClass" ? weightsFor(root, p) : opts.weights;
+  return [...planTurn(root, p, opts, w, rng, false).values()]
+    .map((plan) => ({ actions: plan.steps.map((s) => s.action), state: plan.steps.at(-1)?.state ?? root, value: plan.value }))
+    .sort((x, y) => y.value - x.value);
+}
+
 export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
   const opts = { ...DEFAULT_SEARCH_OPTIONS, ...options };
   const mulliganModel = opts.mulliganCards ? overrideMulliganCards(MULLIGAN_MODEL, opts.mulliganCards) : MULLIGAN_MODEL;
