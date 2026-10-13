@@ -379,4 +379,21 @@ describe("評価関数の重み", () => {
     me.sepEvolvedThisTurn = id("壮麗なる隼");
     expect(evaluateWith(s, 0, w)).toBeCloseTo(evaluateWith(s, 0, DEFAULT_WEIGHTS));
   });
+  it("handStorm は相手の体力が lethalRange 以下で、アクトできるアミュレットが場にあれば、次のターンに出せるグリフォンの攻撃力を数える", () => {
+    const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 4 });
+    const me = s.players[0];
+    s.players[1].leaderHp = 8;
+    me.maxPp = 7;
+    me.hand = [newHandCard(s, id("セイクリッドグリフォン"))];
+    me.board = [newBoardCard(s, id("禁密の聖地"))];
+    const w = { ...DEFAULT_WEIGHTS, handStorm: 0.5 };
+    expect(evaluateWith(s, 0, w) - evaluateWith(s, 0, DEFAULT_WEIGHTS)).toBeCloseTo(3);
+    // 次のターンに 8 PP に届かなければ数えない
+    me.maxPp = 6;
+    expect(evaluateWith(s, 0, w)).toBeCloseTo(evaluateWith(s, 0, DEFAULT_WEIGHTS));
+    // アクトできるアミュレットが無ければ数えない
+    me.maxPp = 7;
+    me.board = [];
+    expect(evaluateWith(s, 0, w)).toBeCloseTo(evaluateWith(s, 0, DEFAULT_WEIGHTS));
+  });
 });

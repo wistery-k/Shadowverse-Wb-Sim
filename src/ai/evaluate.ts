@@ -79,6 +79,12 @@ export interface EvalWeights {
    */
   sevoReserve: number;
   /**
+   * 相手の体力が lethalRange 以下のとき、手札の「アミュレットをアクトすると疾走を得るフォロワー」（セイクリッドグリフォン）を、
+   * 次のターンに出せて（コスト ≤ 次のターンの PP）、自分の場にアクトできるアミュレットがあれば、攻撃力 × この値を足す。
+   * 次のターンの疾走の打点（リノセウスの potential と同じ考え）。0 なら見ない
+   */
+  handStorm: number;
+  /**
    * 手札のスペルブーストで育つカード（【スペルブースト時】の能力を持つ。ストームブラスト・ウィリアム・宿題やるですぅ！・鬼呼びの術・オーバーディメンション等）1 枚あたり（myHand に加算）。
    * 早く引くほどブーストを多く受けられる価値。0 なら見ない
    */
@@ -131,6 +137,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   kuonReserve: 0,
   evoReserve: 0,
   sevoReserve: 0,
+  handStorm: 0,
   boostCard: 0,
   boost: 0,
   boostCap: 5,
@@ -184,6 +191,18 @@ export const SUPER_EVOLVE_ABILITY: ReadonlySet<string> = new Set(
   [...CARDS_BY_ID.values()]
     .filter((c) => c.type === "follower" && abilitiesOf(c.id).abilities.some((a) => a.trigger.on === "evolve" || a.trigger.on === "evolved" || a.trigger.on === "superEvolve"))
     .map((c) => c.id),
+);
+
+/** アミュレットのアクトで疾走を得るフォロワー（handStorm で数える） */
+export const ACT_STORM: ReadonlySet<string> = new Set(
+  [...CARDS_BY_ID.values()]
+    .filter((c) => c.type === "follower" && abilitiesOf(c.id).abilities.some((a) => a.trigger.on === "allyAct" && a.effects.some((e) => e.op === "grant" && (e.keywords ?? []).includes("storm"))))
+    .map((c) => c.id),
+);
+
+/** アクトを持つアミュレット */
+const HAS_ACT: ReadonlySet<string> = new Set(
+  [...CARDS_BY_ID.values()].filter((c) => c.type === "amulet" && abilitiesOf(c.id).abilities.some((a) => a.trigger.on === "act")).map((c) => c.id),
 );
 
 /**
@@ -342,6 +361,13 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
   v += Math.min(me.graveyard, 10) * w.graveyard;
   if (opp.leaderHp <= w.lethalRange) {
     for (const c of me.board) if (c.kind === "follower") v += c.attack * w.lethalAttack * (w.doomed !== 1 && isDoomed(c) ? w.doomed : 1);
+    if (w.handStorm !== 0 && me.board.some((c) => HAS_ACT.has(c.cardId))) {
+      const nextPp = Math.min(MAX_PP, me.maxPp + 1);
+      for (const h of me.hand) {
+        const card = CARDS_BY_ID.get(h.cardId);
+        if (card?.type === "follower" && ACT_STORM.has(h.cardId) && card.cost <= nextPp) v += card.attack * w.handStorm;
+      }
+    }
   }
   return v;
 }
