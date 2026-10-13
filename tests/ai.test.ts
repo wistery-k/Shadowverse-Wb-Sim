@@ -290,6 +290,32 @@ describe("評価関数の重み", () => {
     expect(evaluateWith(t, 0, SEARCH_WEIGHTS)).toBeGreaterThanOrEqual(before);
     expect(evaluateWith(t, 0, DEFAULT_WEIGHTS)).toBeLessThan(evaluateWith(s, 0, DEFAULT_WEIGHTS));
   });
+  it("countdownDecay ではカウントダウンのアミュレットを割れたときに得るもので数え、アクトでカウントを進めると評価が上がる", () => {
+    const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 4 });
+    s.phase = "main";
+    s.active = 0;
+    const me = s.players[0];
+    me.board = [];
+    me.hand = [];
+    s.players[1].board = [];
+    me.pp = 5;
+    const w = { ...DEFAULT_WEIGHTS, countdownDecay: 0.8 };
+    const empty = evaluateWith(s, 0, w);
+    const vow = newBoardCard(s, id("獣姫の誓約"));
+    me.board = [vow];
+    // ホーリーフレイムタイガー 4/4: 4 + 3.2 + 1 = 8.2、カウント 2
+    expect(evaluateWith(s, 0, w) - empty).toBeCloseTo(8.2 * 0.64);
+    const t = applyAction(s, { type: "act", iid: vow.iid });
+    expect(evaluateWith(t, 0, w)).toBeGreaterThan(evaluateWith(s, 0, w));
+    // 穏やかなる教会（2 ドロー）は割ると評価が下がらない
+    const church = newBoardCard(s, id("穏やかなる教会"));
+    (church as { countdown: number | null }).countdown = 1;
+    me.board = [church];
+    const before = evaluateWith(s, 0, w);
+    const u = applyAction(s, { type: "act", iid: church.iid });
+    expect(u.players[0].board).toHaveLength(0);
+    expect(evaluateWith(u, 0, w)).toBeGreaterThan(before);
+  });
   it("evoReserve は EP の数まで手札の進化時能力持ちを数え、このターンに EP で進化させた進化時能力持ちも数える", () => {
     const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 4 });
     const me = s.players[0];
