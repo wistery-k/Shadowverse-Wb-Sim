@@ -11,6 +11,7 @@ import { abilitiesOf, cardOf, crestAbilitiesOf, staticOf } from "./registry";
 import type {
   AmuletOnBoard,
   CardRef,
+  DrawHint,
   CrestInstance,
   EffectContext,
   FollowerOnBoard,
@@ -135,6 +136,8 @@ export function newHandCard(state: GameState, cardId: string, iid = newIid(state
     keywords: [],
     fusedKinds: [],
     fusedThisTurn: false,
+    revealed: false,
+    drawnBy: null,
   };
 }
 
@@ -197,6 +200,7 @@ export function drawCards(
   p: PlayerIndex,
   n: number,
   filter?: (ref: CardRef) => boolean,
+  hint?: DrawHint,
 ): number[] {
   const pl = state.players[p];
   const drawn: number[] = [];
@@ -213,7 +217,10 @@ export function drawCards(
         break;
       }
     }
-    if (ref && addHandCard(state, p, newHandCard(state, ref.cardId, ref.iid))) drawn.push(ref.iid);
+    if (!ref) continue;
+    const card = newHandCard(state, ref.cardId, ref.iid);
+    if (hint) card.drawnBy = hint;
+    if (addHandCard(state, p, card)) drawn.push(ref.iid);
   }
   return drawn;
 }

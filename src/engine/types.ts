@@ -1,5 +1,6 @@
 // ゲーム状態とアクションの型。状態は JSON シリアライズ可能に保つ（クラス・関数・Map を入れない）。
 
+import type { CardType, ClassId } from "../cards/types";
 import type { Ability, Effect } from "./dsl";
 
 export type PlayerIndex = 0 | 1;
@@ -39,6 +40,26 @@ export interface HandCard extends CardRef {
   /** これまでに融合した素材のカードID（種類） */
   fusedKinds: string[];
   fusedThisTurn: boolean;
+  /**
+   * 持ち主の相手にも中身が分かっているカード（場から手札に戻った・名前の決まったカードを効果で加えた）。
+   * ルールには影響しない。AI の determinization（src/ai/determinize.ts）で並べ直さないために使う
+   */
+  revealed: boolean;
+  /**
+   * 条件付きで山札から引いたカードの条件（相手に分かるのは条件だけ）。ルールには影響しない。
+   * AI の determinization で、この条件に合うカードを割り当てるために使う
+   */
+  drawnBy: DrawHint | null;
+}
+
+/** 条件付きのドローの条件（CardFilter のうち山札のカードに使うもの。コストは解決済みの値） */
+export interface DrawHint {
+  type?: CardType;
+  tribe?: string;
+  class?: ClassId;
+  ids?: string[];
+  costMax?: number;
+  costEq?: number;
 }
 
 interface OnBoardBase extends CardRef {

@@ -52,6 +52,30 @@ describe("determinization", () => {
     // 元の局面は変更しない
     expect(determinize(s, viewer, rngFrom({ rng: 1 }))).toEqual(d);
   });
+
+  it("中身が公開された手札は残し、条件付きで引いたカードには条件に合うカードを割り当てる", () => {
+    let s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 3 });
+    s = applyAction(s, legalActions(s)[0]!);
+    s = applyAction(s, legalActions(s)[0]!);
+    const viewer = s.active;
+    const opp = viewer === 0 ? 1 : 0;
+    const oppHand = s.players[opp].hand;
+    oppHand[0]!.revealed = true;
+    oppHand[1]!.drawnBy = { type: "spell" };
+    oppHand[2]!.drawnBy = { costEq: 1 };
+    const hasSpell = [...oppHand.slice(1), ...s.players[opp].deck].some((c) => ALL_CARDS.find((x) => x.id === c.cardId)!.type === "spell");
+    const hasCost1 = [...oppHand.slice(1), ...s.players[opp].deck].some((c) => ALL_CARDS.find((x) => x.id === c.cardId)!.cost === 1);
+    const rng = rngFrom({ rng: 5 });
+    for (let i = 0; i < 20; i++) {
+      const d = determinize(s, viewer, rng);
+      const h = d.players[opp].hand;
+      expect(h[0]!.cardId).toBe(oppHand[0]!.cardId);
+      if (hasSpell) expect(ALL_CARDS.find((x) => x.id === h[1]!.cardId)!.type).toBe("spell");
+      if (hasCost1) expect(ALL_CARDS.find((x) => x.id === h[2]!.cardId)!.cost).toBe(1);
+      // 実験用の設定では相手の手札を実際のまま残す
+      expect(determinize(s, viewer, rng, { peekOppHand: true }).players[opp].hand.map((c) => c.cardId)).toEqual(oppHand.map((c) => c.cardId));
+    }
+  });
 });
 
 describe("探索 AI", () => {
@@ -75,6 +99,12 @@ describe("探索 AI", () => {
   it("相手のターンをビームサーチで読む設定（opponentSearch）でも最後まで打てる", () => {
     const agent = createSearchAgent({ opponentSearch: { beamWidth: 4, maxDepth: 8 } });
     const r = playMatch([agent, greedyAgent], { decks: [DEFAULT_DECKS[2]!.cards, DEFAULT_DECKS[4]!.cards], seed: 5, checkInvariants: true });
+    expect(r.winner).not.toBeNull();
+  }, 120_000);
+
+  it("相手の手札を引き直して読む設定（oppHandSamples）と、実験用の相手の手札を見る設定（peekOppHand）でも最後まで打てる", () => {
+    const agent = createSearchAgent({ oppHandSamples: 2, peekOppHand: true });
+    const r = playMatch([agent, greedyAgent], { decks: [DEFAULT_DECKS[3]!.cards, DEFAULT_DECKS[1]!.cards], seed: 6, checkInvariants: true });
     expect(r.winner).not.toBeNull();
   }, 120_000);
 
