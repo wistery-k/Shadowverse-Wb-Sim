@@ -8,6 +8,7 @@
 // 局面は実際のもの（相手の手札・山札の順番・乱数の状態を知っている）を使う。防いでもその後に勝てたとは限らない。
 //
 // 使い方: npm run lethal-prevent -- <組の数> [最初の試合番号] [--out <file.jsonl>] [--continue <回数>]
+// --quick を付けると、負けた側のターンの手の並びは調べない（実際の終わり方だけを調べる）
 // --continue を付けると、防げる終わり方からその回数だけ試合を続けて、逆転できたかを数える
 // 1 組で席とデッキを入れ替えた 2 試合。試合は CPU のコア数だけ並列に行う（THREADS で変えられる）。
 
@@ -84,10 +85,12 @@ function turnEnds(root: GameState, p: PlayerIndex): { ends: GameState[]; exhaust
 type LethalResult = "lethal" | "none" | "unknown";
 
 /** p がターンを終えた局面 end から相手のターンを始め、相手に倒しきる手順があるか */
-function opponentLethal(end: GameState, p: PlayerIndex): LethalResult {
+function opponentLethal(end: GameState, p: PlayerIndex, boardOnly = false): LethalResult {
   const opp: PlayerIndex = p === 0 ? 1 : 0;
-  const next = tryApply(end, { type: "endTurn" });
-  if (!next) return "unknown";
+  const after = tryApply(end, { type: "endTurn" });
+  if (!after) return "unknown";
+  // boardOnly なら、相手の手札（引いたカードを含む）を空にして、場と見えている能力だけで倒しきれるかを見る
+  const next = boardOnly && after.phase !== "ended" ? withEmptyHand(after, opp) : after;
   if (next.phase === "ended") return next.winner === opp ? "lethal" : "none";
   if (actorOf(next) !== opp) return "unknown";
   const stats = { visited: 0, memo: 0 };
@@ -96,6 +99,12 @@ function opponentLethal(end: GameState, p: PlayerIndex): LethalResult {
   if (stats.visited > LETHAL_STATES) return "unknown";
   // exactLethal はターン終了を試さないので、ターン終了時の能力（ララミア等）で倒しきる手順も調べる
   return winsByTurnEnd(next, opp);
+}
+
+function withEmptyHand(s: GameState, q: PlayerIndex): GameState {
+  const players = [...s.players] as GameState["players"];
+  players[q] = { ...s.players[q], hand: [] };
+  return { ...s, players };
 }
 
 /** q のターンの手の並び（ターン終了まで）で q が勝つものがあるか。ターン終了時の処理も含める */
@@ -148,6 +157,8 @@ export interface PreventRecord {
   hadOwnLethal: boolean;
   /** 実際の終わり方で、相手に倒しきる手順が見つかったか（確認用） */
   actual: LethalResult;
+  /** 実際の終わり方で、相手が手札を使わずに（場と見えている能力だけで）倒しきれたか */
+  boardOnly: LethalResult;
   /** 相手に倒しきる手順が無い終わり方が見つかったか（1 つ見つけたら止める。0 か 1）・判定できなかった数・時間切れで調べなかった数 */
   safe: number;
   unknown: number;
@@ -190,7 +201,7 @@ function continueGame(end: GameState, p: PlayerIndex, seed: number): PlayerIndex
   return state.winner;
 }
 
-function analyze(g: number, swap: boolean, decks: readonly { name: string; cards: readonly string[] }[], continuations: number): PreventRecord {
+function analyze(g: number, swap: boolean, decks: readonly { name: string; cards: readonly string[] }[], continuations: number, quick: boolean): PreventRecord {
   const i = g % 7, j = (g * 3 + 1 + Math.floor(g / 7)) % 7;
   const [da, db] = swap ? [decks[j]!, decks[i]!] : [decks[i]!, decks[j]!];
   const aSeat = (g + (swap ? 1 : 0)) % 2;
@@ -218,7 +229,7 @@ function analyze(g: number, swap: boolean, decks: readonly { name: string; cards
   const actualEnd = states[last]!; // 最後の行動（ターン終了のはず）の前の局面
   const lastAction = r.log![last]!;
 
-  const { ends, exhaustive } = turnEnds(root, loser);
+  const { ends, exhaustive } = quick ? { ends: [], exhaustive: false } : turnEnds(root, loser);
   const value = (s: GameState) => (s.phase === "ended" ? (s.winner === loser ? 1e9 : -1e9) : evaluateWith(resolveTurnEnd(s), loser, SEARCH_WEIGHTS));
   const scored = ends.map((s) => ({ s, v: value(s) })).sort((x, y) => y.v - x.v);
   const best = scored[0]?.v ?? 0;
@@ -246,6 +257,7 @@ function analyze(g: number, swap: boolean, decks: readonly { name: string; cards
     }
   }
   const actual = lastAction.type === "endTurn" ? opponentLethal(actualEnd, loser) : "unknown";
+  const boardOnly = lastAction.type === "endTurn" && killedOnOppTurn ? opponentLethal(actualEnd, loser, true) : "unknown";
   const comebacks = safeEnd ? Array.from({ length: continuations }, (_, c) => continueGame(safeEnd!, loser, (seed * 31 + c + 1) >>> 0) === loser) : [];
   return {
     g, swap, seed,
@@ -259,6 +271,7 @@ function analyze(g: number, swap: boolean, decks: readonly { name: string; cards
     ends: ends.length,
     hadOwnLethal,
     actual,
+    boardOnly,
     safe,
     unknown,
     unchecked,
@@ -273,10 +286,12 @@ function analyze(g: number, swap: boolean, decks: readonly { name: string; cards
 export async function main(argv: string[]): Promise<number> {
   let out: string | null = null;
   let continuations = 0;
+  let quick = false;
   const pos: string[] = [];
   for (let k = 0; k < argv.length; k++) {
     if (argv[k] === "--out") out = argv[++k] ?? null;
     else if (argv[k] === "--continue") continuations = Number(argv[++k] ?? 0);
+    else if (argv[k] === "--quick") quick = true;
     else pos.push(argv[k]!);
   }
   const games = Number(pos[0] ?? 7);
@@ -299,7 +314,7 @@ export async function main(argv: string[]): Promise<number> {
     ({ g, swap }) => {
       const prev = done.get(`${g}/${swap}`);
       if (prev) return prev;
-      const rec = analyze(g, swap, decks, continuations);
+      const rec = analyze(g, swap, decks, continuations, quick);
       if (out) appendFileSync(out, JSON.stringify(rec) + "\n");
       return rec;
     },
@@ -323,6 +338,8 @@ function summarize(rs: PreventRecord[]): void {
   console.log(`相手のターンにとどめ: ${opp.length}、うち前のターンに自分のリーサルがあった: ${own.length}`);
   console.log(`防げる終わり方があった: ${safe.length}/${judged.length} = ${pct(safe.length, judged.length)}（見つからず、判定できないか時間切れの終わり方が残った: ${allUnknown.length}）`);
   console.log(`全探索できたターン: ${judged.filter((r) => r.exhaustive).length}/${judged.length}、実際の終わり方で相手のリーサルを確認: ${judged.filter((r) => r.actual === "lethal").length}`);
+  const board = opp.filter((r) => r.boardOnly === "lethal");
+  console.log(`実際の終わり方で、相手が手札なし（場だけ）で倒しきれた: ${board.length}/${opp.length} = ${pct(board.length, opp.length)}（判定できず ${opp.filter((r) => r.boardOnly === "unknown").length}）`);
   const tried = safe.filter((r) => r.comebacks.length > 0);
   if (tried.length) {
     const rate = tried.reduce((a, r) => a + r.comebacks.filter(Boolean).length / r.comebacks.length, 0);
