@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MODEL_FEATURES, MULLIGAN_MODEL, MULLIGAN_ROLES, handFeatures, modelMulliganSwap, type MulliganModel } from "../src/ai/mulliganModel";
+import { MODEL_FEATURES, MULLIGAN_MODEL, MULLIGAN_ROLES, handFeatures, modelMulliganSwap, overrideMulliganCards, type MulliganModel } from "../src/ai/mulliganModel";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { createGame } from "../src/engine";
 
@@ -43,5 +43,16 @@ describe("手札の形のマリガン", () => {
       expect(deck, name).toBeDefined();
       for (const f of Object.keys(deck!.features)) expect(MODEL_FEATURES).toContain(f);
     }
+  });
+
+  it("カード名で「残した」の係数を置き換えられる（他のカード・他のデッキはそのまま）", () => {
+    const m = overrideMulliganCards(MULLIGAN_MODEL, { 邪教の器: -0.5 });
+    const bishop = m["アミュレット疾走ビショップ"]!;
+    const orig = MULLIGAN_MODEL["アミュレット疾走ビショップ"]!;
+    const changed = Object.keys(bishop.cards).filter((id) => bishop.cards[id] !== orig.cards[id]);
+    expect(changed.length).toBe(1);
+    expect(bishop.cards[changed[0]!]).toBe(-0.5);
+    expect(m["アマリアロイヤル"]).toEqual(MULLIGAN_MODEL["アマリアロイヤル"]);
+    expect(() => overrideMulliganCards(MULLIGAN_MODEL, { 存在しないカード: 1 })).toThrow();
   });
 });
