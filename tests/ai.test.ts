@@ -427,3 +427,43 @@ describe("評価関数の重み", () => {
     expect(evaluateWith(s, 0, w)).toBeCloseTo(evaluateWith(s, 0, DEFAULT_WEIGHTS));
   });
 });
+
+import { reanimateWorthwhile } from "../src/ai/search";
+
+describe("reanimateGuard", () => {
+  it("ケルベロスの超進化は、墓場にコスト 1 のフォロワーがあるときだけ打ってよい", () => {
+    const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 3 });
+    const p = s.active;
+    const id = (name: string) => ALL_CARDS.find((c) => c.name === name)!.id;
+    const kerberos = newBoardCard(s, id("奔放なる獄炎・ケルベロス"));
+    const olivier = newBoardCard(s, id("勇壮の堕天使・オリヴィエ"));
+    s.players[p].board.push(kerberos, olivier);
+    s.players[p].graveyardFollowers = [id("スケルトン")];
+    const sevo = (iid: number) => ({ type: "superEvolve", iid }) as const;
+    expect(reanimateWorthwhile(s, sevo(kerberos.iid), p)).toBe(false);
+    expect(reanimateWorthwhile(s, sevo(olivier.iid), p)).toBe(true);
+    s.players[p].graveyardFollowers = [id("スケルトン"), id("番犬の右腕・ミミ")];
+    expect(reanimateWorthwhile(s, sevo(kerberos.iid), p)).toBe(true);
+  });
+});
+
+
+describe("lastWords の評価", () => {
+  it("ミミは相手のリーダーへの 2 点、ココは減っている分までの回復を数える。相手の場のものは引く", () => {
+    const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 3 });
+    const p = s.active;
+    const q = p === 0 ? 1 : 0;
+    const id = (name: string) => ALL_CARDS.find((c) => c.name === name)!.id;
+    const w0 = { ...SEARCH_WEIGHTS, lastWords: 0 };
+    const w1 = { ...SEARCH_WEIGHTS, lastWords: 1 };
+    const diff = () => evaluateWith(s, p, w1) - evaluateWith(s, p, w0);
+    s.players[p].board.push(newBoardCard(s, id("番犬の右腕・ミミ")));
+    expect(diff()).toBeCloseTo(2 * SEARCH_WEIGHTS.oppHp);
+    s.players[p].board.push(newBoardCard(s, id("番犬の左腕・ココ")));
+    expect(diff()).toBeCloseTo(2 * SEARCH_WEIGHTS.oppHp); // 体力が減っていないので回復は 0
+    s.players[p].leaderHp = 19;
+    expect(diff()).toBeCloseTo(2 * SEARCH_WEIGHTS.oppHp + 1 * SEARCH_WEIGHTS.myHp);
+    s.players[q].board.push(newBoardCard(s, id("番犬の右腕・ミミ")));
+    expect(diff()).toBeCloseTo(2 * SEARCH_WEIGHTS.oppHp + 1 * SEARCH_WEIGHTS.myHp - 2 * SEARCH_WEIGHTS.myHp);
+  });
+});

@@ -79,6 +79,17 @@ export interface EvalWeights {
    */
   sevoReserve: number;
   /**
+   * 手札に奔放なる獄炎・ケルベロスがあり SEP が 1 以上残っているとき、またはこのターンに SEP でケルベロスを超進化させたときに足す点。
+   * ケルベロスの超進化（ミミ・ココのリアニメイト 2 回）はオリヴィエ等より価値が高いので、ほかのカードに先に SEP を使わないようにする（ユーザーの見立て）。0 なら見ない
+   */
+  kerberosReserve: number;
+  /**
+   * 場のフォロワーのラストワードの「相手のリーダーに N ダメージ」「自分のリーダーを N 回復」（番犬の右腕・ミミ、番犬の左腕・ココ、
+   * 人形に付与されたもの等）を、いずれ得るものとして数える倍率。ダメージは N × oppHp、回復は減っている分までの N × myHp にこの倍率を掛ける。
+   * 相手の場のものは逆向きに引く。0 なら見ない
+   */
+  lastWords: number;
+  /**
    * 相手の体力が lethalRange 以下のとき、手札の「アミュレットをアクトすると疾走を得るフォロワー」（セイクリッドグリフォン）を、
    * 次のターンに出せて（コスト ≤ 次のターンの PP）、自分の場にアクトできるアミュレットがあれば、攻撃力 × この値を足す。
    * 次のターンの疾走の打点（リノセウスの potential と同じ考え）。0 なら見ない
@@ -142,6 +153,8 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   kuonReserve: 0,
   evoReserve: 0,
   sevoReserve: 0,
+  kerberosReserve: 0,
+  lastWords: 0,
   handStorm: 0,
   boostCard: 0,
   boost: 0,
@@ -174,6 +187,7 @@ const FUSION_HOLD: Readonly<Record<string, number>> = Object.fromEntries(
 const FUSION_SET: ReadonlySet<string> = new Set(["デストロイアーティファクトα", "デストロイアーティファクトβ", "デストロイアーティファクトγ"].map(id));
 
 const KUON = id("五行の果て・クオン");
+const KERBEROS = id("奔放なる獄炎・ケルベロス");
 const JEANNE = id("純白の聖女・ジャンヌ");
 const JEANNE_COST = 8;
 
@@ -219,6 +233,7 @@ const HAS_ACT: ReadonlySet<string> = new Set(
  * クレストは 1.5 だとアリアのクレスト（妖精に疾走）を安く見て、出すべき局面でアリアを出さなかったため 3（ユーザー判断。docs/ai-notes.md）
  * fusionSet（手札の α・β・γ の種類 1 つにつき）は 0/1.2/2.4/3.6/4.8 で比べて 3.6（AFネメシスの勝率 38.7% → 46.8%。docs/ai-notes.md）
  * kuonReserve は 0/8/12/16 で比べて 8（スペルウィッチの勝率 44.4% → 47.1%、1200 試合。docs/ai-notes.md）
+ * lastWords 1 はユーザー判断で採用（ミミ・ココのラストワードはほぼ確実に回収される。勝率は 1200 試合で誤差の範囲。docs/ai-notes.md）
  * sevoReserve 6 はアミュレット疾走ビショップの勝率 53.3% → 57.0%（2400 試合）、全デッキの compare で 52.4%（1200 試合）（docs/ai-notes.md）
  * evoReserve 3 は勝率を変えない（今の AI と 50〜51%）が、進化時能力を持たないフォロワーへの進化が 30% → 20% に減るので採用（ユーザー判断。docs/ai-notes.md）
  * boostCard 1・boost 0.2（スペルブーストで育つカード）はスペルウィッチの勝率 44.3% → 52.1%（1200 試合。docs/ai-notes.md）
@@ -226,7 +241,7 @@ const HAS_ACT: ReadonlySet<string> = new Set(
  * doomed 0.3（相手のターン終了時に自壊するフォロワー）は勝率を変えない（3000 試合で 49.6%）が、改良型・操り人形で攻撃せずに終えたり
  * アンの大英霊を進化させたりするのが直るので採用（ユーザー判断。docs/ai-notes.md）
  */
-export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, crest: 3, fusionSet: 3.6, kuonReserve: 8, evoReserve: 3, sevoReserve: 6, boostCard: 1, boost: 0.2, countdownDecay: 0.8, doomed: 0.3, hold: FUSION_HOLD };
+export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, crest: 3, fusionSet: 3.6, kuonReserve: 8, evoReserve: 3, sevoReserve: 6, lastWords: 1, boostCard: 1, boost: 0.2, countdownDecay: 0.8, doomed: 0.3, hold: FUSION_HOLD };
 
 const KEYWORD_VALUE: Partial<Record<string, number>> = {
   ward: 1,
@@ -285,6 +300,44 @@ const DOOMED: ReadonlySet<string> = new Set(
 /** 相手のターン終了時に自壊するフォロワーか（改境の再動で付与されたものも含む） */
 export const isDoomed = (f: FollowerOnBoard): boolean => DOOMED.has(f.cardId) || f.granted.some(isSelfDestroyAtOpponentTurnEnd);
 
+/** ラストワードで得るもの（相手のリーダーへのダメージ・自分のリーダーの回復。定数のものだけ） */
+function lastWordsPayoff(abilities: readonly Ability[]): { damage: number; heal: number } {
+  let damage = 0;
+  let heal = 0;
+  for (const a of abilities) {
+    if (a.trigger.on !== "lastWords") continue;
+    for (const e of a.effects) {
+      if (e.op === "damage" && typeof e.amount === "number" && e.target.kind === "leader" && e.target.side === "opponent") damage += e.amount;
+      else if (e.op === "heal" && typeof e.amount === "number" && e.target.kind === "leader" && e.target.side === "self") heal += e.amount;
+    }
+  }
+  return { damage, heal };
+}
+
+const LAST_WORDS_PAYOFF: ReadonlyMap<string, { damage: number; heal: number }> = new Map(
+  [...CARDS_BY_ID.values()].flatMap((c): [string, { damage: number; heal: number }][] => {
+    if (c.type !== "follower") return [];
+    const p = lastWordsPayoff(abilitiesOf(c.id).abilities);
+    return p.damage > 0 || p.heal > 0 ? [[c.id, p]] : [];
+  }),
+);
+
+/** プレイヤー（owner）の場のフォロワーのラストワードで、相手のリーダーに与えるダメージと自分のリーダーの回復（相手の体力・減っている分まで） */
+function lastWordsAmount(state: GameState, owner: PlayerIndex): { damage: number; heal: number } {
+  const me = state.players[owner];
+  const opp = state.players[owner === 0 ? 1 : 0];
+  let damage = 0;
+  let heal = 0;
+  for (const c of me.board) {
+    if (c.kind !== "follower") continue;
+    const base = LAST_WORDS_PAYOFF.get(c.cardId);
+    const extra = c.granted.length > 0 ? lastWordsPayoff(c.granted) : null;
+    damage += (base?.damage ?? 0) + (extra?.damage ?? 0);
+    heal += (base?.heal ?? 0) + (extra?.heal ?? 0);
+  }
+  return { damage: Math.min(damage, Math.max(0, opp.leaderHp)), heal: Math.min(heal, Math.max(0, me.leaderMaxHp - me.leaderHp)) };
+}
+
 function followerValue(f: FollowerOnBoard, w: EvalWeights): number {
   let v = f.attack * w.attack + f.tempAttack * w.tempAttack + f.defense * w.defense + w.followerBase;
   for (const k of f.keywords) v += (KEYWORD_VALUE[k] ?? 0) * w.keywords;
@@ -333,6 +386,11 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
   let oppBoard = 0;
   for (const c of opp.board) oppBoard += discountedBoardValue(c, w);
   v -= oppBoard * w.oppBoard;
+  if (w.lastWords !== 0) {
+    const mine = lastWordsAmount(state, p);
+    const theirs = lastWordsAmount(state, p === 0 ? 1 : 0);
+    v += (mine.damage * w.oppHp + mine.heal * w.myHp - theirs.damage * w.myHp - theirs.heal * w.oppHp) * w.lastWords;
+  }
   v += me.hand.length * w.myHand - opp.hand.length * w.oppHand;
   for (const h of me.hand) v += w.hold[h.cardId] ?? 0;
   if (w.fusionSet !== 0) {
@@ -352,6 +410,10 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
     for (const h of me.hand) if (SUPER_EVOLVE_ABILITY.has(h.cardId)) n++;
     const used = me.sepEvolvedThisTurn !== null && SUPER_EVOLVE_ABILITY.has(me.sepEvolvedThisTurn) ? 1 : 0;
     v += (Math.min(n, me.sep) + used) * w.sevoReserve;
+  }
+  if (w.kerberosReserve !== 0) {
+    if (me.sep > 0 && me.hand.some((h) => h.cardId === KERBEROS)) v += w.kerberosReserve;
+    if (me.sepEvolvedThisTurn === KERBEROS) v += w.kerberosReserve;
   }
   if (w.boostCard !== 0 || w.boost !== 0) {
     for (const h of me.hand) {
