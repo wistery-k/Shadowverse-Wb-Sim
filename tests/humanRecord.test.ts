@@ -36,6 +36,16 @@ describe("人間との比較の記録", () => {
     expect(new Set(seeds).size).toBe(SUBJECT_IDS.length);
   });
 
+  it("疾走ドラゴン・ミッドレンジナイトメア・アマリアロイヤルも他の 6 デッキ（ランプドラゴンを除く）と並べる", () => {
+    for (const subject of ["dragon", "nightmare", "royal"] as const) {
+      const opp = opponentsOf(subject);
+      expect(opp).toHaveLength(6);
+      expect(opp.map((d) => d.name)).not.toContain(SUBJECTS[subject].deck);
+      expect(opp.map((d) => d.name)).not.toContain("ランプドラゴン");
+      expect(compareMatch(subject, opp[0]!.name, 0, 0).decks[0]).toHaveLength(40);
+    }
+  });
+
   it("勝敗・ターンごとの選択・行動の列を記録し、JSON Lines から読み戻せる", () => {
     for (const subject of SUBJECT_IDS)
       for (const seat of [0, 1] as const) {
