@@ -29,8 +29,8 @@ import { parallelMap } from "./parallel";
 
 const ARIA = "自然の妖精姫・アリア";
 const JEANNE = "純白の聖女・ジャンヌ";
-/** フォロワーを出すカウントダウンのアミュレットから出るフォロワー */
-const AMULET_TOKENS = ["ホーリーフレイムタイガー", "壮麗なる隼", "ホーリーファルコン"];
+/** フォロワーを出すカウントダウンのアミュレットから出るフォロワー（ホーリーファルコンはフェザーレインでも出るので数えない） */
+const AMULET_TOKENS = ["ホーリーフレイムタイガー", "壮麗なる隼"];
 
 export async function main(argv: string[]): Promise<number> {
   let games = 50;
