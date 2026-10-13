@@ -20,7 +20,7 @@ import { convergingAttacks, settleConvergingTrades } from "./convergingTrade";
 import { determinize } from "./determinize";
 import { DEFAULT_WEIGHTS, SEARCH_WEIGHTS, evaluateWith, type EvalWeights } from "./evaluate";
 import { createGreedyAgent, greedyAgent } from "./greedy";
-import { KeySet, turnOrderHash, turnOrderKey, withoutIds } from "./keySet";
+import { EqSet, turnOrderEqual, turnOrderHash, withoutIds } from "./keySet";
 import { findLethal, searchLethal, visibleKey } from "./lethal";
 import { MULLIGAN_WEIGHTS, weightedMulliganSwap } from "./mulligan";
 import { MULLIGAN_MODEL, modelMulliganSwap, overrideMulliganCards } from "./mulliganModel";
@@ -297,7 +297,7 @@ function distinctPlays(state: GameState, actions: readonly Action[]): Action[] {
  * perFirst が正なら、最初の手ごとに perFirst 個までは width を超えても残す
  */
 function uniqueStates(children: Node[], width: number, perFirst = 0): Node[] {
-  const seen = new KeySet();
+  const seen = new EqSet(turnOrderEqual);
   const out: Node[] = [];
   const count = new Map<string, number>();
   for (const c of children) {
@@ -307,7 +307,7 @@ function uniqueStates(children: Node[], width: number, perFirst = 0): Node[] {
       if (perFirst === 0) break;
       if (n >= perFirst) continue;
     }
-    if (!seen.addLazy(() => turnOrderKey(c.state), turnOrderHash(c.state))) continue;
+    if (!seen.add(c.state, turnOrderHash(c.state))) continue;
     out.push(c);
     count.set(k, n + 1);
   }
@@ -365,11 +365,11 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
       }
       for (const next of advance(root, a, null)) stack.push({ ...next, first: a, value: 0 });
     }
-    const seen = new KeySet();
+    const seen = new EqSet(turnOrderEqual);
     let count = 0;
     while (stack.length > 0) {
       const node = stack.pop()!;
-      if (!seen.addLazy(() => turnOrderKey(node.state), turnOrderHash(node.state))) continue;
+      if (!seen.add(node.state, turnOrderHash(node.state))) continue;
       if (++count > maxStates) return null;
       node.value = score(node.state);
       out.push(node);
@@ -467,12 +467,12 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   const candidatesOf = (best: Node): Node[] => {
     if (!opts.reusePlan || opts.planCandidates <= 1) return [best];
     const k = keyOf(best.first);
-    const seen = new KeySet();
-    seen.add(turnOrderKey(best.state), turnOrderHash(best.state));
+    const seen = new EqSet(turnOrderEqual);
+    seen.add(best.state, turnOrderHash(best.state));
     const out = [best];
     for (const t of [...terminals].filter((x) => x !== best && keyOf(x.first) === k).sort((x, y) => y.value - x.value)) {
       if (out.length >= opts.planCandidates) break;
-      if (seen.addLazy(() => turnOrderKey(t.state), turnOrderHash(t.state))) out.push(t);
+      if (seen.add(t.state, turnOrderHash(t.state))) out.push(t);
     }
     return out;
   };

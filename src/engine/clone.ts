@@ -17,29 +17,20 @@ const cloneCtx = (c: EffectContext): EffectContext => {
   return { ...c, slots, vars: { ...c.vars } };
 };
 
-const cloneHand = (h: HandCard): HandCard => ({ ...h, keywords: [...h.keywords], fusedKinds: [...h.fusedKinds] });
+// 手札・場・クレストのカードの配列（keywords 等）と記録（usedOncePerTurn 等）は、エンジンが書き換えずに作り直すので共有する
+const cloneHand = (h: HandCard): HandCard => ({ ...h });
 
-const cloneBoard = (c: OnBoard): OnBoard =>
-  c.kind === "follower"
-    ? {
-        ...c,
-        keywords: [...c.keywords],
-        tempKeywords: [...c.tempKeywords],
-        granted: [...c.granted],
-        usedOncePerTurn: { ...c.usedOncePerTurn },
-      }
-    : { ...c, keywords: [...c.keywords], tempKeywords: [...c.tempKeywords], granted: [...c.granted] };
+const cloneBoard = (c: OnBoard): OnBoard => ({ ...c });
 
 const clonePlayer = (p: PlayerState): PlayerState => ({
   ...p,
   deck: [...p.deck], // CardRef は書き換えない
   hand: p.hand.map(cloneHand),
   board: p.board.map(cloneBoard),
-  crests: p.crests.map((c) => ({ ...c, usedOncePerTurn: { ...c.usedOncePerTurn } })),
+  crests: p.crests.map((c) => ({ ...c })),
   graveyardFollowers: [...p.graveyardFollowers],
   destroyedAmulets: [...p.destroyedAmulets],
   destroyedThisTurn: [...p.destroyedThisTurn], // 記録は書き換えない
-  leaderOncePerTurn: { ...p.leaderOncePerTurn },
 });
 
 const clonePending = (p: PendingChoice | null): PendingChoice | null =>

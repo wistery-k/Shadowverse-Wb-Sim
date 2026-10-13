@@ -14,7 +14,7 @@ import {
   boardAbilities,
   canAddToBoard,
   checkLeaders,
-  crestsAndBoard,
+  forEachCrestAndBoard,
   drawCards,
   findBoard,
   findCrest,
@@ -43,6 +43,7 @@ import type {
   InternalEffect,
   OnBoard,
   PlayerIndex,
+  StaticKeyword,
 } from "./types";
 
 // ---- 対象 ----
@@ -225,11 +226,11 @@ function queue(state: GameState, ability: Ability, ctx: EffectContext): void {
   state.queue.push({ ability, ctx });
 }
 
-/** 「自分のターンごとに1回」の確認と記録 */
-function useOncePerTurn(state: GameState, owner: PlayerIndex, used: Record<string, number>, key: string): boolean {
+/** 「自分のターンごとに1回」の確認と記録（記録は書き換えずに作り直す。cloneState が複製せずに共有するため） */
+function useOncePerTurn(state: GameState, owner: PlayerIndex, holder: { usedOncePerTurn: Record<string, number> }, key: string): boolean {
   const turnId = state.players[owner].turnCount;
-  if (used[key] === turnId) return false;
-  used[key] = turnId;
+  if (holder.usedOncePerTurn[key] === turnId) return false;
+  holder.usedOncePerTurn = { ...holder.usedOncePerTurn, [key]: turnId };
   return true;
 }
 
@@ -242,20 +243,20 @@ function fireSide(
   p: PlayerIndex,
   match: (trigger: Trigger, sourceIid: number) => Partial<EffectContext> | null,
 ): void {
-  for (const entry of crestsAndBoard(state, p)) {
+  forEachCrestAndBoard(state, p, (entry) => {
     const sourceIid = entry.kind === "crest" ? entry.crest.iid : entry.card.iid;
     const sourceCardId = entry.kind === "crest" ? entry.crest.crestId : entry.card.cardId;
     entry.abilities.forEach((ability, i) => {
       const extra = match(ability.trigger, sourceIid);
       if (!extra) return;
       if (ability.oncePerOwnTurn) {
-        const used = entry.kind === "crest" ? entry.crest.usedOncePerTurn : entry.card.kind === "follower" ? entry.card.usedOncePerTurn : null;
-        if (used && !useOncePerTurn(state, p, used, String(i))) return;
+        const holder = entry.kind === "crest" ? entry.crest : entry.card.kind === "follower" ? entry.card : null;
+        if (holder && !useOncePerTurn(state, p, holder, String(i))) return;
       }
       const card = entry.kind === "board" && entry.card.kind === "follower" ? entry.card : null;
       queue(state, ability, newContext(p, sourceIid, sourceCardId, { sourceX: card?.x ?? null, sourceAttack: card ? attackOf(card) : 0, ...extra }));
     });
-  }
+  });
 }
 
 /** 手札のカードの能力を誘発させる */
@@ -700,14 +701,16 @@ function exec(state: GameState, frame: Frame, eff: Effect | InternalEffect): boo
       for (const id of targets(eff.target)) {
         const b = findBoard(state, id)?.card;
         if (b) {
-          const list = eff.duration === "endOfTurn" ? b.tempKeywords : b.keywords;
-          for (const k of eff.keywords ?? []) if (!list.includes(k)) list.push(k);
+          // カードの配列は書き換えずに作り直す（cloneState が複製せずに共有するため）
+          const add = (list: StaticKeyword[]) => [...list, ...(eff.keywords ?? []).filter((k, i, all) => !list.includes(k) && all.indexOf(k) === i)];
+          if (eff.duration === "endOfTurn") b.tempKeywords = add(b.tempKeywords);
+          else b.keywords = add(b.keywords);
           if (b.kind === "follower" && eff.maxAttacks !== undefined) b.maxAttacks = Math.max(b.maxAttacks, eff.maxAttacks);
-          if (eff.abilities) b.granted.push(...eff.abilities);
+          if (eff.abilities) b.granted = [...b.granted, ...eff.abilities];
           continue;
         }
         const h = findHand(state, id)?.card;
-        if (h) for (const k of eff.keywords ?? []) if (!h.keywords.includes(k)) h.keywords.push(k);
+        if (h) h.keywords = [...h.keywords, ...(eff.keywords ?? []).filter((k, i, all) => !h.keywords.includes(k) && all.indexOf(k) === i)];
       }
       return next();
     case "loseKeyword":

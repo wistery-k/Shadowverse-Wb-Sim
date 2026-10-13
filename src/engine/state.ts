@@ -264,3 +264,31 @@ export function crestsAndBoard(
     .map((card) => ({ kind: "board" as const, card, abilities: boardAbilities(card) }));
   return [...crests, ...board];
 }
+
+/** order の昇順に並んでいるか */
+function inOrder(cards: readonly { order: number }[]): boolean {
+  for (let i = 1; i < cards.length; i++) if (cards[i - 1]!.order > cards[i]!.order) return false;
+  return true;
+}
+
+/**
+ * crestsAndBoard と同じ順（クレスト（古い順）→場（古い順））で、能力を持つものだけに fn を呼ぶ。
+ * 誘発のたびに呼ぶので、並べ替え済みならコピーを作らない
+ */
+export function forEachCrestAndBoard(
+  state: GameState,
+  p: PlayerIndex,
+  fn: (entry: { kind: "crest"; crest: CrestInstance; abilities: Ability[] } | { kind: "board"; card: OnBoard; abilities: Ability[] }) => void,
+): void {
+  const pl = state.players[p];
+  const crests = inOrder(pl.crests) ? pl.crests.slice() : [...pl.crests].sort((a, b) => a.order - b.order);
+  const board = inOrder(pl.board) ? pl.board.slice() : [...pl.board].sort((a, b) => a.order - b.order);
+  for (const crest of crests) {
+    const abilities = crestAbilitiesOf(crest.crestId);
+    if (abilities.length > 0) fn({ kind: "crest", crest, abilities });
+  }
+  for (const card of board) {
+    const abilities = boardAbilities(card);
+    if (abilities.length > 0) fn({ kind: "board", card, abilities });
+  }
+}
