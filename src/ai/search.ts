@@ -324,8 +324,10 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   const settle = (state: GameState) => (opts.settleTrades ? settleConvergingTrades(state, p) : state);
   const extra = opts.extraEval;
   const evalState = extra ? (state: GameState) => evaluateWith(state, p, w) + extra(state, p) : (state: GameState) => evaluateWith(state, p, w);
-  const endScore = (state: GameState) => evalState(resolveTurnEnd(settle(state)));
-  const score = opts.scoreTurnEnd === "all" ? endScore : (state: GameState) => evalState(settle(state));
+  /** ターンを終えるときに残る PP の罰（ppLeft） */
+  const leftover = (state: GameState) => (w.ppLeft !== 0 && state.phase === "main" && state.active === p ? w.ppLeft * state.players[p].pp : 0);
+  const endScore = (state: GameState) => evalState(resolveTurnEnd(settle(state))) - leftover(state);
+  const score = opts.scoreTurnEnd === "all" ? endScore : (state: GameState) => evalState(settle(state)) - leftover(state);
   const allowed = (state: GameState, a: Action) => !opts.allow || a.type === "endTurn" || opts.allow(state, a, p);
   const expand = (state: GameState) => (opts.sameHandOnce ? distinctPlays(state, legalActions(state)) : legalActions(state));
   /** 手 a を打った局面（と、そこまでの並び）。chain なら、続く自分の選択とエクストラPP の後の手まで進めた局面すべて */
@@ -488,12 +490,12 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
       };
       let value: number;
       if (node.state.phase === "ended") value = evalState(node.state);
-      else if (opts.oppHandSamples <= 1) value = readOnce(settle(node.state));
+      else if (opts.oppHandSamples <= 1) value = readOnce(settle(node.state)) - leftover(node.state);
       else {
         const settled = settle(node.state);
         let sum = 0;
         for (let i = 0; i < opts.oppHandSamples; i++) sum += readOnce(determinize(settled, p, rng, { peekOppHand: opts.peekOppHand }));
-        value = sum / opts.oppHandSamples;
+        value = sum / opts.oppHandSamples - leftover(node.state);
       }
       const k = keyOf(node.first);
       const cur = result.get(k);
