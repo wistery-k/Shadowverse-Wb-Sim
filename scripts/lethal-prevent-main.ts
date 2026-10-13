@@ -343,7 +343,7 @@ function summarize(rs: PreventRecord[]): void {
   const tried = safe.filter((r) => r.comebacks.length > 0);
   if (tried.length) {
     const rate = tried.reduce((a, r) => a + r.comebacks.filter(Boolean).length / r.comebacks.length, 0);
-    console.log(`防いで続けた ${tried.length} 試合の、負けた側の勝ちの期待値: ${rate.toFixed(1)} 試合（${pct(rate, tried.length)}）。全試合の ${pct(rate, n)}`);
+    console.log(`防いで続けた ${tried.length} 試合の、負けた側の勝ちの期待値: ${rate.toFixed(1)} 試合（${pct(rate, tried.length)}）。負け ${n} の ${pct(rate, n)}（負けが半分の AI なら勝率 +${((rate / n) * 50).toFixed(1)} ポイント）`);
   }
   const gaps = safe.map((r) => r.safeEvalGap!).sort((a, b) => a - b);
   if (gaps.length) console.log(`防げる最善の終わり方の評価の差（最善との差）: 中央値 ${gaps[gaps.length >> 1]!.toFixed(1)}、最初の 1/4 ${gaps[gaps.length >> 2]!.toFixed(1)}、3/4 ${gaps[(gaps.length * 3) >> 2]!.toFixed(1)}`);
