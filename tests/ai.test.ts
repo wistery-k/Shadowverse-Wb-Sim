@@ -22,7 +22,7 @@ describe("AI", () => {
 });
 
 import { determinize } from "../src/ai/determinize";
-import { searchAgent, simulateOpponentTurn } from "../src/ai/search";
+import { createSearchAgent, searchAgent, simulateOpponentTurn } from "../src/ai/search";
 import { rhinoAgent } from "../src/ai/rhino";
 import { applyAction, createGame, legalActions, newBoardCard, newHandCard, type GameState } from "../src/engine";
 import { ALL_CARDS } from "../src/cards";
@@ -71,6 +71,12 @@ describe("探索 AI", () => {
     }
     expect(wins).toBeGreaterThanOrEqual(5);
   }, 60_000);
+
+  it("相手のターンをビームサーチで読む設定（opponentSearch）でも最後まで打てる", () => {
+    const agent = createSearchAgent({ opponentSearch: { beamWidth: 4, maxDepth: 8 } });
+    const r = playMatch([agent, greedyAgent], { decks: [DEFAULT_DECKS[2]!.cards, DEFAULT_DECKS[4]!.cards], seed: 5, checkInvariants: true });
+    expect(r.winner).not.toBeNull();
+  }, 120_000);
 
   it("能力の選択待ちの途中の局面からも、選択を済ませて相手のターンまで読む", () => {
     // 自分の選択待ちが残った局面を対戦の中から探す
