@@ -1,4 +1,4 @@
-// 「人間との比較」: npm run rhino-compare / af-compare / spellwitch-compare と同じシードの試合を、人間が比べるデッキ（リノセウスエルフ・AFネメシス・スペルウィッチ）で打つ画面。
+// 「人間との比較」: npm run rhino-compare / af-compare / spellwitch-compare と同じシードの試合を、人間が比べるデッキ（リノセウスエルフ・AFネメシス・スペルウィッチ・アミュレット疾走ビショップ）で打つ画面。
 // 打った試合の記録（勝敗・各ターンの選択・行動の列）はデッキごとにブラウザに保存し、JSON Lines で書き出せる。
 
 import { useMemo, useState } from "preact/hooks";

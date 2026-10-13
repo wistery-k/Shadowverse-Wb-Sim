@@ -1,12 +1,12 @@
 // 人間と AI を同じ試合で比べるときの試合の決め方（npm run rhino-compare / af-compare / spellwitch-compare と web の「人間との比較」で共通に使う）
 //
-// 比べるデッキ（リノセウスエルフ・AFネメシス・スペルウィッチ）vs 他の 6 デッキ（ランプドラゴンは除く）を、試合番号 g と、比べるデッキの席（0/1）ごとに
+// 比べるデッキ（リノセウスエルフ・AFネメシス・スペルウィッチ・アミュレット疾走ビショップ）vs 他の 6 デッキ（ランプドラゴンは除く）を、試合番号 g と、比べるデッキの席（0/1）ごとに
 // 決まったシードで打つ。同じ（比べるデッキ・相手デッキ・g・席）なら、AI でも人間でも同じ初期局面（先攻・山札の順番・初手）から始まる。
 
 import { DEFAULT_DECKS, type DefaultDeck } from "../cards/defaultDecks";
 import type { PlayerIndex } from "../engine";
 
-export type SubjectId = "rhino" | "af" | "spellwitch";
+export type SubjectId = "rhino" | "af" | "spellwitch" | "bishop";
 
 export interface CompareSubject {
   id: SubjectId;
@@ -24,6 +24,7 @@ export const SUBJECTS: Readonly<Record<SubjectId, CompareSubject>> = {
   rhino: { id: "rhino", deck: "リノセウスエルフ", agent: "rhino", seedBase: 900000, storageKey: "svwb-sim:rhino-human:v1" },
   af: { id: "af", deck: "AFネメシス", agent: "search", seedBase: 800000, storageKey: "svwb-sim:af-human:v1" },
   spellwitch: { id: "spellwitch", deck: "スペルウィッチ", agent: "search", seedBase: 700000, storageKey: "svwb-sim:spellwitch-human:v1" },
+  bishop: { id: "bishop", deck: "アミュレット疾走ビショップ", agent: "search", seedBase: 600000, storageKey: "svwb-sim:bishop-human:v1" },
 };
 export const SUBJECT_IDS = Object.keys(SUBJECTS) as SubjectId[];
 
