@@ -139,8 +139,9 @@ export class KeySet {
  * boosts は表示用でルールの判定には使わない（スペルブーストの効果はコスト等の変化として別に持つ）ため、
  * 前のターンから手札にあったフェアリーと、このターンに加わったフェアリーを同じにする
  */
-export function withoutIds<T extends { iid: number }>(c: T): Omit<T, "iid" | "order" | "boosts"> {
-  const { iid: _iid, order: _order, boosts: _boosts, ...rest } = c as T & { order?: number; boosts?: number };
+export function withoutIds<T extends { iid: number }>(c: T): Omit<T, "iid" | "order" | "boosts" | "revealed" | "drawnBy"> {
+  // revealed・drawnBy（相手から見て分かっていること。determinization 用）もルールに影響しないので除く
+  const { iid: _iid, order: _order, boosts: _boosts, revealed: _revealed, drawnBy: _drawnBy, ...rest } = c as T & { order?: number; boosts?: number; revealed?: boolean; drawnBy?: unknown };
   return rest;
 }
 
@@ -148,7 +149,7 @@ export function withoutIds<T extends { iid: number }>(c: T): Omit<T, "iid" | "or
 function cardSortHash(c: object): number {
   let h = 0x811c9dc5;
   for (const [k, v] of Object.entries(c)) {
-    if (k === "iid" || k === "order" || k === "boosts") continue;
+    if (k === "iid" || k === "order" || k === "boosts" || k === "revealed" || k === "drawnBy") continue;
     if (typeof v === "number") h = mix(h, v);
     else if (typeof v === "string") h = mix(h, hashString(v));
     else if (typeof v === "boolean") h = mix(h, v ? 1 : 2);

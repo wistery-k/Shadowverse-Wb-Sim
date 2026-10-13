@@ -137,6 +137,14 @@ export interface SearchOptions {
    * 貪欲法の読みは、消える人形を倒しに行く・タダで消える 1/1 を出さない等、相手の手を読み違える（docs/ai-notes.md）
    */
   opponentSearch: { beamWidth: number; maxDepth: number } | null;
+  /**
+   * 候補を相手のターンまで読むとき、相手の手札・山札を引き直した局面をこの数だけ作って相手のターンを打ち、評価を平均する
+   * （1 なら引き直さず、その determinization のまま 1 回だけ読む）。
+   * 相手の手札にある 1 枚で大きく動くカード（全体除去・疾走など）を、持っている確率に見合った重さで読みに入れるため
+   */
+  oppHandSamples: number;
+  /** 実験用: 相手の手札を実際のまま読む（見えない情報を使う。手札読みの改善の上限を測るためだけに使い、対戦には使わない） */
+  peekOppHand: boolean;
 }
 
 /** 全探索（SearchOptions.exhaustive）の集計（実験用。比較スクリプトが試合ごとに 0 に戻して読む） */
@@ -157,7 +165,7 @@ export const exhaustiveCounts = {
   byTurn: {} as Record<number, [number, number, number, number]>,
 };
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, mulliganCards: null, settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: null };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, mulliganCards: null, settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: null, oppHandSamples: 1, peekOppHand: false };
 
 /** 打った手の並び（後ろから前へのリスト）。各手を打った後の局面も持つ */
 interface Step {
@@ -472,14 +480,21 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   const result = new Map<string, Plan>();
   for (const best of ranked) {
     for (const node of candidatesOf(best)) {
-      const after =
-        node.state.phase === "ended"
-          ? node.state
-          : opts.opponentSearch
-            ? simulateOpponentTurnBySearch(settle(node.state), p, rng, opts, w)
-            : simulateOpponentTurn(settle(node.state), p, rng, w.doomed);
-      let value = evalState(after);
-      if (opts.nextLethal !== 0 && after.phase !== "ended" && after.players[p === 0 ? 1 : 0].leaderHp <= w.lethalRange && hasNextLethal(after, p)) value += opts.nextLethal;
+      const readOnce = (start: GameState): number => {
+        const after = opts.opponentSearch ? simulateOpponentTurnBySearch(start, p, rng, opts, w) : simulateOpponentTurn(start, p, rng, w.doomed);
+        let v = evalState(after);
+        if (opts.nextLethal !== 0 && after.phase !== "ended" && after.players[p === 0 ? 1 : 0].leaderHp <= w.lethalRange && hasNextLethal(after, p)) v += opts.nextLethal;
+        return v;
+      };
+      let value: number;
+      if (node.state.phase === "ended") value = evalState(node.state);
+      else if (opts.oppHandSamples <= 1) value = readOnce(settle(node.state));
+      else {
+        const settled = settle(node.state);
+        let sum = 0;
+        for (let i = 0; i < opts.oppHandSamples; i++) sum += readOnce(determinize(settled, p, rng, { peekOppHand: opts.peekOppHand }));
+        value = sum / opts.oppHandSamples;
+      }
       const k = keyOf(node.first);
       const cur = result.get(k);
       if (!cur || value > cur.value) result.set(k, { action: node.first, value, steps: stepsOf(node.path) });
@@ -533,7 +548,7 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
       const w = opts.weights === "byClass" ? weightsFor(real, p) : opts.weights;
       const totals = new Map<string, { action: Action; sum: number; count: number; plan: Plan }>();
       for (let i = 0; i < opts.samples; i++) {
-        const det = determinize(real, p, rng);
+        const det = determinize(real, p, rng, { peekOppHand: opts.peekOppHand });
         for (const [k, sample] of planTurn(det, p, opts, w, rng)) {
           const t = totals.get(k) ?? { action: sample.action, sum: 0, count: 0, plan: sample };
           t.sum += sample.value;

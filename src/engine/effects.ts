@@ -34,6 +34,7 @@ import {
   superEvolveTurnReached,
 } from "./state";
 import type {
+  DrawHint,
   EffectContext,
   FollowerOnBoard,
   Frame,
@@ -338,7 +339,7 @@ export function leaveBoard(state: GameState, iid: number, reason: LeaveReason): 
       }));
     }
   } else if (reason === "bounce") {
-    addHandCard(state, p, newHandCard(state, card.cardId));
+    addHandCard(state, p, revealedHandCard(state, card.cardId));
   }
 
   if (card.kind === "follower") {
@@ -580,7 +581,7 @@ function exec(state: GameState, frame: Frame, eff: Effect | InternalEffect): boo
     case "draw":
       if (eff.filter) {
         const filter = eff.filter;
-        drawCards(state, p, val(eff.count), (ref) => deckCardMatches(state, ctx, ref.cardId, filter));
+        drawCards(state, p, val(eff.count), (ref) => deckCardMatches(state, ctx, ref.cardId, filter), drawHint(state, ctx, filter));
       } else {
         drawCards(state, p, val(eff.count));
       }
@@ -588,12 +589,12 @@ function exec(state: GameState, frame: Frame, eff: Effect | InternalEffect): boo
     case "drawAll": {
       const filter = eff.filter;
       const n = pl.deck.filter((r) => deckCardMatches(state, ctx, r.cardId, filter)).length;
-      const drawn = drawCards(state, p, n, (ref) => deckCardMatches(state, ctx, ref.cardId, filter));
+      const drawn = drawCards(state, p, n, (ref) => deckCardMatches(state, ctx, ref.cardId, filter), drawHint(state, ctx, filter));
       if (eff.slot) ctx.slots[eff.slot] = drawn;
       return next();
     }
     case "addToHand":
-      for (let i = 0; i < val(eff.count); i++) addHandCard(state, p, newHandCard(state, eff.cardId));
+      for (let i = 0; i < val(eff.count); i++) addHandCard(state, p, revealedHandCard(state, eff.cardId));
       return next();
     case "summon": {
       const ids: number[] = [];
@@ -851,6 +852,25 @@ function slotOf(t: Target): string {
   return t.kind === "slot" ? t.slot : "_";
 }
 
+/** 中身が相手にも分かる手札のカード（場から戻った・名前の決まったカードを加えた・手札で変身した） */
+function revealedHandCard(state: GameState, cardId: string, iid?: number): HandCard {
+  const card = newHandCard(state, cardId, iid);
+  card.revealed = true;
+  return card;
+}
+
+/** 条件付きのドローの、相手に分かる条件（determinization 用。HandCard.drawnBy） */
+function drawHint(state: GameState, ctx: EffectContext, f: CardFilter): DrawHint {
+  const hint: DrawHint = {};
+  if (f.type) hint.type = f.type;
+  if (f.tribe) hint.tribe = f.tribe;
+  if (f.class) hint.class = f.class;
+  if (f.ids) hint.ids = f.ids;
+  if (f.costMax !== undefined) hint.costMax = f.costMax;
+  if (f.costEq !== undefined) hint.costEq = evalValue(state, ctx, f.costEq);
+  return hint;
+}
+
 function deckCardMatches(state: GameState, ctx: EffectContext, cardId: string, f: CardFilter): boolean {
   const card = cardOf(cardId);
   if (f.type && card.type !== f.type) return false;
@@ -876,7 +896,7 @@ function transform(state: GameState, id: number, cardId: string): void {
   const h = findHand(state, id);
   if (h) {
     const pl = state.players[h.player];
-    pl.hand = pl.hand.map((c) => (c.iid === id ? newHandCard(state, cardId, id) : c));
+    pl.hand = pl.hand.map((c) => (c.iid === id ? revealedHandCard(state, cardId, id) : c));
   }
 }
 

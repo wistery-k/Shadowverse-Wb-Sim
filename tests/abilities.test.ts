@@ -424,3 +424,24 @@ describe("ターン終了時の処理だけを進める（resolveTurnEnd）", ()
     expect(resolveTurnEnd(t)).toBe(t);
   });
 });
+
+describe("相手から見て分かる手札の情報（AI の determinization 用）", () => {
+  it("場から戻ったカードと効果で加えたカードは中身が公開され、条件付きで引いたカードは条件を持つ", () => {
+    let { s, me } = setup();
+    const target = toBoard(s, me, "キャラバンマンモス");
+    s = applyAction(s, { type: "play", iid: toHand(s, me, "ベビーカーバンクル") });
+    if (s.pending) s = applyAction(s, { type: "choose", targets: [target.iid] });
+    const bounced = s.players[me].hand.find((h) => h.cardId === FILLER)!;
+    expect(bounced.revealed).toBe(true);
+
+    s = applyAction(s, { type: "play", iid: toHand(s, me, "フェアリーテイマー") });
+    const fairies = s.players[me].hand.filter((h) => h.cardId === id("フェアリー"));
+    expect(fairies.length).toBe(2);
+    expect(fairies.every((h) => h.revealed)).toBe(true);
+
+    s = applyAction(s, { type: "play", iid: toHand(s, me, "冒険者のギルド") });
+    const drawn = s.players[me].hand.at(-1)!;
+    expect(drawn.revealed).toBe(false);
+    expect(drawn.drawnBy).toEqual({ type: "follower" });
+  });
+});
