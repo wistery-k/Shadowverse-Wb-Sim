@@ -28,7 +28,8 @@
     "lethal-prevent": "node scripts/vite-run.mjs scripts/lethal-prevent-main.ts",
     "mulligan-model-fit": "node scripts/vite-run.mjs scripts/mulligan-model-fit-main.ts",
     "plan-value-data": "node scripts/vite-run.mjs scripts/plan-value-data-main.ts",
-    "plan-value-fit": "node scripts/vite-run.mjs scripts/plan-value-fit-main.ts"
+    "plan-value-fit": "node scripts/vite-run.mjs scripts/plan-value-fit-main.ts",
+    "royal-turn2": "node scripts/vite-run.mjs scripts/royal-turn2-main.ts"
   },
   "repository": {
     "type": "git",

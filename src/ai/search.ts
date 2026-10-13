@@ -545,6 +545,35 @@ export function reanimateWorthwhile(state: GameState, a: Action, p: PlayerIndex)
   return state.players[p].graveyardFollowers.some((id) => cardOf(id).cost === cost);
 }
 
+/** 決定化した局面 samples 個で、最初の手ごとの評価（相手のターンまで読んだもの）の合計・回数と、最も評価の高かった並びを集める */
+function sampleFirstActions(real: GameState, p: PlayerIndex, opts: SearchOptions, rng: Rng): Map<string, { action: Action; sum: number; count: number; plan: Plan }> {
+  const w = opts.weights === "byClass" ? weightsFor(real, p) : opts.weights;
+  const totals = new Map<string, { action: Action; sum: number; count: number; plan: Plan }>();
+  for (let i = 0; i < opts.samples; i++) {
+    const det = determinize(real, p, rng, { peekOppHand: opts.peekOppHand });
+    for (const [k, sample] of planTurn(det, p, opts, w, rng)) {
+      const t = totals.get(k) ?? { action: sample.action, sum: 0, count: 0, plan: sample };
+      t.sum += sample.value;
+      t.count++;
+      // 並びは、その手の評価が最も高かったサンプルのものを使う
+      if (sample.value > t.plan.value) t.plan = sample;
+      totals.set(k, t);
+    }
+  }
+  return totals;
+}
+
+/**
+ * 分析用: 探索 AI が実際の局面 real で手を選ぶときの、最初の手ごとの評価（サンプルの平均）と並び。評価の高い順。
+ * 上位 rescoreTop 手に入らなかった手は含まない
+ */
+export function firstActionValues(real: GameState, p: PlayerIndex, rng: Rng, options: Partial<SearchOptions> = {}): { action: Action; value: number; count: number; actions: Action[]; state: GameState }[] {
+  const opts = { ...DEFAULT_SEARCH_OPTIONS, ...options };
+  return [...sampleFirstActions(real, p, opts, rng).values()]
+    .map((t) => ({ action: t.action, value: t.sum / t.count, count: t.count, actions: t.plan.steps.map((s) => s.action), state: t.plan.steps.at(-1)?.state ?? real }))
+    .sort((x, y) => y.value - x.value);
+}
+
 export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
   const base = { ...DEFAULT_SEARCH_OPTIONS, ...options };
   const userAllow = base.allow;
@@ -591,19 +620,7 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
         }
       }
 
-      const w = opts.weights === "byClass" ? weightsFor(real, p) : opts.weights;
-      const totals = new Map<string, { action: Action; sum: number; count: number; plan: Plan }>();
-      for (let i = 0; i < opts.samples; i++) {
-        const det = determinize(real, p, rng, { peekOppHand: opts.peekOppHand });
-        for (const [k, sample] of planTurn(det, p, opts, w, rng)) {
-          const t = totals.get(k) ?? { action: sample.action, sum: 0, count: 0, plan: sample };
-          t.sum += sample.value;
-          t.count++;
-          // 並びは、その手の評価が最も高かったサンプルのものを使う
-          if (sample.value > t.plan.value) t.plan = sample;
-          totals.set(k, t);
-        }
-      }
+      const totals = sampleFirstActions(real, p, opts, rng);
       // 実際の局面で合法な手に限る。どのサンプルでも評価されなかった手は選ばない
       let best: { action: Action; plan: Plan } | null = null;
       let bestValue = -Infinity;
