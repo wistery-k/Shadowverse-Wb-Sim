@@ -18,7 +18,7 @@ import {
 } from "../engine";
 import { convergingAttacks, settleConvergingTrades } from "./convergingTrade";
 import { determinize } from "./determinize";
-import { SEARCH_WEIGHTS, evaluateWith, type EvalWeights } from "./evaluate";
+import { DEFAULT_WEIGHTS, SEARCH_WEIGHTS, evaluateWith, type EvalWeights } from "./evaluate";
 import { createGreedyAgent, greedyAgent } from "./greedy";
 import { KeySet, turnOrderHash, turnOrderKey, withoutIds } from "./keySet";
 import { findLethal, searchLethal, visibleKey } from "./lethal";
@@ -189,13 +189,15 @@ function tryApply(state: GameState, action: Action): GameState | null {
   }
 }
 
+const OPPONENT_POLICY = createGreedyAgent({ omniscient: true });
+
 /**
  * 自分のターンを終え、相手のターン（と、その途中の選択）を貪欲法で進め、自分の手番に戻った局面を返す。
  * 自分の選択待ちが残っている局面（能力の途中）は、先に貪欲法で選択してからターンを終える
  */
-export function simulateOpponentTurn(state: GameState, p: PlayerIndex, rng: Rng): GameState {
+export function simulateOpponentTurn(state: GameState, p: PlayerIndex, rng: Rng, doomed = 1): GameState {
   // determinization 済みの局面の中なので、局面をそのまま見てよい
-  const policy = createGreedyAgent({ omniscient: true });
+  const policy = doomed === 1 ? OPPONENT_POLICY : createGreedyAgent({ omniscient: true, weights: { ...DEFAULT_WEIGHTS, doomed } });
   let s: GameState | null = state;
   let ended = false;
   for (let guard = 0; s && s.phase !== "ended" && guard < 80; guard++) {
@@ -409,7 +411,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   const result = new Map<string, Plan>();
   for (const best of ranked) {
     for (const node of candidatesOf(best)) {
-      const after = node.state.phase === "ended" ? node.state : simulateOpponentTurn(settle(node.state), p, rng);
+      const after = node.state.phase === "ended" ? node.state : simulateOpponentTurn(settle(node.state), p, rng, w.doomed);
       let value = evalState(after);
       if (opts.nextLethal !== 0 && after.phase !== "ended" && after.players[p === 0 ? 1 : 0].leaderHp <= w.lethalRange && hasNextLethal(after, p)) value += opts.nextLethal;
       const k = keyOf(node.first);

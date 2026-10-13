@@ -2,7 +2,7 @@
 
 import { id } from "../cards/abilities/helpers";
 import { CARDS_BY_ID } from "../cards";
-import { EXTRA_PP_REFRESH_TURN, MAX_PP, abilitiesOf, staticOf, type FollowerOnBoard, type GameState, type OnBoard, type PlayerIndex } from "../engine";
+import { EXTRA_PP_REFRESH_TURN, MAX_PP, abilitiesOf, type Ability, staticOf, type FollowerOnBoard, type GameState, type OnBoard, type PlayerIndex } from "../engine";
 
 export interface EvalWeights {
   /** 自分・相手のリーダー体力 1 点 */
@@ -85,6 +85,12 @@ export interface EvalWeights {
    * 手札1枚の価値（myHand）に加算する
    */
   hold: Readonly<Record<string, number>>;
+  /**
+   * 相手のターン終了時に自壊する自分のフォロワー（アンの大英霊・改良型・操り人形等）の価値の倍率。
+   * 評価は自分のターンの終わりの局面で行うので、そのまま数えると次の自分のターンにも残るように見え、
+   * 突進で攻撃せずに残したり、意味の薄い進化をしたりした。残るのは相手のターンに守る分だけなので割り引く。1 なら普通のフォロワーと同じ
+   */
+  doomed: number;
 }
 
 /** 数値の重みの名前（hold を除く） */
@@ -122,6 +128,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   boost: 0,
   boostCap: 5,
   hold: {},
+  doomed: 1,
 };
 
 /**
@@ -176,8 +183,10 @@ export const EVOLVE_ABILITY: ReadonlySet<string> = new Set(
  * evoReserve 3 は勝率を変えない（今の AI と 50〜51%）が、進化時能力を持たないフォロワーへの進化が 30% → 20% に減るので採用（ユーザー判断。docs/ai-notes.md）
  * boostCard 1・boost 0.2（スペルブーストで育つカード）はスペルウィッチの勝率 44.3% → 52.1%（1200 試合。docs/ai-notes.md）
  * countdownDecay 0.8（カウントダウンのアミュレット）はアミュレット疾走ビショップの勝率 50.1% → 54.5%（2400 試合。docs/ai-notes.md）
+ * doomed 0.3（相手のターン終了時に自壊するフォロワー）は勝率を変えない（3000 試合で 49.6%）が、改良型・操り人形で攻撃せずに終えたり
+ * アンの大英霊を進化させたりするのが直るので採用（ユーザー判断。docs/ai-notes.md）
  */
-export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, crest: 3, fusionSet: 3.6, kuonReserve: 8, evoReserve: 3, boostCard: 1, boost: 0.2, countdownDecay: 0.8, hold: FUSION_HOLD };
+export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, crest: 3, fusionSet: 3.6, kuonReserve: 8, evoReserve: 3, boostCard: 1, boost: 0.2, countdownDecay: 0.8, doomed: 0.3, hold: FUSION_HOLD };
 
 const KEYWORD_VALUE: Partial<Record<string, number>> = {
   ward: 1,
@@ -225,11 +234,28 @@ function countdownValue(p: CountdownPayoff, countdown: number, w: EvalWeights, j
   return v * w.countdownDecay ** countdown;
 }
 
+const isSelfDestroyAtOpponentTurnEnd = (a: Ability): boolean =>
+  a.trigger.on === "turnEnd" && a.trigger.whose === "opponent" && a.effects.some((e) => e.op === "destroy" && e.target.kind === "this");
+
+/** 相手のターン終了時に自壊する能力をカード自体に持つフォロワー */
+const DOOMED: ReadonlySet<string> = new Set(
+  [...CARDS_BY_ID.values()].filter((c) => c.type === "follower" && abilitiesOf(c.id).abilities.some(isSelfDestroyAtOpponentTurnEnd)).map((c) => c.id),
+);
+
+/** 相手のターン終了時に自壊するフォロワーか（改境の再動で付与されたものも含む） */
+export const isDoomed = (f: FollowerOnBoard): boolean => DOOMED.has(f.cardId) || f.granted.some(isSelfDestroyAtOpponentTurnEnd);
+
 function followerValue(f: FollowerOnBoard, w: EvalWeights): number {
   let v = f.attack * w.attack + f.tempAttack * w.tempAttack + f.defense * w.defense + w.followerBase;
   for (const k of f.keywords) v += (KEYWORD_VALUE[k] ?? 0) * w.keywords;
   for (const k of f.tempKeywords) v += (KEYWORD_VALUE[k] ?? 0) * w.keywords;
   return v;
+}
+
+/** 自壊するフォロワーを doomed で割り引いた場のカードの価値 */
+function discountedBoardValue(c: OnBoard, w: EvalWeights, jeanneTurns: ReadonlySet<number> | null = null): number {
+  const v = boardValue(c, w, jeanneTurns);
+  return w.doomed !== 1 && c.kind === "follower" && isDoomed(c) ? v * w.doomed : v;
 }
 
 function boardValue(c: OnBoard, w: EvalWeights, jeanneTurns: ReadonlySet<number> | null = null): number {
@@ -263,9 +289,9 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
   let v = 0;
   v += me.leaderHp * w.myHp - opp.leaderHp * w.oppHp;
   const jeanneTurns = w.jeanneSync !== 0 && me.hand.some((h) => h.cardId === JEANNE) ? jeanneCountdowns(state, p) : null;
-  for (const c of me.board) v += boardValue(c, w, jeanneTurns);
+  for (const c of me.board) v += discountedBoardValue(c, w, jeanneTurns);
   let oppBoard = 0;
-  for (const c of opp.board) oppBoard += boardValue(c, w);
+  for (const c of opp.board) oppBoard += discountedBoardValue(c, w);
   v -= oppBoard * w.oppBoard;
   v += me.hand.length * w.myHand - opp.hand.length * w.oppHand;
   for (const h of me.hand) v += w.hold[h.cardId] ?? 0;
@@ -294,7 +320,7 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
   v += (me.crests.length - opp.crests.length) * w.crest;
   v += Math.min(me.graveyard, 10) * w.graveyard;
   if (opp.leaderHp <= w.lethalRange) {
-    for (const c of me.board) if (c.kind === "follower") v += c.attack * w.lethalAttack;
+    for (const c of me.board) if (c.kind === "follower") v += c.attack * w.lethalAttack * (w.doomed !== 1 && isDoomed(c) ? w.doomed : 1);
   }
   return v;
 }
