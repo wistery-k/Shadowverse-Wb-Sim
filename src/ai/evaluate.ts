@@ -73,6 +73,12 @@ export interface EvalWeights {
    */
   evoReserve: number;
   /**
+   * 進化時・超進化時能力（【進化時】・これが進化したとき・【超進化時】）を持つフォロワーのために SEP を残す価値。
+   * evoReserve の超進化版: 手札の該当カードを SEP の数まで数え、このターンに超進化させたのが該当カードならさらに 1 枚分数えて、1 枚あたりこの点を足す。
+   * 能力のないフォロワー（アミュレットから出るトークン等）に超進化を使うと下がる。0 なら見ない
+   */
+  sevoReserve: number;
+  /**
    * 手札のスペルブーストで育つカード（【スペルブースト時】の能力を持つ。ストームブラスト・ウィリアム・宿題やるですぅ！・鬼呼びの術・オーバーディメンション等）1 枚あたり（myHand に加算）。
    * 早く引くほどブーストを多く受けられる価値。0 なら見ない
    */
@@ -124,6 +130,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   fusionSet: 0,
   kuonReserve: 0,
   evoReserve: 0,
+  sevoReserve: 0,
   boostCard: 0,
   boost: 0,
   boostCap: 5,
@@ -169,6 +176,13 @@ const BOOST_GROWN: ReadonlySet<string> = new Set([id("成長したですぅ！")
 export const EVOLVE_ABILITY: ReadonlySet<string> = new Set(
   [...CARDS_BY_ID.values()]
     .filter((c) => c.type === "follower" && abilitiesOf(c.id).abilities.some((a) => a.trigger.on === "evolve" || a.trigger.on === "evolved"))
+    .map((c) => c.id),
+);
+
+/** 進化時・超進化時能力を持つフォロワー（sevoReserve で数える） */
+export const SUPER_EVOLVE_ABILITY: ReadonlySet<string> = new Set(
+  [...CARDS_BY_ID.values()]
+    .filter((c) => c.type === "follower" && abilitiesOf(c.id).abilities.some((a) => a.trigger.on === "evolve" || a.trigger.on === "evolved" || a.trigger.on === "superEvolve"))
     .map((c) => c.id),
 );
 
@@ -306,6 +320,12 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
     for (const h of me.hand) if (EVOLVE_ABILITY.has(h.cardId)) n++;
     const used = me.epEvolvedThisTurn !== null && EVOLVE_ABILITY.has(me.epEvolvedThisTurn) ? 1 : 0;
     v += (Math.min(n, me.ep) + used) * w.evoReserve;
+  }
+  if (w.sevoReserve !== 0) {
+    let n = 0;
+    for (const h of me.hand) if (SUPER_EVOLVE_ABILITY.has(h.cardId)) n++;
+    const used = me.sepEvolvedThisTurn !== null && SUPER_EVOLVE_ABILITY.has(me.sepEvolvedThisTurn) ? 1 : 0;
+    v += (Math.min(n, me.sep) + used) * w.sevoReserve;
   }
   if (w.boostCard !== 0 || w.boost !== 0) {
     for (const h of me.hand) {

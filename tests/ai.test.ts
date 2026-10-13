@@ -360,4 +360,23 @@ describe("評価関数の重み", () => {
     me.epEvolvedThisTurn = id("スティールナイト");
     expect(evaluateWith(s, 0, w)).toBeCloseTo(evaluateWith(s, 0, DEFAULT_WEIGHTS));
   });
+  it("sevoReserve は SEP の数まで手札の進化時・超進化時能力持ちを数え、このターンに超進化させた能力持ちも数える", () => {
+    const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 4 });
+    const me = s.players[0];
+    me.sep = 1;
+    me.hand = [newHandCard(s, id("勇壮の堕天使・オリヴィエ")), newHandCard(s, id("水の守護神・サレファ"))];
+    const w = { ...DEFAULT_WEIGHTS, sevoReserve: 4 };
+    // 2 枚あっても SEP 1 回分まで
+    expect(evaluateWith(s, 0, w) - evaluateWith(s, 0, DEFAULT_WEIGHTS)).toBeCloseTo(4);
+    // 能力のないフォロワーは数えない
+    me.hand = [newHandCard(s, id("壮麗なる隼"))];
+    expect(evaluateWith(s, 0, w)).toBeCloseTo(evaluateWith(s, 0, DEFAULT_WEIGHTS));
+    // このターンに超進化させたのが能力持ちなら 1 枚分数える（SEP が残っていなくても）
+    me.hand = [];
+    me.sep = 0;
+    me.sepEvolvedThisTurn = id("勇壮の堕天使・オリヴィエ");
+    expect(evaluateWith(s, 0, w) - evaluateWith(s, 0, DEFAULT_WEIGHTS)).toBeCloseTo(4);
+    me.sepEvolvedThisTurn = id("壮麗なる隼");
+    expect(evaluateWith(s, 0, w)).toBeCloseTo(evaluateWith(s, 0, DEFAULT_WEIGHTS));
+  });
 });

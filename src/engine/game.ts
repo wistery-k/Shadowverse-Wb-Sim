@@ -100,6 +100,7 @@ function newPlayer(deck: CardRef[]): PlayerState {
     combo: 0,
     evolvedThisTurn: false,
     epEvolvedThisTurn: null,
+    sepEvolvedThisTurn: null,
     leaderOncePerTurn: {},
     mulliganDone: false,
   };
@@ -165,6 +166,7 @@ function startTurn(state: GameState, p: PlayerIndex): void {
   pl.combo = 0;
   pl.evolvedThisTurn = false;
   pl.epEvolvedThisTurn = null;
+  pl.sepEvolvedThisTurn = null;
   if (p !== state.first && pl.turnCount === EXTRA_PP_REFRESH_TURN) pl.extraPpAvailable = true;
   for (const q of [0, 1] as const) state.players[q].destroyedThisTurn = [];
   for (const c of pl.board) {
@@ -741,6 +743,7 @@ function applyEvolve(state: GameState, iid: number, kind: "evolve" | "superEvolv
   else pl.sep--;
   pl.evolvedThisTurn = true;
   if (kind === "evolve") pl.epEvolvedThisTurn = f.cardId;
+  else pl.sepEvolvedThisTurn = f.cardId;
 
   // 【進化時】【超進化時】（超進化でも【進化時】は働く。「〜ではなく」の【超進化時】は置き換える）
   const evolveAbilities = ownAbilities(f, "evolve");
