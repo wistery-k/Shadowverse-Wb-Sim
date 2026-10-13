@@ -89,6 +89,7 @@ export async function main(argv: string[]): Promise<number> {
     else files.push(argv[i]!);
   }
   const positions: Pos[] = [];
+  let decided = 0;
   for (const file of files) {
     for (const line of readFileSync(file, "utf8").split("\n")) {
       let rec: PlanValueRecord;
@@ -99,6 +100,11 @@ export async function main(argv: string[]): Promise<number> {
         continue;
       }
       if (exclude.includes(rec.decks[rec.p])) continue;
+      // 勝敗が決まった点数（±1e6。ターン終了時の処理や、読んだ相手のターンで決着）は直線で当てはめられないので除く
+      if (rec.candidates.some((c) => Math.abs(c.value) >= 1e5 || Math.abs(c.rescored) >= 1e5)) {
+        decided++;
+        continue;
+      }
       const m = rec.candidates[0]!.wins.length;
       const ok = [...Array(m).keys()].filter((r) => rec.candidates.every((c) => c.wins[r] !== null));
       if (ok.length < 2) continue;
@@ -116,7 +122,7 @@ export async function main(argv: string[]): Promise<number> {
   const nCand = sum(positions.map((p) => p.value.length));
   log(`# 手順どうしの比較（plan-value）`);
   log();
-  log(`局面 ${positions.length}、候補 ${nCand}（データ: ${files.join(", ")}${exclude.length ? `、除外: ${exclude.join(", ")}` : ""}）`);
+  log(`局面 ${positions.length}、候補 ${nCand}（データ: ${files.join(", ")}${exclude.length ? `、除外: ${exclude.join(", ")}` : ""}）。候補の点数が勝敗の決まった値（±1e6）になる ${decided} 局面は除いた`);
   log();
 
   // 局面の中の勝率の違いと、打ち切りの誤差
