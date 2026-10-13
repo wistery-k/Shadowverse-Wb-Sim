@@ -95,7 +95,8 @@ export interface SearchOptions {
   mulliganCards: Record<string, number> | null;
   /**
    * 超進化時にリアニメイトするフォロワー（奔放なる獄炎・ケルベロス）を、墓場にそのコストちょうどのフォロワーが無いときに超進化しない。
-   * ミミ・ココを先に戦闘させて墓場に送らずに超進化し、スケルトン（コスト 0）を出したり何も出なかったりするのを防ぐ（ユーザー判断で禁止してよい手。docs/ai-notes.md）
+   * ミミ・ココを先に戦闘させて墓場に送らずに超進化し、スケルトン（コスト 0）を出したり何も出なかったりするのを防ぐ（ユーザー判断で禁止してよい手）。
+   * ナイトメアの勝率は 54.0% → 54.3%（1200 試合、誤差の範囲）で、スケルトンを出す超進化が無くなる（docs/ai-notes.md）
    */
   reanimateGuard: boolean;
   /**
@@ -172,7 +173,7 @@ export const exhaustiveCounts = {
   byTurn: {} as Record<number, [number, number, number, number]>,
 };
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, mulliganCards: null, reanimateGuard: false, settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: null, oppHandSamples: 1, peekOppHand: false };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, mulliganCards: null, reanimateGuard: true, settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: null, oppHandSamples: 1, peekOppHand: false };
 
 /** 打った手の並び（後ろから前へのリスト）。各手を打った後の局面も持つ */
 interface Step {
