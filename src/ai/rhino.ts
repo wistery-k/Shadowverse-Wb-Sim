@@ -16,6 +16,7 @@ import {
   EXTRA_PP_REFRESH_TURN,
   hasKeyword,
   legalActions,
+  MAX_PP,
   rngFrom,
   SUPER_EVOLVE_TURN,
   tryApplyAction,
@@ -90,7 +91,6 @@ function extraPpEnablesKeyPlay(state: GameState, p: PlayerIndex): boolean {
     if (a.type !== "play" || now.has(keyOf(a))) return false;
     const name = playedName(after, a, p);
     const cardId = after.players[p].hand.find((c) => c.iid === a.iid)?.cardId;
-    if (name === ROD) return allowAction(after, a, p);
     if (name === BACKWOOD) return true;
     // プレイすると【コンボ_3】を満たす（プレイしたカード自身も数える）
     return cardId !== undefined && hasComboFanfare(cardId) && combo + 1 >= 3;
@@ -126,8 +126,23 @@ function forcesKeeperChoice(state: GameState, a: Action, p: PlayerIndex): boolea
   return legalActions(after).every((c) => c.type === "choose" && c.targets.some((t) => keepers.has(t)));
 }
 
+/** 温存のルール（リーサルまで出さない・使わない）。比較実験で 1 つずつ外せるようにする */
+export interface RhinoHolds {
+  /** 森の神秘 */
+  mystery: boolean;
+  /** 手札に 1 枚しかないリノセウス */
+  rhino: boolean;
+  /** 2 つ目のエクストラPP */
+  extraPp: boolean;
+}
+const ALL_HOLDS: RhinoHolds = { mystery: true, rhino: true, extraPp: true };
+
 /** ルールで打ってよい手か（リーサル以外の場面に使う） */
 export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolean {
+  return allowActionWith(ALL_HOLDS, state, a, p);
+}
+
+function allowActionWith(holds: RhinoHolds, state: GameState, a: Action, p: PlayerIndex): boolean {
   const pl = state.players[p];
   switch (a.type) {
     case "choose": {
@@ -138,12 +153,11 @@ export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolea
     }
     case "play": {
       const name = playedName(state, a, p);
-      if (name === MYSTERY) return false; // リーサルまで温存
+      if (holds.mystery && name === MYSTERY) return false; // リーサルまで温存
       // 手札に1枚しかないリノセウスはリーサルまで温存（2枚以上なら1枚は残る）
-      if (name === RHINO && handCount(state, p, RHINO) < 2) return false;
+      if (holds.rhino && name === RHINO && handCount(state, p, RHINO) < 2) return false;
       if (forcesKeeperChoice(state, a, p)) return false;
-      // 杖の2枚目以降と燐光の岩は、相手の盤面を全処理できた（フォロワーがいない）ときだけ
-      if (name === ROD) return boardCount(state, p, ROD) === 0 || !oppHasFollowers(state, p);
+      // 燐光の岩は、相手の盤面を全処理できた（フォロワーがいない）ときだけ（杖は何枚目でもよい。ユーザーの判断）
       if (name === ROCK) return !oppHasFollowers(state, p);
       return true;
     }
@@ -156,12 +170,42 @@ export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolea
     }
     case "extraPp":
       // 2つ目はリーサルまで温存。1つ目は使う理由があるときだけ
-      if (pl.turnCount >= EXTRA_PP_REFRESH_TURN) return false;
+      if (holds.extraPp && pl.turnCount >= EXTRA_PP_REFRESH_TURN) return false;
       return extraPpEnablesKeyPlay(state, p);
     default:
       return true;
   }
 }
+
+/**
+ * 次の自分のターンにリノセウスで与えられるダメージの上限の見積もり（足切りの式 rhinoLethalBound を使い、探索はしない）。
+ * PP は最大値 +1、コンボ 0、進化は未使用とし、場のフォロワーは相手に処理されるかもしれないので数えない。
+ * 手札にリノセウスが無ければ 0、1 枚で戻す手段（場の杖・手札の虫の知らせかベビーカーバンクル）が無ければ 1 回の式
+ */
+export function nextTurnRhinoBound(s: GameState, p: PlayerIndex): number {
+  const pl = s.players[p];
+  const rhinos = pl.hand.filter((h) => nameOf(h.cardId) === RHINO).length;
+  if (rhinos === 0) return 0;
+  const pp = Math.min(pl.maxPp + 1, MAX_PP);
+  const next = { ...pl, pp, maxPp: pp, combo: 0, evolvedThisTurn: false, turnCount: pl.turnCount + 1, board: pl.board.filter((c) => c.kind !== "follower") };
+  const players: GameState["players"] = p === 0 ? [next, s.players[1]] : [s.players[0], next];
+  const ns = { ...s, players };
+  const bounce = boardCount(ns, p, ROD) > 0 || pl.hand.some((h) => [BUGS, CARBUNCLE].includes(nameOf(h.cardId)));
+  return rhinos === 1 && !bounce ? rhinoOneDamageBound(ns, p) : rhinoLethalBound(ns, p);
+}
+
+/** 評価に足す項: 次のターンのリノセウスの打点の上限が相手の体力に足りない分 × potential（足りていれば 0） */
+function rhinoPotentialEval(potential: number) {
+  return (s: GameState, p: PlayerIndex) => potential * Math.min(0, nextTurnRhinoBound(s, p) - s.players[p === 0 ? 1 : 0].leaderHp);
+}
+
+/**
+ * rhinoPotentialEval の係数の既定。600 試合で 0 → 262 勝、0.3 → 268、0.6 → 288、1.0 → 291、1.5 → 279、2.0 → 278（docs/ai-notes.md）
+ */
+const RHINO_POTENTIAL = 1;
+
+/** リノセウス用 AI の設定。potential は rhinoPotentialEval の係数（0 なら足さない） */
+export type RhinoOptions = Partial<SearchOptions> & { potential?: number; holds?: Partial<RhinoHolds> };
 
 /** マリガンで入れ替えるカードの iid */
 export function mulliganSwap(state: GameState, p: PlayerIndex): number[] {
@@ -555,8 +599,17 @@ export interface RhinoAgentMode {
  * 深さ 8・幅 32 はリノセウスエルフで先に採用し、後に汎用の探索 AI の既定にした
  * （seed 2510273090 の 4 ターン目・seed 954874822 の 7 ターン目。docs/ai-notes.md）
  */
-export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}, mode: RhinoAgentMode = { rules: true }): Agent {
-  const search = createSearchAgent({ allow: allowAction, lethal: false, perFirst: RHINO_PER_FIRST, nextLethalSearch: (s, q) => searchLethalForRhino(s, q) !== null, ...searchOptions });
+export function createRhinoAgent(options: RhinoOptions = {}, mode: RhinoAgentMode = { rules: true }): Agent {
+  const { potential = RHINO_POTENTIAL, holds, ...searchOptions } = options;
+  const allHolds = { ...ALL_HOLDS, ...holds };
+  const search = createSearchAgent({
+    allow: (s, a, q) => allowActionWith(allHolds, s, a, q),
+    lethal: false,
+    perFirst: RHINO_PER_FIRST,
+    nextLethalSearch: (s, q) => searchLethalForRhino(s, q) !== null,
+    ...(potential !== 0 ? { extraEval: rhinoPotentialEval(potential) } : {}),
+    ...searchOptions,
+  });
   const plainSearch = createSearchAgent();
   return {
     name: "rhino",
@@ -593,14 +646,10 @@ export function createRhinoAgent(searchOptions: Partial<SearchOptions> = {}, mod
       const extraPp = legal.find((a) => a.type === "extraPp");
       // 1つ目のエクストラPP が期限のターンに残っていれば、ターン開始時に使う
       if (extraPp && pl.turnCount === FIRST_EXTRA_PP_DEADLINE) return extraPp;
-      // 1枚目の杖は最優先で置く（エクストラPP で置けるなら使う）
+      // 1枚目の杖は最優先で置く（エクストラPP を使ってまでは置かない。ユーザーの判断）
       if (boardCount(real, p, ROD) === 0) {
         const rod = legal.find((a) => playedName(real, a, p) === ROD);
         if (rod) return rod;
-        if (extraPp && pl.hand.some((h) => nameOf(h.cardId) === ROD) && allowAction(real, extraPp, p)) {
-          const after = applyAction(real, extraPp);
-          if (legalActions(after).some((a) => playedName(after, a, p) === ROD)) return extraPp;
-        }
       }
       return search.chooseAction(real, legal, rng);
     },

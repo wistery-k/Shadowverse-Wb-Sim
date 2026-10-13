@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowAction, createRhinoAgent, mulliganSwap, rhinoAgent } from "../src/ai/rhino";
+import { allowAction, createRhinoAgent, mulliganSwap, nextTurnRhinoBound, rhinoAgent } from "../src/ai/rhino";
 import { searchAgent } from "../src/ai/search";
 import { searchRhinoLethal } from "../src/ai/rhinoLethal";
 import { ALL_CARDS } from "../src/cards";
@@ -97,7 +97,7 @@ describe("リノセウス用ルール: 禁じる手", () => {
     expect(rhinoAgent.chooseAction(after, legalActions(after), rngFrom({ rng: 1 }))).toEqual({ type: "choose", targets: [fairy.iid] });
   });
 
-  it("2枚目の杖と燐光の岩は、相手の場にフォロワーがいないときだけ置く。森の神秘は使わない", () => {
+  it("燐光の岩は相手の場にフォロワーがいないときだけ置く。杖は2枚目でも置いてよい。森の神秘は使わない", () => {
     const s = mainPhase();
     const rod = newHandCard(s, id("聖樹の杖"));
     const rock = newHandCard(s, id("燐光の岩"));
@@ -106,12 +106,24 @@ describe("リノセウス用ルール: 禁じる手", () => {
     expect(allowAction(s, { type: "play", iid: rod.iid }, 0)).toBe(true); // 1枚目
     s.players[0].board = [newBoardCard(s, id("聖樹の杖"))];
     s.players[1].board = [newBoardCard(s, id("ナイト"))];
-    expect(allowAction(s, { type: "play", iid: rod.iid }, 0)).toBe(false);
+    expect(allowAction(s, { type: "play", iid: rod.iid }, 0)).toBe(true);
     expect(allowAction(s, { type: "play", iid: rock.iid }, 0)).toBe(false);
     s.players[1].board = [];
     expect(allowAction(s, { type: "play", iid: rod.iid }, 0)).toBe(true);
     expect(allowAction(s, { type: "play", iid: rock.iid }, 0)).toBe(true);
     expect(allowAction(s, { type: "play", iid: mystery.iid }, 0)).toBe(false);
+  });
+
+  it("次のターンのリノセウスの打点の見積もりは、手札にリノセウスが無ければ 0、増えれば上がる", () => {
+    const s = mainPhase();
+    s.players[0].pp = s.players[0].maxPp = 7;
+    s.players[0].hand = [];
+    expect(nextTurnRhinoBound(s, 0)).toBe(0);
+    s.players[0].hand.push(newHandCard(s, id("殺戮のリノセウス")));
+    const one = nextTurnRhinoBound(s, 0);
+    expect(one).toBeGreaterThan(0);
+    s.players[0].hand.push(newHandCard(s, id("殺戮のリノセウス")), newHandCard(s, id("森の神秘")));
+    expect(nextTurnRhinoBound(s, 0)).toBeGreaterThan(one);
   });
 
   it("手札に1枚しかないリノセウスはプレイしない（2枚以上ならよい）", () => {
@@ -124,7 +136,7 @@ describe("リノセウス用ルール: 禁じる手", () => {
     expect(allowAction(s, { type: "play", iid: rhino.iid }, 0)).toBe(true);
   });
 
-  it("エクストラPP: 2つ目は使わない。1つ目は杖を置けるようになるときに使う", () => {
+  it("エクストラPP: 2つ目は使わない。1つ目は杖を置くためには使わない（バックウッドなら使う）", () => {
     const s = mainPhase();
     const pl = s.players[0];
     pl.extraPpAvailable = true;
@@ -132,12 +144,14 @@ describe("リノセウス用ルール: 禁じる手", () => {
     pl.maxPp = 2;
     pl.pp = 2;
     pl.hand = [newHandCard(s, id("聖樹の杖"))];
+    expect(allowAction(s, { type: "extraPp" }, 0)).toBe(false);
+    pl.maxPp = pl.pp = 4;
+    pl.hand = [newHandCard(s, id("薫交の天宮・バックウッド"))];
     expect(allowAction(s, { type: "extraPp" }, 0)).toBe(true);
-    expect(rhinoAgent.chooseAction(s, legalActions(s), rngFrom({ rng: 1 }))).toEqual({ type: "extraPp" });
     pl.hand = [newHandCard(s, id("殺戮のリノセウス"))];
     expect(allowAction(s, { type: "extraPp" }, 0)).toBe(false);
     pl.turnCount = 6;
-    pl.hand = [newHandCard(s, id("聖樹の杖"))];
+    pl.hand = [newHandCard(s, id("薫交の天宮・バックウッド"))];
     expect(allowAction(s, { type: "extraPp" }, 0)).toBe(false);
   });
 });

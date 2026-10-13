@@ -1,0 +1,98 @@
+import { describe, expect, it } from "vitest";
+import { randomAgent } from "../src/ai/random";
+import { resetExactLethalCache } from "../src/ai/exactLethal";
+import { lethalHint } from "../src/ai/lethalHint";
+import { applyAction, createGame } from "../src/engine";
+import { buildHumanRecord, parseHumanRecord, toJsonLines } from "../src/sim/humanRecord";
+import { playMatch } from "../src/sim/match";
+import { compareMatch, opponentsOf, SUBJECT_IDS, SUBJECTS } from "../src/sim/humanCompare";
+import { PUZZLES, puzzleState } from "./rhinoPuzzles";
+
+describe("人間との比較の記録", () => {
+  it("rhino-compare と同じシード・席でデッキを並べる", () => {
+    const opp = opponentsOf("rhino");
+    expect(opp).toHaveLength(6);
+    expect(opp.map((d) => d.name)).not.toContain(SUBJECTS.rhino.deck);
+    const m = compareMatch("rhino", opp[0]!.name, 3, 1);
+    expect(m.seed).toBe(900000 + 3 * 13 + 1);
+    expect(m.decks[0]).toEqual(opp[0]!.cards);
+  });
+
+  it("AFネメシスも他の 6 デッキと別のシードで並べる", () => {
+    const opp = opponentsOf("af");
+    expect(opp).toHaveLength(6);
+    expect(opp.map((d) => d.name)).not.toContain("AFネメシス");
+    expect(opp.map((d) => d.name)).toContain(SUBJECTS.rhino.deck);
+    const m = compareMatch("af", opp[0]!.name, 3, 0);
+    expect(m.seed).not.toBe(compareMatch("rhino", opponentsOf("rhino")[0]!.name, 3, 0).seed);
+    expect(m.decks[1]).toEqual(opp[0]!.cards);
+  });
+
+  it("スペルウィッチも他の 6 デッキと別のシードで並べる", () => {
+    const opp = opponentsOf("spellwitch");
+    expect(opp).toHaveLength(6);
+    expect(opp.map((d) => d.name)).not.toContain("スペルウィッチ");
+    const seeds = SUBJECT_IDS.map((s) => compareMatch(s, opponentsOf(s)[0]!.name, 3, 0).seed);
+    expect(new Set(seeds).size).toBe(SUBJECT_IDS.length);
+  });
+
+  it("勝敗・ターンごとの選択・行動の列を記録し、JSON Lines から読み戻せる", () => {
+    for (const subject of SUBJECT_IDS)
+      for (const seat of [0, 1] as const) {
+        const deck = opponentsOf(subject)[1]!.name;
+        const m = compareMatch(subject, deck, 0, seat);
+        const r = playMatch([randomAgent, randomAgent], { ...m, record: true });
+        const rec = buildHumanRecord({ subject, deck, g: 0, seat, actions: r.log!, commit: "abc", playedAt: "2026-01-01T00:00:00.000Z" });
+        expect(rec.subject).toBe(subject);
+        expect(rec.won).toBe(r.winner === seat);
+        expect(rec.first).toBe(createGame(m).first === seat);
+        expect(rec.turns).toBe(r.turns);
+        expect(rec.turnLog.flatMap((t) => t.choices)).toHaveLength(r.log!.length);
+        expect(rec.turnLog[0]!.turn).toBe(0);
+        expect(rec.turnLog.some((t) => t.by === "you") && rec.turnLog.some((t) => t.by === "opponent")).toBe(true);
+        const line = toJsonLines([rec]);
+        expect(line.endsWith("\n")).toBe(true);
+        expect(parseHumanRecord(JSON.parse(line))).toEqual(rec);
+      }
+  });
+
+  it("終わっていない試合は記録しない", () => {
+    expect(() => buildHumanRecord({ subject: "rhino", deck: opponentsOf("rhino")[0]!.name, g: 0, seat: 0, actions: [], commit: "", playedAt: "" })).toThrow();
+    expect(parseHumanRecord({ kind: "other" })).toBeNull();
+  });
+
+  it("リノセウスエルフだけの頃の記録（version 1）をリノセウスエルフの記録として読む", () => {
+    const deck = opponentsOf("rhino")[0]!.name;
+    const m = compareMatch("rhino", deck, 2, 1);
+    const r = playMatch([randomAgent, randomAgent], { ...m, record: true });
+    const rec = buildHumanRecord({ subject: "rhino", deck, g: 2, seat: 1, actions: r.log!, commit: "", playedAt: "" });
+    const { subject: _s, seat, ...rest } = rec;
+    const v1 = { ...rest, kind: "rhino-compare-human", version: 1, elfSeat: seat };
+    expect(parseHumanRecord(JSON.parse(JSON.stringify(v1)))).toEqual(rec);
+  });
+});
+
+describe("対戦画面のリーサル表示", () => {
+  it("リーサルがあれば勝てる手順を返し、相手の体力が 1 多ければ見つけない", () => {
+    resetExactLethalCache();
+    const puzzle = PUZZLES[0]!;
+    const yes = puzzleState(puzzle, puzzle.expected);
+    const steps = lethalHint(yes, 0, 1);
+    expect(steps).not.toBeNull();
+    let s = yes;
+    for (const a of steps!) s = applyAction(s, a);
+    expect(s.winner).toBe(0);
+    resetExactLethalCache();
+    expect(lethalHint(puzzleState(puzzle, puzzle.expected + 1), 0, 1)).toBeNull();
+  });
+
+  it("自動で行った行動に印をつけて記録する", () => {
+    const deck = opponentsOf("rhino")[0]!.name;
+    const m = compareMatch("rhino", deck, 0, 0);
+    const r = playMatch([randomAgent, randomAgent], { ...m, record: true });
+    const last = r.log!.length - 1;
+    const rec = buildHumanRecord({ subject: "rhino", deck, g: 0, seat: 0, actions: r.log!, autoActions: [last], commit: "", playedAt: "" });
+    expect(rec.autoActions).toEqual([last]);
+    expect(rec.turnLog.at(-1)!.choices.at(-1)).toMatch(/（自動）$/);
+  });
+});

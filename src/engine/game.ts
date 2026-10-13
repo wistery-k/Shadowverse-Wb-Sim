@@ -99,6 +99,7 @@ function newPlayer(deck: CardRef[]): PlayerState {
     destroyedThisTurn: [],
     combo: 0,
     evolvedThisTurn: false,
+    epEvolvedThisTurn: null,
     leaderOncePerTurn: {},
     mulliganDone: false,
   };
@@ -163,6 +164,7 @@ function startTurn(state: GameState, p: PlayerIndex): void {
   pl.pp = pl.maxPp;
   pl.combo = 0;
   pl.evolvedThisTurn = false;
+  pl.epEvolvedThisTurn = null;
   if (p !== state.first && pl.turnCount === EXTRA_PP_REFRESH_TURN) pl.extraPpAvailable = true;
   for (const q of [0, 1] as const) state.players[q].destroyedThisTurn = [];
   for (const c of pl.board) {
@@ -337,6 +339,12 @@ function canAttackLeader(state: GameState, f: FollowerOnBoard): boolean {
   return !summonedThisTurn(state, f) || hasKeyword(f, "storm");
 }
 
+/** フォロワー自身の状態による攻撃の可否（相手の場は見ない）。leader: リーダーにも / follower: フォロワーにだけ / none: できない */
+export function attackReach(state: GameState, f: FollowerOnBoard): "leader" | "follower" | "none" {
+  if (canAttackLeader(state, f)) return "leader";
+  return canAttackFollowers(state, f) ? "follower" : "none";
+}
+
 /** 攻撃先の候補（守護を考慮済み） */
 export function attackTargets(state: GameState, attacker: FollowerOnBoard): AttackTarget[] {
   const opp = state.players[opponent(state.active)];
@@ -381,6 +389,14 @@ function fusionMaterials(state: GameState, p: PlayerIndex, host: HandCard): Hand
     if (filter.ids && !filter.ids.includes(c.cardId)) return false;
     return true;
   });
+}
+
+/** 手札のカード hostIid に今融合できる素材の候補（手番のプレイヤーのみ。UI で素材を選ばせるのに使う） */
+export function fusionCandidates(state: GameState, hostIid: number): number[] {
+  if (state.phase !== "main" || state.pending) return [];
+  const p = state.active;
+  const host = state.players[p].hand.find((c) => c.iid === hostIid);
+  return host ? fusionMaterials(state, p, host).map((c) => c.iid) : [];
 }
 
 /** マリガンを行うべきプレイヤー（先攻から） */
@@ -724,6 +740,7 @@ function applyEvolve(state: GameState, iid: number, kind: "evolve" | "superEvolv
   if (kind === "evolve") pl.ep--;
   else pl.sep--;
   pl.evolvedThisTurn = true;
+  if (kind === "evolve") pl.epEvolvedThisTurn = f.cardId;
 
   // 【進化時】【超進化時】（超進化でも【進化時】は働く。「〜ではなく」の【超進化時】は置き換える）
   const evolveAbilities = ownAbilities(f, "evolve");

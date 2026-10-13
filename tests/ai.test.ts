@@ -290,4 +290,68 @@ describe("評価関数の重み", () => {
     expect(evaluateWith(t, 0, SEARCH_WEIGHTS)).toBeGreaterThanOrEqual(before);
     expect(evaluateWith(t, 0, DEFAULT_WEIGHTS)).toBeLessThan(evaluateWith(s, 0, DEFAULT_WEIGHTS));
   });
+  it("countdownDecay ではカウントダウンのアミュレットを割れたときに得るもので数え、アクトでカウントを進めると評価が上がる", () => {
+    const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 4 });
+    s.phase = "main";
+    s.active = 0;
+    const me = s.players[0];
+    me.board = [];
+    me.hand = [];
+    s.players[1].board = [];
+    me.pp = 5;
+    const w = { ...DEFAULT_WEIGHTS, countdownDecay: 0.8 };
+    const empty = evaluateWith(s, 0, w);
+    const vow = newBoardCard(s, id("獣姫の誓約"));
+    me.board = [vow];
+    // ホーリーフレイムタイガー 4/4: 4 + 3.2 + 1 = 8.2、カウント 2
+    expect(evaluateWith(s, 0, w) - empty).toBeCloseTo(8.2 * 0.64);
+    const t = applyAction(s, { type: "act", iid: vow.iid });
+    expect(evaluateWith(t, 0, w)).toBeGreaterThan(evaluateWith(s, 0, w));
+    // 穏やかなる教会（2 ドロー）は割ると評価が下がらない
+    const church = newBoardCard(s, id("穏やかなる教会"));
+    (church as { countdown: number | null }).countdown = 1;
+    me.board = [church];
+    const before = evaluateWith(s, 0, w);
+    const u = applyAction(s, { type: "act", iid: church.iid });
+    expect(u.players[0].board).toHaveLength(0);
+    expect(evaluateWith(u, 0, w)).toBeGreaterThan(before);
+  });
+  it("jeanneSync では手札にジャンヌがあり、ジャンヌを出せるターンに割れるアミュレットのフォロワーを +2/+4 して数える", () => {
+    const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 4 });
+    const p = s.first;
+    const me = s.players[p];
+    s.players[p === 0 ? 1 : 0].board = [];
+    me.hand = [];
+    me.turnCount = 6;
+    const vow = newBoardCard(s, id("獣姫の誓約"));
+    me.board = [vow];
+    const w = { ...DEFAULT_WEIGHTS, countdownDecay: 0.8, jeanneSync: 1 };
+    const without = evaluateWith(s, p, w);
+    me.hand = [newHandCard(s, id("純白の聖女・ジャンヌ"))];
+    const handOnly = evaluateWith(s, p, { ...w, jeanneSync: 0 }) - without;
+    // 6 ターン目＋カウント 2 ＝ 8: タイガー 6/8 = 6 + 6.4 + 1 = 13.4（4/4 なら 8.2）
+    expect(evaluateWith(s, p, w) - without - handOnly).toBeCloseTo((13.4 - 8.2) * 0.64);
+    // 5 ターン目（先攻なのでエクストラPP なし）なら加点しない
+    me.turnCount = 5;
+    expect(evaluateWith(s, p, w)).toBeCloseTo(evaluateWith(s, p, { ...w, jeanneSync: 0 }));
+  });
+  it("evoReserve は EP の数まで手札の進化時能力持ちを数え、このターンに EP で進化させた進化時能力持ちも数える", () => {
+    const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 4 });
+    const me = s.players[0];
+    me.ep = 2;
+    me.hand = [newHandCard(s, id("楽朗の天宮・フィルドア")), newHandCard(s, id("楽朗の天宮・フィルドア")), newHandCard(s, id("栄弦の天宮・リュウフウ"))];
+    const w = { ...DEFAULT_WEIGHTS, evoReserve: 3 };
+    // 3 枚あっても EP 2 回分まで
+    expect(evaluateWith(s, 0, w) - evaluateWith(s, 0, DEFAULT_WEIGHTS)).toBeCloseTo(6);
+    // 進化時能力を持たないフォロワーは数えない
+    me.hand = [newHandCard(s, id("スティールナイト"))];
+    expect(evaluateWith(s, 0, w)).toBeCloseTo(evaluateWith(s, 0, DEFAULT_WEIGHTS));
+    // このターンに EP で進化させたのが進化時能力持ちなら 1 枚分数える（EP が残っていなくても）
+    me.hand = [];
+    me.ep = 0;
+    me.epEvolvedThisTurn = id("楽朗の天宮・フィルドア");
+    expect(evaluateWith(s, 0, w) - evaluateWith(s, 0, DEFAULT_WEIGHTS)).toBeCloseTo(3);
+    me.epEvolvedThisTurn = id("スティールナイト");
+    expect(evaluateWith(s, 0, w)).toBeCloseTo(evaluateWith(s, 0, DEFAULT_WEIGHTS));
+  });
 });

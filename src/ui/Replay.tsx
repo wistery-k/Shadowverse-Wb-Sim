@@ -7,8 +7,8 @@ import { replayStates } from "../sim/replay";
 import { reproduceCommand } from "../sim/reproduce";
 import { seatDecks, type Entrant, type GameRecord } from "../sim/tournament";
 import { CardDetail, CardView, type Motion } from "./CardView";
-import { describeAction } from "./describe";
-import { EmptySlots, PlayerInfo } from "./Game";
+import { attackStatuses, describeAction, leaderClasses } from "./describe";
+import { BoardSlots, EmptySlots, PlayerInfo } from "./Game";
 
 interface Props {
   record: GameRecord;
@@ -25,6 +25,7 @@ const SPEEDS = [
 export function Replay({ record, entrants, onClose }: Props) {
   const actions = record.actions ?? [];
   const states = useMemo(() => replayStates(seatDecks(record, entrants), record.seed, actions), [record, entrants]);
+  const classes = useMemo(() => leaderClasses(states[0]!), [states]);
   const names = useMemo((): [string, string] => {
     const ea = entrants[record.a]!.name;
     const eb = entrants[record.b]!.name;
@@ -80,17 +81,8 @@ export function Replay({ record, entrants, onClose }: Props) {
   const state = states[step]!;
   const winnerName = record.seats ? names[record.seats.winner] : "なし";
 
-  // 攻撃できるフォロワー（リーダーにも攻撃できるか）
-  const attackable = useMemo(() => {
-    const m = new Map<number, "follower" | "leader">();
-    if (state.phase !== "main" || state.pending) return m;
-    for (const a of legalActions(state)) {
-      if (a.type !== "attack") continue;
-      if (a.target === "leader") m.set(a.attacker, "leader");
-      else if (!m.has(a.attacker)) m.set(a.attacker, "follower");
-    }
-    return m;
-  }, [state]);
+  // 手番のフォロワーの攻撃の可否
+  const attackable = useMemo(() => attackStatuses(state), [state]);
 
   // 直前の行動の動き: 場に出たフォロワー・攻撃したフォロワーと攻撃されたもの
   const { motions, leaderHit } = useMemo(() => {
@@ -130,14 +122,15 @@ export function Replay({ record, entrants, onClose }: Props) {
             />
           );
         })}
+        <BoardSlots count={pl.board.length} />
       </div>
     );
     const leader = (
-      <div key={leaderHit === p ? `leader-${step}` : "leader"} class={`leader ${leaderHit === p ? "motion-hit" : ""}`}>
+      <div key={leaderHit === p ? `leader-${step}` : "leader"} class={`leader class-${classes[p]} ${leaderHit === p ? "motion-hit" : ""}`}>
         リーダー {pl.leaderHp}/{pl.leaderMaxHp}
       </div>
     );
-    const info = <PlayerInfo label={`${names[p]}${state.first === p ? "（先攻）" : "（後攻）"}`} state={state} p={p} />;
+    const info = <PlayerInfo label={`${names[p]}${state.first === p ? "（先攻）" : "（後攻）"}`} state={state} p={p} cls={classes[p]} />;
     const hand = (
       <div class="hand">
         {pl.hand.map((h) => (

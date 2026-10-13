@@ -1,7 +1,8 @@
 // UI 表示用の文言
 
-import { CLASS_NAMES, type Card } from "../cards";
+import { CLASS_NAMES, type Card, type ClassId } from "../cards";
 import {
+  attackReach,
   cardOf,
   crestOf,
   findBoard,
@@ -31,6 +32,31 @@ export const TYPE_NAMES: Record<Card["type"], string> = {
 };
 
 export const classLabel = (card: Card) => CLASS_NAMES[card.class];
+
+/** 攻撃の可否（leader: リーダーにも攻撃できる / follower: フォロワーにだけ攻撃できる / none: 攻撃できない） */
+export type AttackStatus = "leader" | "follower" | "none";
+
+/** 手番のプレイヤーの場のフォロワーごとの攻撃の可否。相手の場（守護・攻撃先の有無）は見ず、フォロワー自身の状態で決める。
+ *  行動を選べる局面でなければ空 */
+export function attackStatuses(state: GameState): Map<number, AttackStatus> {
+  const m = new Map<number, AttackStatus>();
+  if (state.phase !== "main" || state.pending) return m;
+  for (const c of state.players[state.active].board) if (c.kind === "follower") m.set(c.iid, attackReach(state, c));
+  return m;
+}
+
+/** 各プレイヤーのクラス（試合開始時の局面の山札・手札にあるニュートラル以外のカードから決める） */
+export function leaderClasses(state: GameState): [ClassId, ClassId] {
+  const classOf = (p: PlayerIndex): ClassId => {
+    const pl = state.players[p];
+    for (const c of [...pl.deck, ...pl.hand, ...pl.board]) {
+      const cls = cardOf(c.cardId).class;
+      if (cls !== "neutral") return cls;
+    }
+    return "neutral";
+  };
+  return [classOf(0), classOf(1)];
+}
 
 /** 文言の視点: 人間のプレイヤー（「あなた」「相手」と呼ぶ）か、各プレイヤーの名前 */
 export type Viewer = PlayerIndex | readonly [string, string];

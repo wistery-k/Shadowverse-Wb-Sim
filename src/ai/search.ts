@@ -23,6 +23,7 @@ import { createGreedyAgent, greedyAgent } from "./greedy";
 import { KeySet, turnOrderHash, turnOrderKey, withoutIds } from "./keySet";
 import { findLethal, searchLethal, visibleKey } from "./lethal";
 import { MULLIGAN_WEIGHTS, weightedMulliganSwap } from "./mulligan";
+import { MULLIGAN_MODEL, modelMulliganSwap } from "./mulliganModel";
 import { weightsFor } from "./weights";
 import type { Agent } from "./types";
 
@@ -78,9 +79,13 @@ export interface SearchOptions {
   scoreTurnEnd: "none" | "terminal" | "all";
   /**
    * マリガン。"weights" はカードごとの重み（data/mulligan-weights.json。デフォルトデッキのみ、他はコストで決める）、
-   * "cost" はコスト 4 以上を返す（貪欲法と同じ）。重みは今のマリガンに +3.1%（4200 組、docs/ai-notes.md）
+   * "cost" はコスト 4 以上を返す（貪欲法と同じ）。重みは今のマリガンに +3.1%（4200 組、docs/ai-notes.md）。
+   * "model" は手札の形のマリガン（data/mulligan-model.json と data/mulligan-roles.json。役割の無いデッキは "weights" と同じ）。
+   * 既定は "model"（"weights" に +1.0%、12,600 組）
    */
-  mulligan: "weights" | "cost";
+  mulligan: "model" | "weights" | "cost";
+  /** マリガンの重みで進化時能力持ちを 1 枚も残さないとき、最も重みの大きい 1 枚に足す値（weightedMulliganSwap の evoBonus。実験中、既定 0） */
+  mulliganEvoBonus: number;
   /**
    * 合流する相打ち（convergingTrade.ts）を、ターンを終える前に打つものとして扱う。
    * ターン終了の局面はその攻撃を打ってから採点し、相手のターンもその局面から読む。
@@ -103,15 +108,45 @@ export interface SearchOptions {
    */
   nextLethal: number;
   nextLethalSearch?: (state: GameState, p: PlayerIndex) => boolean;
+  /** 評価関数に足す項（デッキ専用の AI 用。ターン末の採点と、相手のターンを読んだ後の評価の両方に足す） */
+  extraEval?: (state: GameState, p: PlayerIndex) => number;
   /**
    * ビームに、最初の手ごとに少なくともこの数の局面を残す（幅を超えてもよい。0 なら幅だけで切る）。
    * 点数の高い最初の手の局面でビームが埋まると、他の最初の手の並びが途中で切れ、短い並びのまま相手のターンまで読まれる。
    * reusePlan ではその短い並びをそのまま打つ（seed 2275116772 のエルフ 7 ターン目、燐光の岩をコンボ 1 で出した。docs/ai-notes.md）
    */
   perFirst: number;
+  /**
+   * ビームで残す局面を選ぶときだけ、残り PP 1 につきこの点を足す（0 なら足さない）。ターンを終える局面の点数には足さない。
+   * ターン末の採点は使い残した PP を数えないため、コンボを稼ぐだけの手（すぐ戻すリノセウス等）と、PP を残して後で使う手順の途中の局面との比べ方が偏る
+   */
+  beamPp: number;
+  /**
+   * 自分のターン数が untilTurn 以下のとき、ビームサーチの代わりに、そのターンの手の並びを同じ局面をまとめて全て調べる（メモ化付きの全探索）。
+   * 調べた局面が maxStates を超えたらやめて、ビームサーチで探す。null なら使わない（実験用）
+   */
+  exhaustive: { untilTurn: number; maxStates: number } | null;
 }
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "weights", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0 };
+/** 全探索（SearchOptions.exhaustive）の集計（実験用。比較スクリプトが試合ごとに 0 に戻して読む） */
+export const exhaustiveCounts = {
+  /** 全探索した回数（サンプルごと） */
+  searches: 0,
+  /** 上限を超えてビームサーチに戻した回数 */
+  overflow: 0,
+  /** 読み切れたときに調べた局面の数の合計と最大 */
+  states: 0,
+  maxStates: 0,
+  /** 同じ局面でビームサーチも行い、ターン末の点数の最善を比べた結果（全探索の方が高かった回数と、その差の合計） */
+  better: 0,
+  gain: 0,
+  /** 全探索の方が高かったもののうち、最善の終局面の最初の手がビームサーチと違った回数 */
+  firstDiffers: 0,
+  /** 自分のターン数ごとの [全探索した回数, 上限超え, ビームより良い, 読み切れたときの局面数の合計] */
+  byTurn: {} as Record<number, [number, number, number, number]>,
+};
+
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null };
 
 /** 打った手の並び（後ろから前へのリスト）。各手を打った後の局面も持つ */
 interface Step {
@@ -214,13 +249,13 @@ function uniqueStates(children: Node[], width: number, perFirst = 0): Node[] {
 
 /** 1つの局面で、最初の手ごとの評価値を求める */
 function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalWeights, rng: Rng): Map<string, Plan> {
-  const terminals: Node[] = [];
-  let frontier: Node[] = [];
 
   /** ターンを終える局面（合流する相打ちを打った後） */
   const settle = (state: GameState) => (opts.settleTrades ? settleConvergingTrades(state, p) : state);
-  const endScore = (state: GameState) => evaluateWith(resolveTurnEnd(settle(state)), p, w);
-  const score = opts.scoreTurnEnd === "all" ? endScore : (state: GameState) => evaluateWith(settle(state), p, w);
+  const extra = opts.extraEval;
+  const evalState = extra ? (state: GameState) => evaluateWith(state, p, w) + extra(state, p) : (state: GameState) => evaluateWith(state, p, w);
+  const endScore = (state: GameState) => evalState(resolveTurnEnd(settle(state)));
+  const score = opts.scoreTurnEnd === "all" ? endScore : (state: GameState) => evalState(settle(state));
   const allowed = (state: GameState, a: Action) => !opts.allow || a.type === "endTurn" || opts.allow(state, a, p);
   const expand = (state: GameState) => (opts.sameHandOnce ? distinctPlays(state, legalActions(state)) : legalActions(state));
   /** 手 a を打った局面（と、そこまでの並び）。chain なら、続く自分の選択とエクストラPP の後の手まで進めた局面すべて */
@@ -246,8 +281,44 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
     return self;
   };
 
-  // 深さ1: すべての手を展開する（最初の手の候補を落とさない）
   const rootConverges = opts.settleTrades && convergingAttacks(root, p).length > 0;
+
+  /** メモ化付きの全探索で、ターンを終えられる局面すべて（上限を超えたら null） */
+  const exhaustiveTerminals = (maxStates: number): Node[] | null => {
+    const out: Node[] = [];
+    const stack: Node[] = [];
+    for (const a of expand(root)) {
+      if (!allowed(root, a)) continue;
+      if (a.type === "endTurn") {
+        if (!rootConverges) out.push({ state: root, first: a, value: score(root), path: { action: a, state: root, prev: null } });
+        continue;
+      }
+      for (const next of advance(root, a, null)) stack.push({ ...next, first: a, value: 0 });
+    }
+    const seen = new KeySet();
+    let count = 0;
+    while (stack.length > 0) {
+      const node = stack.pop()!;
+      if (!seen.addLazy(() => turnOrderKey(node.state), turnOrderHash(node.state))) continue;
+      if (++count > maxStates) return null;
+      node.value = score(node.state);
+      out.push(node);
+      const actor = node.state.pending ? node.state.pending.player : node.state.active;
+      if (node.state.phase === "ended" || actor !== p) continue;
+      for (const a of expand(node.state)) {
+        if (a.type === "endTurn" || !allowed(node.state, a)) continue;
+        for (const next of advance(node.state, a, node.path)) stack.push({ ...next, first: node.first, value: 0 });
+      }
+    }
+    exhaustiveCounts.states += count;
+    exhaustiveCounts.maxStates = Math.max(exhaustiveCounts.maxStates, count);
+    return out;
+  };
+
+  const beamTerminals = (): Node[] => {
+  const terminals: Node[] = [];
+  let frontier: Node[] = [];
+  // 深さ1: すべての手を展開する（最初の手の候補を落とさない）
   for (const a of expand(root)) {
     if (!allowed(root, a)) continue;
     if (a.type === "endTurn") {
@@ -273,10 +344,42 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
         for (const next of advance(node.state, a, node.path)) children.push({ ...next, first: node.first, value: score(next.state) });
       }
     }
-    children.sort((x, y) => y.value - x.value);
+    if (opts.beamPp !== 0) {
+      const key = (n: Node) => n.value + opts.beamPp * n.state.players[p].pp;
+      children.sort((x, y) => key(y) - key(x));
+    } else children.sort((x, y) => y.value - x.value);
     frontier = opts.dedup ? uniqueStates(children, opts.beamWidth, opts.perFirst) : children.slice(0, opts.beamWidth);
   }
   terminals.push(...frontier);
+  return terminals;
+  };
+
+  let terminals: Node[] | null = null;
+  if (opts.exhaustive && root.players[p].turnCount <= opts.exhaustive.untilTurn) {
+    exhaustiveCounts.searches++;
+    const turn = (exhaustiveCounts.byTurn[root.players[p].turnCount] ??= [0, 0, 0, 0]);
+    turn[0]++;
+    const before = exhaustiveCounts.states;
+    terminals = exhaustiveTerminals(opts.exhaustive.maxStates);
+    turn[3] += exhaustiveCounts.states - before;
+    if (!terminals) {
+      exhaustiveCounts.overflow++;
+      turn[1]++;
+    }
+    else {
+      // 比較用: 同じ局面のビームサーチの、ターン末の点数で最善の終局面
+      const top = (ts: Node[]) => ts.reduce((a, b) => (b.value > a.value ? b : a));
+      const ex = top(terminals);
+      const beam = top(beamTerminals());
+      if (ex.value > beam.value + 1e-9) {
+        exhaustiveCounts.better++;
+        turn[2]++;
+        exhaustiveCounts.gain += ex.value - beam.value;
+        if (keyOf(ex.first) !== keyOf(beam.first)) exhaustiveCounts.firstDiffers++;
+      }
+    }
+  }
+  if (!terminals) terminals = beamTerminals();
   if (opts.scoreTurnEnd === "terminal") for (const t of terminals) t.value = endScore(t.state);
 
   // 最初の手ごとに最善の終局面を残し、上位を相手のターンまで読んで評価し直す
@@ -307,7 +410,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   for (const best of ranked) {
     for (const node of candidatesOf(best)) {
       const after = node.state.phase === "ended" ? node.state : simulateOpponentTurn(settle(node.state), p, rng);
-      let value = evaluateWith(after, p, w);
+      let value = evalState(after);
       if (opts.nextLethal !== 0 && after.phase !== "ended" && after.players[p === 0 ? 1 : 0].leaderHp <= w.lethalRange && hasNextLethal(after, p)) value += opts.nextLethal;
       const k = keyOf(node.first);
       const cur = result.get(k);
@@ -328,7 +431,9 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
       if (!first) throw new Error("合法手がありません");
       if (legal.length === 1) return first;
       if (first.type === "mulligan") {
-        const swap = opts.mulligan === "weights" ? weightedMulliganSwap(real, actingPlayer(real), MULLIGAN_WEIGHTS) : null;
+        const p0 = actingPlayer(real);
+        const modelSwap = opts.mulligan === "model" ? modelMulliganSwap(real, p0, MULLIGAN_MODEL) : null;
+        const swap = modelSwap ?? (opts.mulligan !== "cost" ? weightedMulliganSwap(real, p0, MULLIGAN_WEIGHTS, { evoBonus: opts.mulliganEvoBonus }) : null);
         const action = swap && legal.find((a) => a.type === "mulligan" && a.swap.length === swap.length && a.swap.every((x) => swap.includes(x)));
         // 重みの無いデッキは貪欲法と同じ（コスト 4 以上を返す）
         return action || greedyAgent.chooseAction(real, legal, rng);
