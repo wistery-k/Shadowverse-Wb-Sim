@@ -1,11 +1,12 @@
 // 分析用: アマリアロイヤルの 2 ターン目に、手札に異端の侍と王家の御者が両方あるとき、探索 AI がどちらを出すかを数える
 //
-// 使い方: npm run royal-turn2 -- [--games N] [--seed S] [--out 結果.jsonl]
+// 使い方: npm run royal-turn2 -- [--games N] [--seed S] [--out 結果.jsonl] [--last-words-summon X]
+// --last-words-summon で両者の評価の lastWordsSummon を変える（既定は SEARCH_WEIGHTS のまま）
 // ロイヤル vs 他の各デッキを、席を入れ替えて N 試合ずつ、ロイヤルの 2 ターン目が終わるところまで探索 AI どうしで打つ。
 // 両方あった局面では、探索 AI が手を選ぶときの評価（侍を先に出す並び・御者を先に出す並びの最善）も別の乱数で取り直して記録する。
 
 import { appendFileSync, writeFileSync } from "node:fs";
-import { evaluateWith, SEARCH_WEIGHTS } from "../src/ai/evaluate";
+import { evaluateWith, SEARCH_WEIGHTS, type EvalWeights } from "../src/ai/evaluate";
 import { createSearchAgent, firstActionValues } from "../src/ai/search";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { actingPlayer, applyAction, cardOf, createGame, legalActions, nextRandom, rngFrom, type Action, type GameState, type PlayerIndex } from "../src/engine";
@@ -39,11 +40,11 @@ function playedCard(s: GameState, p: PlayerIndex, a: Action): string | null {
   return h ? h.cardId : null;
 }
 
-function run(opp: string, seat: PlayerIndex, g: number, seed: number): Rec {
+function run(opp: string, seat: PlayerIndex, g: number, seed: number, w: EvalWeights): Rec {
   const royal = DEFAULT_DECKS.find((d) => d.name === ROYAL)!;
   const other = DEFAULT_DECKS.find((d) => d.name === opp)!;
   let s = createGame({ decks: seat === 0 ? [royal.cards, other.cards] : [other.cards, royal.cards], seed });
-  const agents = [createSearchAgent(), createSearchAgent()] as const;
+  const agents = [createSearchAgent({ weights: w }), createSearchAgent({ weights: w })] as const;
   const rng = rngFrom({ rng: (seed ^ 0x9e3779b9) >>> 0 });
   const rec: Rec = { opp, seat, g, first: false, both: false, played: [], attacks: [], oppBoard: [], hand: [] };
   let inTurn2 = false;
@@ -58,7 +59,7 @@ function run(opp: string, seat: PlayerIndex, g: number, seed: number): Rec {
       rec.both = me.hand.some((h) => h.cardId === SAMURAI) && me.hand.some((h) => h.cardId === COACHMAN);
       if (rec.both) {
         const vrng = rngFrom({ rng: (seed ^ 0x51ed270b) >>> 0 });
-        const vals = firstActionValues(s, seat, vrng);
+        const vals = firstActionValues(s, seat, vrng, { weights: w });
         // 最初の手ごとの最善の並びのうち、侍・御者のどちらを先に出すか
         const pick = (id: string) => vals.find((x) => firstPlayed(s, seat, x.actions) === id) ?? null;
         const sam = pick(SAMURAI);
@@ -66,8 +67,8 @@ function run(opp: string, seat: PlayerIndex, g: number, seed: number): Rec {
         rec.values = {
           samurai: sam ? sam.value - (3 - sam.count) * 0.5 : null,
           coachman: coa ? coa.value - (3 - coa.count) * 0.5 : null,
-          samuraiEnd: sam ? evaluateWith(sam.state, seat, SEARCH_WEIGHTS) : null,
-          coachmanEnd: coa ? evaluateWith(coa.state, seat, SEARCH_WEIGHTS) : null,
+          samuraiEnd: sam ? evaluateWith(sam.state, seat, w) : null,
+          coachmanEnd: coa ? evaluateWith(coa.state, seat, w) : null,
           best: vals[0] ? describe(s, seat, vals[0].actions) : "",
         };
       }
@@ -117,6 +118,8 @@ export async function main(argv: string[]): Promise<number> {
   const games = Number(arg(argv, "--games", "20"));
   const seed = Number(arg(argv, "--seed", "1"));
   const out = arg(argv, "--out", "");
+  const lws = arg(argv, "--last-words-summon", "");
+  const w: EvalWeights = lws === "" ? SEARCH_WEIGHTS : { ...SEARCH_WEIGHTS, lastWordsSummon: Number(lws) };
   const opps = DEFAULT_DECKS.filter((d) => d.name !== ROYAL).map((d) => d.name);
   const tasks: { opp: string; seat: PlayerIndex; g: number; seed: number }[] = [];
   for (const [oi, opp] of opps.entries())
@@ -127,7 +130,7 @@ export async function main(argv: string[]): Promise<number> {
   const recs = await parallelMap(
     tasks,
     (t) => {
-      const r = run(t.opp, t.seat, t.g, t.seed);
+      const r = run(t.opp, t.seat, t.g, t.seed, w);
       if (out) appendFileSync(out, JSON.stringify(r) + "\n");
       return r;
     },
