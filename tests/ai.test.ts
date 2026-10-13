@@ -467,3 +467,16 @@ describe("lastWords の評価", () => {
     expect(diff()).toBeCloseTo(2 * SEARCH_WEIGHTS.oppHp + 1 * SEARCH_WEIGHTS.myHp - 2 * SEARCH_WEIGHTS.myHp);
   });
 });
+
+describe("lastWordsSummon の評価", () => {
+  it("ボーンガールはスケルトン 2 体分の価値に倍率を掛けて足す", () => {
+    const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 3 });
+    const p = s.active;
+    const id = (name: string) => ALL_CARDS.find((c) => c.name === name)!.id;
+    s.players[p].board.push(newBoardCard(s, id("ボーンガール")));
+    const w0 = { ...SEARCH_WEIGHTS, lastWordsSummon: 0 };
+    const w1 = { ...SEARCH_WEIGHTS, lastWordsSummon: 0.5 };
+    const skeleton = 1 * SEARCH_WEIGHTS.attack + 1 * SEARCH_WEIGHTS.defense + SEARCH_WEIGHTS.followerBase;
+    expect(evaluateWith(s, p, w1) - evaluateWith(s, p, w0)).toBeCloseTo(2 * skeleton * 0.5);
+  });
+});

@@ -90,6 +90,12 @@ export interface EvalWeights {
    */
   lastWords: number;
   /**
+   * 場のフォロワーのラストワードで出すフォロワー（ボーンガールのスケルトン 2 体、王家の御者のナイト等）の価値の倍率。
+   * 出すフォロワーの攻撃力・体力・キーワード・基本点（カウントダウンのアミュレットが割れたときと同じ数え方）にこの値を掛けて、そのフォロワーの価値に足す。
+   * 死ぬまで出ず、出るのは早くても次のターンなので割り引く。0 なら見ない
+   */
+  lastWordsSummon: number;
+  /**
    * 相手の体力が lethalRange 以下のとき、手札の「アミュレットをアクトすると疾走を得るフォロワー」（セイクリッドグリフォン）を、
    * 次のターンに出せて（コスト ≤ 次のターンの PP）、自分の場にアクトできるアミュレットがあれば、攻撃力 × この値を足す。
    * 次のターンの疾走の打点（リノセウスの potential と同じ考え）。0 なら見ない
@@ -155,6 +161,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   sevoReserve: 0,
   kerberosReserve: 0,
   lastWords: 0,
+  lastWordsSummon: 0,
   handStorm: 0,
   boostCard: 0,
   boost: 0,
@@ -338,10 +345,44 @@ function lastWordsAmount(state: GameState, owner: PlayerIndex): { damage: number
   return { damage: Math.min(damage, Math.max(0, opp.leaderHp)), heal: Math.min(heal, Math.max(0, me.leaderMaxHp - me.leaderHp)) };
 }
 
+/** ラストワードで出すフォロワー（定数の枚数で、フォロワーを出すものだけ）の価値の合計。倍率を掛ける前 */
+function lastWordsSummonValue(abilities: readonly Ability[], w: EvalWeights): number {
+  let v = 0;
+  for (const a of abilities) {
+    if (a.trigger.on !== "lastWords") continue;
+    for (const e of a.effects) {
+      if (e.op !== "summon" || typeof e.count !== "number") continue;
+      const t = CARDS_BY_ID.get(e.cardId);
+      if (t?.type !== "follower") continue;
+      let one = t.attack * w.attack + t.defense * w.defense + w.followerBase;
+      for (const k of staticOf(t.id).keywords) one += (KEYWORD_VALUE[k] ?? 0) * w.keywords;
+      v += one * e.count;
+    }
+  }
+  return v;
+}
+
+/** ラストワードでフォロワーを出すフォロワー（カードID → 倍率を掛ける前の価値。重みごとに計算し直さないよう、重みを覚えておく） */
+let summonCache: { w: EvalWeights; values: Map<string, number> } | null = null;
+function lastWordsSummonOf(cardId: string, w: EvalWeights): number {
+  if (!summonCache || summonCache.w !== w) summonCache = { w, values: new Map() };
+  let v = summonCache.values.get(cardId);
+  if (v === undefined) {
+    v = lastWordsSummonValue(abilitiesOf(cardId).abilities, w);
+    summonCache.values.set(cardId, v);
+  }
+  return v;
+}
+
 function followerValue(f: FollowerOnBoard, w: EvalWeights): number {
   let v = f.attack * w.attack + f.tempAttack * w.tempAttack + f.defense * w.defense + w.followerBase;
   for (const k of f.keywords) v += (KEYWORD_VALUE[k] ?? 0) * w.keywords;
   for (const k of f.tempKeywords) v += (KEYWORD_VALUE[k] ?? 0) * w.keywords;
+  if (w.lastWordsSummon !== 0) {
+    let s = lastWordsSummonOf(f.cardId, w);
+    if (f.granted.length > 0) s += lastWordsSummonValue(f.granted, w);
+    v += s * w.lastWordsSummon;
+  }
   return v;
 }
 
