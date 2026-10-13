@@ -427,3 +427,22 @@ describe("評価関数の重み", () => {
     expect(evaluateWith(s, 0, w)).toBeCloseTo(evaluateWith(s, 0, DEFAULT_WEIGHTS));
   });
 });
+
+import { reanimateWorthwhile } from "../src/ai/search";
+
+describe("reanimateGuard", () => {
+  it("ケルベロスの超進化は、墓場にコスト 1 のフォロワーがあるときだけ打ってよい", () => {
+    const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 3 });
+    const p = s.active;
+    const id = (name: string) => ALL_CARDS.find((c) => c.name === name)!.id;
+    const kerberos = newBoardCard(s, id("奔放なる獄炎・ケルベロス"));
+    const olivier = newBoardCard(s, id("勇壮の堕天使・オリヴィエ"));
+    s.players[p].board.push(kerberos, olivier);
+    s.players[p].graveyardFollowers = [id("スケルトン")];
+    const sevo = (iid: number) => ({ type: "superEvolve", iid }) as const;
+    expect(reanimateWorthwhile(s, sevo(kerberos.iid), p)).toBe(false);
+    expect(reanimateWorthwhile(s, sevo(olivier.iid), p)).toBe(true);
+    s.players[p].graveyardFollowers = [id("スケルトン"), id("番犬の右腕・ミミ")];
+    expect(reanimateWorthwhile(s, sevo(kerberos.iid), p)).toBe(true);
+  });
+});

@@ -7,7 +7,9 @@
 // ただし、このターンで勝てる並び（リーサル、lethal.ts）が見つかれば、それを最優先する
 
 import {
+  abilitiesOf,
   actingPlayer,
+  cardOf,
   tryApplyAction,
   legalActions,
   resolveTurnEnd,
@@ -92,6 +94,11 @@ export interface SearchOptions {
    */
   mulliganCards: Record<string, number> | null;
   /**
+   * 超進化時にリアニメイトするフォロワー（奔放なる獄炎・ケルベロス）を、墓場にそのコストちょうどのフォロワーが無いときに超進化しない。
+   * ミミ・ココを先に戦闘させて墓場に送らずに超進化し、スケルトン（コスト 0）を出したり何も出なかったりするのを防ぐ（ユーザー判断で禁止してよい手。docs/ai-notes.md）
+   */
+  reanimateGuard: boolean;
+  /**
    * 合流する相打ち（convergingTrade.ts）を、ターンを終える前に打つものとして扱う。
    * ターン終了の局面はその攻撃を打ってから採点し、相手のターンもその局面から読む。
    * 合流する攻撃が残っている局面でのターン終了は、攻撃してから終える手に劣らないので候補から外す
@@ -165,7 +172,7 @@ export const exhaustiveCounts = {
   byTurn: {} as Record<number, [number, number, number, number]>,
 };
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, mulliganCards: null, settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: null, oppHandSamples: 1, peekOppHand: false };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, mulliganCards: null, reanimateGuard: false, settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: null, oppHandSamples: 1, peekOppHand: false };
 
 /** 打った手の並び（後ろから前へのリスト）。各手を打った後の局面も持つ */
 interface Step {
@@ -517,8 +524,31 @@ export function turnCandidates(root: GameState, p: PlayerIndex, rng: Rng, option
     .sort((x, y) => y.value - x.value);
 }
 
+/** 超進化時のリアニメイトのコスト（無ければ null） */
+function superEvolveReanimateCost(cardId: string): number | null {
+  for (const a of abilitiesOf(cardId).abilities) {
+    if (a.trigger.on !== "superEvolve") continue;
+    for (const e of a.effects) if (e.op === "reanimate") return e.cost;
+  }
+  return null;
+}
+
+/** reanimateGuard: 墓場にリアニメイトのコストちょうどのフォロワーが無いのに、リアニメイトするフォロワーを超進化する手なら false */
+export function reanimateWorthwhile(state: GameState, a: Action, p: PlayerIndex): boolean {
+  if (a.type !== "superEvolve") return true;
+  const card = state.players[p].board.find((c) => c.iid === a.iid);
+  if (!card) return true;
+  const cost = superEvolveReanimateCost(card.cardId);
+  if (cost === null) return true;
+  return state.players[p].graveyardFollowers.some((id) => cardOf(id).cost === cost);
+}
+
 export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
-  const opts = { ...DEFAULT_SEARCH_OPTIONS, ...options };
+  const base = { ...DEFAULT_SEARCH_OPTIONS, ...options };
+  const userAllow = base.allow;
+  const opts: SearchOptions = base.reanimateGuard
+    ? { ...base, allow: (s, a, p) => reanimateWorthwhile(s, a, p) && (!userAllow || userAllow(s, a, p)) }
+    : base;
   const mulliganModel = opts.mulliganCards ? overrideMulliganCards(MULLIGAN_MODEL, opts.mulliganCards) : MULLIGAN_MODEL;
   /** プレイヤーごとの、打っている途中の計画（reusePlan）。expected[i] は steps[i] を打つ前に見えているはずの局面 */
   const plans: [{ steps: Step[]; expected: string[]; index: number } | null, { steps: Step[]; expected: string[]; index: number } | null] = [null, null];
