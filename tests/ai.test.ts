@@ -316,6 +316,25 @@ describe("評価関数の重み", () => {
     expect(u.players[0].board).toHaveLength(0);
     expect(evaluateWith(u, 0, w)).toBeGreaterThan(before);
   });
+  it("jeanneSync では手札にジャンヌがあり、ジャンヌを出せるターンに割れるアミュレットのフォロワーを +2/+4 して数える", () => {
+    const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 4 });
+    const p = s.first;
+    const me = s.players[p];
+    s.players[p === 0 ? 1 : 0].board = [];
+    me.hand = [];
+    me.turnCount = 6;
+    const vow = newBoardCard(s, id("獣姫の誓約"));
+    me.board = [vow];
+    const w = { ...DEFAULT_WEIGHTS, countdownDecay: 0.8, jeanneSync: 1 };
+    const without = evaluateWith(s, p, w);
+    me.hand = [newHandCard(s, id("純白の聖女・ジャンヌ"))];
+    const handOnly = evaluateWith(s, p, { ...w, jeanneSync: 0 }) - without;
+    // 6 ターン目＋カウント 2 ＝ 8: タイガー 6/8 = 6 + 6.4 + 1 = 13.4（4/4 なら 8.2）
+    expect(evaluateWith(s, p, w) - without - handOnly).toBeCloseTo((13.4 - 8.2) * 0.64);
+    // 5 ターン目（先攻なのでエクストラPP なし）なら加点しない
+    me.turnCount = 5;
+    expect(evaluateWith(s, p, w)).toBeCloseTo(evaluateWith(s, p, { ...w, jeanneSync: 0 }));
+  });
   it("evoReserve は EP の数まで手札の進化時能力持ちを数え、このターンに EP で進化させた進化時能力持ちも数える", () => {
     const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 4 });
     const me = s.players[0];
