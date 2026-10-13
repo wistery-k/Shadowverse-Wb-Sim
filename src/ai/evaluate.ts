@@ -79,6 +79,11 @@ export interface EvalWeights {
    */
   sevoReserve: number;
   /**
+   * 手札に奔放なる獄炎・ケルベロスがあり SEP が 1 以上残っているとき、またはこのターンに SEP でケルベロスを超進化させたときに足す点。
+   * ケルベロスの超進化（ミミ・ココのリアニメイト 2 回）はオリヴィエ等より価値が高いので、ほかのカードに先に SEP を使わないようにする（ユーザーの見立て）。0 なら見ない
+   */
+  kerberosReserve: number;
+  /**
    * 相手の体力が lethalRange 以下のとき、手札の「アミュレットをアクトすると疾走を得るフォロワー」（セイクリッドグリフォン）を、
    * 次のターンに出せて（コスト ≤ 次のターンの PP）、自分の場にアクトできるアミュレットがあれば、攻撃力 × この値を足す。
    * 次のターンの疾走の打点（リノセウスの potential と同じ考え）。0 なら見ない
@@ -142,6 +147,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   kuonReserve: 0,
   evoReserve: 0,
   sevoReserve: 0,
+  kerberosReserve: 0,
   handStorm: 0,
   boostCard: 0,
   boost: 0,
@@ -174,6 +180,7 @@ const FUSION_HOLD: Readonly<Record<string, number>> = Object.fromEntries(
 const FUSION_SET: ReadonlySet<string> = new Set(["デストロイアーティファクトα", "デストロイアーティファクトβ", "デストロイアーティファクトγ"].map(id));
 
 const KUON = id("五行の果て・クオン");
+const KERBEROS = id("奔放なる獄炎・ケルベロス");
 const JEANNE = id("純白の聖女・ジャンヌ");
 const JEANNE_COST = 8;
 
@@ -352,6 +359,10 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
     for (const h of me.hand) if (SUPER_EVOLVE_ABILITY.has(h.cardId)) n++;
     const used = me.sepEvolvedThisTurn !== null && SUPER_EVOLVE_ABILITY.has(me.sepEvolvedThisTurn) ? 1 : 0;
     v += (Math.min(n, me.sep) + used) * w.sevoReserve;
+  }
+  if (w.kerberosReserve !== 0) {
+    if (me.sep > 0 && me.hand.some((h) => h.cardId === KERBEROS)) v += w.kerberosReserve;
+    if (me.sepEvolvedThisTurn === KERBEROS) v += w.kerberosReserve;
   }
   if (w.boostCard !== 0 || w.boost !== 0) {
     for (const h of me.hand) {
