@@ -134,6 +134,25 @@ export class KeySet {
   }
 }
 
+/** 自分で決めた同一判定（eq）で値をまとめる集合。KeySet と同じだが、比べるためのキーを作らない */
+export class EqSet<T> {
+  private readonly buckets = new Map<number, T[]>();
+
+  constructor(private readonly eq: (a: T, b: T) => boolean) {}
+
+  /** eq で同じとみなす値がまだ無ければ加えて true、既にあれば false。hash は eq で同じ値には同じ数 */
+  add(value: T, hash: number): boolean {
+    const bucket = this.buckets.get(hash);
+    if (!bucket) {
+      this.buckets.set(hash, [value]);
+      return true;
+    }
+    for (const x of bucket) if (this.eq(x, value)) return false;
+    bucket.push(value);
+    return true;
+  }
+}
+
 /**
  * カードの iid・場に出た順（order）・スペルブーストの回数（boosts）を除いた中身。
  * boosts は表示用でルールの判定には使わない（スペルブーストの効果はコスト等の変化として別に持つ）ため、
@@ -225,4 +244,87 @@ export function turnOrderHash(s: GameState): number {
   const pd = s.pending;
   h = mix(h, pd === null ? 0 : pd.kind === "choose" ? 1 + pd.candidates.length : 100 + pd.options);
   return mix(h, s.stack.length);
+}
+
+/** withoutIds で除くキー */
+const ID_KEYS = new Set(["iid", "order", "boosts", "revealed", "drawnBy"]);
+
+/** jsonEqual(withoutIds(a), withoutIds(b)) と同じ（オブジェクトを作らない） */
+function cardEqual(a: object, b: object): boolean {
+  if (a === b) return true;
+  const oa = a as Record<string, unknown>;
+  const ob = b as Record<string, unknown>;
+  let n = 0;
+  for (const k in oa) {
+    if (ID_KEYS.has(k)) continue;
+    const x = oa[k];
+    if (!present(x)) continue;
+    const y = ob[k];
+    if (!present(y) || !jsonEqual(x, y)) return false;
+    n++;
+  }
+  for (const k in ob) if (!ID_KEYS.has(k) && present(ob[k])) n--;
+  return n === 0;
+}
+
+/** iid 等を除いた中身の集まりとして同じか（並び順は問わない） */
+function sameCards(a: readonly object[], b: readonly object[]): boolean {
+  if (a.length !== b.length) return false;
+  if (a.length === 0) return true;
+  if (a.length === 1) return cardEqual(a[0]!, b[0]!);
+  const used: boolean[] = new Array<boolean>(b.length).fill(false);
+  outer: for (const x of a) {
+    for (let j = 0; j < b.length; j++) {
+      if (!used[j] && cardEqual(x, b[j]!)) {
+        used[j] = true;
+        continue outer;
+      }
+    }
+    return false;
+  }
+  return true;
+}
+
+/** turnOrderKey で別に扱うプレイヤーのキー */
+const PLAYER_CARD_KEYS = new Set(["deck", "hand", "board", "crests"]);
+
+function samePlayerForTurnOrder(a: GameState["players"][number], b: GameState["players"][number]): boolean {
+  if (a.deck.length !== b.deck.length) return false;
+  for (let i = 0; i < a.deck.length; i++) if (a.deck[i]!.cardId !== b.deck[i]!.cardId) return false;
+  if (!sameCards(a.hand, b.hand) || !sameCards(a.board, b.board) || !sameCards(a.crests, b.crests)) return false;
+  const oa = a as unknown as Record<string, unknown>;
+  const ob = b as unknown as Record<string, unknown>;
+  let n = 0;
+  for (const k in oa) {
+    if (PLAYER_CARD_KEYS.has(k)) continue;
+    const x = oa[k];
+    if (!present(x)) continue;
+    const y = ob[k];
+    if (!present(y) || !jsonEqual(x, y)) return false;
+    n++;
+  }
+  for (const k in ob) if (!PLAYER_CARD_KEYS.has(k) && present(ob[k])) n--;
+  return n === 0;
+}
+
+const midAbility = (s: GameState) => s.stack.length > 0 || s.queue.length > 0 || s.pending !== null || s.attack !== null;
+
+/**
+ * jsonEqual(turnOrderKey(a), turnOrderKey(b)) と同じ判定を、キーを作らずに行う（ビームの同じ局面の判定を速くするため）。
+ * 違いは、手札・場・クレストのカードを並べ替えて比べる代わりに、中身の集まりとして比べることだけ
+ * （オブジェクトのキーの順番だけが違うカードがあるときに限り、結果が変わりうる）
+ */
+export function turnOrderEqual(a: GameState, b: GameState): boolean {
+  if (a === b) return true;
+  const ma = midAbility(a), mb = midAbility(b);
+  if (ma || mb) return ma && mb && jsonEqual(a, b);
+  return (
+    a.phase === b.phase &&
+    a.turn === b.turn &&
+    a.active === b.active &&
+    a.winner === b.winner &&
+    jsonEqual(a.rng, b.rng) &&
+    samePlayerForTurnOrder(a.players[0], b.players[0]) &&
+    samePlayerForTurnOrder(a.players[1], b.players[1])
+  );
 }

@@ -775,7 +775,8 @@ function applyFuse(state: GameState, hostIid: number, materials: readonly number
   const used = pl.hand.filter((c) => materials.includes(c.iid));
   pl.hand = pl.hand.filter((c) => !materials.includes(c.iid));
   host.fusedThisTurn = true;
-  for (const m of used) if (!host.fusedKinds.includes(m.cardId)) host.fusedKinds.push(m.cardId);
+  // 配列は書き換えずに作り直す（cloneState が複製せずに共有するため）
+  host.fusedKinds = [...host.fusedKinds, ...used.map((m) => m.cardId).filter((id, i, all) => !host.fusedKinds.includes(id) && all.indexOf(id) === i)];
 
   const ctx = newContext(p, host.iid, host.cardId, {
     vars: {

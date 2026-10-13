@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { jsonEqual, KeySet, stateHash, turnOrderHash, turnOrderKey, type HashScope } from "../src/ai/keySet";
+import { jsonEqual, KeySet, stateHash, turnOrderEqual, turnOrderHash, turnOrderKey, type HashScope } from "../src/ai/keySet";
 import { randomAgent } from "../src/ai/random";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { ALL_CARDS } from "../src/cards";
@@ -70,7 +70,14 @@ describe("KeySet", () => {
           const strings = new Set<string>();
           const keys = new KeySet();
           const lazyKeys = new KeySet();
-          const hashes = new Map<string, number>();
+          // turnOrderEqual はキーを作らずに同じ判定をする（同じハッシュの局面どうしで確かめる）
+        const byHash = new Map<number, GameState[]>();
+        for (const t of states) {
+          const h = turnOrderHash(t);
+          for (const u of byHash.get(h) ?? []) expect(turnOrderEqual(t, u)).toBe(jsonEqual(turnOrderKey(t), turnOrderKey(u)));
+          byHash.set(h, [...(byHash.get(h) ?? []), t]);
+        }
+        const hashes = new Map<string, number>();
           for (const t of states) {
             const k = key(t);
             const json = JSON.stringify(k);
@@ -122,9 +129,11 @@ describe("turnOrderKey（手の順番だけが違う局面）", () => {
     expect(jsonEqual(a, b)).toBe(false);
     expect(jsonEqual(turnOrderKey(a), turnOrderKey(b))).toBe(true);
     expect(turnOrderHash(a)).toBe(turnOrderHash(b));
+    expect(turnOrderEqual(a, b)).toBe(true);
     // 中身が違う局面はまとめない（コンボ 3 で岩を出すと森の神秘が加わる）
     const c = ["フェアリーテイマー", "フェアリー", "燐光の岩"].reduce(play, root);
     expect(jsonEqual(turnOrderKey(a), turnOrderKey(c))).toBe(false);
+    expect(turnOrderEqual(a, c)).toBe(false);
   });
 
   it("キーが同じ局面は同じハッシュになる", () => {
