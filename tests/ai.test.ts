@@ -428,7 +428,8 @@ describe("評価関数の重み", () => {
   });
 });
 
-import { reanimateWorthwhile } from "../src/ai/search";
+import { reanimateWorthwhile, turn1ExtraPpAllowed } from "../src/ai/search";
+import { handCost } from "../src/engine";
 
 describe("reanimateGuard", () => {
   it("ケルベロスの超進化は、墓場にコスト 1 のフォロワーがあるときだけ打ってよい", () => {
@@ -481,7 +482,7 @@ describe("lastWordsSummon の評価", () => {
   });
 });
 
-describe("noTurn1ExtraPp", () => {
+describe("turn1ExtraPp", () => {
   it("後攻の 1 ターン目にエクストラPP を使わない（2 コストが手札にあっても）", () => {
     let s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 5 });
     while (s.phase === "mulligan") s = applyAction(s, legalActions(s).find((a) => a.type === "mulligan" && a.swap.length === 0)!);
@@ -492,7 +493,15 @@ describe("noTurn1ExtraPp", () => {
     const girl = ALL_CARDS.find((c) => c.name === "竜育の少女")!.id;
     s.players[p].hand.push(newHandCard(s, girl));
     const choose = (agent: ReturnType<typeof createSearchAgent>) => agent.chooseAction(s, legalActions(s), rngFrom({ rng: 1 }));
-    expect(choose(createSearchAgent({ noTurn1ExtraPp: true })).type).not.toBe("extraPp");
+    expect(choose(createSearchAgent({ turn1ExtraPp: "never" })).type).not.toBe("extraPp");
     expect(choose(createSearchAgent()).type).toBe("extraPp");
+    // keepTurn2: コスト 2 以下が 1 枚なら使わず、2 枚なら使う
+    const low = s.players[p].hand.filter((h) => handCost(h) <= 2).length;
+    const extra = { type: "extraPp" } as const;
+    expect(turn1ExtraPpAllowed(s, extra, p, "keepTurn2")).toBe(low >= 2);
+    s.players[p].hand = s.players[p].hand.filter((h) => handCost(h) > 2 || h.cardId === girl);
+    expect(turn1ExtraPpAllowed(s, extra, p, "keepTurn2")).toBe(false);
+    s.players[p].hand.push(newHandCard(s, girl));
+    expect(turn1ExtraPpAllowed(s, extra, p, "keepTurn2")).toBe(true);
   });
 });
