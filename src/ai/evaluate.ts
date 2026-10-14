@@ -126,8 +126,10 @@ export interface EvalWeights {
    */
   ppLeft: number;
   /**
-   * 後攻の 5 ターン目（使用権が戻る前のターン）に残っているエクストラPP の価値を extraPp の何倍にするか。
-   * 6 ターン目の開始時に使用権が戻り、重ならないので、5 ターン目に残しても得は無い（ユーザー案）。1 なら他のターンと同じ
+   * 後攻の 5 ターン目（使用権が戻る前のターン）を終えるときに残っているエクストラPP の価値を extraPp の何倍にするか。
+   * 6 ターン目の開始時に使用権が戻り、重ならないので、5 ターン目に残しても得は無い（ユーザー案）。1 なら他のターンと同じ。
+   * 探索 AI のターン末の採点（ビーム）だけに使い、evaluateWith では見ない（相手のターンを読んだ後の自分の 5 ターン目の開始時には、
+   * そのターンに使えるので価値がある）
    */
   extraPpExpiring: number;
 }
@@ -469,7 +471,7 @@ export function evaluateWith(state: GameState, p: PlayerIndex, w: EvalWeights): 
     }
   }
   v += me.ep * w.ep + me.sep * w.sep;
-  if (me.extraPpAvailable) v += me.turnCount === EXTRA_PP_REFRESH_TURN - 1 ? w.extraPp * w.extraPpExpiring : w.extraPp;
+  if (me.extraPpAvailable) v += w.extraPp;
   // 自然に増えた分は数えない（PP を増やさないデッキの評価値を変えないため）
   v += (me.maxPp - Math.min(me.turnCount, MAX_PP)) * w.maxPp;
   v += (me.crests.length - opp.crests.length) * w.crest;

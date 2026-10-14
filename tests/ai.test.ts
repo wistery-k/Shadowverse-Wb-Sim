@@ -428,7 +428,7 @@ describe("評価関数の重み", () => {
   });
 });
 
-import { reanimateWorthwhile, turn1ExtraPpAllowed } from "../src/ai/search";
+import { expiringExtraPp, reanimateWorthwhile, turn1ExtraPpAllowed } from "../src/ai/search";
 import { handCost } from "../src/engine";
 
 describe("reanimateGuard", () => {
@@ -507,16 +507,25 @@ describe("turn1ExtraPp", () => {
 });
 
 describe("extraPpExpiring", () => {
-  it("後攻の 5 ターン目に残っているエクストラPP の価値だけを変える", () => {
+  it("後攻の 5 ターン目を終える局面だけ、残っているエクストラPP の価値を引く", () => {
     const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 3 });
     const p = s.first === 0 ? 1 : 0;
+    const q = s.first;
+    s.phase = "main";
+    s.active = p;
     s.players[p].extraPpAvailable = true;
-    const w0 = { ...SEARCH_WEIGHTS, extraPpExpiring: 0 };
     const w1 = { ...SEARCH_WEIGHTS, extraPpExpiring: 1 };
-    const diff = () => evaluateWith(s, p, w1) - evaluateWith(s, p, w0);
     s.players[p].turnCount = 5;
-    expect(diff()).toBeCloseTo(SEARCH_WEIGHTS.extraPp);
+    expect(expiringExtraPp(s, p, SEARCH_WEIGHTS)).toBeCloseTo(SEARCH_WEIGHTS.extraPp * (1 - SEARCH_WEIGHTS.extraPpExpiring));
+    expect(expiringExtraPp(s, p, w1)).toBe(0);
     s.players[p].turnCount = 4;
-    expect(diff()).toBeCloseTo(0);
+    expect(expiringExtraPp(s, p, SEARCH_WEIGHTS)).toBe(0);
+    // 相手のターン中（相手のターンを読んだ後の局面など）は引かない
+    s.players[p].turnCount = 5;
+    s.active = q;
+    expect(expiringExtraPp(s, p, SEARCH_WEIGHTS)).toBe(0);
+    // evaluateWith は 5 ターン目でも他のターンと同じ価値
+    s.active = p;
+    expect(evaluateWith(s, p, SEARCH_WEIGHTS)).toBeCloseTo(evaluateWith(s, p, w1));
   });
 });

@@ -11,6 +11,7 @@ import {
   actingPlayer,
   cardOf,
   handCost,
+  EXTRA_PP_REFRESH_TURN,
   tryApplyAction,
   legalActions,
   resolveTurnEnd,
@@ -344,8 +345,9 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   const evalState = extra ? (state: GameState) => evaluateWith(state, p, w) + extra(state, p) : (state: GameState) => evaluateWith(state, p, w);
   /** ターンを終えるときに残る PP の罰（ppLeft） */
   const leftover = (state: GameState) => (w.ppLeft !== 0 && state.phase === "main" && state.active === p ? w.ppLeft * state.players[p].pp : 0);
-  const endScore = (state: GameState) => evalState(resolveTurnEnd(settle(state))) - leftover(state);
-  const score = opts.scoreTurnEnd === "all" ? endScore : (state: GameState) => evalState(settle(state)) - leftover(state);
+  const expiring = (state: GameState) => expiringExtraPp(state, p, w);
+  const endScore = (state: GameState) => evalState(resolveTurnEnd(settle(state))) - leftover(state) - expiring(state);
+  const score = opts.scoreTurnEnd === "all" ? endScore : (state: GameState) => evalState(settle(state)) - leftover(state) - expiring(state);
   const allowed = (state: GameState, a: Action) => !opts.allow || a.type === "endTurn" || opts.allow(state, a, p);
   const expand = (state: GameState) => (opts.sameHandOnce ? distinctPlays(state, legalActions(state)) : legalActions(state));
   /** 手 a を打った局面（と、そこまでの並び）。chain なら、続く自分の選択とエクストラPP の後の手まで進めた局面すべて */
@@ -552,6 +554,16 @@ export function reanimateWorthwhile(state: GameState, a: Action, p: PlayerIndex)
   const cost = superEvolveReanimateCost(card.cardId);
   if (cost === null) return true;
   return state.players[p].graveyardFollowers.some((id) => cardOf(id).cost === cost);
+}
+
+/**
+ * 後攻の 5 ターン目を終える局面で、残っているエクストラPP の評価（extraPp）から引く点（extraPpExpiring 倍にする分）。
+ * 6 ターン目の開始時に使用権が戻り、重ならないので、5 ターン目に残しても得は無い。ターン末の採点だけに使う
+ */
+export function expiringExtraPp(state: GameState, p: PlayerIndex, w: EvalWeights): number {
+  const me = state.players[p];
+  if (w.extraPpExpiring === 1 || state.phase !== "main" || state.active !== p || p === state.first || !me.extraPpAvailable) return 0;
+  return me.turnCount === EXTRA_PP_REFRESH_TURN - 1 ? w.extraPp * (1 - w.extraPpExpiring) : 0;
 }
 
 /** turn1ExtraPp: 自分の 1 ターン目のエクストラPP を打ってよいか */
