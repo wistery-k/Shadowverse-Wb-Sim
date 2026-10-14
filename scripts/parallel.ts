@@ -99,3 +99,106 @@ export async function parallelMap<T, R>(
   }
   return results;
 }
+
+/** createPool で作る、仕事を何度も渡せる Worker の集まり */
+export interface Pool<T, R> {
+  /** tasks の各要素を並列に行い、tasks と同じ順で結果を返す。onProgress は仕事が 1 つ終わるたびに親で呼ばれる */
+  map(tasks: readonly T[], onProgress?: (done: number, total: number) => void): Promise<R[]>;
+  close(): Promise<void>;
+}
+
+type TaskReply<R> = { ok: true; value: R } | { ok: false; error: string };
+
+/**
+ * 仕事を何度も渡せる Worker の集まりを作る（反復する調整のように、仕事の一覧が前の結果で決まるとき用）。
+ * Worker は main をもう一度呼び、ここに来たところで「親から渡された仕事（構造化複製できる値）に run を適用して返す」処理に切り替わる。
+ * parallelMap と同じく、1 回の実行で 1 回だけ呼び、これより前に画面への出力などの副作用を置かない
+ */
+export async function createPool<T, R>(run: (task: T) => R): Promise<Pool<T, R>> {
+  if (isParallelWorker) {
+    const port = parentPort;
+    if (!port) throw new Error("parentPort がありません");
+    port.on("message", (task: T) => {
+      let reply: TaskReply<R>;
+      try {
+        reply = { ok: true, value: run(task) };
+      } catch (e) {
+        reply = { ok: false, error: e instanceof Error ? (e.stack ?? e.message) : String(e) };
+      }
+      port.postMessage(reply);
+    });
+    return new Promise<Pool<T, R>>(() => {});
+  }
+
+  const ctx = viteRun();
+  const threads = threadCount();
+  if (!ctx || threads <= 1) {
+    return {
+      map: async (tasks, onProgress) =>
+        tasks.map((task, i) => {
+          const value = run(task);
+          onProgress?.(i + 1, tasks.length);
+          return value;
+        }),
+      close: async () => {},
+    };
+  }
+
+  const workers = Array.from({ length: threads }, () => new Worker(new URL(ctx.runner), { workerData: { viteRun: ctx } }));
+  return {
+    map: (tasks, onProgress) =>
+      new Promise<R[]>((resolve, reject) => {
+        const results: R[] = new Array<R>(tasks.length);
+        if (tasks.length === 0) {
+          resolve(results);
+          return;
+        }
+        let next = 0;
+        let done = 0;
+        let failed = false;
+        const cleanups: (() => void)[] = [];
+        const finish = (error?: Error) => {
+          for (const c of cleanups) c();
+          if (error) reject(error);
+          else resolve(results);
+        };
+        for (const worker of workers) {
+          let current = -1;
+          const feed = () => {
+            if (next < tasks.length) {
+              current = next++;
+              worker.postMessage(tasks[current]);
+            } else current = -1;
+          };
+          const onMessage = (reply: TaskReply<R>) => {
+            if (failed) return;
+            if (!reply.ok) {
+              failed = true;
+              finish(new Error(`仕事 ${current} でエラー: ${reply.error}`));
+              return;
+            }
+            results[current] = reply.value;
+            done++;
+            onProgress?.(done, tasks.length);
+            if (done === tasks.length) finish();
+            else feed();
+          };
+          const onError = (e: Error) => {
+            if (failed) return;
+            failed = true;
+            finish(e);
+          };
+          worker.on("message", onMessage);
+          worker.on("error", onError);
+          cleanups.push(() => {
+            worker.off("message", onMessage);
+            worker.off("error", onError);
+          });
+          feed();
+        }
+      }),
+    close: async () => {
+      await Promise.all(workers.map((w) => w.terminate()));
+    },
+  };
+}
