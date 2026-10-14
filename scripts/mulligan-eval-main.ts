@@ -1,8 +1,9 @@
-// マリガンの重みの評価（npm run mulligan-eval -- --weights <file> --games <n> --seed <s> --shard <i>/<k> --out <file.jsonl> [--base weights] [--evo-bonus <b>] [--base-weights <file>] [--one-copy] [--max-high <n>] [--model <file>]）。
+// マリガンの重みの評価（npm run mulligan-eval -- --weights <file> --games <n> --seed <s> --shard <i>/<k> --out <file.jsonl> [--base weights] [--evo-bonus <b>] [--base-weights <file>] [--base-model <file>] [--one-copy] [--max-high <n>] [--model <file>]）。
 // --base weights なら「今の方針」を重み（evoBonus なし）にし、新しい方針を重み＋--evo-bonus にする（進化時能力持ちの加点の評価）。
 // --one-copy・--max-high は新しい方針に「同じカードは 1 枚まで」「コスト 4 以上は n 枚まで」を足す（MulliganOptions）。
 // --model <file> なら新しい方針を手札の形のマリガン（src/ai/mulliganModel.ts）にする。
 // --base-weights <file> なら「今の方針」をそのファイルの重みにする（取り直した重みと今の重みの比較）。
+// --base-model <file> なら「今の方針」をそのファイルの手札の形のマリガンにする（役割の無いデッキは重み、エルフはリノセウス用のルール。取り直したモデルと今のモデルの比較）。
 // 集計は npm run mulligan-eval -- --summary <file.jsonl ...>
 // 7 デッキの全ての組（ミラーを除く 42 通り）× 両方の席 × n シードについて、自分側だけマリガンを「今の方針」と「重み」で打ち分ける。
 // 相手は今の AI（今のマリガン）。シードが同じなので、マリガンの判断が同じなら試合はまったく同じになる。
@@ -85,6 +86,7 @@ export async function main(argv: string[]): Promise<number> {
   }
   const opts: MulliganOptions = {};
   let modelFile: string | null = null;
+  let baseModelFile: string | null = null;
   let games = 10, seed = 2, shard = [0, 1], out = "mulligan-eval.jsonl", weightsFile = "data/mulligan-weights.json", base = "rule", baseWeightsFile: string | null = null;
   for (let i = 0; i < argv.length; i += 2) {
     const k = argv[i], v = argv[i + 1] ?? "";
@@ -100,7 +102,10 @@ export async function main(argv: string[]): Promise<number> {
       i--;
     } else if (k === "--max-high") opts.maxHighCost = Number(v);
     else if (k === "--model") modelFile = v;
-    else if (k === "--base-weights") {
+    else if (k === "--base-model") {
+      baseModelFile = v;
+      base = "model";
+    } else if (k === "--base-weights") {
       baseWeightsFile = v;
       base = "weights";
     }
@@ -116,9 +121,12 @@ export async function main(argv: string[]): Promise<number> {
     }
   }
   const baseWeights = baseWeightsFile === null ? weights : (JSON.parse(readFileSync(baseWeightsFile, "utf8")) as MulliganWeights);
-  if (base !== "rule" && base !== "weights") throw new Error(`不明な --base: ${base}`);
+  if (base !== "rule" && base !== "weights" && base !== "model") throw new Error(`不明な --base: ${base}`);
+  const baseModel = baseModelFile === null ? null : (JSON.parse(readFileSync(baseModelFile, "utf8")) as MulliganModel);
   const baseSwap = (deck: string) => (s: GameState, p: PlayerIndex) =>
-    base === "weights" ? (weightedMulliganSwap(s, p, baseWeights) ?? costMulliganSwap(s, p)) : deck === ELF ? rhinoMulliganSwap(s, p) : costMulliganSwap(s, p);
+    baseModel
+      ? deck === ELF ? rhinoMulliganSwap(s, p) : (modelMulliganSwap(s, p, baseModel) ?? weightedMulliganSwap(s, p, weights) ?? costMulliganSwap(s, p))
+      : base === "weights" ? (weightedMulliganSwap(s, p, baseWeights) ?? costMulliganSwap(s, p)) : deck === ELF ? rhinoMulliganSwap(s, p) : costMulliganSwap(s, p);
   const model = modelFile === null ? null : (JSON.parse(readFileSync(modelFile, "utf8")) as MulliganModel);
   const newSwap = (s: GameState, p: PlayerIndex) => (model ? modelMulliganSwap(s, p, model) : weightedMulliganSwap(s, p, weights, opts));
   const baseAgent = (deck: string): Agent => (deck === ELF ? rhinoAgent : searchAgent);
