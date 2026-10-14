@@ -28,7 +28,9 @@
     "lethal-prevent": "node scripts/vite-run.mjs scripts/lethal-prevent-main.ts",
     "mulligan-model-fit": "node scripts/vite-run.mjs scripts/mulligan-model-fit-main.ts",
     "plan-value-data": "node scripts/vite-run.mjs scripts/plan-value-data-main.ts",
-    "plan-value-fit": "node scripts/vite-run.mjs scripts/plan-value-fit-main.ts"
+    "plan-value-fit": "node scripts/vite-run.mjs scripts/plan-value-fit-main.ts",
+    "human-plan-value": "node scripts/vite-run.mjs scripts/human-plan-value-main.ts",
+    "human-plan-value-report": "node scripts/vite-run.mjs scripts/human-plan-value-report-main.ts"
   },
   "repository": {
     "type": "git",

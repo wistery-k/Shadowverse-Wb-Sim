@@ -31,12 +31,12 @@ type Reply<R> = { index: number; ok: true; value: R } | { index: number; ok: fal
 
 /**
  * items の各要素に run を適用した結果を、items と同じ順で返す（並列に行う）。
- * onProgress は親で、仕事が 1 つ終わるたびに呼ばれる
+ * onProgress は親で、仕事が 1 つ終わるたびに呼ばれる（終わった仕事の結果と番号も渡す。結果を親だけで書き出すときに使う）
  */
 export async function parallelMap<T, R>(
   items: readonly T[],
   run: (item: T, index: number) => R,
-  onProgress?: (done: number, total: number) => void,
+  onProgress?: (done: number, total: number, value: R, index: number) => void,
 ): Promise<R[]> {
   if (isParallelWorker) {
     const port = parentPort;
@@ -60,7 +60,7 @@ export async function parallelMap<T, R>(
   if (!ctx || threads <= 1) {
     for (const [i, item] of items.entries()) {
       results[i] = run(item, i);
-      onProgress?.(i + 1, items.length);
+      onProgress?.(i + 1, items.length, results[i] as R, i);
     }
     return results;
   }
@@ -83,7 +83,7 @@ export async function parallelMap<T, R>(
           }
           results[reply.index] = reply.value;
           done++;
-          onProgress?.(done, items.length);
+          onProgress?.(done, items.length, reply.value, reply.index);
           if (done === items.length) resolve();
           else feed();
         });
