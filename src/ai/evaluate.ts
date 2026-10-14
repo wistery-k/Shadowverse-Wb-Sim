@@ -125,6 +125,13 @@ export interface EvalWeights {
    * 同じ局面の手順どうしを比べると（plan-value、docs/ai-notes.md）、評価が同じでも PP を余らせた手順ほど勝率が低かった。0 なら見ない
    */
   ppLeft: number;
+  /**
+   * 後攻の 5 ターン目（使用権が戻る前のターン）を終えるときに残っているエクストラPP の価値を extraPp の何倍にするか。
+   * 6 ターン目の開始時に使用権が戻り、重ならないので、5 ターン目に残しても得は無い（ユーザー案）。1 なら他のターンと同じ。
+   * 探索 AI のターン末の採点（ビーム）だけに使い、evaluateWith では見ない（相手のターンを読んだ後の自分の 5 ターン目の開始時には、
+   * そのターンに使えるので価値がある）
+   */
+  extraPpExpiring: number;
 }
 
 /** 数値の重みの名前（hold を除く） */
@@ -169,6 +176,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   hold: {},
   doomed: 1,
   ppLeft: 0,
+  extraPpExpiring: 1,
 };
 
 /**
@@ -248,7 +256,7 @@ const HAS_ACT: ReadonlySet<string> = new Set(
  * doomed 0.3（相手のターン終了時に自壊するフォロワー）は勝率を変えない（3000 試合で 49.6%）が、改良型・操り人形で攻撃せずに終えたり
  * アンの大英霊を進化させたりするのが直るので採用（ユーザー判断。docs/ai-notes.md）
  */
-export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, crest: 3, fusionSet: 3.6, kuonReserve: 8, evoReserve: 3, sevoReserve: 6, lastWords: 1, lastWordsSummon: 0.5, boostCard: 1, boost: 0.2, countdownDecay: 0.8, doomed: 0.3, hold: FUSION_HOLD };
+export const SEARCH_WEIGHTS: EvalWeights = { ...DEFAULT_WEIGHTS, maxPp: 8, sep: 5, crest: 3, fusionSet: 3.6, kuonReserve: 8, evoReserve: 3, sevoReserve: 6, lastWords: 1, lastWordsSummon: 0.5, boostCard: 1, boost: 0.2, countdownDecay: 0.8, doomed: 0.3, extraPpExpiring: 0, hold: FUSION_HOLD };
 
 const KEYWORD_VALUE: Partial<Record<string, number>> = {
   ward: 1,
