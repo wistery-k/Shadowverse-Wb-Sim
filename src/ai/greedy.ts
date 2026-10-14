@@ -44,12 +44,34 @@ function valueAfterExtraPp(state: GameState, p: PlayerIndex, w: EvalWeights): nu
   return values.length > 0 ? Math.max(...values) : -Infinity;
 }
 
-function bestAction(state: GameState, legal: readonly Action[], p: PlayerIndex, w: EvalWeights): Action {
+/**
+ * 融合は、融合した局面と、融合した後に打てる最善手（融合・エクストラPP を除く）の価値の高い方で評価する。
+ * 融合しただけでは手札が減るので、デストロイアーティファクト α・β・γ からイクシードアーティファクトΩ を作る手等を打たない
+ */
+function valueAfterFuse(state: GameState, action: Action, p: PlayerIndex, w: EvalWeights): number {
+  const self = valueAfter(state, action, p, w);
+  let next: GameState | null;
+  try {
+    next = tryApplyAction(state, action);
+  } catch {
+    return self;
+  }
+  if (!next || next.phase === "ended" || next.pending || next.active !== p) return self;
+  let best = self;
+  for (const a of legalActions(next)) {
+    if (a.type === "endTurn" || a.type === "extraPp" || a.type === "fuse") continue;
+    best = Math.max(best, valueAfter(next, a, p, w));
+  }
+  return best;
+}
+
+function bestAction(state: GameState, legal: readonly Action[], p: PlayerIndex, w: EvalWeights, fuseFollowUp: boolean): Action {
   let best: Action | undefined;
   let bestValue = -Infinity;
   for (const a of legal) {
     if (a.type === "endTurn") continue;
-    const value = a.type === "extraPp" ? valueAfterExtraPp(state, p, w) : valueAfter(state, a, p, w);
+    const value =
+      a.type === "extraPp" ? valueAfterExtraPp(state, p, w) : a.type === "fuse" && fuseFollowUp ? valueAfterFuse(state, a, p, w) : valueAfter(state, a, p, w);
     if (value > bestValue) {
       bestValue = value;
       best = a;
@@ -70,16 +92,17 @@ function mulligan(state: GameState, legal: readonly Action[], p: PlayerIndex): A
 }
 
 /**
- * 貪欲法の AI を作る。omniscient は比較実験用（見えない情報を使う。対戦には使わない）
+ * 貪欲法の AI を作る。omniscient は比較実験用（見えない情報を使う。対戦には使わない）。
+ * fuseFollowUp なら、融合を融合した後に打てる最善手の価値でも評価する（valueAfterFuse）
  */
-export function createGreedyAgent(opts: { omniscient?: boolean; weights?: EvalWeights | "byClass" } = {}): Agent {
+export function createGreedyAgent(opts: { omniscient?: boolean; weights?: EvalWeights | "byClass"; fuseFollowUp?: boolean } = {}): Agent {
   const weights = opts.weights ?? DEFAULT_WEIGHTS;
   return {
     name: opts.omniscient ? "greedy-omniscient" : "greedy",
     chooseAction: (real, legal, rng) => {
       const p = real.pending ? real.pending.player : real.active;
       const w = weights === "byClass" ? weightsFor(real, p) : weights;
-      return chooseGreedy(real, legal, rng, opts.omniscient ?? false, w);
+      return chooseGreedy(real, legal, rng, opts.omniscient ?? false, w, opts.fuseFollowUp ?? false);
     },
   };
 }
@@ -93,7 +116,7 @@ export const greedyAgent: Agent = createGreedyAgent();
  */
 export const tunedGreedyAgent: Agent = createGreedyAgent({ weights: "byClass" });
 
-function chooseGreedy(real: GameState, legal: readonly Action[], rng: Rng, omniscient: boolean, w: EvalWeights): Action {
+function chooseGreedy(real: GameState, legal: readonly Action[], rng: Rng, omniscient: boolean, w: EvalWeights, fuseFollowUp: boolean): Action {
     const first = legal[0];
     if (!first) throw new Error("合法手がありません");
     if (first.type === "mulligan") return mulligan(real, legal, first.player);
@@ -111,5 +134,5 @@ function chooseGreedy(real: GameState, legal: readonly Action[], rng: Rng, omnis
       }
       return best;
     }
-    return bestAction(state, legal, p, w);
+    return bestAction(state, legal, p, w, fuseFollowUp);
 }

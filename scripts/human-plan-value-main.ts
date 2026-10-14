@@ -15,7 +15,7 @@ import { settleConvergingTrades } from "../src/ai/convergingTrade";
 import { determinize } from "../src/ai/determinize";
 import { SEARCH_WEIGHTS, evaluateWith } from "../src/ai/evaluate";
 import { turnOrderKey } from "../src/ai/keySet";
-import { createRhinoAgent } from "../src/ai/rhino";
+import { createRhinoAgent, type RhinoOptions } from "../src/ai/rhino";
 import { createSearchAgent, simulateOpponentTurn, turnCandidates } from "../src/ai/search";
 import type { Agent } from "../src/ai/types";
 import {
@@ -79,17 +79,20 @@ export interface HumanPlanRecord {
   humanInCandidates: boolean | null;
 }
 
-const gameKey = (r: { subject: string; deck: string; g: number; seat: number }) => `${r.subject}/${r.deck}/${r.g}/${r.seat}`;
+export const gameKey = (r: { subject: string; deck: string; g: number; seat: number }) => `${r.subject}/${r.deck}/${r.g}/${r.seat}`;
 
-function mix(seed: number, x: number): number {
+export function mix(seed: number, x: number): number {
   return nextRandom((seed ^ Math.imul(x + 1, 0x9e3779b1)) >>> 0)[1];
 }
 
-const isStartOfTurn = (s: GameState) => s.phase === "main" && !s.pending && s.stack.length === 0 && s.queue.length === 0;
+export const isStartOfTurn = (s: GameState) => s.phase === "main" && !s.pending && s.stack.length === 0 && s.queue.length === 0;
 
-/** 比べるデッキの席に既定の AI、相手に探索 AI（人間の試合の相手と同じ）。続きを打つたびに作り直す（計画を持ち越さないため） */
-function makeAgents(subject: SubjectId, seat: PlayerIndex): [Agent, Agent] {
-  const me = SUBJECTS[subject].agent === "rhino" ? createRhinoAgent() : createSearchAgent();
+/**
+ * 比べるデッキの席に既定の AI、相手に探索 AI（人間の試合の相手と同じ）。続きを打つたびに作り直す（計画を持ち越さないため）。
+ * opts は比べるデッキの AI の設定（variant-plan-value で AI の手順を変えるときだけ使う）
+ */
+export function makeAgents(subject: SubjectId, seat: PlayerIndex, opts: RhinoOptions = {}): [Agent, Agent] {
+  const me = SUBJECTS[subject].agent === "rhino" ? createRhinoAgent(opts) : createSearchAgent(opts);
   const opp = createSearchAgent();
   return seat === 0 ? [me, opp] : [opp, me];
 }
@@ -107,7 +110,7 @@ function rescoredValue(s: GameState, p: PlayerIndex, seed: number): number {
 }
 
 const round = (x: number) => Math.round(x * 100) / 100;
-const keyOf = (s: GameState) => JSON.stringify(turnOrderKey(s));
+export const keyOf = (s: GameState) => JSON.stringify(turnOrderKey(s));
 
 function mulliganText(s: GameState, a: Action, p: PlayerIndex): string[] {
   if (a.type !== "mulligan") return [describeAction(s, a, p)];
@@ -117,7 +120,7 @@ function mulliganText(s: GameState, a: Action, p: PlayerIndex): string[] {
 }
 
 /** 局面 start から、席 p の AI がターンを終える直前まで打つ（相手の選択待ちは相手の AI が選ぶ） */
-function aiTurn(start: GameState, p: PlayerIndex, agents: [Agent, Agent], seed: number): { end: GameState; steps: string[] } {
+export function aiTurn(start: GameState, p: PlayerIndex, agents: [Agent, Agent], seed: number): { end: GameState; steps: string[] } {
   const rng = rngFrom({ rng: seed });
   const steps: string[] = [];
   let t = start;
@@ -134,7 +137,7 @@ function aiTurn(start: GameState, p: PlayerIndex, agents: [Agent, Agent], seed: 
 }
 
 /** 局面 after（ターンを終えた後）から M 回最後まで打たせ、席 p が勝ったか。r 番目は手順によらず同じシード */
-function rollouts(after: GameState, subject: SubjectId, p: PlayerIndex, M: number, seed: number, prepare?: (det: GameState) => GameState): (boolean | null)[] {
+export function rollouts(after: GameState, subject: SubjectId, p: PlayerIndex, M: number, seed: number, prepare?: (det: GameState) => GameState): (boolean | null)[] {
   const wins: (boolean | null)[] = [];
   for (let r = 0; r < M; r++) {
     try {
