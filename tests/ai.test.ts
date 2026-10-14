@@ -480,3 +480,19 @@ describe("lastWordsSummon の評価", () => {
     expect(evaluateWith(s, p, w1) - evaluateWith(s, p, w0)).toBeCloseTo(2 * skeleton * 0.5);
   });
 });
+
+describe("noTurn1ExtraPp", () => {
+  it("後攻の 1 ターン目にエクストラPP を使わない（2 コストが手札にあっても）", () => {
+    let s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 5 });
+    while (s.phase === "mulligan") s = applyAction(s, legalActions(s).find((a) => a.type === "mulligan" && a.swap.length === 0)!);
+    s = applyAction(s, { type: "endTurn" });
+    const p = s.active;
+    expect(s.players[p].turnCount).toBe(1);
+    expect(s.players[p].extraPpAvailable).toBe(true);
+    const girl = ALL_CARDS.find((c) => c.name === "竜育の少女")!.id;
+    s.players[p].hand.push(newHandCard(s, girl));
+    const choose = (agent: ReturnType<typeof createSearchAgent>) => agent.chooseAction(s, legalActions(s), rngFrom({ rng: 1 }));
+    expect(choose(createSearchAgent({ noTurn1ExtraPp: true })).type).not.toBe("extraPp");
+    expect(choose(createSearchAgent()).type).toBe("extraPp");
+  });
+});
