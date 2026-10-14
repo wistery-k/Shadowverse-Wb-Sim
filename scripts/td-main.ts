@@ -14,6 +14,9 @@
 //     λ 収益（G_t = (1-λ) V_{t+1} + λ G_{t+1}、最後は勝敗）を目標に、L と c（--fitA 1 なら a も）を交差エントロピーで学ぶ。
 //     a を学ぶと、出発点の評価が勝敗をあまり当てないとき a が小さくなり、探索では補正 (c + L) / a の重みが増える。
 //     V は今のモデルの予測で、エポックごとに計算し直す。試合の --holdout の割合は学習に使わず、予測の確かめに使う
+//   npm run td -- probe --model m1.json --data d0.jsonl [--per 2000]
+//     学んだ補正が何を見ているか: デッキごとのターン末の局面で、入力を 1 つ増やしたときの補正 (c + L) / a の変化（評価の点数の単位）の平均。
+//     PP 最大値・EP・SEP を 1 増やす、手札・場にカードを 1 枚足す（変化の大きい順）
 //
 // 自己対戦は CPU のコア数だけ並列に行う（scripts/parallel.ts）。
 
@@ -24,14 +27,17 @@ import {
   compileValueNet,
   defaultVocab,
   encodeState,
+  forwardValueNet,
   inputSize,
   VALUE_SCALARS,
   VALUE_ZONES,
   valueNetExtraEval,
   type CompiledValueNet,
+  type SparseInput,
   type ValueNetModel,
   type ValuePhase,
 } from "../src/ai/valueNet";
+import { ALL_CARDS, ALL_CRESTS } from "../src/cards";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { actingPlayer, applyAction, createGame, legalActions, nextRandom, resolveTurnEnd, rngFrom, type Action, type GameState, type PlayerIndex } from "../src/engine";
 import { isParallelWorker, parallelMap } from "./parallel";
@@ -54,7 +60,8 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === "init") return init(args);
   if (cmd === "selfplay") return selfplay(args);
   if (cmd === "train") return train(args);
-  throw new Error("npm run td -- init|selfplay|train ...（scripts/td-main.ts の先頭の説明を参照）");
+  if (cmd === "probe") return probe(args);
+  throw new Error("npm run td -- init|selfplay|train|probe ...（scripts/td-main.ts の先頭の説明を参照）");
 }
 
 type Args = Map<string, string>;
@@ -476,5 +483,71 @@ function train(args: Args): number {
   };
   writeFileSync(out, JSON.stringify(outModel));
   console.log(`${out} に書き出しました`);
+  return 0;
+}
+
+// ---- probe ----
+
+function probe(args: Args): number {
+  const model = loadValueNet(need(args, "model"));
+  const net = compileValueNet(model);
+  const per = numArg(args, "per", 2000);
+  const V = model.vocab.length;
+  const base = model.zones.length * V;
+  const zone = (name: (typeof VALUE_ZONES)[number]) => VALUE_ZONES.indexOf(name) * V;
+  const scalar = (name: (typeof VALUE_SCALARS)[number]) => base + VALUE_SCALARS.indexOf(name);
+  const nameOf = new Map([...ALL_CARDS.map((c): [string, string] => [c.id, c.name]), ...ALL_CRESTS.map((c): [string, string] => [`crest:${c.id}`, c.name])]);
+  // デッキごとのターン末の局面
+  const byDeck = new Map<string, SparseInput[]>();
+  for (const file of need(args, "data").split(",")) {
+    for (const line of readFileSync(file, "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      const r = JSON.parse(line) as GameRecord;
+      r.samples.forEach((seq, p) => {
+        const list = byDeck.get(r.decks[p]!) ?? [];
+        for (const x of seq) if (x.ph === 0 && list.length < per) list.push({ idx: x.x, val: x.v });
+        byDeck.set(r.decks[p]!, list);
+      });
+    }
+  }
+  const points = (x: SparseInput) => (model.c + forwardValueNet(net, x)) / model.a;
+  const bump = (x: SparseInput, i: number, d: number): SparseInput => {
+    const k = x.idx.indexOf(i);
+    if (k < 0) return { idx: [...x.idx, i], val: [...x.val, d] };
+    const val = [...x.val];
+    val[k] = val[k]! + d;
+    return { idx: x.idx, val };
+  };
+  /** 局面の一覧で、添字 i を d 増やしたときの点数の変化の平均（has を渡すと、その添字が既に正の局面だけ） */
+  const effect = (list: SparseInput[], i: number, d: number, has = false): [number, number] => {
+    let sum = 0, n = 0;
+    for (const x of list) {
+      if (has && !(x.val[x.idx.indexOf(i)]! > 0)) continue;
+      sum += points(bump(x, i, d)) - points(x);
+      n++;
+    }
+    return [n === 0 ? 0 : sum / n, n];
+  };
+  for (const [deck, list] of byDeck) {
+    const mean = list.reduce((x, s) => x + points(s), 0) / Math.max(1, list.length);
+    const sc = ([["myMaxPp", 0.1, "PP最大値+1"], ["myEp", 1 / 3, "EP+1"], ["mySep", 0.5, "SEP+1"], ["myHp", 0.05, "体力+1"], ["oppHp", 0.05, "相手の体力+1"]] as const)
+      .map(([name, d, label]) => `${label} ${effect(list, scalar(name), d)[0].toFixed(2)}`)
+      .join("、");
+    console.log(`== ${deck}（${list.length} 局面、補正の平均 ${mean.toFixed(1)} 点）: ${sc}`);
+    for (const z of ["myHand", "myBoard"] as const) {
+      // その局面で使われているカード（そのゾーンに 1 回でも現れたもの）
+      const seen = new Set<number>();
+      for (const x of list) for (const i of x.idx) if (i >= zone(z) && i < zone(z) + V) seen.add(i);
+      const rows = [...seen]
+        .map((i) => {
+          const [d, n] = effect(list, i, 1);
+          return { name: nameOf.get(model.vocab[i - zone(z)]!) ?? model.vocab[i - zone(z)]!, d, n };
+        })
+        .sort((x, y) => y.d - x.d);
+      const fmt = (r: (typeof rows)[number]) => `${r.name} ${r.d >= 0 ? "+" : ""}${r.d.toFixed(2)}`;
+      console.log(`  ${z} +1 枚: 高い ${rows.slice(0, 8).map(fmt).join("、")}`);
+      console.log(`  ${z} +1 枚: 低い ${rows.slice(-5).map(fmt).join("、")}`);
+    }
+  }
   return 0;
 }
