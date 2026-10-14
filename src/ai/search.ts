@@ -132,8 +132,11 @@ export interface SearchOptions {
    */
   nextLethal: number;
   nextLethalSearch?: (state: GameState, p: PlayerIndex) => boolean;
-  /** 評価関数に足す項（デッキ専用の AI 用。ターン末の採点と、相手のターンを読んだ後の評価の両方に足す） */
-  extraEval?: (state: GameState, p: PlayerIndex) => number;
+  /**
+   * 評価関数に足す項（デッキ専用の AI・学習した補正用。ターン末の採点と、相手のターンを読んだ後の評価の両方に足す）。
+   * phase は、ターン末の局面（"end"）か、相手のターンを読んだ後の局面（"after"）か
+   */
+  extraEval?: (state: GameState, p: PlayerIndex, phase: "end" | "after") => number;
   /**
    * ビームに、最初の手ごとに少なくともこの数の局面を残す（幅を超えてもよい。0 なら幅だけで切る）。
    * 点数の高い最初の手の局面でビームが埋まると、他の最初の手の並びが途中で切れ、短い並びのまま相手のターンまで読まれる。
@@ -377,7 +380,10 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   /** ターンを終える局面（合流する相打ちを打った後） */
   const settle = (state: GameState) => (opts.settleTrades ? settleConvergingTrades(state, p) : state);
   const extra = opts.extraEval;
-  const evalState = extra ? (state: GameState) => evaluateWith(state, p, w) + extra(state, p) : (state: GameState) => evaluateWith(state, p, w);
+  const evalAt = (phase: "end" | "after") =>
+    extra ? (state: GameState) => evaluateWith(state, p, w) + extra(state, p, phase) : (state: GameState) => evaluateWith(state, p, w);
+  const evalState = evalAt("end");
+  const evalAfter = evalAt("after");
   /** ターンを終えるときに残る PP の罰（ppLeft） */
   const leftover = (state: GameState) => (w.ppLeft !== 0 && state.phase === "main" && state.active === p ? w.ppLeft * state.players[p].pp : 0);
   const expiring = (state: GameState) => expiringExtraPp(state, p, w);
@@ -537,7 +543,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   const result = new Map<string, Plan>();
   const readOnce = (start: GameState): number => {
     const after = opts.opponentSearch ? simulateOpponentTurnBySearch(start, p, rng, opts, w) : simulateOpponentTurn(start, p, rng, w.doomed, opts.oppFuse);
-    let v = evalState(after);
+    let v = evalAfter(after);
     if (opts.nextLethal !== 0 && after.phase !== "ended" && after.players[p === 0 ? 1 : 0].leaderHp <= w.lethalRange && hasNextLethal(after, p)) v += opts.nextLethal;
     return v;
   };

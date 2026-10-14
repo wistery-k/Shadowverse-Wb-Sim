@@ -26,6 +26,7 @@ import type { Agent } from "../src/ai/types";
 import { playMatch } from "../src/sim/match";
 import { compareMatch, isSubjectId, opponentsOf, SUBJECTS, type SubjectId } from "../src/sim/humanCompare";
 import { parallelMap } from "./parallel";
+import { applyValueNetOption } from "./valueNetOption";
 
 const ARIA = "自然の妖精姫・アリア";
 const JEANNE = "純白の聖女・ジャンヌ";
@@ -54,7 +55,8 @@ export async function main(argv: string[]): Promise<number> {
       subject = v;
     }
     else if (key === "--opts") {
-      const raw = JSON.parse(v) as Record<string, unknown>;
+      // "valueNet" にファイル名を渡すと、TD 学習で作った評価の補正を使う（scripts/valueNetOption.ts）
+      const raw = applyValueNetOption(JSON.parse(v) as Record<string, unknown>);
       if (typeof raw.weights === "object" && raw.weights !== null) raw.weights = { ...SEARCH_WEIGHTS, ...raw.weights };
       opts = raw as RhinoOptions;
     }
