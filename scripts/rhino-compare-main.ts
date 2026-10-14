@@ -1,6 +1,6 @@
 // リノセウス用 AI の設定を変えたときの勝率（npm run rhino-compare）。--subject af（npm run af-compare）で AFネメシスの AI を、--subject spellwitch（npm run spellwitch-compare）でスペルウィッチの AI を、--subject bishop（npm run bishop-compare）でアミュレット疾走ビショップの AI を、--subject dragon・nightmare・royal（npm run dragon-compare・nightmare-compare・royal-compare）で疾走ドラゴン・ミッドレンジナイトメア・アマリアロイヤルの AI を同じ形で比べる
 //
-// リノセウスエルフ（リノセウス用 AI）vs 他の 6 デッキ（探索 AI。ランプドラゴンは除く）を、両方の席で同じシードで打つ。
+// リノセウスエルフ（リノセウス用 AI）vs 他の 6 デッキ（学習した評価の補正を入れる前の探索 AI。ランプドラゴンは除く）を、両方の席で同じシードで打つ。
 // --subject af・spellwitch・bishop・dragon・nightmare・royal のときは AFネメシス・スペルウィッチ・アミュレット疾走ビショップ・疾走ドラゴン・ミッドレンジナイトメア・アマリアロイヤル（既定は探索 AI。--opts は探索 AI の設定 SearchOptions の一部）vs 他の 6 デッキ。
 // 設定を変えても同じシードの試合になるので、変更前後を同じ試合数で比べられる。
 // 例: npm run rhino-compare -- --games 50 --opts '{"nextLethal":10}'
@@ -21,10 +21,10 @@ import { exactLethalCounts } from "../src/ai/exactLethal";
 import { createRhinoAgent, type RhinoOptions } from "../src/ai/rhino";
 import { agentOf } from "../src/ai/registry";
 import { applyAction, cardOf, createGame } from "../src/engine";
-import { createSearchAgent, exhaustiveCounts, searchAgent } from "../src/ai/search";
+import { createSearchAgent, exhaustiveCounts } from "../src/ai/search";
 import type { Agent } from "../src/ai/types";
 import { playMatch } from "../src/sim/match";
-import { compareMatch, isSubjectId, opponentsOf, SUBJECTS, type SubjectId } from "../src/sim/humanCompare";
+import { compareMatch, isSubjectId, OPPONENT_AGENT, opponentsOf, SUBJECTS, type SubjectId } from "../src/sim/humanCompare";
 import { parallelMap } from "./parallel";
 import { applyValueNetOption } from "./valueNetOption";
 
@@ -65,6 +65,8 @@ export async function main(argv: string[]): Promise<number> {
   agentKey ??= SUBJECTS[subject].agent;
   // --opts は rhino・search のときだけ使う
   const agent: Agent = agentKey === "rhino" ? createRhinoAgent(opts) : agentKey === "search" ? createSearchAgent(opts) : agentOf(agentKey);
+  // 相手は web の「人間との比較」と同じ AI（学習した評価の補正を入れる前の探索 AI。src/sim/humanCompare.ts）
+  const opponent = agentOf(OPPONENT_AGENT);
   const given = matches === null ? null : readMatches(matches, subject);
   const tasks =
     given?.map(({ deck, g, seat }) => ({ o: deck, g, elfSeat: seat })) ??
@@ -74,7 +76,7 @@ export async function main(argv: string[]): Promise<number> {
     const { decks, seed } = compareMatch(subject, o, g, elfSeat);
     Object.assign(exhaustiveCounts, { searches: 0, overflow: 0, states: 0, maxStates: 0, better: 0, gain: 0, firstDiffers: 0, byTurn: {} });
     const t = Date.now();
-    const r = playMatch(elfSeat === 0 ? [agent, searchAgent] : [searchAgent, agent], { decks, seed, record: true });
+    const r = playMatch(elfSeat === 0 ? [agent, opponent] : [opponent, agent], { decks, seed, record: true });
     // アリアを最初に出した自分のターン
     let s = createGame({ decks, seed });
     let ariaTurn: number | null = null;

@@ -14,6 +14,9 @@
 //     λ 収益（G_t = (1-λ) V_{t+1} + λ G_{t+1}、最後は勝敗）を目標に、L と c（--fitA 1 なら a も）を交差エントロピーで学ぶ。
 //     a を学ぶと、出発点の評価が勝敗をあまり当てないとき a が小さくなり、探索では補正 (c + L) / a の重みが増える。
 //     V は今のモデルの予測で、エポックごとに計算し直す。試合の --holdout の割合は学習に使わず、予測の確かめに使う
+//   npm run td -- prune --model m4.json --data d0.jsonl,d1.jsonl,... --out data/value-net.json
+//     学習データに一度も現れなかった入力（デフォルトデッキに無いカードなど）の重みを 0 にする。学ばれずに初期値の乱数のまま残っているので、
+//     そのカードを使う自作デッキで補正がでたらめに動かないようにする（ファイルも小さくなる）
 //   npm run td -- probe --model m1.json --data d0.jsonl [--per 2000]
 //     学んだ補正が何を見ているか: デッキごとのターン末の局面で、入力を 1 つ増やしたときの補正 (c + L) / a の変化（評価の点数の単位）の平均。
 //     PP 最大値・EP・SEP を 1 増やす、手札・場にカードを 1 枚足す（変化の大きい順）
@@ -61,7 +64,8 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === "selfplay") return selfplay(args);
   if (cmd === "train") return train(args);
   if (cmd === "probe") return probe(args);
-  throw new Error("npm run td -- init|selfplay|train|probe ...（scripts/td-main.ts の先頭の説明を参照）");
+  if (cmd === "prune") return prune(args);
+  throw new Error("npm run td -- init|selfplay|train|probe|prune ...（scripts/td-main.ts の先頭の説明を参照）");
 }
 
 type Args = Map<string, string>;
@@ -158,7 +162,8 @@ interface GameRecord {
 function modelOptions(model: ValueNetModel, net: CompiledValueNet): { opts: Partial<SearchOptions>; w: EvalWeights } {
   const w = { ...SEARCH_WEIGHTS, ...model.baseWeights } as EvalWeights;
   const zero = model.w2.every((x) => x === 0) && model.b2 === 0 && model.c === 0;
-  return { opts: { weights: w, ...(zero ? {} : { extraEval: valueNetExtraEval(net) }) }, w };
+  // 補正が 0 のモデルは補正を足さない（探索 AI の既定の補正 data/value-net.json も外す）
+  return { opts: { weights: w, extraEval: zero ? null : valueNetExtraEval(net) }, w };
 }
 
 async function selfplay(args: Args): Promise<number> {
@@ -549,5 +554,27 @@ function probe(args: Args): number {
       console.log(`  ${z} +1 枚: 低い ${rows.slice(-5).map(fmt).join("、")}`);
     }
   }
+  return 0;
+}
+
+// ---- prune ----
+
+function prune(args: Args): number {
+  const model = loadValueNet(need(args, "model"));
+  const files = need(args, "data").split(",");
+  const out = need(args, "out");
+  const used = new Set<number>();
+  for (const file of files) {
+    for (const line of readFileSync(file, "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      const r = JSON.parse(line) as GameRecord;
+      for (const seq of r.samples) for (const x of seq) for (const i of x.x) used.add(i);
+    }
+  }
+  const H = model.hidden;
+  const n = inputSize(model);
+  const w1 = model.w1.map((w, k) => (used.has(Math.floor(k / H)) ? w : 0));
+  writeFileSync(out, JSON.stringify({ ...model, w1 }));
+  console.log(`${out}: 入力 ${n} のうち、データに現れた ${used.size} 個の重みを残し、${n - used.size} 個を 0 にしました`);
   return 0;
 }

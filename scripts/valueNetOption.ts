@@ -10,12 +10,14 @@ export function loadValueNet(path: string): ValueNetModel {
 
 /**
  * raw に "valueNet": "<ファイル>" があれば、評価の重みをそのモデルの出発点（SEARCH_WEIGHTS ＋ baseWeights）にし、
- * extraEval に学習した補正を入れる。"weights" も渡したときは、その項目をさらに上書きする
+ * extraEval に学習した補正を入れる。"weights" も渡したときは、その項目をさらに上書きする。
+ * "valueNet": false なら、学習した補正を使わない（探索 AI の既定の補正を外す。data/value-net.json を入れる前の AI）
  */
 export function applyValueNetOption(raw: Record<string, unknown>): Record<string, unknown> {
   const { valueNet, ...rest } = raw;
   if (valueNet === undefined) return raw;
-  if (typeof valueNet !== "string") throw new Error(`"valueNet" にはモデルのファイル名を渡します`);
+  if (valueNet === false) return { ...rest, extraEval: null };
+  if (typeof valueNet !== "string") throw new Error(`"valueNet" にはモデルのファイル名か false を渡します`);
   const model = loadValueNet(valueNet);
   const extra = typeof rest.weights === "object" && rest.weights !== null ? rest.weights : {};
   return { ...rest, weights: { ...SEARCH_WEIGHTS, ...model.baseWeights, ...extra }, extraEval: valueNetExtraEval(compileValueNet(model)) };

@@ -34,8 +34,11 @@ export const SUBJECT_IDS = Object.keys(SUBJECTS) as SubjectId[];
 export const isSubjectId = (v: unknown): v is SubjectId => typeof v === "string" && v in SUBJECTS;
 
 const EXCLUDED_DECKS = ["ランプドラゴン"];
-/** 相手の AI（src/ai/registry.ts のキー） */
-export const OPPONENT_AGENT = "search";
+/**
+ * 相手の AI（src/ai/registry.ts のキー）。今までの人間の対戦記録と比べられるよう、学習した評価の補正を入れる前の探索 AI に固定する
+ * （rhino-compare の相手も同じ）
+ */
+export const OPPONENT_AGENT = "search-classic";
 
 export function subjectDeck(subject: SubjectId): DefaultDeck {
   const name = SUBJECTS[subject].deck;
