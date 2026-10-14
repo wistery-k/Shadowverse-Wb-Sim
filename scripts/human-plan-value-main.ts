@@ -37,6 +37,7 @@ import { parseHumanRecord, type HumanGameRecord } from "../src/sim/humanRecord";
 import { playFrom } from "../src/sim/match";
 import { describeAction } from "../src/ui/describe";
 import { isParallelWorker, parallelMap } from "./parallel";
+import { summarize, type SideSummary } from "./plan-value-data-main";
 
 /** 片方の手順 */
 export interface HumanPlanSide {
@@ -48,6 +49,8 @@ export interface HumanPlanSide {
   rescored: number | null;
   /** そのターンで試合が終わったか */
   ended: boolean;
+  /** ターン末の局面の要約（ターン終了時の処理の後。マリガン・試合が終わったときは null） */
+  end: { me: SideSummary; opp: SideSummary } | null;
   /** M 個のシードそれぞれで勝ったか（同じ局面は打たないので空。エラーで最後まで打てなかったら null） */
   wins: (boolean | null)[];
 }
@@ -153,6 +156,8 @@ function rollouts(after: GameState, subject: SubjectId, p: PlayerIndex, M: numbe
   return wins;
 }
 
+const summarizeEnd = (s: GameState, p: PlayerIndex) => ({ me: summarize(s, p), opp: summarize(s, p === 0 ? 1 : 0) });
+
 function summarizeStart(s: GameState, p: PlayerIndex): HumanPlanRecord["start"] {
   const me = s.players[p], opp = s.players[p === 0 ? 1 : 0];
   return { hp: me.leaderHp, oppHp: opp.leaderHp, maxPp: me.maxPp, hand: me.hand.length, oppHand: opp.hand.length, ep: me.ep, sep: me.sep, board: me.board.length, oppBoard: opp.board.length };
@@ -191,8 +196,8 @@ function compareGame(rec: HumanGameRecord, M: number, turns: [number, number]): 
             ownTurn,
             start: summarizeStart(start, p),
             same: sameSwap,
-            human: { steps: mulliganText(start, a, p), value: null, rescored: null, ended: false, wins: play(a) },
-            ai: { steps: mulliganText(start, aiMull, p), value: null, rescored: null, ended: false, wins: play(aiMull) },
+            human: { steps: mulliganText(start, a, p), value: null, rescored: null, ended: false, end: null, wins: play(a) },
+            ai: { steps: mulliganText(start, aiMull, p), value: null, rescored: null, ended: false, end: null, wins: play(aiMull) },
             beamBest: null,
             humanInCandidates: null,
           });
@@ -225,6 +230,7 @@ function compareGame(rec: HumanGameRecord, M: number, turns: [number, number]): 
                 value: ended ? null : round(endValue(end, p)),
                 rescored: ended || same ? null : round(rescoredValue(end, p, mix(posSeed, 2))),
                 ended,
+                end: ended ? null : summarizeEnd(resolveTurnEnd(end), p),
                 wins: same ? [] : rollouts(ended ? end : applyAction(end, { type: "endTurn" }), rec.subject, p, M, posSeed),
               };
             };

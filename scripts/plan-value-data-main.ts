@@ -91,7 +91,7 @@ function makeAgents(decks: [string, string]): [Agent, Agent] {
   return decks.map((d) => (d === "リノセウスエルフ" ? createRhinoAgent() : createSearchAgent())) as [Agent, Agent];
 }
 
-function summarize(s: GameState, q: PlayerIndex): SideSummary {
+export function summarize(s: GameState, q: PlayerIndex): SideSummary {
   const pl = s.players[q];
   return {
     hp: pl.leaderHp,
