@@ -165,6 +165,12 @@ export interface SearchOptions {
    * 読んで負けると分かっている並びを選んでいた（docs/ai-notes.md）
    */
   dangerRescore: number;
+  /**
+   * reusePlan のとき、使い回す並びを、手を選んだすべてのサンプルの並びが一致する所まで（先頭からの共通部分）に限る。
+   * 並びは評価の最も高かったサンプル（相手の手札が最も都合のよい決定化）のものなので、2 手目以降が楽観的になり、
+   * 相手の疾走や Ω を残して顔を殴る等をしていた（人間の記録の局面の打ち直し。docs/ai-notes.md）。その手を評価しなかったサンプルがあれば使い回さない
+   */
+  reuseAgree: boolean;
 }
 
 /** 全探索（SearchOptions.exhaustive）の集計（実験用。比較スクリプトが試合ごとに 0 に戻して読む） */
@@ -185,7 +191,7 @@ export const exhaustiveCounts = {
   byTurn: {} as Record<number, [number, number, number, number]>,
 };
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, mulliganCards: null, reanimateGuard: false, settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: null, oppHandSamples: 1, peekOppHand: false, oppFuse: false, dangerRescore: 0 };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, mulliganCards: null, reanimateGuard: false, settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: null, oppHandSamples: 1, peekOppHand: false, oppFuse: false, dangerRescore: 0, reuseAgree: false };
 
 /** 打った手の並び（後ろから前へのリスト）。各手を打った後の局面も持つ */
 interface Step {
@@ -202,6 +208,19 @@ interface Node {
   value: number;
   /** この局面までの手の並び（最初の手を含む） */
   path: Step;
+}
+
+/** 並びの、先頭から手がすべて同じ部分の長さ（reuseAgree） */
+function agreedLength(plans: readonly Plan[]): number {
+  const [first, ...rest] = plans;
+  if (!first) return 0;
+  let n = first.steps.length;
+  for (const other of rest) {
+    let i = 0;
+    while (i < n && i < other.steps.length && keyOf(first.steps[i]!.action) === keyOf(other.steps[i]!.action)) i++;
+    n = i;
+  }
+  return n;
 }
 
 /** 並びを前から順の配列にする */
@@ -633,20 +652,21 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
       }
 
       const w = opts.weights === "byClass" ? weightsFor(real, p) : opts.weights;
-      const totals = new Map<string, { action: Action; sum: number; count: number; plan: Plan }>();
+      const totals = new Map<string, { action: Action; sum: number; count: number; plan: Plan; plans: Plan[] }>();
       for (let i = 0; i < opts.samples; i++) {
         const det = determinize(real, p, rng, { peekOppHand: opts.peekOppHand });
         for (const [k, sample] of planTurn(det, p, opts, w, rng)) {
-          const t = totals.get(k) ?? { action: sample.action, sum: 0, count: 0, plan: sample };
+          const t = totals.get(k) ?? { action: sample.action, sum: 0, count: 0, plan: sample, plans: [] };
           t.sum += sample.value;
           t.count++;
+          t.plans.push(sample);
           // 並びは、その手の評価が最も高かったサンプルのものを使う
           if (sample.value > t.plan.value) t.plan = sample;
           totals.set(k, t);
         }
       }
       // 実際の局面で合法な手に限る。どのサンプルでも評価されなかった手は選ばない
-      let best: { action: Action; plan: Plan } | null = null;
+      let best: { action: Action; plan: Plan; plans: Plan[]; count: number } | null = null;
       let bestValue = -Infinity;
       for (const [k, t] of totals) {
         if (!legalKeys.has(k)) continue;
@@ -658,8 +678,8 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
         }
       }
       if (best) {
-        if (opts.reusePlan && best.plan.steps.length > 1) {
-          const steps = best.plan.steps;
+        const steps = opts.reuseAgree ? best.plan.steps.slice(0, best.count < opts.samples ? 1 : agreedLength(best.plans)) : best.plan.steps;
+        if (opts.reusePlan && steps.length > 1) {
           plans[p] = { steps, expected: steps.map((_, i) => (i === 0 ? "" : visibleKey(steps[i - 1]!.state, p))), index: 1 };
         }
         return best.action;
