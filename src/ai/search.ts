@@ -10,6 +10,8 @@ import {
   abilitiesOf,
   actingPlayer,
   cardOf,
+  handCost,
+  EXTRA_PP_REFRESH_TURN,
   tryApplyAction,
   legalActions,
   resolveTurnEnd,
@@ -101,6 +103,14 @@ export interface SearchOptions {
    */
   reanimateGuard: boolean;
   /**
+   * 自分の 1 ターン目にエクストラPP を使わない（候補から外す）。人間はドラゴンの比較で 1 ターン目に使わず、
+   * 2 ターン目の竜の啓示や 3 ターン目の 4 コストに使った（notes/dragon-human）。AI は 2 コストを出すために 1 ターン目に使い、
+   * 2・3 ターン目に何も出せない試合があった。
+   * "always": 制限しない。"never": 1 ターン目は使わない。
+   * "keepTurn2": 手札にコスト 2 以下のカードが 2 枚以上あるときだけ使う（1 枚を今出しても 2 ターン目に出すものが残る。ユーザー案）
+   */
+  turn1ExtraPp: "always" | "never" | "keepTurn2";
+  /**
    * 合流する相打ち（convergingTrade.ts）を、ターンを終える前に打つものとして扱う。
    * ターン終了の局面はその攻撃を打ってから採点し、相手のターンもその局面から読む。
    * 合流する攻撃が残っている局面でのターン終了は、攻撃してから終える手に劣らないので候補から外す
@@ -174,7 +184,7 @@ export const exhaustiveCounts = {
   byTurn: {} as Record<number, [number, number, number, number]>,
 };
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, mulliganCards: null, reanimateGuard: false, settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: null, oppHandSamples: 1, peekOppHand: false };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, mulliganCards: null, reanimateGuard: false, turn1ExtraPp: "always", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: null, oppHandSamples: 1, peekOppHand: false };
 
 /** 打った手の並び（後ろから前へのリスト）。各手を打った後の局面も持つ */
 interface Step {
@@ -335,8 +345,9 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   const evalState = extra ? (state: GameState) => evaluateWith(state, p, w) + extra(state, p) : (state: GameState) => evaluateWith(state, p, w);
   /** ターンを終えるときに残る PP の罰（ppLeft） */
   const leftover = (state: GameState) => (w.ppLeft !== 0 && state.phase === "main" && state.active === p ? w.ppLeft * state.players[p].pp : 0);
-  const endScore = (state: GameState) => evalState(resolveTurnEnd(settle(state))) - leftover(state);
-  const score = opts.scoreTurnEnd === "all" ? endScore : (state: GameState) => evalState(settle(state)) - leftover(state);
+  const expiring = (state: GameState) => expiringExtraPp(state, p, w);
+  const endScore = (state: GameState) => evalState(resolveTurnEnd(settle(state))) - leftover(state) - expiring(state);
+  const score = opts.scoreTurnEnd === "all" ? endScore : (state: GameState) => evalState(settle(state)) - leftover(state) - expiring(state);
   const allowed = (state: GameState, a: Action) => !opts.allow || a.type === "endTurn" || opts.allow(state, a, p);
   const expand = (state: GameState) => (opts.sameHandOnce ? distinctPlays(state, legalActions(state)) : legalActions(state));
   /** 手 a を打った局面（と、そこまでの並び）。chain なら、続く自分の選択とエクストラPP の後の手まで進めた局面すべて */
@@ -545,12 +556,31 @@ export function reanimateWorthwhile(state: GameState, a: Action, p: PlayerIndex)
   return state.players[p].graveyardFollowers.some((id) => cardOf(id).cost === cost);
 }
 
+/**
+ * 後攻の 5 ターン目を終える局面で、残っているエクストラPP の評価（extraPp）から引く点（extraPpExpiring 倍にする分）。
+ * 6 ターン目の開始時に使用権が戻り、重ならないので、5 ターン目に残しても得は無い。ターン末の採点だけに使う
+ */
+export function expiringExtraPp(state: GameState, p: PlayerIndex, w: EvalWeights): number {
+  const me = state.players[p];
+  if (w.extraPpExpiring === 1 || state.phase !== "main" || state.active !== p || p === state.first || !me.extraPpAvailable) return 0;
+  return me.turnCount === EXTRA_PP_REFRESH_TURN - 1 ? w.extraPp * (1 - w.extraPpExpiring) : 0;
+}
+
+/** turn1ExtraPp: 自分の 1 ターン目のエクストラPP を打ってよいか */
+export function turn1ExtraPpAllowed(state: GameState, a: Action, p: PlayerIndex, mode: SearchOptions["turn1ExtraPp"]): boolean {
+  if (a.type !== "extraPp" || mode === "always" || state.players[p].turnCount > 1) return true;
+  if (mode === "never") return false;
+  return state.players[p].hand.filter((h) => handCost(h) <= 2).length >= 2;
+}
+
 export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
   const base = { ...DEFAULT_SEARCH_OPTIONS, ...options };
   const userAllow = base.allow;
-  const opts: SearchOptions = base.reanimateGuard
-    ? { ...base, allow: (s, a, p) => reanimateWorthwhile(s, a, p) && (!userAllow || userAllow(s, a, p)) }
-    : base;
+  const guards: ((s: GameState, a: Action, p: PlayerIndex) => boolean)[] = [];
+  if (base.reanimateGuard) guards.push(reanimateWorthwhile);
+  if (base.turn1ExtraPp !== "always") guards.push((s, a, p) => turn1ExtraPpAllowed(s, a, p, base.turn1ExtraPp));
+  if (userAllow) guards.push(userAllow);
+  const opts: SearchOptions = guards.length > 0 && (base.reanimateGuard || base.turn1ExtraPp !== "always") ? { ...base, allow: (s, a, p) => guards.every((g) => g(s, a, p)) } : base;
   const mulliganModel = opts.mulliganCards ? overrideMulliganCards(MULLIGAN_MODEL, opts.mulliganCards) : MULLIGAN_MODEL;
   /** プレイヤーごとの、打っている途中の計画（reusePlan）。expected[i] は steps[i] を打つ前に見えているはずの局面 */
   const plans: [{ steps: Step[]; expected: string[]; index: number } | null, { steps: Step[]; expected: string[]; index: number } | null] = [null, null];

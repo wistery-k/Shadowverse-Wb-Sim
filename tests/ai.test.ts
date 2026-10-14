@@ -428,7 +428,8 @@ describe("評価関数の重み", () => {
   });
 });
 
-import { reanimateWorthwhile } from "../src/ai/search";
+import { expiringExtraPp, reanimateWorthwhile, turn1ExtraPpAllowed } from "../src/ai/search";
+import { handCost } from "../src/engine";
 
 describe("reanimateGuard", () => {
   it("ケルベロスの超進化は、墓場にコスト 1 のフォロワーがあるときだけ打ってよい", () => {
@@ -478,5 +479,53 @@ describe("lastWordsSummon の評価", () => {
     const w1 = { ...SEARCH_WEIGHTS, lastWordsSummon: 0.5 };
     const skeleton = 1 * SEARCH_WEIGHTS.attack + 1 * SEARCH_WEIGHTS.defense + SEARCH_WEIGHTS.followerBase;
     expect(evaluateWith(s, p, w1) - evaluateWith(s, p, w0)).toBeCloseTo(2 * skeleton * 0.5);
+  });
+});
+
+describe("turn1ExtraPp", () => {
+  it("後攻の 1 ターン目にエクストラPP を使わない（2 コストが手札にあっても）", () => {
+    let s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 5 });
+    while (s.phase === "mulligan") s = applyAction(s, legalActions(s).find((a) => a.type === "mulligan" && a.swap.length === 0)!);
+    s = applyAction(s, { type: "endTurn" });
+    const p = s.active;
+    expect(s.players[p].turnCount).toBe(1);
+    expect(s.players[p].extraPpAvailable).toBe(true);
+    const girl = ALL_CARDS.find((c) => c.name === "竜育の少女")!.id;
+    s.players[p].hand.push(newHandCard(s, girl));
+    const choose = (agent: ReturnType<typeof createSearchAgent>) => agent.chooseAction(s, legalActions(s), rngFrom({ rng: 1 }));
+    expect(choose(createSearchAgent({ turn1ExtraPp: "never" })).type).not.toBe("extraPp");
+    expect(choose(createSearchAgent()).type).toBe("extraPp");
+    // keepTurn2: コスト 2 以下が 1 枚なら使わず、2 枚なら使う
+    const low = s.players[p].hand.filter((h) => handCost(h) <= 2).length;
+    const extra = { type: "extraPp" } as const;
+    expect(turn1ExtraPpAllowed(s, extra, p, "keepTurn2")).toBe(low >= 2);
+    s.players[p].hand = s.players[p].hand.filter((h) => handCost(h) > 2 || h.cardId === girl);
+    expect(turn1ExtraPpAllowed(s, extra, p, "keepTurn2")).toBe(false);
+    s.players[p].hand.push(newHandCard(s, girl));
+    expect(turn1ExtraPpAllowed(s, extra, p, "keepTurn2")).toBe(true);
+  });
+});
+
+describe("extraPpExpiring", () => {
+  it("後攻の 5 ターン目を終える局面だけ、残っているエクストラPP の価値を引く", () => {
+    const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 3 });
+    const p = s.first === 0 ? 1 : 0;
+    const q = s.first;
+    s.phase = "main";
+    s.active = p;
+    s.players[p].extraPpAvailable = true;
+    const w1 = { ...SEARCH_WEIGHTS, extraPpExpiring: 1 };
+    s.players[p].turnCount = 5;
+    expect(expiringExtraPp(s, p, SEARCH_WEIGHTS)).toBeCloseTo(SEARCH_WEIGHTS.extraPp * (1 - SEARCH_WEIGHTS.extraPpExpiring));
+    expect(expiringExtraPp(s, p, w1)).toBe(0);
+    s.players[p].turnCount = 4;
+    expect(expiringExtraPp(s, p, SEARCH_WEIGHTS)).toBe(0);
+    // 相手のターン中（相手のターンを読んだ後の局面など）は引かない
+    s.players[p].turnCount = 5;
+    s.active = q;
+    expect(expiringExtraPp(s, p, SEARCH_WEIGHTS)).toBe(0);
+    // evaluateWith は 5 ターン目でも他のターンと同じ価値
+    s.active = p;
+    expect(evaluateWith(s, p, SEARCH_WEIGHTS)).toBeCloseTo(evaluateWith(s, p, w1));
   });
 });
