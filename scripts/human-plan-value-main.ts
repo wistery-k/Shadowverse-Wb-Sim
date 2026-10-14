@@ -122,7 +122,7 @@ function aiTurn(start: GameState, p: PlayerIndex, agents: [Agent, Agent], seed: 
     const actor = actingPlayer(t);
     const a = agents[actor].chooseAction(t, legalActions(t), rng);
     if (actor === p && a.type === "endTurn") return { end: t, steps };
-    steps.push(describeAction(t, a, p));
+    steps.push(describeAction(t, a, p).replace(/^あなた: /, ""));
     t = applyAction(t, a);
     if (t.phase !== "ended" && t.active !== p) throw new Error("ターンを終える手を打たずに相手の番になりました");
   }
@@ -207,7 +207,7 @@ function compareGame(rec: HumanGameRecord, M: number, turns: [number, number]): 
               complete = true;
               break;
             }
-            humanSteps.push(describeAction(h, b, p));
+            humanSteps.push(describeAction(h, b, p).replace(/^あなた: /, ""));
             h = applyAction(h, b);
             if (h.phase === "ended") {
               complete = true;

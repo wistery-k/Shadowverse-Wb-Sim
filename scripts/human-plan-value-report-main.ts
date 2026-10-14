@@ -2,8 +2,8 @@
 //
 // 差は「人間の手順の勝率 − AI の手順の勝率」（同じ M 個のシードの続きを探索 AI が打った勝率）。同じ局面になったターンは差 0 として数える。
 // - デッキ別・ターン別の差の平均。1 試合あたりの差の合計（人間と AI の勝率の差のうち、ターンごとの選択で説明できる分の目安）
-// - 打ち比べたターンを 3 つに分ける: 人間の手順の点数が AI の候補の最善より高い（ビームが届かなかった）／人間の手順が AI の候補にあった／
-//   それ以外（評価が人間の手順を AI の候補より低く見た）
+// - 打ち比べたターンを分ける: 人間の手順の点数が AI の候補の最善より高い（ビームが届かなかった）／それ以外（評価が AI の候補を人間の手順より上に見た）。
+//   後者のうち、人間の手順が候補（その最初の手での最善の並び）にあったものも数える
 // - 差の大きいターン（人間が良い・AI が良い）を手順付きで並べる
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -16,6 +16,8 @@ const se = (xs: number[]) => {
   return Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / (xs.length - 1) / xs.length);
 };
 const pct = (x: number) => (Number.isNaN(x) ? "-" : `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}%`);
+/** 平均 ± 標準誤差 */
+const pm = (xs: number[]) => `${pct(mean(xs))} ± ${Number.isNaN(se(xs)) ? "-" : `${(se(xs) * 100).toFixed(1)}%`}`;
 const rate = (s: HumanPlanSide) => mean(s.wins.filter((w): w is boolean => w !== null).map(Number));
 
 /** 1 局面の差（共通のシードで両方とも打てた組だけ）と、その標準誤差 */
@@ -29,14 +31,12 @@ function diff(r: HumanPlanRecord): { d: number; se: number; n: number } {
   return { d: mean(ds), se: se(ds), n: ds.length };
 }
 
-type Kind = "ビームが届かなかった" | "AI の候補にあった" | "評価が低く見た" | "マリガン" | "試合が終わった";
+type Kind = "ビームが届かなかった" | "評価が AI の候補を上に見た" | "マリガン" | "試合が終わった";
 function kindOf(r: HumanPlanRecord): Kind | null {
   if (r.same) return null;
   if (r.ownTurn === 0) return "マリガン";
   if (r.human.ended || r.ai.ended || r.human.value === null || r.beamBest === null) return "試合が終わった";
-  if (r.human.value > r.beamBest + 1e-9) return "ビームが届かなかった";
-  if (r.humanInCandidates) return "AI の候補にあった";
-  return "評価が低く見た";
+  return r.human.value > r.beamBest + 1e-9 ? "ビームが届かなかった" : "評価が AI の候補を上に見た";
 }
 
 function row(cells: (string | number)[]): string {
@@ -77,8 +77,8 @@ export async function main(argv: string[]): Promise<number> {
   const compared = withD.filter((x) => !x.r.same);
   L.push(
     `- 試合 ${games.size}（人間の勝ち ${[...games.values()].filter((rs) => rs[0]!.won).length}）、局面 ${recs.length}、同じ局面 ${recs.filter((r) => r.same).length}、打ち比べ ${compared.length}`,
-    `- 差（人間 − AI、続きは探索 AI）の平均: 全局面 ${pct(mean(withD.map((x) => x.d)))} ± ${pct(se(withD.map((x) => x.d)))}、打ち比べた局面 ${pct(mean(compared.map((x) => x.d)))} ± ${pct(se(compared.map((x) => x.d)))}`,
-    `- 1 試合あたりの差の合計: ${pct(mean([...games.values()].map(perGameSum)))} ± ${pct(se([...games.values()].map(perGameSum)))}`,
+    `- 差（人間 − AI、続きは探索 AI）の平均: 全局面 ${pm(withD.map((x) => x.d))}、打ち比べた局面 ${pm(compared.map((x) => x.d))}`,
+    `- 1 試合あたりの差の合計: ${pm([...games.values()].map(perGameSum))}`,
     "",
   );
 
@@ -87,7 +87,7 @@ export async function main(argv: string[]): Promise<number> {
   for (const subject of [...new Set(recs.map((r) => r.subject))]) {
     const gs = [...games.values()].filter((rs) => rs[0]!.subject === subject);
     const cs = compared.filter((x) => x.r.subject === subject).map((x) => x.d);
-    L.push(row([subject, gs.length, gs.filter((rs) => rs[0]!.won).length, recs.filter((r) => r.subject === subject).length, cs.length, `${pct(mean(cs))} ± ${pct(se(cs))}`, pct(mean(gs.map(perGameSum)))]));
+    L.push(row([subject, gs.length, gs.filter((rs) => rs[0]!.won).length, recs.filter((r) => r.subject === subject).length, cs.length, pm(cs), pct(mean(gs.map(perGameSum)))]));
   }
   L.push("");
 
@@ -98,19 +98,24 @@ export async function main(argv: string[]): Promise<number> {
     const all = withD.filter((x) => x.r.ownTurn === t).map((x) => x.d);
     if (all.length === 0) continue;
     const cs = compared.filter((x) => x.r.ownTurn === t).map((x) => x.d);
-    L.push(row([t, all.length, cs.length, `${pct(mean(all))} ± ${pct(se(all))}`, `${pct(mean(cs))} ± ${pct(se(cs))}`]));
+    L.push(row([t, all.length, cs.length, pm(all), pm(cs)]));
   }
   L.push("");
 
   L.push("## 打ち比べた局面の分類", "");
-  L.push("- ビームが届かなかった: 人間のターン末の点数が、AI の候補（最初の手ごとの最善の並び）の最善より高い", "- AI の候補にあった: 人間のターン末が候補のどれかと同じ局面（相手のターンを読み直して別の手を選んだ）", "- 評価が低く見た: それ以外（人間のターン末の点数が候補の最善以下で、候補にもない）", "");
-  L.push(row(["分類", "局面", "差の平均", "差 ≥ +25%", "差 ≤ −25%", "点数（人間 − AI）の平均"]), row(["---", "---:", "---:", "---:", "---:", "---:"]));
-  const kinds: Kind[] = ["ビームが届かなかった", "AI の候補にあった", "評価が低く見た", "マリガン", "試合が終わった"];
+  L.push(
+    "- ビームが届かなかった: 人間のターン末の点数（探索 AI のターン末の採点）が、AI の候補（最初の手ごとの最善の並び）の最善より高い",
+    "- 評価が AI の候補を上に見た: それ以外。「候補にあった」は、人間のターン末がその最初の手での最善の並びとして候補に入っていた数",
+    "- 点数は実際の局面（決定化しない）で付けた。AI は決定化 3 回で探索し、上位の手を相手のターンまで読み直して選ぶので、AI の手順の点数は候補の最善より低いことがある",
+    "",
+  );
+  L.push(row(["分類", "局面", "差の平均", "差 ≥ +25%", "差 ≤ −25%", "点数（人間 − AI）の平均", "候補にあった"]), row(["---", "---:", "---:", "---:", "---:", "---:", "---:"]));
+  const kinds: Kind[] = ["ビームが届かなかった", "評価が AI の候補を上に見た", "マリガン", "試合が終わった"];
   for (const k of kinds) {
     const xs = compared.filter((x) => kindOf(x.r) === k);
     if (xs.length === 0) continue;
     const dv = xs.filter((x) => x.r.human.value !== null && x.r.ai.value !== null).map((x) => x.r.human.value! - x.r.ai.value!);
-    L.push(row([k, xs.length, `${pct(mean(xs.map((x) => x.d)))} ± ${pct(se(xs.map((x) => x.d)))}`, xs.filter((x) => x.d >= 0.25).length, xs.filter((x) => x.d <= -0.25).length, Number.isNaN(mean(dv)) ? "-" : mean(dv).toFixed(2)]));
+    L.push(row([k, xs.length, pm(xs.map((x) => x.d)), xs.filter((x) => x.d >= 0.25).length, xs.filter((x) => x.d <= -0.25).length, Number.isNaN(mean(dv)) ? "-" : mean(dv).toFixed(2), xs.filter((x) => x.r.humanInCandidates).length]));
   }
   L.push("");
 
@@ -120,7 +125,7 @@ export async function main(argv: string[]): Promise<number> {
       const r = x.r;
       const v = (s: HumanPlanSide) => `点数 ${s.value ?? "-"}・読み後 ${s.rescored ?? "-"}・勝率 ${pct(rate(s))}`;
       L.push(
-        `### ${r.subject} vs ${r.deck} g${r.g} 席${r.seat}（${r.won ? "人間の勝ち" : "人間の負け"}）自分の ${r.ownTurn} ターン目: 差 ${pct(x.d)} ± ${pct(x.se)}（${kindOf(r)}）`,
+        `### ${r.subject} vs ${r.deck} g${r.g} 席${r.seat}（${r.won ? "人間の勝ち" : "人間の負け"}）自分の ${r.ownTurn} ターン目: 差 ${pct(x.d)} ± ${(x.se * 100).toFixed(1)}%（${kindOf(r)}${r.humanInCandidates ? "、候補にあった" : ""}）`,
         "",
         `- 開始時: 体力 ${r.start.hp}・相手 ${r.start.oppHp}、PP ${r.start.maxPp}、手札 ${r.start.hand}・相手 ${r.start.oppHand}、EP ${r.start.ep}・SEP ${r.start.sep}、場 ${r.start.board}・相手 ${r.start.oppBoard}。AI の候補の最善の点数 ${r.beamBest ?? "-"}`,
         `- 人間（${v(r.human)}）: ${r.human.steps.join(" → ") || "何もしない"}`,
