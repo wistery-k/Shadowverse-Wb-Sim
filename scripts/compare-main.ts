@@ -13,7 +13,7 @@ const EXCLUDED_DECKS = ["ランプドラゴン"];
 /**
  * 探索 AI の設定 A と B を対戦させる（npm run compare -- <試合数> '<Aの設定JSON>' '<Bの設定JSON>'）。
  * 同じデッキの組で席とデッキを入れ替えて2試合ずつ行い、A の勝率とデッキごとの A の勝率を出す。
- * 例: npm run compare -- 105 '{}' '{"lethal":false}'（4 つ目に最初の試合番号を渡せる。既定 0）
+ * 例: npm run compare -- 105 '{}' '{"lethal":false}'（4 つ目に最初の試合番号を渡せる。既定 0。5 つ目に B のデッキ名を渡すと、B がそのデッキの試合だけを打つ）
  * "weights": "byClass" でクラスごとに調整した重み、"default" で基準の重みを使う。
  * 試合は CPU のコア数だけ並列に行う（環境変数 THREADS で変えられる。scripts/parallel.ts）。
  * デッキは各クラス1つずつ（ドラゴンは疾走ドラゴン）の 7 つを使う。
@@ -29,11 +29,20 @@ export async function main(argv: string[]): Promise<number> {
   const t0 = Date.now();
   // 4 つ目の引数で最初の試合番号を変えられる（例: 600 なら g600〜。前に回した試合と重ならない別の試合で確かめるため）
   const start = Number(argv[3] ?? 0);
-  const tasks = Array.from({ length: games }, (_, k) => [false, true].map((swap) => ({ g: start + k, swap }))).flat();
+  type Deck = (typeof decks)[number];
+  const pairOf = (g: number, swap: boolean): [Deck, Deck] => {
+    const i = g % 7, j = (g * 3 + 1 + Math.floor(g / 7)) % 7;
+    return swap ? [decks[j]!, decks[i]!] : [decks[i]!, decks[j]!];
+  };
+  // 5 つ目の引数で、B のデッキがその名前の試合だけを打つ（例: AFネメシス。相手のデッキでしか変わらない設定を、その対戦だけで比べるため）
+  const vs = argv[4];
+  if (vs && !decks.some((d) => d.name === vs)) throw new Error(`不明なデッキ: ${vs}`);
+  const tasks = Array.from({ length: games }, (_, k) => [false, true].map((swap) => ({ g: start + k, swap })))
+    .flat()
+    .filter(({ g, swap }) => !vs || pairOf(g, swap)[1].name === vs);
   // 1 試合ずつ並列に行う（各試合はシードで決まるので、結果は並列数によらない）
   const results = await parallelMap(tasks, ({ g, swap }) => {
-    const i = g % 7, j = (g * 3 + 1 + Math.floor(g / 7)) % 7;
-    const [da, db] = swap ? [decks[j]!, decks[i]!] : [decks[i]!, decks[j]!];
+    const [da, db] = pairOf(g, swap);
     const aSeat = (g + (swap ? 1 : 0)) % 2;
     const r = playMatch(aSeat === 0 ? [a, b] : [b, a], { decks: aSeat === 0 ? [da.cards, db.cards] : [db.cards, da.cards], seed: g * 7 + (swap ? 1 : 2) });
     return { deck: da.name, won: r.winner === aSeat };
