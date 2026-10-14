@@ -512,7 +512,8 @@ describe("extraPpExpiring", () => {
     const p = s.first === 0 ? 1 : 0;
     s.players[p].extraPpAvailable = true;
     const w0 = { ...SEARCH_WEIGHTS, extraPpExpiring: 0 };
-    const diff = () => evaluateWith(s, p, SEARCH_WEIGHTS) - evaluateWith(s, p, w0);
+    const w1 = { ...SEARCH_WEIGHTS, extraPpExpiring: 1 };
+    const diff = () => evaluateWith(s, p, w1) - evaluateWith(s, p, w0);
     s.players[p].turnCount = 5;
     expect(diff()).toBeCloseTo(SEARCH_WEIGHTS.extraPp);
     s.players[p].turnCount = 4;
