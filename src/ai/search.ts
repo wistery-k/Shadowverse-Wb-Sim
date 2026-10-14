@@ -164,6 +164,24 @@ export interface SearchOptions {
   oppHandSamples: number;
   /** 実験用: 相手の手札を実際のまま読む（見えない情報を使う。手札読みの改善の上限を測るためだけに使い、対戦には使わない） */
   peekOppHand: boolean;
+  /**
+   * 上位の手を相手のターンまで読むとき、貪欲法の相手が融合を、融合した後に打てる最善手の価値でも評価する。
+   * 融合しただけでは手札が減るので、貪欲法の相手は α・β・γ から Ω を作らず、Ω の 10 点の疾走を読めなかった（docs/ai-notes.md）
+   */
+  oppFuse: boolean;
+  /**
+   * 上位の手を相手のターンまで読んで、どれも負ける（点数が DANGER 以下）とき、ターン末の点数の高い順に異なる終局面をこの数だけ読み足す（0 なら読み足さない）。
+   * 上位の手は最初の手ごとに選ぶので、同じ最初の手で攻撃先だけが違う守りの並び（相手の疾走を倒す等）が読まれず、
+   * 読んで負けると分かっている並びを選んでいた（docs/ai-notes.md）
+   */
+  dangerRescore: number;
+  /**
+   * reusePlan のとき、使い回す並びを、手を選んだすべてのサンプルの並びが一致する所まで（先頭からの共通部分）に限る。
+   * 並びは評価の最も高かったサンプル（相手の手札が最も都合のよい決定化）のものなので、2 手目以降が楽観的になり、
+   * 相手の疾走や Ω を残して顔を殴る等をしていた（人間の記録の局面の打ち直し。docs/ai-notes.md）。その手を評価しなかったサンプルがあれば使い回さない。
+   * 対戦では勝率が変わらず（1600 試合で 50.3%、リノセウス用 AI も同じ）、遅くなるだけなので既定は false
+   */
+  reuseAgree: boolean;
 }
 
 /** 全探索（SearchOptions.exhaustive）の集計（実験用。比較スクリプトが試合ごとに 0 に戻して読む） */
@@ -184,7 +202,7 @@ export const exhaustiveCounts = {
   byTurn: {} as Record<number, [number, number, number, number]>,
 };
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, mulliganCards: null, reanimateGuard: false, turn1ExtraPp: "always", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: null, oppHandSamples: 1, peekOppHand: false };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, mulliganCards: null, reanimateGuard: false, turn1ExtraPp: "always", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: null, oppHandSamples: 1, peekOppHand: false, oppFuse: false, dangerRescore: 0, reuseAgree: false };
 
 /** 打った手の並び（後ろから前へのリスト）。各手を打った後の局面も持つ */
 interface Step {
@@ -201,6 +219,19 @@ interface Node {
   value: number;
   /** この局面までの手の並び（最初の手を含む） */
   path: Step;
+}
+
+/** 並びの、先頭から手がすべて同じ部分の長さ（reuseAgree） */
+function agreedLength(plans: readonly Plan[]): number {
+  const [first, ...rest] = plans;
+  if (!first) return 0;
+  let n = first.steps.length;
+  for (const other of rest) {
+    let i = 0;
+    while (i < n && i < other.steps.length && keyOf(first.steps[i]!.action) === keyOf(other.steps[i]!.action)) i++;
+    n = i;
+  }
+  return n;
 }
 
 /** 並びを前から順の配列にする */
@@ -229,13 +260,17 @@ function tryApply(state: GameState, action: Action): GameState | null {
 
 const OPPONENT_POLICY = createGreedyAgent({ omniscient: true });
 
+/** 相手のターンを読んだ後の点数がこれ以下なら、その並びは相手のターンで負ける（dangerRescore） */
+const DANGER = -1e5;
+
 /**
  * 自分のターンを終え、相手のターン（と、その途中の選択）を貪欲法で進め、自分の手番に戻った局面を返す。
  * 自分の選択待ちが残っている局面（能力の途中）は、先に貪欲法で選択してからターンを終える
  */
-export function simulateOpponentTurn(state: GameState, p: PlayerIndex, rng: Rng, doomed = 1): GameState {
+export function simulateOpponentTurn(state: GameState, p: PlayerIndex, rng: Rng, doomed = 1, fuseFollowUp = false): GameState {
   // determinization 済みの局面の中なので、局面をそのまま見てよい
-  const policy = doomed === 1 ? OPPONENT_POLICY : createGreedyAgent({ omniscient: true, weights: { ...DEFAULT_WEIGHTS, doomed } });
+  const policy =
+    doomed === 1 && !fuseFollowUp ? OPPONENT_POLICY : createGreedyAgent({ omniscient: true, weights: { ...DEFAULT_WEIGHTS, doomed }, fuseFollowUp });
   let s: GameState | null = state;
   let ended = false;
   for (let guard = 0; s && s.phase !== "ended" && guard < 80; guard++) {
@@ -500,26 +535,43 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   };
   const hasNextLethal = opts.nextLethalSearch ?? ((state: GameState, q: PlayerIndex) => searchLethal(state, q) !== null);
   const result = new Map<string, Plan>();
+  const readOnce = (start: GameState): number => {
+    const after = opts.opponentSearch ? simulateOpponentTurnBySearch(start, p, rng, opts, w) : simulateOpponentTurn(start, p, rng, w.doomed, opts.oppFuse);
+    let v = evalState(after);
+    if (opts.nextLethal !== 0 && after.phase !== "ended" && after.players[p === 0 ? 1 : 0].leaderHp <= w.lethalRange && hasNextLethal(after, p)) v += opts.nextLethal;
+    return v;
+  };
+  const rescoreNode = (node: Node) => {
+    let value: number;
+    if (node.state.phase === "ended") value = evalState(node.state);
+    else if (opts.oppHandSamples <= 1) value = readOnce(settle(node.state)) - leftover(node.state);
+    else {
+      const settled = settle(node.state);
+      let sum = 0;
+      for (let i = 0; i < opts.oppHandSamples; i++) sum += readOnce(determinize(settled, p, rng, { peekOppHand: opts.peekOppHand }));
+      value = sum / opts.oppHandSamples - leftover(node.state);
+    }
+    const k = keyOf(node.first);
+    const cur = result.get(k);
+    if (!cur || value > cur.value) result.set(k, { action: node.first, value, steps: stepsOf(node.path) });
+  };
+  const rescored = new Set<Node>();
   for (const best of ranked) {
     for (const node of candidatesOf(best)) {
-      const readOnce = (start: GameState): number => {
-        const after = opts.opponentSearch ? simulateOpponentTurnBySearch(start, p, rng, opts, w) : simulateOpponentTurn(start, p, rng, w.doomed);
-        let v = evalState(after);
-        if (opts.nextLethal !== 0 && after.phase !== "ended" && after.players[p === 0 ? 1 : 0].leaderHp <= w.lethalRange && hasNextLethal(after, p)) v += opts.nextLethal;
-        return v;
-      };
-      let value: number;
-      if (node.state.phase === "ended") value = evalState(node.state);
-      else if (opts.oppHandSamples <= 1) value = readOnce(settle(node.state)) - leftover(node.state);
-      else {
-        const settled = settle(node.state);
-        let sum = 0;
-        for (let i = 0; i < opts.oppHandSamples; i++) sum += readOnce(determinize(settled, p, rng, { peekOppHand: opts.peekOppHand }));
-        value = sum / opts.oppHandSamples - leftover(node.state);
-      }
-      const k = keyOf(node.first);
-      const cur = result.get(k);
-      if (!cur || value > cur.value) result.set(k, { action: node.first, value, steps: stepsOf(node.path) });
+      rescoreNode(node);
+      rescored.add(node);
+    }
+  }
+  // 読み直した手がどれも相手のターンで負けるなら、ターン末の点数の高い順に、異なる終局面を dangerRescore 個まで読み足す
+  if (opts.dangerRescore > 0 && [...result.values()].every((x) => x.value <= DANGER)) {
+    const seen = new EqSet(turnOrderEqual);
+    for (const node of rescored) seen.add(node.state, turnOrderHash(node.state));
+    let n = 0;
+    for (const t of [...terminals].sort((x, y) => y.value - x.value)) {
+      if (n >= opts.dangerRescore) break;
+      if (rescored.has(t) || !seen.add(t.state, turnOrderHash(t.state))) continue;
+      rescoreNode(t);
+      n++;
     }
   }
   return result;
@@ -535,6 +587,15 @@ export function turnCandidates(root: GameState, p: PlayerIndex, rng: Rng, option
   return [...planTurn(root, p, opts, w, rng, false).values()]
     .map((plan) => ({ actions: plan.steps.map((s) => s.action), state: plan.steps.at(-1)?.state ?? root, value: plan.value }))
     .sort((x, y) => y.value - x.value);
+}
+
+/**
+ * 分析用: 局面 root（決定化しない）で、探索 AI が手を選ぶときと同じく上位の手を相手のターンまで読み直した点数を、最初の手ごとに高い順に返す
+ */
+export function rescoredCandidates(root: GameState, p: PlayerIndex, rng: Rng, options: Partial<SearchOptions> = {}): { actions: Action[]; value: number }[] {
+  const opts = { ...DEFAULT_SEARCH_OPTIONS, ...options };
+  const w = opts.weights === "byClass" ? weightsFor(root, p) : opts.weights;
+  return [...planTurn(root, p, opts, w, rng, true).values()].map((plan) => ({ actions: plan.steps.map((s) => s.action), value: plan.value })).sort((x, y) => y.value - x.value);
 }
 
 /** 超進化時のリアニメイトのコスト（無ければ null） */
@@ -622,20 +683,21 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
       }
 
       const w = opts.weights === "byClass" ? weightsFor(real, p) : opts.weights;
-      const totals = new Map<string, { action: Action; sum: number; count: number; plan: Plan }>();
+      const totals = new Map<string, { action: Action; sum: number; count: number; plan: Plan; plans: Plan[] }>();
       for (let i = 0; i < opts.samples; i++) {
         const det = determinize(real, p, rng, { peekOppHand: opts.peekOppHand });
         for (const [k, sample] of planTurn(det, p, opts, w, rng)) {
-          const t = totals.get(k) ?? { action: sample.action, sum: 0, count: 0, plan: sample };
+          const t = totals.get(k) ?? { action: sample.action, sum: 0, count: 0, plan: sample, plans: [] };
           t.sum += sample.value;
           t.count++;
+          t.plans.push(sample);
           // 並びは、その手の評価が最も高かったサンプルのものを使う
           if (sample.value > t.plan.value) t.plan = sample;
           totals.set(k, t);
         }
       }
       // 実際の局面で合法な手に限る。どのサンプルでも評価されなかった手は選ばない
-      let best: { action: Action; plan: Plan } | null = null;
+      let best: { action: Action; plan: Plan; plans: Plan[]; count: number } | null = null;
       let bestValue = -Infinity;
       for (const [k, t] of totals) {
         if (!legalKeys.has(k)) continue;
@@ -647,8 +709,8 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
         }
       }
       if (best) {
-        if (opts.reusePlan && best.plan.steps.length > 1) {
-          const steps = best.plan.steps;
+        const steps = opts.reuseAgree ? best.plan.steps.slice(0, best.count < opts.samples ? 1 : agreedLength(best.plans)) : best.plan.steps;
+        if (opts.reusePlan && steps.length > 1) {
           plans[p] = { steps, expected: steps.map((_, i) => (i === 0 ? "" : visibleKey(steps[i - 1]!.state, p))), index: 1 };
         }
         return best.action;
