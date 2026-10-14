@@ -11,6 +11,24 @@ import { applyValueNetOption } from "./valueNetOption";
 /** 比較に使わないデフォルトデッキ（クラスごとに 1 つにするため） */
 const EXCLUDED_DECKS = ["ランプドラゴン"];
 
+/** 比較に使うデッキ（各クラス 1 つずつの 7 つ） */
+export const COMPARE_DECKS = DEFAULT_DECKS.filter((d) => !EXCLUDED_DECKS.includes(d.name));
+type Deck = (typeof COMPARE_DECKS)[number];
+
+/** 試合番号 g（swap で席とデッキを入れ替えた方）の A と B のデッキ */
+export function comparePair(g: number, swap: boolean): [Deck, Deck] {
+  const i = g % 7, j = (g * 3 + 1 + Math.floor(g / 7)) % 7;
+  return swap ? [COMPARE_DECKS[j]!, COMPARE_DECKS[i]!] : [COMPARE_DECKS[i]!, COMPARE_DECKS[j]!];
+}
+
+/** 試合番号 g を A と B で打つ（席・シードは g と swap で決まる）。A のデッキ名と、A が勝ったか */
+export function playCompareGame(a: Agent, b: Agent, g: number, swap: boolean): { deck: string; won: boolean } {
+  const [da, db] = comparePair(g, swap);
+  const aSeat = (g + (swap ? 1 : 0)) % 2;
+  const r = playMatch(aSeat === 0 ? [a, b] : [b, a], { decks: aSeat === 0 ? [da.cards, db.cards] : [db.cards, da.cards], seed: g * 7 + (swap ? 1 : 2) });
+  return { deck: da.name, won: r.winner === aSeat };
+}
+
 /**
  * 探索 AI の設定 A と B を対戦させる（npm run compare -- <試合数> '<Aの設定JSON>' '<Bの設定JSON>'）。
  * 同じデッキの組で席とデッキを入れ替えて2試合ずつ行い、A の勝率とデッキごとの A の勝率を出す。
@@ -24,31 +42,21 @@ const EXCLUDED_DECKS = ["ランプドラゴン"];
  */
 export async function main(argv: string[]): Promise<number> {
   const games = Number(argv[0] ?? 28);
-  const decks = DEFAULT_DECKS.filter((d) => !EXCLUDED_DECKS.includes(d.name));
+  const decks = COMPARE_DECKS;
   if (decks.length !== 7) throw new Error(`比較用のデッキは 7 つの想定です（${decks.map((d) => d.name).join(", ")}）`);
   const a: Agent = createSearchAgent(parseOptions(argv[1]));
   const b: Agent = createSearchAgent(parseOptions(argv[2]));
   const t0 = Date.now();
   // 4 つ目の引数で最初の試合番号を変えられる（例: 600 なら g600〜。前に回した試合と重ならない別の試合で確かめるため）
   const start = Number(argv[3] ?? 0);
-  type Deck = (typeof decks)[number];
-  const pairOf = (g: number, swap: boolean): [Deck, Deck] => {
-    const i = g % 7, j = (g * 3 + 1 + Math.floor(g / 7)) % 7;
-    return swap ? [decks[j]!, decks[i]!] : [decks[i]!, decks[j]!];
-  };
   // 5 つ目の引数で、B のデッキがその名前の試合だけを打つ（例: AFネメシス。相手のデッキでしか変わらない設定を、その対戦だけで比べるため）
   const vs = argv[4];
   if (vs && !decks.some((d) => d.name === vs)) throw new Error(`不明なデッキ: ${vs}`);
   const tasks = Array.from({ length: games }, (_, k) => [false, true].map((swap) => ({ g: start + k, swap })))
     .flat()
-    .filter(({ g, swap }) => !vs || pairOf(g, swap)[1].name === vs);
+    .filter(({ g, swap }) => !vs || comparePair(g, swap)[1].name === vs);
   // 1 試合ずつ並列に行う（各試合はシードで決まるので、結果は並列数によらない）
-  const results = await parallelMap(tasks, ({ g, swap }) => {
-    const [da, db] = pairOf(g, swap);
-    const aSeat = (g + (swap ? 1 : 0)) % 2;
-    const r = playMatch(aSeat === 0 ? [a, b] : [b, a], { decks: aSeat === 0 ? [da.cards, db.cards] : [db.cards, da.cards], seed: g * 7 + (swap ? 1 : 2) });
-    return { deck: da.name, won: r.winner === aSeat };
-  });
+  const results = await parallelMap(tasks, ({ g, swap }) => playCompareGame(a, b, g, swap));
   let wins = 0;
   const n = results.length;
   const perDeck = new Map<string, [number, number]>();
