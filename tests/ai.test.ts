@@ -505,3 +505,17 @@ describe("turn1ExtraPp", () => {
     expect(turn1ExtraPpAllowed(s, extra, p, "keepTurn2")).toBe(true);
   });
 });
+
+describe("extraPpExpiring", () => {
+  it("後攻の 5 ターン目に残っているエクストラPP の価値だけを変える", () => {
+    const s = createGame({ decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 3 });
+    const p = s.first === 0 ? 1 : 0;
+    s.players[p].extraPpAvailable = true;
+    const w0 = { ...SEARCH_WEIGHTS, extraPpExpiring: 0 };
+    const diff = () => evaluateWith(s, p, SEARCH_WEIGHTS) - evaluateWith(s, p, w0);
+    s.players[p].turnCount = 5;
+    expect(diff()).toBeCloseTo(SEARCH_WEIGHTS.extraPp);
+    s.players[p].turnCount = 4;
+    expect(diff()).toBeCloseTo(0);
+  });
+});
