@@ -34,7 +34,7 @@ export interface VariantRecord {
 const winsOf = (end: GameState, subject: HumanGameRecord["subject"], p: PlayerIndex, M: number, posSeed: number) =>
   rollouts(end.phase === "ended" ? end : applyAction(end, { type: "endTurn" }), subject, p, M, posSeed);
 
-function compareGame(rec: HumanGameRecord, base: Map<number, HumanPlanRecord>, opts: RhinoOptions, M: number): VariantRecord[] {
+function compareGame(rec: HumanGameRecord, base: Map<number, HumanPlanRecord>, opts: RhinoOptions, M: number, salt: number): VariantRecord[] {
   const { decks, seed } = compareMatch(rec.subject, rec.deck, rec.g, rec.seat);
   const p = rec.seat;
   const out: VariantRecord[] = [];
@@ -49,7 +49,7 @@ function compareGame(rec: HumanGameRecord, base: Map<number, HumanPlanRecord>, o
       if (b) {
         try {
           const posSeed = mix(seed, 100 + lastTurn);
-          const v = aiTurn(s, p, makeAgents(rec.subject, p, opts), mix(posSeed, 1));
+          const v = aiTurn(s, p, makeAgents(rec.subject, p, opts), salt === 0 ? mix(posSeed, 1) : mix(mix(posSeed, 1), salt));
           const changed = v.steps.join("\n") !== b.ai.steps.join("\n");
           const row: VariantRecord = { subject: rec.subject, deck: rec.deck, g: rec.g, seat: p, ownTurn: lastTurn, changed, steps: v.steps, oldSteps: b.ai.steps, wins: [], oldWins: [], humanWins: [] };
           if (changed) {
@@ -120,12 +120,14 @@ export function summarizeVariant(rows: VariantRecord[]): string[] {
 }
 
 /**
- * npm run variant-plan-value -- --base <human-plan-value の出力.jsonl> --opts '<JSON>' --out <file.jsonl> [--m 32] <人間の記録.jsonl>...
+ * npm run variant-plan-value -- --base <human-plan-value の出力.jsonl> --opts '<JSON>' --out <file.jsonl> [--m 32] [--salt N] <人間の記録.jsonl>...
  * --opts は比べるデッキの AI の設定（SearchOptions の一部。リノセウスエルフは RhinoOptions。"weights" にオブジェクトを渡すと SEARCH_WEIGHTS のその項目だけを変える）。
- * --m は --base を作ったときと同じ値にする（シードを揃えるため）。並列数は環境変数 THREADS
+ * --m は --base を作ったときと同じ値にする（シードを揃えるため）。並列数は環境変数 THREADS。
+ * --salt に 0 以外を渡すと、AI のそのターンの乱数だけを変える（--opts '{}' と合わせると、AI の手順のばらつきだけで変わる分を測れる。
+ * 差の大きい局面を選んで見ると、選んだこと自体で元の AI の手順が悪く見える（平均への回帰）ので、その対照に使う）
  */
 export async function main(argv: string[]): Promise<number> {
-  let out = "variant-plan-value.jsonl", M = 32, basePath = "";
+  let out = "variant-plan-value.jsonl", M = 32, basePath = "", salt = 0;
   let opts: RhinoOptions = {};
   const files: string[] = [];
   for (let i = 0; i < argv.length; i++) {
@@ -138,6 +140,7 @@ export async function main(argv: string[]): Promise<number> {
     if (k === "--out") out = v;
     else if (k === "--m") M = Number(v);
     else if (k === "--base") basePath = v;
+    else if (k === "--salt") salt = Number(v);
     else if (k === "--opts") {
       const raw = JSON.parse(v) as Record<string, unknown>;
       if (typeof raw.weights === "object" && raw.weights !== null) raw.weights = { ...SEARCH_WEIGHTS, ...raw.weights };
@@ -178,7 +181,7 @@ export async function main(argv: string[]): Promise<number> {
   if (!isParallelWorker) console.log(`試合 ${todo.length}（済み ${records.length - todo.length}）、M ${M}、設定 ${JSON.stringify(opts)}`);
   await parallelMap(
     todo,
-    (rec) => compareGame(rec, base.get(gameKey(rec))!, opts, M).map((x) => JSON.stringify(x)),
+    (rec) => compareGame(rec, base.get(gameKey(rec))!, opts, M, salt).map((x) => JSON.stringify(x)),
     (n, total, lines) => {
       if (lines.length > 0) appendFileSync(out, lines.join("\n") + "\n");
       const sec = (Date.now() - t0) / 1000;
