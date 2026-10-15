@@ -10,6 +10,7 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
 - **画像・音源・フォント等のアセットは一切使わない**（CDN 読み込み、絵文字依存の装飾、base64 埋め込み画像も不可）。表現は CSS とテキストのみ。クラスの識別は色＋文字で行う
 - スタック: TypeScript(strict) + Vite + 軽量UI(Preact想定) + Vitest
 - AI: まずルールベース、次に MCTS。重い思考は Web Worker で実行
+- 自己対戦の高速化のため、エンジンと AI を段階的に Rust に移す（`rust/README.md`、検討は `docs/ai-notes.md`「エンジンを Rust に移す」）。ブラウザ向けにビルドした `.wasm` をサイトに置くのは可（ユーザー確認済み 2026-10-15。画像・音・フォント等のアセットの禁止はそのまま）
 - カードデータは、ユーザーが提供した公式サイトのカード一覧APIのレスポンス（`data/raw/*.json`）を `npm run cards`（`scripts/convert-cards.ts`）で `data/cards.json` と `data/crests.json` に変換する。作業環境からは公式サイト・攻略サイトにアクセスできない
 - 元データはブランチ `wistery-k-patch-1` の `cardList.json`〜`cardList_7.json`（全198枚、offset 0〜180）。再生成するときは `git show origin/wistery-k-patch-1:<file> > data/raw/<file>` で取り出す
 - ドキュメント・UI 文言・コミットメッセージは日本語。識別子・コードコメントの用語は英語でもよいが、ゲーム用語は `docs/rules.md` の対応表に従う
@@ -21,12 +22,14 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
 3. **状態遷移は純関数的に**: `applyAction(state, action) -> state`。状態は JSON シリアライズ可能に保つ（クラスインスタンスや関数を状態に入れない）。MCTS 用に高速に複製できる形を意識する
 4. **合法手列挙**: `legalActions(state)` をエンジンが提供し、UI と AI は同じ API だけを使う。UI/AI がルール判定を再実装しない
 5. **カード効果はデータ駆動**: 効果は `src/cards/abilities/<クラス>.ts` にカードIDをキーに宣言的に記述し（DSL は `src/engine/dsl.ts`、補助関数は `src/cards/abilities/helpers.ts`）、エンジンの効果プリミティブ（ダメージ、ドロー、召喚、バフ、キーワード付与 等）の組み合わせで表現する。表現できない効果が出たらプリミティブを足す。カード個別の `if (id === ...)` は書かない
+5.0 **Rust 版エンジン・AI（`rust/`）**: 移行が終わるまでは TS 版と同じ処理順（乱数を引く順を含む）に保つ。エンジンやカード能力を変えたら `npm run rust-data` で書き出し直し、差分テスト（`npm run rust-diff` と `svwb diff`。CI でも行う）を通す。
+   AI（探索 AI・リノセウス用 AI）を変えたら Rust 側（`rust/engine/src/ai`）も同じに変え、AI の差分テスト（`npm run rust-ai-diff` と `svwb ai-diff`。CI でも行う）を通す
 5.1 **能力の解決**: `src/engine/effects.ts` が解決スタック（`state.stack`）と誘発待ち（`state.queue`）で解決する。プレイヤーの選択が必要になると `state.pending` を設定して中断し、`choose` / `mode` アクションで再開する。状態に関数を入れないため、継続はデータ（効果の配列とプログラムカウンタ）で持つ
 6. **非公開情報**: AI は実際の局面を直接先読みせず、`src/ai/determinize.ts` で作った「視点のプレイヤーから見て矛盾しない局面」（相手の手札・山札の中身と山札の順番を並べ直し、乱数の状態も新しくしたもの）で手を試す。新しい AI もこれに従う
 7. **AI インターフェース共通化**: `Agent.chooseAction(state, legalActions, rng) -> Action`（`src/ai/types.ts`）。選べる AI は `src/ai/registry.ts` に登録し、UI・自動対戦（`npm run sim`、「AI対戦」タブ）で共通に使う。UI では AI の思考を Web Worker（`src/ai/worker.ts`）で行う
 8. **AI の強さの比較**: AI を変えたら `npm run sim -- --games 50 --agents <新>,<旧>` 等で勝率を比べてから採用する。状態の複製は `cloneState`（`src/engine/clone.ts`）を使い、状態の型を変えたらそこも更新する
 9. **AI の実験記録**: AI の改善で試したことと結果（不採用のものも）は `docs/ai-notes.md` に残す。新しい実験の前に読み、同じことを繰り返さない
-   - 判断は勝率（探索 AI どうしなら `npm run compare`、同じシードで席とデッキを入れ替えて 200 試合程度）で行う。予測精度などの代わりの指標が良くても、勝率で確かめるまで採用しない（評価関数の学習は予測精度が上がったのに勝率は下がった）
+   - 判断は勝率（探索 AI どうしなら `npm run compare`、同じシードで席とデッキを入れ替えて 200 試合程度）で行う。Rust 版のランナー（`svwb compare`・`svwb rhino-compare`・`svwb td selfplay`。`rust/README.md`）は同じ試合・同じ出力で 7〜10 倍速い。予測精度などの代わりの指標が良くても、勝率で確かめるまで採用しない（評価関数の学習は予測精度が上がったのに勝率は下がった）
    - 1 組 20 試合の勝率表は 1 マス ±10% ほどぶれる。小さな差で結論を出さない
 
 ## ルールの扱い

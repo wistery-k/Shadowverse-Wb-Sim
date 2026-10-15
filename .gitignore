@@ -5,3 +5,6 @@ coverage/
 data/raw/
 .cache/
 *.log
+# Rust 版エンジンのビルド結果と、書き出したデータ（npm run rust-data で生成）
+rust/target/
+rust/engine/data/

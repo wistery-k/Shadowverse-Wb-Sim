@@ -17,3 +17,38 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  # Rust 版エンジン（rust/）が TypeScript 版と同じ結果になるかの差分テスト
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run rust-data
+      - run: cargo fmt --check && cargo clippy --release -- -D warnings
+        working-directory: rust
+      - run: cargo build --release && cargo test --release
+        working-directory: rust
+      - run: |
+          npm run -s rust-diff -- expect --games 1000 --out expected.txt
+          rust/target/release/svwb diff expected.txt
+          npm run -s rust-diff -- expect --games 1000 --random-decks --out expected-random.txt
+          rust/target/release/svwb diff expected-random.txt
+      # 探索 AI・リノセウス用 AI が TypeScript 版と同じ手を選ぶか（--probe はエルフの手番ごとに全探索のリーサル探索も比べる）
+      - run: |
+          npm run -s rust-ai-diff -- expect --games 14 --out expected-ai.txt
+          rust/target/release/svwb ai-diff expected-ai.txt
+          npm run -s rust-ai-diff -- expect --games 6 --agent rhino --probe --out expected-rhino.txt
+          rust/target/release/svwb ai-diff expected-rhino.txt
+      # 実験のランナー（svwb td selfplay・rhino-compare）が TypeScript 版と同じファイルを書き出すか
+      - run: |
+          npm run -s td -- selfplay --model data/value-net.json --games 7 --out td-ts.jsonl
+          rust/target/release/svwb td selfplay --model data/value-net.json --games 7 --out td-rs.jsonl
+          cmp <(sort td-ts.jsonl) <(sort td-rs.jsonl)
+          npm run -s rhino-compare -- --subject bishop --games 1 --out rc-ts.jsonl
+          rust/target/release/svwb rhino-compare --subject bishop --games 1 --out rc-rs.jsonl
+          cmp rc-ts.jsonl rc-rs.jsonl

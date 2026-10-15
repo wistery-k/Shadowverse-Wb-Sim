@@ -1,0 +1,22 @@
+[package]
+name = "svwb-engine"
+version = "0.1.0"
+edition = "2021"
+description = "Shadowverse: Worlds Beyond 非公式対戦シミュレータのエンジン（TypeScript 版 src/engine の移植）"
+publish = false
+
+[lib]
+name = "svwb_engine"
+path = "src/lib.rs"
+
+[[bin]]
+name = "svwb"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[features]
+# 差分テストで実行された効果の種類を数える（svwb coverage）
+coverage = []
