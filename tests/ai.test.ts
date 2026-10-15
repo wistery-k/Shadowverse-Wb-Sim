@@ -157,13 +157,19 @@ describe("探索 AI", () => {
     return s;
   }
 
+  /**
+   * SEP の重みの効き目を見るので、相手のターンは貪欲法で読む
+   * （相手のターンをビームサーチで読むと、乱数によっては超進化しない。12 通り中 4 回）
+   */
+  const sepAgent = createSearchAgent({ opponentSearch: null });
+
   /** 探索 AI でターンの終わりまで打ち、打った手を返す */
   function playTurn(state: GameState) {
     let s = state;
     const rng = rngFrom({ rng: 7 });
     const actions = [];
     for (let i = 0; i < 20 && s.phase !== "ended" && (s.pending ? s.pending.player : s.active) === 0; i++) {
-      const a = searchAgent.chooseAction(s, legalActions(s), rng);
+      const a = sepAgent.chooseAction(s, legalActions(s), rng);
       actions.push(a);
       if (a.type === "endTurn") break;
       s = applyAction(s, a);

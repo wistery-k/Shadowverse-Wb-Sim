@@ -163,7 +163,8 @@ function modelOptions(model: ValueNetModel, net: CompiledValueNet): { opts: Part
   const w = { ...SEARCH_WEIGHTS, ...model.baseWeights } as EvalWeights;
   const zero = model.w2.every((x) => x === 0) && model.b2 === 0 && model.c === 0;
   // 補正が 0 のモデルは補正を足さない（探索 AI の既定の補正 data/value-net.json も外す）
-  return { opts: { weights: w, extraEval: zero ? null : valueNetExtraEval(net) }, w };
+  // 相手のターンは、これまでの学習と同じく貪欲法で読む（既定のビームサーチは思考時間が約 2.4 倍）
+  return { opts: { weights: w, extraEval: zero ? null : valueNetExtraEval(net), opponentSearch: null }, w };
 }
 
 async function selfplay(args: Args): Promise<number> {

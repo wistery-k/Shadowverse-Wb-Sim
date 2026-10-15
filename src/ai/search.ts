@@ -157,7 +157,8 @@ export interface SearchOptions {
   exhaustive: { untilTurn: number; maxStates: number } | null;
   /**
    * 上位の手を相手のターンまで読むとき、相手のターンを貪欲法ではなく、局面をそのまま見たビームサーチ（幅 beamWidth・深さ maxDepth、
-   * 相手のターン末の採点で最善の並び。相手の次のターンは読まない）で打つ。null なら貪欲法（既定。幅 4 で 52.3%・思考時間 約 3.7 倍のため保留）。
+   * 相手のターン末の採点で最善の並び。相手の次のターンは読まない）で打つ。null なら貪欲法。
+   * 既定は幅 4・深さ 8（学習した補正を入れた後、貪欲法で読む AI に 3200 試合で 53.2%。思考時間は約 2.4 倍。docs/ai-notes.md）。
    * 貪欲法の読みは、消える人形を倒しに行く・タダで消える 1/1 を出さない等、相手の手を読み違える（docs/ai-notes.md）。
    * extraEval が true なら、相手のビームサーチの評価にも extraEval（学習した補正）を足す（false・省略なら足さない）
    */
@@ -208,7 +209,7 @@ export const exhaustiveCounts = {
   byTurn: {} as Record<number, [number, number, number, number]>,
 };
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, mulliganCards: null, reanimateGuard: false, turn1ExtraPp: "always", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: null, oppHandSamples: 1, peekOppHand: false, oppFuse: false, dangerRescore: 0, reuseAgree: false, extraEval: valueNetEval };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, mulliganCards: null, reanimateGuard: false, turn1ExtraPp: "always", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: { beamWidth: 4, maxDepth: 8 }, oppHandSamples: 1, peekOppHand: false, oppFuse: false, dangerRescore: 0, reuseAgree: false, extraEval: valueNetEval };
 
 /** 打った手の並び（後ろから前へのリスト）。各手を打った後の局面も持つ */
 interface Step {

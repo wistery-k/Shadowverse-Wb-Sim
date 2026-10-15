@@ -74,7 +74,7 @@ describe("TD 学習の評価の補正（valueNet）", () => {
     const extra = valueNetExtraEval(net);
     expect(extra(s, 0, "end")).toBe(0);
     expect(extra(s, 1, "after")).toBe(0);
-    const plain = createSearchAgent({ weights: SEARCH_WEIGHTS });
+    const plain = createSearchAgent({ weights: SEARCH_WEIGHTS, extraEval: null });
     const withNet = createSearchAgent({ weights: SEARCH_WEIGHTS, extraEval: extra });
     const legal = legalActions(s);
     expect(withNet.chooseAction(s, legal, rngFrom({ rng: 9 }))).toEqual(plain.chooseAction(s, legal, rngFrom({ rng: 9 })));
