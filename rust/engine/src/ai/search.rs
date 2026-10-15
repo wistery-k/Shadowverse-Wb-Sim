@@ -67,6 +67,9 @@ pub struct SearchOptions {
     pub mulligan: MulliganMode,
     /// MulliganMode::Sample で、返し方ごとに引き直しを試す回数
     pub mulligan_samples: usize,
+    /// MulliganMode::Sample で、評価関数（手で決めた部分）と学習した補正のどちらを使うか
+    pub mulligan_static: bool,
+    pub mulligan_net: bool,
     pub settle_trades: bool,
     pub reuse_plan: bool,
     pub plan_candidates: usize,
@@ -101,6 +104,8 @@ impl Default for SearchOptions {
             score_turn_end: ScoreTurnEnd::All,
             mulligan: MulliganMode::Model,
             mulligan_samples: 100,
+            mulligan_static: true,
+            mulligan_net: true,
             settle_trades: true,
             reuse_plan: true,
             plan_candidates: 3,
@@ -828,10 +833,14 @@ impl Agent for SearchAgent {
         if matches!(first, Action::Mulligan { .. }) {
             let p0 = acting_player(real);
             if opts.mulligan == MulliganMode::Sample {
-                let extra = opts.extra_eval.clone();
+                let extra = opts.extra_eval.clone().filter(|_| opts.mulligan_net);
                 let w = &self.w;
                 return sampled_mulligan(real, legal, p0, opts.mulligan_samples, rng, |s| {
-                    let v = evaluate_with(s, p0, w);
+                    let v = if opts.mulligan_static {
+                        evaluate_with(s, p0, w)
+                    } else {
+                        0.0
+                    };
                     match &extra {
                         Some(f) => v + f(s, p0, ValuePhase::End),
                         None => v,

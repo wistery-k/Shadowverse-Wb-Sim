@@ -121,6 +121,8 @@ pub fn search_options(
             "dangerRescore" => o.danger_rescore = count(k, v)?,
             "mulliganSamples" => o.mulligan_samples = count(k, v)?,
             "lethal" => o.lethal = flag(k, v)?,
+            "mulliganStatic" => o.mulligan_static = flag(k, v)?,
+            "mulliganNet" => o.mulligan_net = flag(k, v)?,
             "dedup" => o.dedup = flag(k, v)?,
             "sameHandOnce" => o.same_hand_once = flag(k, v)?,
             "chain" => o.chain = flag(k, v)?,
