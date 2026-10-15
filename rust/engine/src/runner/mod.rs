@@ -5,6 +5,7 @@
 //! 試合は CPU のコア数だけのスレッドで並列に行う（環境変数 THREADS で変えられる）。
 
 pub mod compare;
+pub mod mulligan_compare;
 pub mod options;
 pub mod parallel;
 pub mod rhino_compare;

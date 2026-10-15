@@ -62,6 +62,7 @@ npm run svwb -- ai-play 14 0 search                     # AI どうしの試合�
 npm run compare -- 105 '{}' '{"lethal":false}'                          # 探索 AI の設定どうしの勝率
 npm run rhino-compare -- --games 50 --opts '{"nextLethal":10}' --out r.jsonl
 npm run af-compare -- --games 50                                         # rhino-compare --subject af
+npm run svwb -- mulligan-compare --games 50 --a '{"mulligan":"sample"}'  # マリガンの設定どうしを同じシードの試合で打ち比べる（相手は今の探索 AI）
 npm run svwb -- td selfplay --model m0.json --games 2000 --out d0.jsonl  # TD 学習の自己対戦（試合が終わった順に書く。--opp beam・--iv k は td.rs の先頭の説明）
 ```
 
@@ -69,6 +70,7 @@ npm run svwb -- td selfplay --model m0.json --games 2000 --out d0.jsonl  # TD �
   リノセウス用 AI の `"potential"`・`"holds"` 等を受け付ける。TypeScript 版とともに消した実験用の項目（序盤のターンを全探索する
   `"exhaustive"` 等）はエラーになる（既定の値なら受け付ける）。知らない項目もエラーにする
 - rhino-compare の `--agent` は rhino・rhino-lethal・search・search-classic
+- マリガンの設定 `"mulligan"` は model（既定）・weights・cost・sample（返し方 16 通りごとに引き直しを `"mulliganSamples"` 回（既定 100）試し、評価関数の平均で選ぶ）
 - td の init・train・probe・prune は `npm run td -- …`（`scripts/td-main.ts`）で行い、td selfplay の書き出したファイルをそのまま渡せる
 
 ## 構成
@@ -79,7 +81,7 @@ npm run svwb -- td selfplay --model m0.json --games 2000 --out d0.jsonl  # TD �
 - `engine/src/effects.rs`: 能力の解釈と解決スタック
 - `engine/src/game.rs`: 対戦の生成・合法手・行動の適用
 - `engine/src/golden.rs`・`canonical.rs`・`sim.rs`・`main.rs`: ゴールデンテスト・計測・CLI
-- `engine/src/runner/`: 実験のランナー（compare・rhino-compare・td selfplay）。`parallel.rs`（並列実行）、`options.rs`（設定の JSON）、
+- `engine/src/runner/`: 実験のランナー（compare・rhino-compare・mulligan-compare・td selfplay）。`parallel.rs`（並列実行）、`options.rs`（設定の JSON）、
   `json.rs`（項目の順番を保つ JSON）、`jsnum.rs`（JavaScript の `Number#toString`・`toPrecision`・`toFixed` と同じ数の書き方）
 - `engine/src/ai/`: AI。`registry.rs`（選べる AI の一覧）、`search.rs`（ターン単位のビームサーチ・相手のターンの読み）、`eval.rs`（評価関数）、
   `valuenet.rs`（学習した補正の推論）、`lethal.rs`（リーサル探索）、`lethal_hint.rs`（対戦画面の「リーサル」表示）、`determinize.rs`、

@@ -1,7 +1,10 @@
 //! マリガン（src/ai/mulligan.ts の weightedMulliganSwap、src/ai/mulliganModel.ts の modelMulliganSwap）。
 
 use super::aidata::{ai_data, MulliganDeckModel};
+use super::determinize::determinize;
+use super::Rng;
 use crate::data::{data, CardIdx};
+use crate::game::try_apply_action;
 use crate::state::*;
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -190,4 +193,35 @@ pub(crate) fn model_swap(
         }
     }
     best
+}
+
+/// 返し方ごとに引き直しを n 回ずつ試し、引き直した後の局面の評価の平均が最も高い返し方を選ぶ。
+/// 自分の山札の順番と相手の手札・山札は determinize で並べ直し、n 通りの並べ方を全ての返し方で共通に使う
+/// （返し方どうしの差のぶれを減らすため）。乱数は rng を進めずに、その状態から作った別の乱数を使う
+/// （判断が今のマリガンと同じなら、その後の試合も同じになるように）
+pub(crate) fn sampled_mulligan(
+    real: &GameState,
+    legal: &[Action],
+    p: PlayerIndex,
+    n: usize,
+    rng: &Rng,
+    eval: impl Fn(&GameState) -> f64,
+) -> Action {
+    let mut local = Rng::new(rng.state ^ 0x6d75_6c6c);
+    let dets: Vec<GameState> = (0..n.max(1))
+        .map(|_| determinize(real, p, &mut local, false))
+        .collect();
+    let mut best = &legal[0];
+    let mut best_v = f64::NEG_INFINITY;
+    for a in legal {
+        let sum: f64 = dets
+            .iter()
+            .map(|d| eval(&try_apply_action(d, a).expect("マリガンの合法手")))
+            .sum();
+        if sum > best_v {
+            best_v = sum;
+            best = a;
+        }
+    }
+    best.clone()
 }

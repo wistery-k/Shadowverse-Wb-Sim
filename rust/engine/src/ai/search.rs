@@ -12,7 +12,7 @@ use super::eval::{evaluate_with, EvalWeights};
 use super::greedy::choose_greedy;
 use super::keys::{hand_eq_noid, visible_eq, TurnOrderSet};
 use super::lethal::{find_lethal, search_lethal, DEFAULT_LETHAL_OPTIONS};
-use super::mulligan::{model_mulligan_swap, weighted_mulligan_swap};
+use super::mulligan::{model_mulligan_swap, sampled_mulligan, weighted_mulligan_swap};
 use super::valuenet::{value_net_eval, ValuePhase};
 use super::{Agent, Rng};
 use crate::game::{acting_player, legal_actions, resolve_turn_end, try_apply_action};
@@ -39,6 +39,8 @@ pub enum MulliganMode {
     Model,
     Weights,
     Cost,
+    /// 返し方ごとに引き直しを mulligan_samples 回試して、評価の平均で選ぶ
+    Sample,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -63,6 +65,11 @@ pub struct SearchOptions {
     pub chain_fuse: bool,
     pub score_turn_end: ScoreTurnEnd,
     pub mulligan: MulliganMode,
+    /// MulliganMode::Sample で、返し方ごとに引き直しを試す回数
+    pub mulligan_samples: usize,
+    /// MulliganMode::Sample で、評価関数（手で決めた部分）と学習した補正のどちらを使うか
+    pub mulligan_static: bool,
+    pub mulligan_net: bool,
     pub settle_trades: bool,
     pub reuse_plan: bool,
     pub plan_candidates: usize,
@@ -96,6 +103,9 @@ impl Default for SearchOptions {
             chain_fuse: false,
             score_turn_end: ScoreTurnEnd::All,
             mulligan: MulliganMode::Model,
+            mulligan_samples: 100,
+            mulligan_static: true,
+            mulligan_net: true,
             settle_trades: true,
             reuse_plan: true,
             plan_candidates: 3,
@@ -822,6 +832,21 @@ impl Agent for SearchAgent {
         let opts = &self.opts;
         if matches!(first, Action::Mulligan { .. }) {
             let p0 = acting_player(real);
+            if opts.mulligan == MulliganMode::Sample {
+                let extra = opts.extra_eval.clone().filter(|_| opts.mulligan_net);
+                let w = &self.w;
+                return sampled_mulligan(real, legal, p0, opts.mulligan_samples, rng, |s| {
+                    let v = if opts.mulligan_static {
+                        evaluate_with(s, p0, w)
+                    } else {
+                        0.0
+                    };
+                    match &extra {
+                        Some(f) => v + f(s, p0, ValuePhase::End),
+                        None => v,
+                    }
+                });
+            }
             let model_swap = if opts.mulligan == MulliganMode::Model {
                 model_mulligan_swap(real, p0)
             } else {

@@ -144,3 +144,45 @@ fn model_picks_best_predicted_keep() {
     // 既定の係数のあるデッキなら既定の係数で選ぶ
     assert!(model_mulligan_swap(&s, s.first).is_some());
 }
+
+fn sample_agent(n: usize) -> crate::ai::search::SearchAgent {
+    crate::ai::search::SearchAgent::new(crate::ai::search::SearchOptions {
+        mulligan: crate::ai::search::MulliganMode::Sample,
+        mulligan_samples: n,
+        ..Default::default()
+    })
+}
+
+#[test]
+fn sampled_mulligan_is_deterministic_and_keeps_rng() {
+    // 引き直しを試すマリガンは、同じ局面・同じ乱数なら同じ手を選び、試合の乱数を進めない
+    let (s, _) = weights_state();
+    let legal = legal_actions(&s);
+    assert_eq!(legal.len(), 16);
+    let mut rng = Rng::new(777);
+    let a = sample_agent(20).choose_action(&s, &legal, &mut rng);
+    assert_eq!(rng.state, 777);
+    let b = sample_agent(20).choose_action(&s, &legal, &mut rng);
+    assert_eq!(a, b);
+    assert!(legal.contains(&a));
+}
+
+/// 速さの確認（cargo test --release -- --ignored --nocapture sampled_mulligan_speed）
+#[test]
+#[ignore]
+fn sampled_mulligan_speed() {
+    for n in [100usize, 1000] {
+        let mut agent = sample_agent(n);
+        let t0 = std::time::Instant::now();
+        let games = 50u32;
+        for g in 0..games {
+            let s = new_game(deck(DECK), deck(OTHER), g);
+            let legal = legal_actions(&s);
+            agent.choose_action(&s, &legal, &mut Rng::new(g));
+        }
+        println!(
+            "引き直し {n} 回: 1 回のマリガン {:.1} ミリ秒",
+            t0.elapsed().as_secs_f64() * 1000.0 / games as f64
+        );
+    }
+}

@@ -119,7 +119,10 @@ pub fn search_options(
             "perFirst" => o.per_first = count(k, v)?,
             "oppHandSamples" => o.opp_hand_samples = count(k, v)?,
             "dangerRescore" => o.danger_rescore = count(k, v)?,
+            "mulliganSamples" => o.mulligan_samples = count(k, v)?,
             "lethal" => o.lethal = flag(k, v)?,
+            "mulliganStatic" => o.mulligan_static = flag(k, v)?,
+            "mulliganNet" => o.mulligan_net = flag(k, v)?,
             "dedup" => o.dedup = flag(k, v)?,
             "sameHandOnce" => o.same_hand_once = flag(k, v)?,
             "chain" => o.chain = flag(k, v)?,
@@ -149,9 +152,10 @@ pub fn search_options(
                     Json::Str(s) if s == "model" => MulliganMode::Model,
                     Json::Str(s) if s == "weights" => MulliganMode::Weights,
                     Json::Str(s) if s == "cost" => MulliganMode::Cost,
+                    Json::Str(s) if s == "sample" => MulliganMode::Sample,
                     _ => {
                         return Err(format!(
-                            "\"mulligan\" は model / weights / cost: {}",
+                            "\"mulligan\" は model / weights / cost / sample: {}",
                             v.stringify()
                         ))
                     }

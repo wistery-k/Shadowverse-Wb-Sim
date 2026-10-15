@@ -7,6 +7,7 @@
 //!   svwb ai-play [games] [start] [search|rhino|rhino-lethal] AI どうしの試合を打って時間を測る
 //!   svwb compare <games> '<A>' '<B>' [start] [vsDeck]  探索 AI の設定どうしの勝率（npm run compare と同じ）
 //!   svwb rhino-compare [--subject …] [--games …] [--opts …] [--out …]  デッキ専用の AI の勝率（npm run rhino-compare と同じ）
+//!   svwb mulligan-compare [--games 50] [--a …] [--b …]  マリガンの設定どうしを同じシードの試合で打ち比べる
 //!   svwb td selfplay --model m.json --games N [--start S] [--eps 0.1] --out d.jsonl  TD 学習の自己対戦
 
 use std::time::Instant;
@@ -150,10 +151,11 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Some(cmd @ ("compare" | "rhino-compare" | "td")) => {
+        Some(cmd @ ("compare" | "rhino-compare" | "mulligan-compare" | "td")) => {
             let rest = &args[1..];
             let r = match cmd {
                 "compare" => runner::compare::main(rest),
+                "mulligan-compare" => runner::mulligan_compare::main(rest),
                 "rhino-compare" => runner::rhino_compare::main(rest),
                 _ => runner::td::main(rest),
             };
@@ -163,7 +165,7 @@ fn main() {
             }
         }
         _ => {
-            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | td selfplay …（rust/README.md）");
+            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | mulligan-compare … | td selfplay …（rust/README.md）");
             std::process::exit(2);
         }
     }
