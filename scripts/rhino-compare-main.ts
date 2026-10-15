@@ -7,7 +7,7 @@
 //     （--opts はリノセウス用 AI の探索の設定 SearchOptions の一部。"weights" にオブジェクトを渡すと SEARCH_WEIGHTS のその項目だけを変える。"potential" は次のターンのリノセウスの打点の不足分を評価に足す係数。"holds" は温存のルールを外す（例: {"mystery":false}）。"beamPp" はビームで残す局面を選ぶときに残り PP 1 につき足す点。"exhaustive" は序盤のターンを全探索する（例: {"untilTurn":5,"maxStates":10000}）。
 //      試合は CPU のコア数だけ並列に行う）
 // 自然の妖精姫・アリアを出した試合の数と、最初に出した自分のターン（平均）も出す。
-// --agent で、リノセウスエルフ側の AI を registry のキーで選べる（既定は rhino。例: search、rhino-lethal。--opts は rhino のときだけ使う）。
+// --agent で、リノセウスエルフ側の AI を registry のキーで選べる（既定は rhino。例: search、rhino-lethal。--opts は rhino・rhino-lethal・search のときだけ使う）。
 // --start N で、最初の試合番号を N にする（既定 0。前に回した試合と重ならない別の試合で確かめるため）。
 // --subject bishop のときは、ジャンヌを出した回数と、そのときアミュレットから出たフォロワーが場にいた回数も出す。
 // --out ファイル名 で、試合ごとの結果（相手デッキ・g・席・勝ち・全探索でリーサルを見つけた回数）を JSON Lines で書き出す（変更前後で試合ごとに比べる用）。
@@ -63,8 +63,15 @@ export async function main(argv: string[]): Promise<number> {
     else throw new Error(`不明な引数: ${key}`);
   }
   agentKey ??= SUBJECTS[subject].agent;
-  // --opts は rhino・search のときだけ使う
-  const agent: Agent = agentKey === "rhino" ? createRhinoAgent(opts) : agentKey === "search" ? createSearchAgent(opts) : agentOf(agentKey);
+  // --opts は rhino・rhino-lethal・search のときだけ使う
+  const agent: Agent =
+    agentKey === "rhino"
+      ? createRhinoAgent(opts)
+      : agentKey === "rhino-lethal"
+        ? { ...createRhinoAgent(opts, { rules: false }), name: "rhino-lethal" }
+        : agentKey === "search"
+          ? createSearchAgent(opts)
+          : agentOf(agentKey);
   // 相手は web の「人間との比較」と同じ AI（学習した評価の補正を入れる前の探索 AI。src/sim/humanCompare.ts）
   const opponent = agentOf(OPPONENT_AGENT);
   const given = matches === null ? null : readMatches(matches, subject);
