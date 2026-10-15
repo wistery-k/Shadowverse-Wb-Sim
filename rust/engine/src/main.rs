@@ -6,6 +6,9 @@
 //!   svwb bench [games]         速さの計測（npm run rust-diff -- bench と同じ 2 つ）
 //!   svwb ai-diff <expected.txt> TypeScript 版（npm run rust-ai-diff -- expect）の AI どうしの試合の行動の列と突き合わせる
 //!   svwb ai-play [games] [start] [search|rhino|rhino-lethal] AI どうしの試合を打って時間を測る
+//!   svwb compare <games> '<A>' '<B>' [start] [vsDeck]  探索 AI の設定どうしの勝率（npm run compare と同じ）
+//!   svwb rhino-compare [--subject …] [--games …] [--opts …] [--out …]  デッキ専用の AI の勝率（npm run rhino-compare と同じ）
+//!   svwb td selfplay --model m.json --games N [--start S] [--eps 0.1] --out d.jsonl  TD 学習の自己対戦（npm run td -- selfplay と同じ）
 
 use std::time::Instant;
 use svwb_engine::ai::rhino::{rhino_lethal_bound, search_lethal_for_rhino_turn, RhinoAgent};
@@ -13,6 +16,7 @@ use svwb_engine::ai::rhino_lethal::{tag, Tag};
 use svwb_engine::ai::search::{SearchAgent, SearchOptions};
 use svwb_engine::ai::Agent;
 use svwb_engine::canonical::{action_canon, fnv, state_canon};
+use svwb_engine::runner;
 use svwb_engine::sim::{play_ai, play_random};
 use svwb_engine::{legal_actions, resolve_turn_end, try_apply_action, GameState};
 
@@ -259,8 +263,20 @@ fn main() {
                 println!("{k}\t{n}");
             }
         }
+        Some(cmd @ ("compare" | "rhino-compare" | "td")) => {
+            let rest = &args[1..];
+            let r = match cmd {
+                "compare" => runner::compare::main(rest),
+                "rhino-compare" => runner::rhino_compare::main(rest),
+                _ => runner::td::main(rest),
+            };
+            if let Err(e) = r {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
         _ => {
-            eprintln!("使い方: svwb diff <expected.txt> | dump <game> <step> | bench [games]");
+            eprintln!("使い方: svwb diff <expected.txt> | dump <game> <step> | bench [games] | ai-diff <expected.txt> | ai-play [games] | compare … | rhino-compare … | td selfplay …（rust/README.md）");
             std::process::exit(2);
         }
     }

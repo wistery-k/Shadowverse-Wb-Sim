@@ -1,7 +1,7 @@
 # Rust 版エンジン
 
 TypeScript 版のエンジン（`src/engine`）と探索 AI（`src/ai`）を Rust に移したもの。自己対戦の高速化のため
-（段階 1: エンジン、段階 2: 探索 AI とリノセウス用 AI。計画はプロジェクトのメモ `notes/speedup-port.md`）。
+（段階 1: エンジン、段階 2: 探索 AI とリノセウス用 AI、段階 3: 実験のランナー。計画はプロジェクトのメモ `notes/speedup-port.md`）。
 同じシード＋同じ行動列で TypeScript 版と同じ結果になり、AI は同じ局面・同じ乱数で TypeScript 版と同じ手を選ぶ。
 カードの能力は書き直さず、TypeScript の定義（`src/cards/abilities`）を JSON に書き出して読む。AI の重み・学習した補正のモデル等も同じく書き出して読む。
 
@@ -36,6 +36,26 @@ rust/target/release/svwb ai-diff expected-rhino.txt
 rust/target/release/svwb ai-play 14 0 search
 ```
 
+### 実験のランナー（段階 3）
+
+TypeScript 版の `npm run compare`・`npm run rhino-compare`（`af-compare` 等の `--subject` も）・`npm run td -- selfplay` と
+同じ引数で、同じ試合を打って同じ出力を出す（試合ごとの結果・勝率・書き出す JSON Lines まで同じ。秒数だけ違う）。7〜10 倍速い。
+書き出したファイルは、そのまま TypeScript 版の集計や `npm run td -- train` に渡せる。
+試合は CPU のコア数だけのスレッドで並列に行う（環境変数 `THREADS` で変えられる。並列数によらず同じ結果）。
+
+```sh
+rust/target/release/svwb compare 105 '{}' '{"lethal":false}'                         # npm run compare -- 105 '{}' '{"lethal":false}'
+rust/target/release/svwb rhino-compare --games 50 --opts '{"nextLethal":10}' --out r.jsonl  # npm run rhino-compare -- …
+rust/target/release/svwb rhino-compare --subject af --games 50                         # npm run af-compare -- --games 50
+rust/target/release/svwb td selfplay --model m0.json --games 2000 --out d0.jsonl      # npm run td -- selfplay …（試合が終わった順に書く）
+```
+
+- 設定の JSON は TypeScript 版と同じ項目を受け付ける（`"valueNet"` に学習した補正のファイル、`"weights"` のオブジェクト・`"default"`・`"holdScale"`、
+  リノセウス用 AI の `"potential"`・`"holds"` 等）。序盤のターンを全探索する `"exhaustive"` 等、TypeScript 版だけにある実験用の項目は
+  エラーになる（既定の値なら受け付ける）。知らない項目もエラーにする
+- rhino-compare の `--agent` は rhino・rhino-lethal・search・search-classic
+- td は selfplay だけ（init・train・probe・prune は `npm run td -- …` で行う）
+
 カードの能力やエンジンを TypeScript 側で変えたら、`npm run rust-data` で書き出し直し、差分テストを通すこと（CI でも行う）。
 エンジンの処理を変えるときは Rust 側も同じ順番（乱数を引く順を含む）で変える。
 AI を変えるときも Rust 側を同じに変え、AI の差分テストを通す。AI は浮動小数の足し算の順番、Map の挿入順、安定な並べ替え、
@@ -48,6 +68,8 @@ AI を変えるときも Rust 側を同じに変え、AI の差分テストを�
 - `engine/src/effects.rs`: 能力の解釈と解決スタック（`effects.ts`）
 - `engine/src/game.rs`: 対戦の生成・合法手・行動の適用（`game.ts`）
 - `engine/src/canonical.rs`・`sim.rs`・`main.rs`: 差分テストと計測
+- `engine/src/runner/`: 実験のランナー（`scripts/` の compare・rhino-compare・td selfplay）。`parallel.rs`（並列実行）、`options.rs`（設定の JSON）、
+  `json.rs`（項目の順番を保つ JSON。`JSON.stringify` と同じ並びで表示する）、`jsnum.rs`（`Number#toString`・`toPrecision`・`toFixed` と同じ数の書き方）
 - `engine/src/ai/`: 探索 AI（`src/ai`）。`search.rs`（ターン単位のビームサーチ・相手のターンの読み）、`eval.rs`（評価関数）、
   `valuenet.rs`（学習した補正の推論）、`lethal.rs`（リーサル探索）、`determinize.rs`、`keys.rs`（同じ局面の判定）、
   `greedy.rs`・`converging.rs`・`mulligan.rs`、リノセウス用 AI の `rhino.rs`・`rhino_lethal.rs`・`exact_lethal.rs`。

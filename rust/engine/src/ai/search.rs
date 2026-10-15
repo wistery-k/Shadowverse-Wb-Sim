@@ -5,7 +5,7 @@
 //! 3. 有望な並び（最初の手ごとの最善）について、相手のターンを軽いビームサーチで進めた後の局面を評価する
 //! 4. 平均の評価が最も良い「最初の手」を選ぶ。このターンで勝てる並び（リーサル）が見つかれば最優先する
 
-use super::aidata::ai_data;
+use super::aidata::{ai_data, Weights};
 use super::converging::{converging_attacks, settle_converging_trades};
 use super::determinize::determinize;
 use super::eval::{evaluate_with, EvalWeights};
@@ -18,9 +18,14 @@ use super::{Agent, Rng};
 use crate::game::{acting_player, legal_actions, resolve_turn_end, try_apply_action};
 use crate::state::*;
 use std::rc::Rc;
+use std::sync::Arc;
 
-pub type ExtraEval = fn(&GameState, PlayerIndex, ValuePhase) -> f64;
-pub type Allow = Rc<dyn Fn(&GameState, &Action, PlayerIndex) -> bool>;
+/// 評価関数に足す項（学習した補正・デッキ専用の AI 用）
+pub type ExtraEval = Arc<dyn Fn(&GameState, PlayerIndex, ValuePhase) -> f64 + Send + Sync>;
+/// 自分が打ってよい手か（ルールで禁じる手を探索から外す）
+pub type Allow = Arc<dyn Fn(&GameState, &Action, PlayerIndex) -> bool + Send + Sync>;
+/// 次の自分のターンにリーサルがあるか（nextLethal の判定。None ならリーサル探索 searchLethal）
+pub type NextLethalSearch = Arc<dyn Fn(&GameState, PlayerIndex) -> bool + Send + Sync>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ScoreTurnEnd {
@@ -63,8 +68,11 @@ pub struct SearchOptions {
     pub plan_candidates: usize,
     pub per_first: usize,
     pub next_lethal: f64,
+    pub next_lethal_search: Option<NextLethalSearch>,
     pub beam_pp: f64,
     pub extra_eval: Option<ExtraEval>,
+    /// 評価関数の重み（None なら探索 AI の既定 SEARCH_WEIGHTS）
+    pub weights: Option<Arc<Weights>>,
     pub opponent_search: Option<OpponentSearch>,
     pub opp_hand_samples: usize,
     pub peek_opp_hand: bool,
@@ -93,8 +101,10 @@ impl Default for SearchOptions {
             plan_candidates: 3,
             per_first: 0,
             next_lethal: 0.0,
+            next_lethal_search: None,
             beam_pp: 0.0,
-            extra_eval: Some(value_net_eval),
+            extra_eval: Some(Arc::new(value_net_eval)),
+            weights: None,
             opponent_search: Some(OpponentSearch {
                 beam_width: 4,
                 max_depth: 8,
@@ -227,7 +237,7 @@ impl<'a> Planner<'a> {
 
     fn eval_state(&self, s: &GameState) -> f64 {
         let v = evaluate_with(s, self.p, self.env.w);
-        match self.opts().extra_eval {
+        match &self.opts().extra_eval {
             Some(f) => v + f(s, self.p, ValuePhase::End),
             None => v,
         }
@@ -235,7 +245,7 @@ impl<'a> Planner<'a> {
 
     fn eval_after(&self, s: &GameState) -> f64 {
         let v = evaluate_with(s, self.p, self.env.w);
-        match self.opts().extra_eval {
+        match &self.opts().extra_eval {
             Some(f) => v + f(s, self.p, ValuePhase::After),
             None => v,
         }
@@ -617,7 +627,10 @@ fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng) -> f64 {
     if env.opts.next_lethal != 0.0
         && after.phase != Phase::Ended
         && after.players[opponent(p)].leader_hp as f64 <= env.w.w.lethal_range
-        && search_lethal(&after, p, &DEFAULT_LETHAL_OPTIONS).is_some()
+        && match &env.opts.next_lethal_search {
+            Some(f) => f(&after, p),
+            None => search_lethal(&after, p, &DEFAULT_LETHAL_OPTIONS).is_some(),
+        }
     {
         v += env.opts.next_lethal;
     }
@@ -675,7 +688,7 @@ pub fn simulate_opponent_turn_by_search(
     let opp_opts = SearchOptions {
         allow: None,
         extra_eval: if os.is_some_and(|o| o.extra_eval) {
-            opts.extra_eval
+            opts.extra_eval.clone()
         } else {
             None
         },
@@ -768,7 +781,12 @@ pub struct SearchAgent {
 impl SearchAgent {
     pub fn new(opts: SearchOptions) -> SearchAgent {
         let ad = ai_data();
-        let w = EvalWeights::new(ad.search_weights.clone());
+        let w = EvalWeights::new(
+            opts.weights
+                .as_deref()
+                .unwrap_or(&ad.search_weights)
+                .clone(),
+        );
         let mut pw = ad.default_weights.clone();
         pw.doomed = w.w.doomed;
         SearchAgent {

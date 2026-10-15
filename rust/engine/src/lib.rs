@@ -8,6 +8,7 @@ pub mod canonical;
 pub mod data;
 pub mod effects;
 pub mod game;
+pub mod runner;
 pub mod sim;
 pub mod state;
 

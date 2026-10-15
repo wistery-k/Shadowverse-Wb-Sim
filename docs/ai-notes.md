@@ -1946,3 +1946,29 @@ AI の改善で試したことと結果。同じ実験を繰り返さないた�
 
   - 探索 AI どうしの Rust 版の内訳（callgrind）: malloc/free 約 35%、局面の複製 約 19%、合流する相打ちの処理（`settle_converging_trades`）約 18%。局面の持ち方を詰めればまだ縮む
 - **次:** 段階 3（`compare`・`td selfplay` 等の実験のランナーを Rust の CLI にする。出力の形は今と同じにし、学習・集計は TS のまま使う）
+
+## 実験のランナーを Rust に移す（段階 3、2026-10-15）
+
+- **やったこと:** `npm run compare`・`npm run rhino-compare`（`--subject` で af・spellwitch・bishop・dragon・nightmare・royal も）・`npm run td -- selfplay` を
+  `svwb compare`・`svwb rhino-compare`・`svwb td selfplay` にした（`rust/README.md`「実験のランナー」）。引数・試合の組み方・シード・画面の出力・
+  書き出す JSON Lines は TS と同じ。学習（`td train`）・集計は TS のまま、Rust が書いたファイルを読む。試合はスレッドで並列に行う（`THREADS`）
+- **一致の確認:** 同じ引数で TS と Rust を回し、出力（秒数を除く）と書き出したファイルを比べた。
+  - td selfplay: 補正 0 のモデル（`td init`）14 試合、`data/value-net.json` と、STRIPPED の出発点に補正を足したモデルで各 49 試合（全 49 組）。ファイルの各行がバイト単位で一致（試合が終わった順に書くので、`g` で並べて比べる）
+  - rhino-compare（`--out` の JSON Lines と出力）: rhino 24 試合、rhino-lethal 12 試合、rhino に `potential`・`holds`・`nextLethal`・`valueNet`・`weights` を渡して 12 試合、
+    af（`valueNet`＋`weights`＋`beamWidth`）12 試合、bishop 12 試合（ジャンヌの回数も）、`--matches` 8 試合ですべて一致
+  - compare（出力は勝率とデッキごとの勝率だけ）: 設定の組 5 つ（`weights` の `holdScale`・`"default"`、`valueNet`、`opponentSearch`、`oppHandSamples`・`dangerRescore`・`reuseAgree`・`beamPp`、相手デッキの指定。最大 56 試合）で一致
+  - 並列数を変えても（`THREADS=1`・3）同じ結果
+  - 数の書き方（`JSON.stringify`・`toPrecision`・`toFixed`）は JavaScript に合わせた（Rust の書式は中間の値を偶数に丸めるが、JavaScript は絶対値の大きい方に丸める）。
+    設定の JSON の表示も、項目の順番（`{ ...SEARCH_WEIGHTS, ...weights }` の並び）まで TS と同じ
+  - CI でも td selfplay 7 試合と bishop の rhino-compare 12 試合を TS と比べる
+- **速さ（4 コアのクラウド環境、全体の実時間）:**
+
+  | | TS | Rust |
+  | --- | --- | --- |
+  | compare 56 試合（`'{}'` vs `'{"valueNet":false}'`） | 1.12 秒/試合 | 0.14 秒/試合（約 8 倍） |
+  | rhino-compare 24 試合（rhino） | 58.7 秒 | 8.1 秒（約 7 倍） |
+  | td selfplay 49 試合（`data/value-net.json`） | 24.3 秒 | 2.4 秒（約 10 倍） |
+
+- **未対応:** TS だけにある実験用の設定（序盤のターンを全探索する `exhaustive`、`mulliganCards`・`mulliganEvoBonus`・`reanimateGuard`・`turn1ExtraPp`、
+  `weights: "byClass"`）はエラーにする（既定の値なら受け付ける）。rhino-compare の `--agent` は rhino・rhino-lethal・search・search-classic だけ
+- **次:** 段階 4（ブラウザでも WASM の Rust 版を使い、TS 版のエンジン・AI を消す）。それまでは AI やエンジンを変えたら Rust 側も同じに変える

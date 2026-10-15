@@ -120,15 +120,29 @@ pub fn play_ai(
     g: u32,
     elf: bool,
     agents: &mut [&mut dyn crate::ai::Agent; 2],
-    mut visit: impl FnMut(&GameState, &Action),
+    visit: impl FnMut(&GameState, &Action),
 ) -> GameState {
     let (decks, seed) = ai_game_setup(g, elf);
-    let mut s = create_game([&decks[0], &decks[1]], seed);
+    play_match(agents, [&decks[0], &decks[1]], seed, visit)
+}
+
+/// 2 つの AI で 1 試合を最後まで打つ（TypeScript 版 src/sim/match.ts の playMatch。AI の乱数は seed から作る）。
+/// 各手で、打つ前の局面と選んだ手で visit を呼ぶ（勝者がいない終わり方は呼び出し側で確かめる）
+pub fn play_match(
+    agents: &mut [&mut dyn crate::ai::Agent; 2],
+    decks: [&[CardIdx]; 2],
+    seed: u32,
+    mut visit: impl FnMut(&GameState, &Action),
+) -> GameState {
+    let mut s = create_game(decks, seed);
     let mut rng = crate::ai::Rng::new(seed ^ 0x9e3779b9);
     let mut actions = 0;
     while s.phase != Phase::Ended {
         actions += 1;
-        assert!(actions <= 10000, "アクション数が上限を超えました");
+        assert!(
+            actions <= 10000,
+            "アクション数が上限 10000 を超えました（シード {seed}）"
+        );
         let legal = legal_actions(&s);
         let actor = crate::game::acting_player(&s);
         let a = agents[actor].choose_action(&s, &legal, &mut rng);

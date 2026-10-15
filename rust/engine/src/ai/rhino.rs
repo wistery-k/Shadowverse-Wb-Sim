@@ -13,13 +13,13 @@ use super::lethal::{
     find_lethal, search_lethal, LethalOptions, DEFAULT_LETHAL_OPTIONS, DIRECT_SCORING,
 };
 use super::rhino_lethal::{search_rhino_lethal, tag, Tag, DEFAULT_RHINO_LETHAL_OPTIONS};
-use super::search::{SearchAgent, SearchOptions};
-use super::valuenet::{value_net_eval, ValuePhase};
+use super::search::{ExtraEval, SearchAgent, SearchOptions};
+use super::valuenet::ValuePhase;
 use super::{Agent, Rng};
 use crate::data::{ClassId, AMBUSH, INTIMIDATE, STORM, WARD};
 use crate::game::{acting_player, legal_actions, try_apply_action};
 use crate::state::*;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 /// マリガンで1枚だけ残す序盤のカード（優先順）
@@ -401,10 +401,44 @@ pub fn next_turn_rhino_bound(s: &GameState, p: PlayerIndex) -> i32 {
     }
 }
 
-/// 評価に足す項: 次のターンのリノセウスの打点の上限が相手の体力に足りない分（係数 1。足りていれば 0）＋ 学習した評価の補正
-pub fn rhino_extra_eval(s: &GameState, p: PlayerIndex, phase: ValuePhase) -> f64 {
-    let short = (next_turn_rhino_bound(s, p) - s.players[opponent(p)].leader_hp).min(0);
-    short as f64 + value_net_eval(s, p, phase)
+/// rhinoPotentialEval の係数の既定（600 試合で 0 → 262 勝、1.0 → 291。docs/ai-notes.md）
+pub const RHINO_POTENTIAL: f64 = 1.0;
+
+/// 評価に足す項: 次のターンのリノセウスの打点の上限が相手の体力に足りない分 × potential ＋ learned（rhino.ts の addEval）。
+/// potential が 0 なら learned だけ
+pub fn rhino_extra_eval(potential: f64, learned: Option<ExtraEval>) -> Option<ExtraEval> {
+    if potential == 0.0 {
+        return learned;
+    }
+    let short = move |s: &GameState, p: PlayerIndex| {
+        potential * (next_turn_rhino_bound(s, p) - s.players[opponent(p)].leader_hp).min(0) as f64
+    };
+    Some(match learned {
+        None => Arc::new(move |s: &GameState, p: PlayerIndex, _: ValuePhase| short(s, p)),
+        Some(b) => Arc::new(move |s: &GameState, p: PlayerIndex, phase: ValuePhase| {
+            short(s, p) + b(s, p, phase)
+        }),
+    })
+}
+
+/// リノセウス用 AI の探索の設定（createRhinoAgent の既定。user の設定はこの上に上書きする）
+pub fn rhino_search_options(
+    potential: f64,
+    holds: RhinoHolds,
+    learned: Option<ExtraEval>,
+) -> SearchOptions {
+    SearchOptions {
+        allow: Some(Arc::new(
+            move |s: &GameState, a: &Action, q: PlayerIndex| allow_action_with(holds, s, a, q),
+        )),
+        lethal: false,
+        per_first: RHINO_PER_FIRST,
+        next_lethal_search: Some(Arc::new(|s: &GameState, q: PlayerIndex| {
+            search_lethal_for_rhino(s, q).is_some()
+        })),
+        extra_eval: rhino_extra_eval(potential, learned),
+        ..SearchOptions::default()
+    }
 }
 
 /// マリガンで入れ替えるカードの iid
@@ -821,20 +855,25 @@ pub struct RhinoAgent {
 }
 
 impl RhinoAgent {
+    /// 既定の設定のリノセウス用 AI
     pub fn new(rules: bool) -> RhinoAgent {
-        let search = SearchAgent::new(SearchOptions {
-            allow: Some(Rc::new(|s: &GameState, a: &Action, q: PlayerIndex| {
-                allow_action_with(ALL_HOLDS, s, a, q)
-            })),
-            lethal: false,
-            per_first: RHINO_PER_FIRST,
-            extra_eval: Some(rhino_extra_eval),
-            ..SearchOptions::default()
-        });
+        let learned = SearchOptions::default().extra_eval;
+        RhinoAgent::with_options(
+            rules,
+            rhino_search_options(RHINO_POTENTIAL, ALL_HOLDS, learned.clone()),
+            SearchOptions {
+                extra_eval: learned,
+                ..SearchOptions::default()
+            },
+        )
+    }
+
+    /// search はエルフの手番の探索の設定、plain はエルフ以外のデッキ・ルールを使わないときの探索の設定
+    pub fn with_options(rules: bool, search: SearchOptions, plain: SearchOptions) -> RhinoAgent {
         RhinoAgent {
             rules,
-            search,
-            plain: SearchAgent::new(SearchOptions::default()),
+            search: SearchAgent::new(search),
+            plain: SearchAgent::new(plain),
         }
     }
 }

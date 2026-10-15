@@ -1,7 +1,7 @@
 //! 探索 AI のデータ（`npm run rust-data` が書き出す rust/engine/data/ai-data.json）。
 //! 評価関数の重み・学習した評価の補正・マリガンの係数等を TypeScript 版から受け取る（書き写さない）。
 
-use crate::data::{data, CardIdx, CrestIdx};
+use crate::data::{data, CardIdx};
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -71,7 +71,7 @@ struct RawCards {
     boost_grown: Vec<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct RawValueNet {
     pub kind: String,
     pub version: i32,
@@ -98,8 +98,8 @@ struct RawMulliganDeck {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawAiData {
-    default_weights: Weights,
-    search_weights: Weights,
+    default_weights: serde_json::Map<String, serde_json::Value>,
+    search_weights: serde_json::Map<String, serde_json::Value>,
     decay_pow: HashMap<String, Vec<f64>>,
     cards: RawCards,
     value_net: RawValueNet,
@@ -120,6 +120,8 @@ pub struct MulliganDeckModel {
 pub struct AiData {
     pub default_weights: Weights,
     pub search_weights: Weights,
+    /// SEARCH_WEIGHTS の JSON（一部の項目だけを変えた重みを作るため。TypeScript の `{ ...SEARCH_WEIGHTS, ...x }`）
+    pub search_weights_raw: serde_json::Map<String, serde_json::Value>,
     /// countdownDecay → countdownDecay ** n（n = 0..63）
     pub decay_pow: Vec<(f64, Vec<f64>)>,
     pub kuon: CardIdx,
@@ -127,10 +129,8 @@ pub struct AiData {
     pub jeanne: CardIdx,
     pub fusion_set: Vec<CardIdx>,
     pub boost_grown: Vec<CardIdx>,
+    /// 学習した評価の補正（data/value-net.json）
     pub value_net: RawValueNet,
-    /// 学習した評価の補正の vocab の添字（カード・クレストの添字ごと）
-    pub vocab_card: Vec<Option<usize>>,
-    pub vocab_crest: Vec<Option<usize>>,
     /// デッキ名 → カード → [1 枚目を残す重み, 2 枚目も残す重み]
     pub mulligan_weights: HashMap<String, HashMap<CardIdx, [f64; 2]>>,
     pub mulligan_model: HashMap<String, MulliganDeckModel>,
@@ -157,18 +157,6 @@ fn load(json: &str) -> AiData {
     let raw: RawAiData = serde_json::from_str(json).expect("ai-data.json を読めません");
     let d = data();
     let ids = |v: &[String]| v.iter().map(|id| d.card_idx(id)).collect::<Vec<_>>();
-    let vn = raw.value_net;
-    let mut vocab_card = vec![None; d.cards.len()];
-    let mut vocab_crest = vec![None; d.crests.len()];
-    for (k, id) in vn.vocab.iter().enumerate() {
-        if let Some(c) = id.strip_prefix("crest:") {
-            if let Some(n) = d.crests.iter().position(|x| x.id == c) {
-                vocab_crest[n as CrestIdx as usize] = Some(k);
-            }
-        } else if let Some(&c) = d.card_by_id.get(id) {
-            vocab_card[c as usize] = Some(k);
-        }
-    }
     let role_index = |r: &str| {
         raw.roles
             .iter()
@@ -186,9 +174,7 @@ fn load(json: &str) -> AiData {
         jeanne: d.card_idx(&raw.cards.jeanne),
         fusion_set: ids(&raw.cards.fusion_set),
         boost_grown: ids(&raw.cards.boost_grown),
-        value_net: vn,
-        vocab_card,
-        vocab_crest,
+        value_net: raw.value_net,
         mulligan_weights: raw
             .mulligan_weights
             .into_iter()
@@ -230,16 +216,38 @@ fn load(json: &str) -> AiData {
                 )
             })
             .collect(),
-        default_weights: raw.default_weights,
-        search_weights: raw.search_weights,
+        default_weights: weights_from(raw.default_weights).expect("defaultWeights"),
+        search_weights: weights_from(raw.search_weights.clone()).expect("searchWeights"),
+        search_weights_raw: raw.search_weights,
         roles: raw.roles.clone(),
         model_features: raw.model_features,
     }
 }
 
+/// 重みの JSON から重みを作る（足りない項目・知らない項目があれば Err）
+pub fn weights_from(map: serde_json::Map<String, serde_json::Value>) -> Result<Weights, String> {
+    serde_json::from_value(serde_json::Value::Object(map))
+        .map_err(|e| format!("重みが読めません: {e}"))
+}
+
+/// base（重みの JSON）の項目を overrides で上書きした重み（TypeScript の `{ ...base, ...overrides }`）
+pub fn weights_with(
+    base: &serde_json::Map<String, serde_json::Value>,
+    overrides: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Weights, String> {
+    let mut m = base.clone();
+    for (k, v) in overrides {
+        m.insert(k.clone(), v.clone());
+    }
+    weights_from(m)
+}
+
+/// 埋め込んだ AI のデータの JSON（設定の重みを項目の順番どおりに表示するときにも読む）
+pub const AI_DATA_JSON: &str = include_str!("../../data/ai-data.json");
+
 static AI_DATA: OnceLock<AiData> = OnceLock::new();
 
 /// 埋め込んだ AI のデータ（最初の呼び出しで読み込む）
 pub fn ai_data() -> &'static AiData {
-    AI_DATA.get_or_init(|| load(include_str!("../../data/ai-data.json")))
+    AI_DATA.get_or_init(|| load(AI_DATA_JSON))
 }
