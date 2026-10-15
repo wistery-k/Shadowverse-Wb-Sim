@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { searchAgent } from "../src/ai/search";
+import { createSearchAgent } from "../src/ai/search";
 import { SEARCH_WEIGHTS, evaluateWith } from "../src/ai/evaluate";
 import { id } from "../src/cards/abilities/helpers";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
@@ -19,6 +19,12 @@ function position(turn: number): GameState {
   opp.leaderHp = 20;
   return s;
 }
+
+/**
+ * 評価関数の doomed の効き目を見るので、学習した評価の補正（data/value-net.json）を足さない探索 AI で打つ
+ * （補正を足すと、手札も場も空にした作りものの局面では攻撃しないことがある）
+ */
+const searchAgent = createSearchAgent({ extraEval: null });
 
 function playTurn(state: GameState): Action[] {
   let s = state;

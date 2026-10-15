@@ -6,6 +6,7 @@ import type { Agent } from "../src/ai/types";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { playMatch } from "../src/sim/match";
 import { parallelMap } from "./parallel";
+import { applyValueNetOption } from "./valueNetOption";
 
 /** 比較に使わないデフォルトデッキ（クラスごとに 1 つにするため） */
 const EXCLUDED_DECKS = ["ランプドラゴン"];
@@ -37,6 +38,7 @@ export function playCompareGame(a: Agent, b: Agent, g: number, swap: boolean): {
  * デッキは各クラス1つずつ（ドラゴンは疾走ドラゴン）の 7 つを使う。
  * "weights" にオブジェクトを渡すと、探索 AI の既定の重み（SEARCH_WEIGHTS）のその項目だけを変える（例: '{"weights":{"myHand":0.8}}'）。
  * "weights" の "holdScale" は、融合で作るカードの手札の価値（hold）を何倍にするか（例: '{"weights":{"myHand":1.2,"holdScale":2}}'）。
+ * "valueNet" にファイル名を渡すと、TD 学習で作った評価の補正（npm run td）を使う（例: '{"valueNet":"m3.json"}'。scripts/valueNetOption.ts）。
  */
 export async function main(argv: string[]): Promise<number> {
   const games = Number(argv[0] ?? 28);
@@ -69,7 +71,7 @@ export async function main(argv: string[]): Promise<number> {
 }
 
 function parseOptions(json: string | undefined): Partial<SearchOptions> {
-  const raw = JSON.parse(json ?? "{}") as Record<string, unknown>;
+  const raw = applyValueNetOption(JSON.parse(json ?? "{}") as Record<string, unknown>);
   if (raw.weights === "default") raw.weights = DEFAULT_WEIGHTS;
   else if (typeof raw.weights === "object" && raw.weights !== null) {
     // "holdScale" は融合で作るカードの手札の価値（hold）を何倍にするか（myHand を変えるとき、素材の枚数 × 手札 1 枚の価値に合わせる用）

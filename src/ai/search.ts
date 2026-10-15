@@ -28,6 +28,7 @@ import { EqSet, turnOrderEqual, turnOrderHash, withoutIds } from "./keySet";
 import { findLethal, searchLethal, visibleKey } from "./lethal";
 import { MULLIGAN_WEIGHTS, weightedMulliganSwap } from "./mulligan";
 import { MULLIGAN_MODEL, modelMulliganSwap, overrideMulliganCards } from "./mulliganModel";
+import { valueNetEval } from "./valueNetModel";
 import { weightsFor } from "./weights";
 import type { Agent } from "./types";
 
@@ -132,8 +133,12 @@ export interface SearchOptions {
    */
   nextLethal: number;
   nextLethalSearch?: (state: GameState, p: PlayerIndex) => boolean;
-  /** 評価関数に足す項（デッキ専用の AI 用。ターン末の採点と、相手のターンを読んだ後の評価の両方に足す） */
-  extraEval?: (state: GameState, p: PlayerIndex) => number;
+  /**
+   * 評価関数に足す項（デッキ専用の AI・学習した補正用。ターン末の採点と、相手のターンを読んだ後の評価の両方に足す）。
+   * phase は、ターン末の局面（"end"）か、相手のターンを読んだ後の局面（"after"）か。
+   * 既定は TD 学習で作った評価の補正（src/ai/valueNetModel.ts。docs/ai-notes.md）。null なら足さない
+   */
+  extraEval?: ((state: GameState, p: PlayerIndex, phase: "end" | "after") => number) | null;
   /**
    * ビームに、最初の手ごとに少なくともこの数の局面を残す（幅を超えてもよい。0 なら幅だけで切る）。
    * 点数の高い最初の手の局面でビームが埋まると、他の最初の手の並びが途中で切れ、短い並びのまま相手のターンまで読まれる。
@@ -202,7 +207,7 @@ export const exhaustiveCounts = {
   byTurn: {} as Record<number, [number, number, number, number]>,
 };
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, mulliganCards: null, reanimateGuard: false, turn1ExtraPp: "always", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: null, oppHandSamples: 1, peekOppHand: false, oppFuse: false, dangerRescore: 0, reuseAgree: false };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, mulliganCards: null, reanimateGuard: false, turn1ExtraPp: "always", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: null, oppHandSamples: 1, peekOppHand: false, oppFuse: false, dangerRescore: 0, reuseAgree: false, extraEval: valueNetEval };
 
 /** 打った手の並び（後ろから前へのリスト）。各手を打った後の局面も持つ */
 interface Step {
@@ -377,7 +382,10 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   /** ターンを終える局面（合流する相打ちを打った後） */
   const settle = (state: GameState) => (opts.settleTrades ? settleConvergingTrades(state, p) : state);
   const extra = opts.extraEval;
-  const evalState = extra ? (state: GameState) => evaluateWith(state, p, w) + extra(state, p) : (state: GameState) => evaluateWith(state, p, w);
+  const evalAt = (phase: "end" | "after") =>
+    extra ? (state: GameState) => evaluateWith(state, p, w) + extra(state, p, phase) : (state: GameState) => evaluateWith(state, p, w);
+  const evalState = evalAt("end");
+  const evalAfter = evalAt("after");
   /** ターンを終えるときに残る PP の罰（ppLeft） */
   const leftover = (state: GameState) => (w.ppLeft !== 0 && state.phase === "main" && state.active === p ? w.ppLeft * state.players[p].pp : 0);
   const expiring = (state: GameState) => expiringExtraPp(state, p, w);
@@ -537,7 +545,7 @@ function planTurn(root: GameState, p: PlayerIndex, opts: SearchOptions, w: EvalW
   const result = new Map<string, Plan>();
   const readOnce = (start: GameState): number => {
     const after = opts.opponentSearch ? simulateOpponentTurnBySearch(start, p, rng, opts, w) : simulateOpponentTurn(start, p, rng, w.doomed, opts.oppFuse);
-    let v = evalState(after);
+    let v = evalAfter(after);
     if (opts.nextLethal !== 0 && after.phase !== "ended" && after.players[p === 0 ? 1 : 0].leaderHp <= w.lethalRange && hasNextLethal(after, p)) v += opts.nextLethal;
     return v;
   };

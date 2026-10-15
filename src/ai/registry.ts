@@ -3,11 +3,13 @@
 import { greedyAgent, tunedGreedyAgent } from "./greedy";
 import { randomAgent } from "./random";
 import { rhinoAgent, rhinoLethalOnlyAgent } from "./rhino";
-import { searchAgent } from "./search";
+import { createSearchAgent, searchAgent } from "./search";
 import type { Agent } from "./types";
 
 export const AGENTS: Readonly<Record<string, { agent: Agent; label: string }>> = {
   search: { agent: searchAgent, label: "探索" },
+  // 学習した評価の補正（data/value-net.json）を入れる前の探索 AI。人間との比較の相手（src/sim/humanCompare.ts）
+  "search-classic": { agent: createSearchAgent({ extraEval: null }), label: "探索（学習した補正なし）" },
   rhino: { agent: rhinoAgent, label: "リノセウス用ルール＋探索" },
   "rhino-lethal": { agent: rhinoLethalOnlyAgent, label: "探索＋リノセウス用リーサル" },
   greedy: { agent: tunedGreedyAgent, label: "貪欲法" },
