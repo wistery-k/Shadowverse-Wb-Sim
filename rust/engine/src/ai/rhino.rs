@@ -401,6 +401,18 @@ pub fn next_turn_rhino_bound(s: &GameState, p: PlayerIndex) -> i32 {
     }
 }
 
+/// リノセウスを 2 回出して与えられるダメージの上限（ユーザーの式。テスト用）
+#[cfg(test)]
+pub(crate) fn rhino_damage_bound(s: &GameState, p: PlayerIndex) -> i32 {
+    View::of(s, p).damage_bound()
+}
+
+/// リノセウスを 3 回出して与えられるダメージの上限（テスト用）
+#[cfg(test)]
+pub(crate) fn rhino_three_damage_bound(s: &GameState, p: PlayerIndex) -> i32 {
+    View::of(s, p).three_damage_bound()
+}
+
 /// rhinoPotentialEval の係数の既定（600 試合で 0 → 262 勝、1.0 → 291。docs/ai-notes.md）
 pub const RHINO_POTENTIAL: f64 = 1.0;
 

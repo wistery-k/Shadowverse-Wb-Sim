@@ -1,9 +1,15 @@
 [workspace]
 resolver = "2"
-members = ["engine"]
+members = ["engine", "wasm"]
 
 [profile.release]
 debug = 1
 lto = "fat"
 codegen-units = 1
 panic = "abort"
+
+# WASM（npm run wasm）。デバッグ情報を入れず、小さくする
+[profile.wasm]
+inherits = "release"
+debug = 0
+strip = true

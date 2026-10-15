@@ -1,4 +1,4 @@
-//! 差分テスト用の、局面と行動の正規化した文字列（scripts/rust-diff-main.ts の stateCanon・actionCanon と同じ形）。
+//! ゴールデンテスト用の、局面と行動の正規化した文字列（ハッシュを取って比べる）。
 
 use crate::data::*;
 use crate::state::*;

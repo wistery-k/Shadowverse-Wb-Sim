@@ -1,12 +1,10 @@
 //! 実験のランナー（TypeScript 版 scripts/ の compare・rhino-compare・td selfplay の移植）。
 //!
-//! 試合の組み方・シード・画面への出力・書き出すファイル（JSON Lines）は TypeScript 版と同じ。
-//! 書き出したファイルは、そのまま TypeScript 版の集計や `npm run td -- train` に渡せる。
+//! 試合の組み方・シード・画面への出力・書き出すファイル（JSON Lines）は TypeScript 版と同じにしてある。
+//! td selfplay の書き出したファイルは、そのまま `npm run td -- train` に渡せる。
 //! 試合は CPU のコア数だけのスレッドで並列に行う（環境変数 THREADS で変えられる）。
 
 pub mod compare;
-pub mod jsnum;
-pub mod json;
 pub mod options;
 pub mod parallel;
 pub mod rhino_compare;
@@ -31,7 +29,7 @@ pub fn fixed(x: f64, f: usize) -> String {
     if x.is_nan() {
         "NaN".into()
     } else {
-        jsnum::to_fixed(x, f)
+        crate::jsnum::to_fixed(x, f)
     }
 }
 

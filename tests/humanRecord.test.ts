@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { randomAgent } from "../src/ai/random";
-import { resetExactLethalCache } from "../src/ai/exactLethal";
-import { lethalHint } from "../src/ai/lethalHint";
+import { agentOf } from "../src/ai/registry";
+import { lethalHint, resetAiCaches } from "../src/ai/lethalHint";
 import { applyAction, createGame } from "../src/engine";
 import { buildHumanRecord, parseHumanRecord, toJsonLines } from "../src/sim/humanRecord";
 import { playMatch } from "../src/sim/match";
 import { compareMatch, opponentsOf, SUBJECT_IDS, SUBJECTS } from "../src/sim/humanCompare";
 import { PUZZLES, puzzleState } from "./rhinoPuzzles";
+
+const randomAgent = agentOf("random");
 
 describe("人間との比較の記録", () => {
   it("rhino-compare と同じシード・席でデッキを並べる", () => {
@@ -84,7 +85,7 @@ describe("人間との比較の記録", () => {
 
 describe("対戦画面のリーサル表示", () => {
   it("リーサルがあれば勝てる手順を返し、相手の体力が 1 多ければ見つけない", () => {
-    resetExactLethalCache();
+    resetAiCaches();
     const puzzle = PUZZLES[0]!;
     const yes = puzzleState(puzzle, puzzle.expected);
     const steps = lethalHint(yes, 0, 1);
@@ -92,7 +93,7 @@ describe("対戦画面のリーサル表示", () => {
     let s = yes;
     for (const a of steps!) s = applyAction(s, a);
     expect(s.winner).toBe(0);
-    resetExactLethalCache();
+    resetAiCaches();
     expect(lethalHint(puzzleState(puzzle, puzzle.expected + 1), 0, 1)).toBeNull();
   });
 

@@ -4,7 +4,7 @@
 // 探索 AI が使うデータ（評価関数の重み、学習した評価の補正、マリガンの係数等）は ai-data.json に書き出す。
 // 出力は rust/engine/data/ の 2 つ（生成物なのでコミットしない）。
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { ALL_CARDS, ALL_CRESTS } from "../src/cards";
 import { CARD_ABILITIES, CREST_ABILITIES } from "../src/cards/abilities";
@@ -12,9 +12,7 @@ import { APOCALYPSE_DECK } from "../src/cards/abilities/special";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { enhanceCost, staticOf } from "../src/engine";
 import { id } from "../src/cards/abilities/helpers";
-import { DEFAULT_WEIGHTS, SEARCH_WEIGHTS } from "../src/ai/evaluate";
-import { MULLIGAN_WEIGHTS } from "../src/ai/mulligan";
-import { MODEL_FEATURES, MULLIGAN_MODEL, MULLIGAN_ROLES, ROLES } from "../src/ai/mulliganModel";
+import { CLASS_WEIGHTS, DEFAULT_WEIGHTS, MODEL_FEATURES, MULLIGAN_MODEL, MULLIGAN_ROLES, MULLIGAN_WEIGHTS, ROLES, SEARCH_WEIGHTS } from "../src/ai/data";
 import valueNet from "../data/value-net.json";
 
 export const RUST_DATA_PATH = "rust/engine/data/engine-data.json";
@@ -49,7 +47,7 @@ export function engineData() {
   };
 }
 
-/** 探索 AI のデータ（src/ai の evaluate.ts・valueNetModel.ts・mulligan.ts・mulliganModel.ts が使うもの） */
+/** 探索 AI のデータ（src/ai/data.ts と、学習した評価の補正 data/value-net.json） */
 export function aiData() {
   return {
     defaultWeights: DEFAULT_WEIGHTS,
@@ -71,15 +69,22 @@ export function aiData() {
     mulliganRoles: MULLIGAN_ROLES,
     roles: ROLES,
     modelFeatures: MODEL_FEATURES,
+    classWeights: CLASS_WEIGHTS,
   };
 }
 
+/** 中身が変わったときだけ書く（変わらなければ Rust を作り直さずに済む） */
+function writeIfChanged(path: string, text: string): boolean {
+  if (existsSync(path) && readFileSync(path, "utf8") === text) return false;
+  writeFileSync(path, text);
+  return true;
+}
+
 export async function main(argv: string[]): Promise<number> {
-  const out = argv[0] ?? RUST_DATA_PATH;
+  const quiet = argv.includes("--quiet");
+  const [out = RUST_DATA_PATH, aiOut = RUST_AI_DATA_PATH] = argv.filter((a) => a !== "--quiet");
   mkdirSync(dirname(out), { recursive: true });
-  writeFileSync(out, JSON.stringify(engineData()));
-  const aiOut = argv[1] ?? RUST_AI_DATA_PATH;
-  writeFileSync(aiOut, JSON.stringify(aiData()));
-  console.log(`${out}・${aiOut} に書き出しました`);
+  const changed = [writeIfChanged(out, JSON.stringify(engineData())), writeIfChanged(aiOut, JSON.stringify(aiData()))];
+  if (!quiet) console.log(changed.some((c) => c) ? `${out}・${aiOut} に書き出しました` : `${out}・${aiOut} は変わっていません`);
   return 0;
 }

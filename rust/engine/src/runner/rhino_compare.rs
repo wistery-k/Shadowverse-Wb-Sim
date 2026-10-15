@@ -4,17 +4,18 @@
 //!                      [--agent rhino|rhino-lethal|search|search-classic] [--opts '<設定JSON>'] [--out 結果.jsonl] [--matches 試合.jsonl]
 //!
 //! 比べるデッキ vs 他の 6 デッキ（相手は学習した補正を入れる前の探索 AI）を、両方の席で同じシードで打つ
-//! （試合の決め方は src/sim/humanCompare.ts）。序盤のターンを全探索する "exhaustive" は TypeScript 版だけにある。
+//! （試合の決め方は src/sim/humanCompare.ts）。序盤のターンを全探索する "exhaustive" は TypeScript 版とともに消した。
 
-use super::json::Json;
 use super::options::{rhino_compare_options, rhino_options, search_options};
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
 use crate::ai::exact_lethal::exact_lethal_counts;
+use crate::ai::registry::search_classic_options;
 use crate::ai::rhino::RhinoAgent;
 use crate::ai::search::{SearchAgent, SearchOptions};
 use crate::ai::Agent;
 use crate::data::{data, Deck};
+use crate::json::Json;
 use crate::sim::play_match;
 use crate::state::{card, Action};
 use std::time::Instant;
@@ -60,15 +61,6 @@ impl AgentConfig {
             )),
             AgentConfig::Search(o) => Box::new(SearchAgent::new(o.clone())),
         }
-    }
-}
-
-/// 相手の AI（search-classic: 学習した評価の補正と相手のターンのビームサーチを入れる前の探索 AI）
-fn search_classic() -> SearchOptions {
-    SearchOptions {
-        extra_eval: None,
-        opponent_search: None,
-        ..SearchOptions::default()
     }
 }
 
@@ -165,7 +157,7 @@ fn play_one(
     let (subject_id, _, _, seed_base) = *subject;
     let seed = seed_base + t.g * 13 + t.seat as u32;
     let mut a = agent.create();
-    let mut o = SearchAgent::new(search_classic());
+    let mut o = SearchAgent::new(search_classic_options());
     let decks = if t.seat == 0 {
         [&me.cards[..], &opp.cards[..]]
     } else {
@@ -265,7 +257,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             AgentConfig::Rhino { rules: agent_key == "rhino", search, plain }
         }
         "search" => AgentConfig::Search(search_options(&opts, model.as_ref(), SearchOptions::default(), &["potential", "holds"])?),
-        "search-classic" => AgentConfig::Search(search_classic()),
+        "search-classic" => AgentConfig::Search(search_classic_options()),
         _ => return Err(format!("Rust 版で使える --agent は rhino / rhino-lethal / search / search-classic: {agent_key}")),
     };
     let me: &'static Deck = data()

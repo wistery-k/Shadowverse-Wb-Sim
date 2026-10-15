@@ -1,0 +1,13 @@
+[package]
+name = "svwb-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "ブラウザ・Node から呼ぶエンジンと AI（src/engine/wasm.ts が読み込む WASM）"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+svwb-engine = { path = "../engine" }

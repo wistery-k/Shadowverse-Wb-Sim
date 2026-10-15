@@ -1,5 +1,5 @@
 // カード能力を宣言的に記述するためのデータ型。
-// 能力はすべて JSON シリアライズ可能なデータで、エンジン（effects.ts）が解釈する。
+// 能力はすべて JSON シリアライズ可能なデータで、エンジン（rust/engine/src/effects.rs）が解釈する。
 // 能力の定義は src/cards/abilities/ にカードIDごとに置く。
 
 import type { CardType, ClassId } from "../cards/types";

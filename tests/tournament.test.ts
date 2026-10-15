@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { greedyAgent } from "../src/ai/greedy";
+import { agentOf } from "../src/ai/registry";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { planGames, runGame, seatDecks, summarize, type Entrant, type GameRecord } from "../src/sim/tournament";
 import { playMatch } from "../src/sim/match";
 import { replayStates } from "../src/sim/replay";
+
+const greedyAgent = agentOf("greedy-base");
 
 describe("総当たりの計画と集計", () => {
   it("組み合わせごとに指定数の試合を計画し、席を交互に入れ替える", () => {

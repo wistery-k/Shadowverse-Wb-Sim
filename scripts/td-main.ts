@@ -1,12 +1,13 @@
 // TD 学習の実験（npm run td）。docs/ai-notes.md「評価の項目を手で作らない（TD 学習）」
 //
 // 評価関数から、人が見つけたデッキ専用の項（STRIPPED）を外した点数 S を出発点にし、
-// 勝つ確率 σ(a × S + c + L(局面)) の補正 L（src/ai/valueNet.ts）を、その評価で打った自己対戦から TD(λ) で学ぶ。
+// 勝つ確率 σ(a × S + c + L(局面)) の補正 L（scripts/valueNet.ts。探索で使う推論は rust/engine/src/ai/valuenet.rs）を、その評価で打った自己対戦から TD(λ) で学ぶ。
 // 外した項を学習で取り戻せるか（今の AI との勝率の差が縮まるか）で、学習が「眺めるだけ」を越えるかを確かめる。
 //
 //   npm run td -- init --out m0.json [--hidden 32] [--seed 1] [--a 0.08] [--base stripped|current]
 //     L = 0 のモデルを作る（--base current なら今の評価関数をそのまま出発点にする）
-//   npm run td -- selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] --out d0.jsonl
+//   rust/target/release/svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] --out d0.jsonl
+//     自己対戦は Rust 版で行う（rust/engine/src/runner/td.rs。cd rust && cargo build --release で作る）。
 //     両方の席がモデルの評価で打つ探索 AI の自己対戦（7 デッキの全 49 組を順に回す）。
 //     各自分のターンの最初の局面（after）とターン末の局面（end）を、入力と S と一緒に JSON Lines で書き出す。
 //     --eps の確率で、自分のターンの最初の手をランダムに打つ（探索。その局面は学習に使わず、1 つ前の局面の目標もそこで切る）
@@ -21,30 +22,22 @@
 //     学んだ補正が何を見ているか: デッキごとのターン末の局面で、入力を 1 つ増やしたときの補正 (c + L) / a の変化（評価の点数の単位）の平均。
 //     PP 最大値・EP・SEP を 1 増やす、手札・場にカードを 1 枚足す（変化の大きい順）
 //
-// 自己対戦は CPU のコア数だけ並列に行う（scripts/parallel.ts）。
 
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
-import { evaluateWith, SEARCH_WEIGHTS, type EvalWeights } from "../src/ai/evaluate";
-import { createSearchAgent, type SearchOptions } from "../src/ai/search";
+import { readFileSync, writeFileSync } from "node:fs";
+import { ALL_CARDS, ALL_CRESTS } from "../src/cards";
+import { nextRandom, type PlayerIndex } from "../src/engine";
 import {
   compileValueNet,
   defaultVocab,
-  encodeState,
   forwardValueNet,
   inputSize,
+  loadValueNet,
   VALUE_SCALARS,
   VALUE_ZONES,
-  valueNetExtraEval,
   type CompiledValueNet,
   type SparseInput,
   type ValueNetModel,
-  type ValuePhase,
-} from "../src/ai/valueNet";
-import { ALL_CARDS, ALL_CRESTS } from "../src/cards";
-import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
-import { actingPlayer, applyAction, createGame, legalActions, nextRandom, resolveTurnEnd, rngFrom, type Action, type GameState, type PlayerIndex } from "../src/engine";
-import { isParallelWorker, parallelMap } from "./parallel";
-import { loadValueNet } from "./valueNetOption";
+} from "./valueNet";
 
 /**
  * 評価関数から外す、人が見つけたデッキ専用の項（過去に勝率で確かめて足したもの。docs/ai-notes.md）。
@@ -53,15 +46,11 @@ import { loadValueNet } from "./valueNetOption";
  */
 const STRIPPED: Record<string, unknown> = { maxPp: 0, hold: {}, fusionSet: 0, boostCard: 0, boost: 0, kuonReserve: 0, countdownDecay: 0, sevoReserve: 0, lastWordsSummon: 0 };
 
-const EXCLUDED_DECKS = ["ランプドラゴン"];
-/** 自己対戦のシード（compare・rhino-compare の試合と重ならないように大きくする） */
-const SEED_BASE = 2_000_000;
-
 export async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
   const args = parseArgs(rest);
   if (cmd === "init") return init(args);
-  if (cmd === "selfplay") return selfplay(args);
+  if (cmd === "selfplay") throw new Error("自己対戦は Rust 版で行う: rust/target/release/svwb td selfplay ...（cd rust && cargo build --release で作る）");
   if (cmd === "train") return train(args);
   if (cmd === "probe") return probe(args);
   if (cmd === "prune") return prune(args);
@@ -137,7 +126,7 @@ function init(args: Args): number {
   return 0;
 }
 
-// ---- selfplay ----
+// ---- 自己対戦のデータ（svwb td selfplay が書き出す） ----
 
 /** 自己対戦で記録する局面 1 つ */
 interface Sample {
@@ -157,94 +146,6 @@ interface GameRecord {
   winner: PlayerIndex;
   turns: number;
   samples: [Sample[], Sample[]];
-}
-
-function modelOptions(model: ValueNetModel, net: CompiledValueNet): { opts: Partial<SearchOptions>; w: EvalWeights } {
-  const w = { ...SEARCH_WEIGHTS, ...model.baseWeights } as EvalWeights;
-  const zero = model.w2.every((x) => x === 0) && model.b2 === 0 && model.c === 0;
-  // 補正が 0 のモデルは補正を足さない（探索 AI の既定の補正 data/value-net.json も外す）
-  // 相手のターンは、これまでの学習と同じく貪欲法で読む（既定のビームサーチは思考時間が約 2.4 倍）
-  return { opts: { weights: w, extraEval: zero ? null : valueNetExtraEval(net), opponentSearch: null }, w };
-}
-
-async function selfplay(args: Args): Promise<number> {
-  const modelPath = need(args, "model");
-  const out = need(args, "out");
-  const games = numArg(args, "games", 100);
-  const start = numArg(args, "start", 0);
-  const eps = numArg(args, "eps", 0.1);
-  const model = loadValueNet(modelPath);
-  const net = compileValueNet(model);
-  const { opts, w } = modelOptions(model, net);
-  const decks = DEFAULT_DECKS.filter((d) => !EXCLUDED_DECKS.includes(d.name));
-  if (decks.length !== 7) throw new Error(`自己対戦のデッキは 7 つの想定です（${decks.map((d) => d.name).join(", ")}）`);
-
-  const sampleOf = (state: GameState, p: PlayerIndex, phase: ValuePhase, explored: boolean): Sample => {
-    const x = encodeState(net, state, p, phase);
-    return { ph: phase === "end" ? 0 : 1, s: round(evaluateWith(state, p, w), 6), x: x.idx, v: x.val.map((v) => round(v, 4)), ...(explored ? { ex: 1 as const } : {}) };
-  };
-
-  const playOne = (g: number): GameRecord => {
-    const di = g % 7, dj = Math.floor(g / 7) % 7;
-    const seed = SEED_BASE + g;
-    let state = createGame({ decks: [decks[di]!.cards, decks[dj]!.cards], seed });
-    const agentRng = rngFrom({ rng: (seed ^ 0x9e3779b9) >>> 0 });
-    const explore = { rng: (seed ^ 0x2545f491) >>> 0 };
-    const agents = [createSearchAgent(opts), createSearchAgent(opts)] as const;
-    const seen = [-1, -1];
-    const samples: [Sample[], Sample[]] = [[], []];
-    for (let n = 0; state.phase !== "ended"; n++) {
-      if (n > 10000) throw new Error(`試合 ${g} のアクション数が上限を超えました`);
-      const legal = legalActions(state);
-      const actor = actingPlayer(state);
-      let action: Action | undefined;
-      // 自分のターンの最初の局面（相手のターンを読んだ後に探索が評価する局面と同じ）
-      if (state.phase === "main" && !state.pending && state.active === actor && seen[actor] !== state.players[actor].turnCount) {
-        seen[actor] = state.players[actor].turnCount;
-        const choices = legal.filter((a) => a.type !== "endTurn");
-        if (eps > 0 && choices.length > 0 && nextFloat(explore) < eps) action = choices[Math.floor(nextFloat(explore) * choices.length)];
-        samples[actor].push(sampleOf(state, actor, "after", action !== undefined));
-      }
-      action ??= agents[actor].chooseAction(state, legal, agentRng);
-      if (action.type === "endTurn" && state.phase === "main" && !state.pending) {
-        const end = resolveTurnEnd(state);
-        if (end.phase !== "ended") samples[actor].push(sampleOf(end, actor, "end", false));
-      }
-      state = applyAction(state, action);
-    }
-    if (state.winner === null) throw new Error(`試合 ${g} に勝者がいません`);
-    return { g, decks: [decks[di]!.name, decks[dj]!.name], winner: state.winner, turns: state.turn, samples };
-  };
-
-  if (!isParallelWorker) writeFileSync(out, "");
-  const t0 = Date.now();
-  const tasks = Array.from({ length: games }, (_, k) => start + k);
-  const summaries = await parallelMap(
-    tasks,
-    (g) => {
-      const r = playOne(g);
-      return { line: JSON.stringify(r), decks: r.decks, winner: r.winner, turns: r.turns, samples: r.samples[0].length + r.samples[1].length, explored: r.samples.flat().filter((s) => s.ex).length };
-    },
-    (done, total, r) => {
-      appendFileSync(out, r.line + "\n");
-      r.line = "";
-      if (done % 100 === 0 || done === total) console.log(`${done}/${total} 試合 ${((Date.now() - t0) / done / 1000).toFixed(2)}s/試合`);
-    },
-  );
-  const n = summaries.length;
-  const sum = (f: (r: (typeof summaries)[number]) => number) => summaries.reduce((x, r) => x + f(r), 0);
-  console.log(`${out}: ${n} 試合、局面 ${sum((r) => r.samples)}（ランダムに打った ${sum((r) => r.explored)}）、平均 ${(sum((r) => r.turns) / n).toFixed(1)} ターン、先攻の勝率 ${((sum((r) => (r.winner === 0 ? 1 : 0)) / n) * 100).toFixed(1)}%`);
-  // 自己対戦でのデッキごとの勝率（同じデッキ同士は除く）
-  const perDeck = new Map<string, [number, number]>();
-  for (const r of summaries) {
-    if (r.decks[0] === r.decks[1]) continue;
-    r.decks.forEach((d, p) => {
-      const cur = perDeck.get(d) ?? [0, 0];
-      perDeck.set(d, [cur[0] + (r.winner === p ? 1 : 0), cur[1] + 1]);
-    });
-  }
-  console.log([...perDeck].map(([d, [wins, t]]) => `${d} ${wins}/${t}`).join(", "));
-  return 0;
 }
 
 // ---- train ----

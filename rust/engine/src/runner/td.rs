@@ -4,9 +4,8 @@
 //!
 //! 両方の席がモデルの評価で打つ探索 AI の自己対戦（7 デッキの全 49 組を順に回す）。各自分のターンの最初の局面（after）と
 //! ターン末の局面（end）を、入力と出発点の評価の点数 S と一緒に、試合が終わった順に 1 試合 1 行で書き出す。
-//! 書き出したファイルは `npm run td -- train` にそのまま渡せる（init・train・probe・prune は TypeScript 版で行う）。
+//! 書き出したファイルは `npm run td -- train` にそのまま渡せる（init・train・probe・prune は scripts/td-main.ts で行う）。
 
-use super::jsnum::{js_num, round_precision};
 use super::options::model_eval;
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
@@ -17,6 +16,7 @@ use crate::ai::valuenet::{ValueNet, ValuePhase};
 use crate::ai::{Agent, Rng};
 use crate::data::Deck;
 use crate::game::{acting_player, apply_action, create_game, legal_actions, resolve_turn_end};
+use crate::jsnum::{js_num, round_precision};
 use crate::state::{next_random, Action, GameState, Phase, PlayerIndex};
 use std::io::Write;
 use std::sync::Arc;

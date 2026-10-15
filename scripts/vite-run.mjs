@@ -5,11 +5,13 @@
 // 以前は Vite のモジュールランナーで直接実行していたが、モジュールをまたぐ呼び出しが遅く（探索 AI で約 1 割）、
 // worker_threads でも使えないため、ビルドしてから実行する。
 // 自動対戦を並列に回すとき（scripts/parallel.ts）は、このファイルを Worker として起動し、同じビルド結果を読み込む。
+// エンジンと AI は WASM（src/engine/svwb.wasm）なので、先に npm run wasm と同じことをして作り直す（変更が無ければすぐ終わる）。
 
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { isMainThread, workerData } from "node:worker_threads";
 
 if (!isMainThread && workerData?.viteRun) {
@@ -22,6 +24,10 @@ if (!isMainThread && workerData?.viteRun) {
   if (!script) {
     console.error("使い方: node scripts/vite-run.mjs <スクリプト.ts> [引数...]");
     process.exit(2);
+  }
+  // rust-data は WASM を作る途中で呼ばれる（WASM を使わない）
+  if (basename(script) !== "rust-data-main.ts") {
+    execFileSync(process.execPath, [fileURLToPath(new URL("./build-wasm.mjs", import.meta.url))], { stdio: ["ignore", "inherit", "inherit"] });
   }
   const { build } = await import("vite");
   // 同時に複数のスクリプトを実行してもぶつからないよう、実行ごとに別のディレクトリにビルドする

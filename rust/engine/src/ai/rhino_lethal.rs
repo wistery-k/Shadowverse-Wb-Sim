@@ -352,7 +352,7 @@ fn setup_actions(s: &GameState, p: PlayerIndex) -> Vec<Action> {
 }
 
 /// 準備の局面の同一判定（相手リーダーの体力・山札・乱数の状態を除く）
-fn setup_key_eq(a: &GameState, b: &GameState) -> bool {
+pub(crate) fn setup_key_eq(a: &GameState, b: &GameState) -> bool {
     a.players.iter().zip(&b.players).all(|(x, y)| {
         x.pp == y.pp
             && x.combo == y.combo
@@ -369,7 +369,7 @@ fn setup_key_eq(a: &GameState, b: &GameState) -> bool {
         && stack_eq(&a.stack, &b.stack)
 }
 
-fn setup_key_hash(s: &GameState) -> u32 {
+pub(crate) fn setup_key_hash(s: &GameState) -> u32 {
     let mut h: u32 = 0x811c9dc5;
     for pl in &s.players {
         h = mix(

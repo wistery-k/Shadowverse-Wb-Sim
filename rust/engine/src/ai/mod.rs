@@ -1,6 +1,7 @@
-//! 探索 AI（TypeScript 版 src/ai の移植）。同じ局面・同じ乱数なら TypeScript 版と同じ手を選ぶ（`svwb ai-diff` で確かめる）。
+//! 探索 AI 等（TypeScript 版 src/ai の移植）。同じ局面・同じ乱数なら同じ手を選ぶ（ゴールデンテストの ai-* で確かめる）。
 //!
-//! 浮動小数点の足し算の順番、Map の挿入順、安定な並べ替え、厳密な `>` の比較まで TypeScript 版に合わせている。
+//! 浮動小数点の足し算の順番、Map の挿入順、安定な並べ替え、厳密な `>` の比較まで TypeScript 版に合わせて移した。
+//! テストは tests/（`cargo test --release`）。
 
 pub mod aidata;
 pub mod converging;
@@ -10,11 +11,16 @@ pub mod exact_lethal;
 pub mod greedy;
 pub mod keys;
 pub mod lethal;
+pub mod lethal_hint;
 pub mod mulligan;
+pub mod registry;
 pub mod rhino;
 pub mod rhino_lethal;
 pub mod search;
 pub mod valuenet;
+
+#[cfg(test)]
+mod tests;
 
 use crate::state::{next_random, Action, GameState};
 

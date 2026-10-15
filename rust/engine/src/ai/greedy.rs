@@ -1,8 +1,11 @@
 //! 貪欲法の AI（src/ai/greedy.ts）。各合法手を適用した後の盤面を評価し、最も良いものを選ぶ。
 
+use super::aidata::ai_data;
 use super::determinize::determinize;
 use super::eval::{evaluate_with, EvalWeights};
+use super::rhino::deck_class_of;
 use super::{Agent, Rng};
+use crate::data::ClassId;
 use crate::game::{apply_action, legal_actions, try_apply_action};
 use crate::state::*;
 
@@ -162,5 +165,36 @@ impl Agent for GreedyAgent {
             &self.weights,
             self.fuse_follow_up,
         )
+    }
+}
+
+/// クラスごとに調整した重み（data/ai-weights.json）を使う貪欲法 AI（src/ai/greedy.ts の tunedGreedyAgent。対戦相手の「ふつう」）
+#[derive(Default)]
+pub struct TunedGreedyAgent {
+    weights: Vec<(ClassId, EvalWeights)>,
+}
+
+impl Agent for TunedGreedyAgent {
+    fn choose_action(&mut self, state: &GameState, legal: &[Action], rng: &mut Rng) -> Action {
+        let p = state
+            .pending
+            .as_ref()
+            .map(|pd| pd.player())
+            .unwrap_or(state.active);
+        let cls = deck_class_of(state, p);
+        let i = match self.weights.iter().position(|(c, _)| *c == cls) {
+            Some(i) => i,
+            None => {
+                let d = ai_data();
+                let w = d
+                    .class_weights
+                    .get(cls.name())
+                    .unwrap_or(&d.default_weights)
+                    .clone();
+                self.weights.push((cls, EvalWeights::new(w)));
+                self.weights.len() - 1
+            }
+        };
+        choose_greedy(state, legal, rng, false, &self.weights[i].1, false)
     }
 }

@@ -1,5 +1,5 @@
 //! 能力（DSL）の解釈と、解決スタックの実行（src/engine/effects.ts の移植）。
-//! 処理の順番（乱数を引く順を含む）は TypeScript 版と同じにしてある。変えると差分テストが通らなくなる。
+//! 処理の順番（乱数を引く順を含む）は TypeScript 版と同じにしてある。変えるとゴールデンテストの結果が変わる。
 
 use crate::data::*;
 use crate::game::handle_internal;

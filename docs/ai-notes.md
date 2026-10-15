@@ -3,20 +3,23 @@
 AI の改善で試したことと結果。同じ実験を繰り返さないため、また「なぜ今の形なのか」を残すために書く。
 新しく試したら、採用・不採用にかかわらずここに追記する。
 
+エンジンと AI は段階 4（2026-10-15）で Rust に移し、TypeScript 版を消した（最後の節）。それより前の節の `src/ai/*.ts`・`src/engine/*.ts` や
+`npm run bench`・`npm run tune` 等は当時の TypeScript 版のファイル・コマンドで、main の d0dd121 までにある。今の対応するファイルは `rust/engine/src/ai/` の同名のもの。
+
 ## 今の AI（2026-10 時点）
 
-- **探索**（`search`、UI の「つよい」）: `src/ai/search.ts`
+- **探索**（`search`、UI の「つよい」）: `rust/engine/src/ai/search.rs`
   - determinization 3 つ × 自分のターン終了までのビームサーチ（幅 32・深さ 8。リノセウス用 AI も同じ）。手の順番が違うだけの同じ局面（効果で加わったカードの iid 等だけが違うものを含む）はビームの中で 1 つにまとめる。手札の同じカードはどちらか一方だけプレイを試す
   - 選択（対象の選択・モード）とエクストラPP は、続く手とまとめて 1 手として展開する（`chain`）。融合をまとめる設定（`chainFuse`）もあるが既定は無効（下記）
   - ターン終了の局面は、ターン終了時の処理（ターン終了時の能力・一時的な効果の終了）を進めてから採点する（`scoreTurnEnd`）
   - 上位 4 手は、相手のターンをビームサーチ（幅 4・深さ 8、`opponentSearch`）で進めた後の局面で評価し直す（2026-10-15 から。それまでは貪欲法。最後の節「学習した補正の上で、相手のターンを読み直す」）
-  - その前にリーサル探索（`src/ai/lethal.ts`）を行う
-  - 評価関数は基準の重み（`DEFAULT_WEIGHTS`、`src/ai/evaluate.ts`）に、融合で作るカードの「手札に持っておく価値」（`hold`）と、PP 最大値を増やした分（1 につき 8、下記）を足したもの（`SEARCH_WEIGHTS`）。手札は枚数で数え（自分 1 枚 0.6・相手 1 枚 0.3）、融合で作るカードだけ融合した素材の枚数分を足す（下記）。スペルブーストで育つカードは 1 枚 1、受けたブースト 1 回 0.2（5 回まで）を足す（下記）
-  - その評価関数に、自己対戦の TD 学習で作った補正（小さな NN、`data/value-net.json`・`src/ai/valueNetModel.ts`）を足す（2026-10-14 から。補正なしの探索 AI に 55.3%。下の「評価の項目を手で作らない（TD 学習）」）。
+  - その前にリーサル探索（`rust/engine/src/ai/lethal.rs`）を行う
+  - 評価関数は基準の重み（`DEFAULT_WEIGHTS`、`src/ai/data.ts`。評価は `rust/engine/src/ai/eval.rs`）に、融合で作るカードの「手札に持っておく価値」（`hold`）と、PP 最大値を増やした分（1 につき 8、下記）を足したもの（`SEARCH_WEIGHTS`）。手札は枚数で数え（自分 1 枚 0.6・相手 1 枚 0.3）、融合で作るカードだけ融合した素材の枚数分を足す（下記）。スペルブーストで育つカードは 1 枚 1、受けたブースト 1 回 0.2（5 回まで）を足す（下記）
+  - その評価関数に、自己対戦の TD 学習で作った補正（小さな NN、`data/value-net.json`・`rust/engine/src/ai/valuenet.rs`）を足す（2026-10-14 から。補正なしの探索 AI に 55.3%。下の「評価の項目を手で作らない（TD 学習）」）。
     補正なしの探索 AI は `search-classic`（相手のターンも貪欲法で読む。`npm run compare` では `'{"valueNet":false,"opponentSearch":null}'`）。web の「人間との比較」と `rhino-compare` の相手は、今までの記録と比べられるよう `search-classic` のまま
 - **リノセウス用 AI**（`rhino`）: 探索 AI にユーザーのルールとリノセウス専用のリーサル探索を重ねたもの（下記）。自動対戦ではリノセウスエルフだけこれを使う。エルフの探索にも、リノセウスの打点の項に足して学習した補正を足す（2026-10-15 から。補正なしのリノセウス用 AI 49.7% → 52.4%、1800 試合。下の「評価の項目を手で作らない（TD 学習）」）。相手のターンもビームサーチで読む（2026-10-15 から。52.4% → 56.2%、1800 試合。最後の節）
 - **貪欲法**（`greedy`、「ふつう」）: 1 手読み。クラスごとに調整した重み（`data/ai-weights.json`。カードごとの `hold` を含む）を使う
-- **マリガン**: 探索 AI はカードごとの重み（`data/mulligan-weights.json`、`src/ai/mulligan.ts`）。重みが正のカードを残す。デフォルトデッキ以外と重みの無いカードはコスト 4 以上を返す。
+- **マリガン**: 探索 AI はカードごとの重み（`data/mulligan-weights.json`、`rust/engine/src/ai/mulligan.rs`）。重みが正のカードを残す。デフォルトデッキ以外と重みの無いカードはコスト 4 以上を返す。
   リノセウス用 AI のエルフはユーザーのルール、貪欲法はコスト 4 以上を返す（下記「マリガンの重みの推定」）
 
 ### 探索 AI どうしの総当たり（seed 7、1 組 20 試合、リーサル探索あり）
@@ -1972,3 +1975,16 @@ AI の改善で試したことと結果。同じ実験を繰り返さないた�
 - **未対応:** TS だけにある実験用の設定（序盤のターンを全探索する `exhaustive`、`mulliganCards`・`mulliganEvoBonus`・`reanimateGuard`・`turn1ExtraPp`、
   `weights: "byClass"`）はエラーにする（既定の値なら受け付ける）。rhino-compare の `--agent` は rhino・rhino-lethal・search・search-classic だけ
 - **次:** 段階 4（ブラウザでも WASM の Rust 版を使い、TS 版のエンジン・AI を消す）。それまでは AI やエンジンを変えたら Rust 側も同じに変える
+
+## ブラウザも WASM にし、TypeScript 版のエンジン・AI を消す（段階 4、2026-10-15）
+
+- **やったこと:** ブラウザ（対戦・AI対戦・リーサル表示）と Node のスクリプト（`npm run sim`・`game`・`sim-report`・`td` 等）が、
+  Rust のエンジン・AI を WASM（`rust/wasm`）にしたものを使うようにし、TypeScript 版のエンジン（`src/engine` の効果の解決等）と AI（`src/ai`）を消した。
+  TypeScript 側に残したのは、局面の型・能力の DSL・カードの定義、AI のデータ（重み・マリガンの表）、WASM を呼ぶ薄い関数（`src/engine/game.ts`・`src/ai/registry.ts`）
+- **使わない実験のスクリプトは移さず消した（ユーザー判断）:** `npm run bench`・`plan-value`・`human-plan-value`・`human-position`・`variant-plan-value`・
+  `lethal-prevent`・`spsa`・`tune`・`mulligan-data`/`fit`/`eval`/`model-fit`。必要になったら main の d0dd121 の TS 版を見て Rust に移す
+- **TS 版との一致の確かめ方を置き換えた:** 決まった試合（ランダムな手の試合と、探索 AI・`search-classic`・リノセウス用 AI・貪欲法・ランダムの AI どうしの試合）の結果を
+  ゴールデンテスト（`rust/engine/tests/golden/*.txt`。`cargo test --release`）として保存した。TS 版を消す前に、その結果が TS 版との差分テストで一致することを確かめてある。
+  以後は保存した結果と比べる。振る舞いを意図して変えたら `npm run svwb -- golden write` で保存し直す
+- **AI のテストを Rust に移した:** TS の AI の単体テスト（探索・評価関数の各項・リーサル探索・リノセウス用 AI とリーサル問題集・マリガン・同じ局面の判定・学習した補正等）を
+  `rust/engine/src/ai/tests/` に移した（73 件）。TS 版にしか無かった実験用の設定（`exhaustive` 等）のテストは設定ごと消した

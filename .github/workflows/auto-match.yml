@@ -12,7 +12,7 @@ on:
         description: 1組（デッキの組み合わせ）あたりの試合数
         default: "20"
       agents:
-        description: AI（src/ai/registry.ts のキー、カンマ区切り）
+        description: AI（src/ai/registry.ts・rust/engine/src/ai/registry.rs のキー、カンマ区切り）
         default: search
       deck_agents:
         description: デッキごとの AI の差し替え（<デッキ>=<AI>、カンマ区切り。空なら差し替えなし）
@@ -45,6 +45,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # エンジンと AI の WASM を作る（npm run sim の前に npm run wasm と同じことをする）
+      - run: rustup target add wasm32-unknown-unknown
       - run: npm ci
       - run: |
           extra=()
@@ -68,6 +70,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - run: rustup target add wasm32-unknown-unknown
       - run: npm ci
       - uses: actions/download-artifact@v4
         with:

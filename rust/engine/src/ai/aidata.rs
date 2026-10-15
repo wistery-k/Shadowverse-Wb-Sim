@@ -108,6 +108,8 @@ struct RawAiData {
     mulligan_roles: HashMap<String, HashMap<String, Vec<String>>>,
     roles: Vec<String>,
     model_features: Vec<String>,
+    /// クラス → DEFAULT_WEIGHTS から変える重み（data/ai-weights.json）
+    class_weights: HashMap<String, serde_json::Map<String, serde_json::Value>>,
 }
 
 /// デッキごとのマリガンのモデル（src/ai/mulliganModel.ts）
@@ -138,6 +140,8 @@ pub struct AiData {
     pub mulligan_roles: HashMap<String, HashMap<CardIdx, Vec<usize>>>,
     pub roles: Vec<String>,
     pub model_features: Vec<String>,
+    /// クラスごとに調整した重み（data/ai-weights.json を DEFAULT_WEIGHTS に重ねたもの。src/ai/weights.ts の weightsForClass）
+    pub class_weights: HashMap<String, Weights>,
 }
 
 impl AiData {
@@ -216,12 +220,42 @@ fn load(json: &str) -> AiData {
                 )
             })
             .collect(),
+        class_weights: raw
+            .class_weights
+            .iter()
+            .map(|(cls, o)| {
+                let w = class_weights_json(&raw.default_weights, o);
+                (cls.clone(), weights_from(w).expect("classWeights"))
+            })
+            .collect(),
         default_weights: weights_from(raw.default_weights).expect("defaultWeights"),
         search_weights: weights_from(raw.search_weights.clone()).expect("searchWeights"),
         search_weights_raw: raw.search_weights,
         roles: raw.roles.clone(),
         model_features: raw.model_features,
     }
+}
+
+/// `{ ...DEFAULT_WEIGHTS, ...o, hold: { ...DEFAULT_WEIGHTS.hold, ...o.hold } }`
+pub(crate) fn class_weights_json(
+    base: &serde_json::Map<String, serde_json::Value>,
+    o: &serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut m = base.clone();
+    for (k, v) in o {
+        m.insert(k.clone(), v.clone());
+    }
+    let mut hold = match base.get("hold") {
+        Some(serde_json::Value::Object(h)) => h.clone(),
+        _ => serde_json::Map::new(),
+    };
+    if let Some(serde_json::Value::Object(h)) = o.get("hold") {
+        for (k, v) in h {
+            hold.insert(k.clone(), v.clone());
+        }
+    }
+    m.insert("hold".into(), serde_json::Value::Object(hold));
+    m
 }
 
 /// 重みの JSON から重みを作る（足りない項目・知らない項目があれば Err）

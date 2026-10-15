@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import preact from "@preact/preset-vite";
 
@@ -16,7 +17,7 @@ function gitInfo(): { commit: string; date: string; dirty: boolean } {
 
 const git = gitInfo();
 
-export default defineConfig({
+export default defineConfig(({ command, isSsrBuild }) => ({
   // GitHub Pages はリポジトリ名のサブパスで配信される
   base: "/Shadowverse-Wb-Sim/",
   plugins: [preact()],
@@ -24,10 +25,12 @@ export default defineConfig({
     __BUILD_COMMIT__: JSON.stringify(git.commit),
     __BUILD_DATE__: JSON.stringify(git.date),
     __BUILD_DIRTY__: JSON.stringify(git.dirty),
+    // Node（テスト・スクリプト）で読み込むエンジンの WASM（src/engine/wasm.ts）。ブラウザ向けのビルドでは使わない（このマシンのパスを埋め込まない）
+    __SVWB_WASM_PATH__: JSON.stringify(command === "build" && !isSsrBuild ? "" : fileURLToPath(new URL("./src/engine/svwb.wasm", import.meta.url))),
   },
   test: {
     include: ["tests/**/*.test.ts"],
     // 自己対戦のテストは時間がかかる（CI や負荷の高い環境でも落ちないようにする）
     testTimeout: 30_000,
   },
-});
+}));

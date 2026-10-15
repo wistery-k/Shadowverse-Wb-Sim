@@ -1,13 +1,13 @@
 //! 設定の JSON（compare の A・B、rhino-compare の --opts）を探索 AI の設定にする。
 //!
 //! TypeScript 版と同じく、`"valueNet"` に学習した評価の補正のファイルを渡すと、重みをそのモデルの出発点にして補正を足す
-//! （scripts/valueNetOption.ts）。TypeScript 版だけにある実験用の項目（exhaustive 等）は、既定の値のときだけ受け付ける。
+//! （scripts/valueNetOption.ts）。TypeScript 版とともに消した実験用の項目（exhaustive 等）は、既定の値のときだけ受け付ける。
 
-use super::json::Json;
 use crate::ai::aidata::{weights_from, AI_DATA_JSON};
 use crate::ai::rhino::{rhino_search_options, RhinoHolds, ALL_HOLDS, RHINO_POTENTIAL};
 use crate::ai::search::{ExtraEval, MulliganMode, OpponentSearch, ScoreTurnEnd, SearchOptions};
 use crate::ai::valuenet::ValueNet;
+use crate::json::Json;
 use std::sync::{Arc, OnceLock};
 
 fn ai_json(key: &str) -> &'static Json {
@@ -217,7 +217,7 @@ pub fn search_options(
                     }
                 }
             }
-            // TypeScript 版だけにある実験用の項目（既定の値なら何もしない）
+            // TypeScript 版とともに消した実験用の項目（既定の値なら何もしない）
             "exhaustive" | "mulliganCards" if *v == Json::Null => {}
             "mulliganEvoBonus" if *v == Json::Num(0.0) => {}
             "reanimateGuard" if *v == Json::Bool(false) => {}
@@ -225,7 +225,7 @@ pub fn search_options(
             "exhaustive" | "mulliganCards" | "mulliganEvoBonus" | "reanimateGuard"
             | "turn1ExtraPp" => {
                 return Err(format!(
-                    "\"{k}\" は Rust 版では未対応です（TypeScript 版の npm run で回してください）"
+                    "\"{k}\" は未対応です（TypeScript 版とともに消した実験用の項目）"
                 ))
             }
             _ => return Err(format!("未知の設定の項目: \"{k}\"")),
