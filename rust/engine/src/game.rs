@@ -172,7 +172,7 @@ fn clear_turn_effects(s: &mut GameState) {
     let turn = s.turn;
     for p in 0..2 {
         for c in &mut s.players[p].board {
-            c.temp_keywords = Kw(0);
+            c.temp_keywords = Kw::EMPTY;
             if c.is_follower {
                 c.temp_attack = 0;
                 if matches!(c.cannot_attack_until, Some(u) if u <= turn) {

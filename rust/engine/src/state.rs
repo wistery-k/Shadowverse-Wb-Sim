@@ -220,7 +220,7 @@ pub struct Frame {
     pub ctx: Ctx,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Pending {
     Choose {
         player: PlayerIndex,
@@ -248,7 +248,7 @@ pub struct Queued {
     pub ctx: Ctx,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AttackInProgress {
     pub attacker: Iid,
     pub defender: Iid,
@@ -472,7 +472,7 @@ impl GameState {
             defense_mod: 0,
             boosts: 0,
             x: abilities_of(c).initial_x,
-            keywords: Kw(0),
+            keywords: Kw::EMPTY,
             fused_kinds: Vec::new(),
             fused_this_turn: false,
             revealed: false,
@@ -497,7 +497,7 @@ impl GameState {
             card: c,
             is_follower: cd.ctype == CardType::Follower,
             keywords,
-            temp_keywords: Kw(0),
+            temp_keywords: Kw::EMPTY,
             granted: Vec::new(),
             order,
             attack: 0,

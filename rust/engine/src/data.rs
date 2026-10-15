@@ -18,9 +18,14 @@ pub type VarId = u8;
 
 // ---- キーワード ----
 
-/// 常在型のキーワードの集合（ビット）
+/// 常在型のキーワードの集合。TypeScript 版の配列と同じく、加えた順を覚えている
+/// （評価関数の足し算の順と、局面の同一判定が配列の順に依る）。
+/// bits は集合、seq は加えた順のキーワードの番号＋1 を下位から 4 ビットずつ並べたもの
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Hash)]
-pub struct Kw(pub u16);
+pub struct Kw {
+    bits: u16,
+    seq: u64,
+}
 
 pub const KEYWORD_NAMES: [&str; 9] = [
     "ward",
@@ -33,39 +38,80 @@ pub const KEYWORD_NAMES: [&str; 9] = [
     "barrier",
     "aura",
 ];
-pub const WARD: Kw = Kw(1 << 0);
-pub const STORM: Kw = Kw(1 << 1);
-pub const RUSH: Kw = Kw(1 << 2);
-pub const BANE: Kw = Kw(1 << 3);
-pub const DRAIN: Kw = Kw(1 << 4);
-pub const AMBUSH: Kw = Kw(1 << 5);
-pub const INTIMIDATE: Kw = Kw(1 << 6);
-pub const BARRIER: Kw = Kw(1 << 7);
-pub const AURA: Kw = Kw(1 << 8);
+pub const WARD: Kw = Kw::one(0);
+pub const STORM: Kw = Kw::one(1);
+pub const RUSH: Kw = Kw::one(2);
+pub const BANE: Kw = Kw::one(3);
+pub const DRAIN: Kw = Kw::one(4);
+pub const AMBUSH: Kw = Kw::one(5);
+pub const INTIMIDATE: Kw = Kw::one(6);
+pub const BARRIER: Kw = Kw::one(7);
+pub const AURA: Kw = Kw::one(8);
 
 impl Kw {
+    pub const EMPTY: Kw = Kw { bits: 0, seq: 0 };
+    const fn one(i: u16) -> Kw {
+        Kw {
+            bits: 1 << i,
+            seq: i as u64 + 1,
+        }
+    }
     #[inline]
     pub fn has(self, k: Kw) -> bool {
-        self.0 & k.0 != 0
+        self.bits & k.bits != 0
     }
+    #[inline]
+    pub fn len(self) -> usize {
+        self.bits.count_ones() as usize
+    }
+    /// k のキーワードのうち無いものを、k の順に後ろへ加える
     #[inline]
     pub fn with(self, k: Kw) -> Kw {
-        Kw(self.0 | k.0)
+        if k.bits & !self.bits == 0 {
+            return self;
+        }
+        let mut r = self;
+        for i in k.iter() {
+            if r.bits & (1 << i) == 0 {
+                r.seq |= (i as u64 + 1) << (4 * r.len());
+                r.bits |= 1 << i;
+            }
+        }
+        r
     }
+    /// k のキーワードを除く（残りの順は保つ）
     #[inline]
     pub fn without(self, k: Kw) -> Kw {
-        Kw(self.0 & !k.0)
+        if self.bits & k.bits == 0 {
+            return self;
+        }
+        let mut r = Kw::EMPTY;
+        for i in self.iter() {
+            if k.bits & (1 << i) == 0 {
+                r.seq |= (i as u64 + 1) << (4 * r.len());
+                r.bits |= 1 << i;
+            }
+        }
+        r
     }
     pub fn is_empty(self) -> bool {
-        self.0 == 0
+        self.bits == 0
+    }
+    /// キーワードの番号（KEYWORD_NAMES の添字）を加えた順に
+    #[inline]
+    pub fn iter(self) -> impl Iterator<Item = u16> {
+        let mut s = self.seq;
+        std::iter::from_fn(move || {
+            if s == 0 {
+                return None;
+            }
+            let i = (s & 15) as u16 - 1;
+            s >>= 4;
+            Some(i)
+        })
     }
     pub fn names(self) -> Vec<&'static str> {
-        KEYWORD_NAMES
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| self.0 & (1 << i) != 0)
-            .map(|(_, n)| *n)
-            .collect()
+        self.iter().map(|i| KEYWORD_NAMES[i as usize]).collect()
     }
 }
 
@@ -73,7 +119,7 @@ fn kw_from_name(name: &str) -> Option<Kw> {
     KEYWORD_NAMES
         .iter()
         .position(|n| *n == name)
-        .map(|i| Kw(1 << i))
+        .map(|i| Kw::one(i as u16))
 }
 
 impl<'de> Deserialize<'de> for Kw {
@@ -88,7 +134,7 @@ impl<'de> Deserialize<'de> for Kw {
             One::Name(n) => vec![n],
             One::List(l) => l,
         };
-        let mut k = Kw(0);
+        let mut k = Kw::EMPTY;
         for n in names {
             k = k.with(
                 kw_from_name(&n)
@@ -250,7 +296,7 @@ pub enum Side {
     Both,
 }
 
-#[derive(Deserialize, Clone, Debug, Default)]
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CardFilter {
     #[serde(rename = "type")]
@@ -274,7 +320,7 @@ pub struct CardFilter {
     pub earth_sigil: bool,
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, PartialEq)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -313,14 +359,14 @@ pub enum Stat {
     Defense,
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 pub enum Value {
     Num(i32),
     Obj(ValueObj),
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, PartialEq)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -349,7 +395,7 @@ pub enum ValueObj {
     },
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, PartialEq)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -404,14 +450,14 @@ pub enum MaxTag {
     Max,
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 pub enum PpAmount {
     Max(MaxTag),
     Value(Value),
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, PartialEq)]
 #[serde(
     tag = "op",
     rename_all = "camelCase",
@@ -658,7 +704,7 @@ pub enum Whose {
     Opponent,
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, PartialEq)]
 #[serde(
     tag = "on",
     rename_all = "camelCase",
@@ -743,7 +789,7 @@ impl Trigger {
     }
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Ability {
     pub trigger: Trigger,
@@ -754,7 +800,7 @@ pub struct Ability {
     pub replaces_evolve: bool,
 }
 
-#[derive(Deserialize, Clone, Debug, Default)]
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CardAbilities {
     pub abilities: Vec<Ability>,
@@ -802,6 +848,7 @@ pub struct CrestData {
 
 pub struct Deck {
     pub key: String,
+    pub name: String,
     pub cards: Vec<CardIdx>,
 }
 
@@ -846,6 +893,7 @@ struct RawData {
 #[derive(Deserialize)]
 struct RawDeck {
     key: String,
+    name: String,
     cards: Vec<String>,
 }
 
@@ -897,6 +945,7 @@ pub fn load(json: &str) -> Data {
         .into_iter()
         .map(|d| Deck {
             key: d.key,
+            name: d.name,
             cards: d.cards.iter().map(|c| card_by_id[c]).collect(),
         })
         .collect();

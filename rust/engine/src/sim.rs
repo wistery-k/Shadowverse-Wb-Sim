@@ -81,3 +81,37 @@ pub fn play_random(
         step += 1;
     }
 }
+
+/// 探索 AI どうしの試合 g の組み合わせとシード（scripts/rust-ai-diff-main.ts・bench-main.ts と同じ）
+pub fn ai_game_setup(g: u32) -> ([Vec<CardIdx>; 2], u32) {
+    let decks: Vec<&crate::data::Deck> = data()
+        .decks
+        .iter()
+        .filter(|d| d.name != "ランプドラゴン")
+        .collect();
+    let i = (g % 7) as usize;
+    let j = ((g * 3 + 1 + g / 7) % 7) as usize;
+    ([decks[i].cards.clone(), decks[j].cards.clone()], g * 7 + 1)
+}
+
+/// 2 つの AI で試合 g を最後まで打つ（AI の乱数は playMatch と同じくシードから作る）。各手で visit を呼ぶ
+pub fn play_ai(
+    g: u32,
+    agents: &mut [&mut dyn crate::ai::Agent; 2],
+    mut visit: impl FnMut(&GameState, &Action),
+) -> GameState {
+    let (decks, seed) = ai_game_setup(g);
+    let mut s = create_game([&decks[0], &decks[1]], seed);
+    let mut rng = crate::ai::Rng::new(seed ^ 0x9e3779b9);
+    let mut actions = 0;
+    while s.phase != Phase::Ended {
+        actions += 1;
+        assert!(actions <= 10000, "アクション数が上限を超えました");
+        let legal = legal_actions(&s);
+        let actor = crate::game::acting_player(&s);
+        let a = agents[actor].choose_action(&s, &legal, &mut rng);
+        visit(&s, &a);
+        s = apply_action(&s, &a);
+    }
+    s
+}

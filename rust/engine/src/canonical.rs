@@ -20,9 +20,7 @@ fn cid(c: CardIdx) -> &'static str {
 }
 
 fn kws(k: Kw) -> String {
-    let mut n = k.names();
-    n.sort();
-    n.join("+")
+    k.names().join("+")
 }
 
 fn once(r: &[(u8, i32)]) -> String {

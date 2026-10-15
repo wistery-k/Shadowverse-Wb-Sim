@@ -1,7 +1,8 @@
 // Rust 版エンジン（rust/）が読むデータを書き出す（npm run rust-data）。
 // カード・クレストの基本情報と、テキストから読み取る常在型キーワード等（registry.ts の staticOf と同じもの）、
 // カード能力の DSL（src/cards/abilities。関数を含まない JSON）、アポカリプスデッキ、デフォルトデッキを 1 つの JSON にまとめる。
-// 出力は rust/engine/data/engine-data.json（生成物なのでコミットしない）。
+// 探索 AI が使うデータ（評価関数の重み、学習した評価の補正、マリガンの係数等）は ai-data.json に書き出す。
+// 出力は rust/engine/data/ の 2 つ（生成物なのでコミットしない）。
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -10,8 +11,14 @@ import { CARD_ABILITIES, CREST_ABILITIES } from "../src/cards/abilities";
 import { APOCALYPSE_DECK } from "../src/cards/abilities/special";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { enhanceCost, staticOf } from "../src/engine";
+import { id } from "../src/cards/abilities/helpers";
+import { DEFAULT_WEIGHTS, SEARCH_WEIGHTS } from "../src/ai/evaluate";
+import { MULLIGAN_WEIGHTS } from "../src/ai/mulligan";
+import { MODEL_FEATURES, MULLIGAN_MODEL, MULLIGAN_ROLES, ROLES } from "../src/ai/mulliganModel";
+import valueNet from "../data/value-net.json";
 
 export const RUST_DATA_PATH = "rust/engine/data/engine-data.json";
+export const RUST_AI_DATA_PATH = "rust/engine/data/ai-data.json";
 
 export function engineData() {
   return {
@@ -37,7 +44,32 @@ export function engineData() {
     cardAbilities: CARD_ABILITIES,
     crestAbilities: CREST_ABILITIES,
     apocalypseDeck: APOCALYPSE_DECK,
-    decks: DEFAULT_DECKS.map((d) => ({ key: d.key, cards: d.cards })),
+    decks: DEFAULT_DECKS.map((d) => ({ key: d.key, name: d.name, cards: d.cards })),
+  };
+}
+
+/** 探索 AI のデータ（src/ai の evaluate.ts・valueNetModel.ts・mulligan.ts・mulliganModel.ts が使うもの） */
+export function aiData() {
+  return {
+    defaultWeights: DEFAULT_WEIGHTS,
+    searchWeights: SEARCH_WEIGHTS,
+    // countdownDecay ** n（V8 の Math.pow は Rust の powf と最後の桁が違うことがあるので、表にして渡す）
+    decayPow: Object.fromEntries(
+      [DEFAULT_WEIGHTS.countdownDecay, SEARCH_WEIGHTS.countdownDecay].map((d) => [String(d), Array.from({ length: 64 }, (_, n) => d ** n)]),
+    ),
+    cards: {
+      kuon: id("五行の果て・クオン"),
+      kerberos: id("奔放なる獄炎・ケルベロス"),
+      jeanne: id("純白の聖女・ジャンヌ"),
+      fusionSet: ["デストロイアーティファクトα", "デストロイアーティファクトβ", "デストロイアーティファクトγ"].map(id),
+      boostGrown: [id("成長したですぅ！")],
+    },
+    valueNet,
+    mulliganWeights: MULLIGAN_WEIGHTS,
+    mulliganModel: MULLIGAN_MODEL,
+    mulliganRoles: MULLIGAN_ROLES,
+    roles: ROLES,
+    modelFeatures: MODEL_FEATURES,
   };
 }
 
@@ -45,6 +77,8 @@ export async function main(argv: string[]): Promise<number> {
   const out = argv[0] ?? RUST_DATA_PATH;
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, JSON.stringify(engineData()));
-  console.log(`${out} に書き出しました`);
+  const aiOut = argv[1] ?? RUST_AI_DATA_PATH;
+  writeFileSync(aiOut, JSON.stringify(aiData()));
+  console.log(`${out}・${aiOut} に書き出しました`);
   return 0;
 }

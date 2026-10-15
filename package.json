@@ -36,7 +36,8 @@
     "variant-plan-value": "node scripts/vite-run.mjs scripts/variant-plan-value-main.ts",
     "td": "node scripts/vite-run.mjs scripts/td-main.ts",
     "rust-data": "node scripts/vite-run.mjs scripts/rust-data-main.ts",
-    "rust-diff": "node scripts/vite-run.mjs scripts/rust-diff-main.ts"
+    "rust-diff": "node scripts/vite-run.mjs scripts/rust-diff-main.ts",
+    "rust-ai-diff": "node scripts/vite-run.mjs scripts/rust-ai-diff-main.ts"
   },
   "repository": {
     "type": "git",

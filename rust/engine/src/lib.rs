@@ -3,6 +3,7 @@
 //! 同じシード＋同じ行動列で TypeScript 版と同じ結果になる（`svwb diff` で確かめる）。
 //! カードのデータと能力の定義は TypeScript 側から `npm run rust-data` で書き出したものを埋め込む。
 
+pub mod ai;
 pub mod canonical;
 pub mod data;
 pub mod effects;

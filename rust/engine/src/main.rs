@@ -4,10 +4,14 @@
 //!   svwb dump <game> <step> [--random-decks]  その試合のその手番の正規化した文字列を表示する
 //!   svwb coverage [games] [--random-decks]    実行された効果の種類を数える（--features coverage でビルド）
 //!   svwb bench [games]         速さの計測（npm run rust-diff -- bench と同じ 2 つ）
+//!   svwb ai-diff <expected.txt> TypeScript 版（npm run rust-ai-diff -- expect）の探索 AI どうしの試合の行動の列と突き合わせる
+//!   svwb ai-play [games] [start] 探索 AI どうしの試合を打って時間を測る
 
 use std::time::Instant;
+use svwb_engine::ai::search::{SearchAgent, SearchOptions};
+use svwb_engine::ai::Agent;
 use svwb_engine::canonical::{action_canon, fnv, state_canon};
-use svwb_engine::sim::play_random;
+use svwb_engine::sim::{play_ai, play_random};
 use svwb_engine::{legal_actions, resolve_turn_end, try_apply_action, GameState};
 
 /// 手番の局面・合法手の一覧・ターン終了時の処理だけを行った局面
@@ -23,9 +27,69 @@ fn step_canon(s: &GameState, legal: &[svwb_engine::Action]) -> String {
     )
 }
 
+/// 探索 AI どうしで試合 g を打ち、行動の列（正規化した文字列）と勝者を返す
+fn ai_game(g: u32) -> (Vec<String>, Option<usize>) {
+    // TypeScript 版は 1 つの AI が両方の手番を打つ。計画はプレイヤーごとに持つので、席ごとに分けても同じ
+    let mut a = SearchAgent::new(SearchOptions::default());
+    let mut b = SearchAgent::new(SearchOptions::default());
+    let mut agents: [&mut dyn Agent; 2] = [&mut a, &mut b];
+    let mut log = Vec::new();
+    let end = play_ai(g, &mut agents, |_, act| log.push(action_canon(act)));
+    (log, end.winner)
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(|s| s.as_str()) {
+        Some("ai-diff") => {
+            let text = std::fs::read_to_string(&args[1]).expect("ファイルを読めません");
+            let (mut games, mut bad) = (0, 0);
+            let t0 = Instant::now();
+            for line in text.lines().filter(|l| !l.is_empty()) {
+                let mut it = line.split(' ');
+                let g: u32 = it.next().unwrap().parse().unwrap();
+                let winner = it.next().unwrap();
+                let expected: Vec<&str> = it.collect();
+                let (log, w) = ai_game(g);
+                games += 1;
+                let first_diff = (0..log.len().max(expected.len()))
+                    .find(|&i| log.get(i).map(|s| s.as_str()) != expected.get(i).copied());
+                let w = w.map(|x| x.to_string()).unwrap_or_else(|| "null".into());
+                if let Some(i) = first_diff {
+                    bad += 1;
+                    println!(
+                        "試合 {g}: {i} 手目で食い違い（Rust {}、TS {}）",
+                        log.get(i).map(|s| s.as_str()).unwrap_or("（終わり）"),
+                        expected.get(i).copied().unwrap_or("（終わり）")
+                    );
+                } else if w != winner {
+                    bad += 1;
+                    println!("試合 {g}: 勝者が違う（Rust {w}、TS {winner}）");
+                }
+            }
+            println!(
+                "{games} 試合を照合、食い違い {bad} 試合（1 試合 {:.2}秒）",
+                t0.elapsed().as_secs_f64() / games as f64
+            );
+            if bad > 0 {
+                std::process::exit(1);
+            }
+        }
+        Some("ai-play") => {
+            let games: u32 = args.get(1).map(|s| s.parse().unwrap()).unwrap_or(14);
+            let start: u32 = args.get(2).map(|s| s.parse().unwrap()).unwrap_or(0);
+            let t0 = Instant::now();
+            for g in start..start + games {
+                let t = Instant::now();
+                let (log, w) = ai_game(g);
+                println!(
+                    "試合 {g}: 勝者 {w:?}、{} 手、{:.2}秒",
+                    log.len(),
+                    t.elapsed().as_secs_f64()
+                );
+            }
+            println!("1 試合 {:.2}秒", t0.elapsed().as_secs_f64() / games as f64);
+        }
         Some("diff") => {
             let text = std::fs::read_to_string(&args[1]).expect("ファイルを読めません");
             let (mut games, mut steps, mut bad) = (0, 0, 0);

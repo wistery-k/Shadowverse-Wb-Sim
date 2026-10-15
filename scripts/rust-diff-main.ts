@@ -65,7 +65,7 @@ function chooser(seed: number): (len: number) => number {
 
 const b = (v: boolean) => (v ? "1" : "0");
 const opt = (v: number | string | null | undefined) => (v === null || v === undefined ? "-" : String(v));
-const kws = (k: readonly string[]) => [...k].sort().join("+");
+const kws = (k: readonly string[]) => k.join("+");
 const once = (r: Record<string, number>) =>
   Object.keys(r)
     .sort()
