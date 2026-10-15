@@ -158,9 +158,10 @@ export interface SearchOptions {
   /**
    * 上位の手を相手のターンまで読むとき、相手のターンを貪欲法ではなく、局面をそのまま見たビームサーチ（幅 beamWidth・深さ maxDepth、
    * 相手のターン末の採点で最善の並び。相手の次のターンは読まない）で打つ。null なら貪欲法（既定。幅 4 で 52.3%・思考時間 約 3.7 倍のため保留）。
-   * 貪欲法の読みは、消える人形を倒しに行く・タダで消える 1/1 を出さない等、相手の手を読み違える（docs/ai-notes.md）
+   * 貪欲法の読みは、消える人形を倒しに行く・タダで消える 1/1 を出さない等、相手の手を読み違える（docs/ai-notes.md）。
+   * extraEval が true なら、相手のビームサーチの評価にも extraEval（学習した補正）を足す（false・省略なら足さない）
    */
-  opponentSearch: { beamWidth: number; maxDepth: number } | null;
+  opponentSearch: { beamWidth: number; maxDepth: number; extraEval?: boolean } | null;
   /**
    * 候補を相手のターンまで読むとき、相手の手札・山札を引き直した局面をこの数だけ作って相手のターンを打ち、評価を平均する
    * （1 なら引き直さず、その determinization のまま 1 回だけ読む）。
@@ -298,9 +299,10 @@ export function simulateOpponentTurn(state: GameState, p: PlayerIndex, rng: Rng,
 function simulateOpponentTurnBySearch(state: GameState, p: PlayerIndex, rng: Rng, opts: SearchOptions, w: EvalWeights): GameState {
   const q: PlayerIndex = p === 0 ? 1 : 0;
   const policy = createGreedyAgent({ omniscient: true, weights: { ...DEFAULT_WEIGHTS, doomed: w.doomed } });
-  const { allow: _allow, extraEval: _extra, ...rest } = opts;
+  const { allow: _allow, extraEval, ...rest } = opts;
   const oppOpts: SearchOptions = {
     ...rest,
+    ...(opts.opponentSearch?.extraEval && extraEval ? { extraEval } : {}),
     beamWidth: opts.opponentSearch?.beamWidth ?? opts.beamWidth,
     maxDepth: opts.opponentSearch?.maxDepth ?? opts.maxDepth,
     exhaustive: null,
