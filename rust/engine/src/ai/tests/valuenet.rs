@@ -68,9 +68,7 @@ fn input_ignores_hidden_information() {
         .collect();
     assert!(!hidden.is_empty());
     for (k, &i) in hidden.iter().enumerate() {
-        let c = opp.hand[i].card;
-        opp.hand[i].card = opp.deck[k].card;
-        opp.deck[k].card = c;
+        std::mem::swap(&mut opp.hand[i].card, &mut opp.deck[k].card);
     }
     opp.deck.reverse();
     t.players[p].deck.reverse();
@@ -99,9 +97,9 @@ fn zero_output_does_not_change_search() {
         ..SearchOptions::default()
     });
     let mut with_net = SearchAgent::new(SearchOptions {
-        extra_eval: Some(Arc::new(move |s: &GameState, p: PlayerIndex, phase: ValuePhase| {
-            n.eval(s, p, phase)
-        })),
+        extra_eval: Some(Arc::new(
+            move |s: &GameState, p: PlayerIndex, phase: ValuePhase| n.eval(s, p, phase),
+        )),
         ..SearchOptions::default()
     });
     let legal = legal_actions(&s);

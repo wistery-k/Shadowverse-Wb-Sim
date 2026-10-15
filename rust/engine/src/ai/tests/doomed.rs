@@ -83,7 +83,7 @@ fn super_evolves_the_follower_that_stays() {
         .find(|c| c.card == id("アンの大英霊"))
         .expect("アンの大英霊")
         .iid;
-    assert!(!moves.iter().any(
-        |(_, a)| matches!(a, Action::Evolve(i) | Action::SuperEvolve(i) if *i == spirit)
-    ));
+    assert!(!moves
+        .iter()
+        .any(|(_, a)| matches!(a, Action::Evolve(i) | Action::SuperEvolve(i) if *i == spirit)));
 }

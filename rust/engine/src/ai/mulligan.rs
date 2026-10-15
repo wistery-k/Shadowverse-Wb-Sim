@@ -76,7 +76,11 @@ pub(crate) fn weighted_swap(
 }
 
 /// 残したカード（重複あり）と後攻かどうかから特徴を作る
-pub(crate) fn hand_features(kept: &[CardIdx], roles: &HashMap<CardIdx, Vec<usize>>, second: bool) -> Vec<f64> {
+pub(crate) fn hand_features(
+    kept: &[CardIdx],
+    roles: &HashMap<CardIdx, Vec<usize>>,
+    second: bool,
+) -> Vec<f64> {
     let n_roles = ai_data().roles.len();
     let mut count = vec![0i32; n_roles];
     for id in kept {

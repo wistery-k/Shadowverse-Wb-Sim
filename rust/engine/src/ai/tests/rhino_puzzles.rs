@@ -84,7 +84,11 @@ fn puzzle_state(pz: &Puzzle, opp_hp: i32) -> GameState {
     let s = new_game(class_deck(ClassId::Elf), class_deck(ClassId::Royal), 1);
     let mut s = skip_mulligan(s);
     s.active = 0;
-    let hand: Vec<HandCard> = pz.hand.iter().map(|n| hand_card(&mut s, full_name(n))).collect();
+    let hand: Vec<HandCard> = pz
+        .hand
+        .iter()
+        .map(|n| hand_card(&mut s, full_name(n)))
+        .collect();
     let board: Vec<OnBoard> = pz
         .my_board
         .iter()

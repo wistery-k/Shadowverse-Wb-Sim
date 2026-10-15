@@ -61,10 +61,7 @@ fn cards_without_weights_follow_cost() {
         .filter(|h| card(h.card).cost >= 4)
         .map(|h| h.iid)
         .collect();
-    assert_eq!(
-        sorted(weighted_swap(&s, p, &HashMap::new())),
-        sorted(cost)
-    );
+    assert_eq!(sorted(weighted_swap(&s, p, &HashMap::new())), sorted(cost));
 }
 
 /// 役割の名前の添字
@@ -89,10 +86,17 @@ fn hand_features_count_roles_duplicates_and_kept() {
     assert_eq!(f.len(), names.len());
     let get = |n: &str| f[names.iter().position(|x| x == n).expect(n)];
     // 除去を 2 つ書いたカードは 1 枚で 2 枚分
-    let counts: Vec<f64> = ["2PP>=1", "2PP>=2", "リソース>=2", "除去>=1", "除去>=2", "展開>=1"]
-        .iter()
-        .map(|n| get(n))
-        .collect();
+    let counts: Vec<f64> = [
+        "2PP>=1",
+        "2PP>=2",
+        "リソース>=2",
+        "除去>=1",
+        "除去>=2",
+        "展開>=1",
+    ]
+    .iter()
+    .map(|n| get(n))
+    .collect();
     assert_eq!(counts, vec![1.0, 1.0, 1.0, 1.0, 1.0, 0.0]);
     let rest: Vec<f64> = ["dup", "kept", "2PPxSecond", "1PPxRes"]
         .iter()

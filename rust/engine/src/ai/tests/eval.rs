@@ -25,7 +25,10 @@ fn main_phase(seed: u32) -> GameState {
 fn class_weights_override_default_weights() {
     // クラスの重みは基準の重みに差分を重ねる（hold はカードごとに重ねる）
     let raw: serde_json::Value = serde_json::from_str(AI_DATA_JSON).expect("ai-data.json");
-    let base = raw["defaultWeights"].as_object().expect("defaultWeights").clone();
+    let base = raw["defaultWeights"]
+        .as_object()
+        .expect("defaultWeights")
+        .clone();
     let mut hold = serde_json::Map::new();
     hold.insert(card(id("フェアリー")).id.clone(), 1.into());
     let mut o = serde_json::Map::new();
@@ -162,7 +165,11 @@ fn evo_reserve_counts_evolve_abilities_up_to_ep() {
     s.players[0].ep = 2;
     let hand = hand_cards(
         &mut s,
-        &["楽朗の天宮・フィルドア", "楽朗の天宮・フィルドア", "栄弦の天宮・リュウフウ"],
+        &[
+            "楽朗の天宮・フィルドア",
+            "楽朗の天宮・フィルドア",
+            "栄弦の天宮・リュウフウ",
+        ],
     );
     s.players[0].hand = hand;
     let dw = default_weights();
@@ -187,7 +194,10 @@ fn sevo_reserve_counts_super_evolve_abilities_up_to_sep() {
     // sevoReserve は SEP の数まで手札の進化時・超進化時能力持ちを数え、このターンに超進化させた能力持ちも数える
     let mut s = new_game(deck_at(0), deck_at(1), 4);
     s.players[0].sep = 1;
-    s.players[0].hand = hand_cards(&mut s, &["勇壮の堕天使・オリヴィエ", "水の守護神・サレファ"]);
+    s.players[0].hand = hand_cards(
+        &mut s,
+        &["勇壮の堕天使・オリヴィエ", "水の守護神・サレファ"],
+    );
     let dw = default_weights();
     let w = with(&dw, |w| w.sevo_reserve = 4.0);
     let diff = |s: &GameState| evaluate_with(s, 0, &w) - evaluate_with(s, 0, &dw);

@@ -271,7 +271,11 @@ fn rhino_lethal_replays_rhinoceus_with_rod() {
     let mut rhino_plays = 0;
     for a in &seq {
         if let Action::Play(iid) = a {
-            if s.players[0].hand.iter().any(|h| h.iid == *iid && h.card == rhino_card) {
+            if s.players[0]
+                .hand
+                .iter()
+                .any(|h| h.iid == *iid && h.card == rhino_card)
+            {
                 rhino_plays += 1;
             }
         }

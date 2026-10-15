@@ -38,10 +38,22 @@ fn keeps_own_cards_and_shuffles_hidden_ones() {
     };
 
     let d = determinize(&s, viewer, &mut Rng::new(1), false);
-    assert_eq!(player_part(&d, viewer, "hand"), player_part(&s, viewer, "hand"));
-    assert_eq!(player_part(&d, viewer, "board"), player_part(&s, viewer, "board"));
+    assert_eq!(
+        player_part(&d, viewer, "hand"),
+        player_part(&s, viewer, "hand")
+    );
+    assert_eq!(
+        player_part(&d, viewer, "board"),
+        player_part(&s, viewer, "board")
+    );
     assert_eq!(deck_cards(&d), deck_cards(&s));
-    let iids = |st: &GameState| st.players[opp].hand.iter().map(|h| h.iid).collect::<Vec<_>>();
+    let iids = |st: &GameState| {
+        st.players[opp]
+            .hand
+            .iter()
+            .map(|h| h.iid)
+            .collect::<Vec<_>>()
+    };
     assert_eq!(iids(&d), iids(&s));
     assert_eq!(d.players[opp].hand.last().map(|h| h.card), Some(fairy));
     assert_eq!(hidden(&d), hidden(&s));

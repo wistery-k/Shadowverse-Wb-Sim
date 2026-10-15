@@ -29,7 +29,16 @@ fn lethal_key(s: &GameState, with_hp: bool) -> String {
             if with_hp {
                 v.push(field(pl, "leaderHp").clone());
             }
-            for k in ["pp", "combo", "ep", "sep", "extraPpAvailable", "hand", "board", "crests"] {
+            for k in [
+                "pp",
+                "combo",
+                "ep",
+                "sep",
+                "extraPpAvailable",
+                "hand",
+                "board",
+                "crests",
+            ] {
                 v.push(field(pl, k).clone());
             }
             if with_hp {
@@ -115,11 +124,12 @@ fn two_steps(s: &GameState) -> Vec<GameState> {
 
 type Eq = fn(&GameState, &GameState) -> bool;
 type Hash = fn(&GameState) -> u32;
+type Key = fn(&GameState) -> String;
 
 #[test]
 fn eq_sets_match_json_sets() {
     // 同一判定でまとめた集合が JSON 文字列の集合と同じものをまとめ、JSON が同じ局面は同じハッシュになる
-    let projections: [(Eq, Hash, fn(&GameState) -> String); 3] = [
+    let projections: [(Eq, Hash, Key); 3] = [
         (state_eq, lethal_key_hash, canon),
         (lethal_key_eq, lethal_key_hash, |s| lethal_key(s, true)),
         (setup_key_eq, setup_key_hash, |s| lethal_key(s, false)),

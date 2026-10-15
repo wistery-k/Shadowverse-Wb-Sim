@@ -23,6 +23,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # エンジンと AI の WASM を作る（npm test・npm run build の前に npm run wasm が走る）
+      - run: rustup target add wasm32-unknown-unknown
       - run: npm ci
       - run: npm test
       - run: npm run build

@@ -14,7 +14,12 @@ fn finishes_games_with_opp_hand_samples_and_peek() {
     });
     let mut greedy = greedy_base();
     fresh();
-    let end = play_match(&mut [&mut search, &mut greedy], [deck_at(3), deck_at(1)], 6, |_, _| {});
+    let end = play_match(
+        &mut [&mut search, &mut greedy],
+        [deck_at(3), deck_at(1)],
+        6,
+        |_, _| {},
+    );
     assert!(end.winner.is_some());
 }
 
