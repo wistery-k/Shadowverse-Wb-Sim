@@ -4,7 +4,7 @@
 //!                      [--agent rhino|rhino-lethal|search|search-classic] [--opts '<設定JSON>'] [--out 結果.jsonl] [--matches 試合.jsonl]
 //!
 //! 比べるデッキ vs 他の 6 デッキ（相手は学習した補正を入れる前の探索 AI）を、両方の席で同じシードで打つ
-//! （試合の決め方は src/sim/humanCompare.ts）。序盤のターンを全探索する "exhaustive" は TypeScript 版だけにある。
+//! （試合の決め方は src/sim/humanCompare.ts）。序盤のターンを全探索する "exhaustive" は TypeScript 版とともに消した。
 
 use super::options::{rhino_compare_options, rhino_options, search_options};
 use super::parallel::parallel_map;

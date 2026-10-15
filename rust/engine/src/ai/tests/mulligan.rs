@@ -1,5 +1,5 @@
 //! マリガン（tests/mulligan.test.ts・mulliganModel.test.ts）。
-//! 表のデータがデフォルトデッキに合っていることは TypeScript 側（tests/aiData.test.ts）で確かめる
+//! 表のデータがデフォルトデッキに合っていることは TypeScript 側（tests/ai.test.ts）で確かめる
 
 use super::*;
 use crate::ai::aidata::MulliganDeckModel;

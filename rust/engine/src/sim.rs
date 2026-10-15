@@ -1,4 +1,4 @@
-//! 差分テスト・計測用のランダムな対戦（scripts/rust-diff-main.ts と同じ組み方・同じ手の選び方）。
+//! ゴールデンテスト・計測用の対戦（ランダムな手で打つ試合と、AI どうしの試合）。
 
 use crate::data::{data, CardIdx, ClassId};
 use crate::game::{apply_action, create_game, legal_actions};
@@ -82,7 +82,7 @@ pub fn play_random(
     }
 }
 
-/// 探索 AI どうしの試合 g の組み合わせとシード（scripts/rust-ai-diff-main.ts・bench-main.ts と同じ）
+/// 探索 AI どうしの試合 g の組み合わせとシード
 pub fn ai_game_setup(g: u32, elf: bool) -> ([Vec<CardIdx>; 2], u32) {
     let decks: Vec<&crate::data::Deck> = data()
         .decks

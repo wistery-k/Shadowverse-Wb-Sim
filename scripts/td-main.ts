@@ -1,7 +1,7 @@
 // TD 学習の実験（npm run td）。docs/ai-notes.md「評価の項目を手で作らない（TD 学習）」
 //
 // 評価関数から、人が見つけたデッキ専用の項（STRIPPED）を外した点数 S を出発点にし、
-// 勝つ確率 σ(a × S + c + L(局面)) の補正 L（src/ai/valueNet.ts）を、その評価で打った自己対戦から TD(λ) で学ぶ。
+// 勝つ確率 σ(a × S + c + L(局面)) の補正 L（scripts/valueNet.ts。探索で使う推論は rust/engine/src/ai/valuenet.rs）を、その評価で打った自己対戦から TD(λ) で学ぶ。
 // 外した項を学習で取り戻せるか（今の AI との勝率の差が縮まるか）で、学習が「眺めるだけ」を越えるかを確かめる。
 //
 //   npm run td -- init --out m0.json [--hidden 32] [--seed 1] [--a 0.08] [--base stripped|current]

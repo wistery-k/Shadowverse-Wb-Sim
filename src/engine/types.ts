@@ -42,7 +42,7 @@ export interface HandCard extends CardRef {
   fusedThisTurn: boolean;
   /**
    * 持ち主の相手にも中身が分かっているカード（場から手札に戻った・名前の決まったカードを効果で加えた）。
-   * ルールには影響しない。AI の determinization（src/ai/determinize.ts）で並べ直さないために使う
+   * ルールには影響しない。AI の determinization（rust/engine/src/ai/determinize.rs）で並べ直さないために使う
    */
   revealed: boolean;
   /**

@@ -1,5 +1,5 @@
 //! TD 学習の評価の補正（tests/valueNet.test.ts）。
-//! モデルの JSON の読み込みは TypeScript 側（scripts/valueNet.ts）でも確かめる
+//! モデルの JSON の読み込みは TypeScript 側（tests/ai.test.ts。学習は scripts/valueNet.ts）でも確かめる
 
 use super::*;
 use crate::ai::aidata::RawValueNet;

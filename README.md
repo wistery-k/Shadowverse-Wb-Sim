@@ -25,6 +25,7 @@
 ## 技術スタック
 
 - TypeScript（strict）＋ Vite
+- エンジン・AI: Rust（ブラウザでは WASM にして使う。`rust/README.md`）
 - UI: 軽量ライブラリ（Preact 想定）＋ CSS のみ
 - テスト: Vitest
 - AI: ルールベース → MCTS（Web Worker 上で実行）
@@ -33,10 +34,13 @@
 ## ディレクトリ構成（予定）
 
 ```
+rust/
+  engine/   ルールエンジンと AI（UI非依存・決定的・シード付き乱数）。自己対戦の CLI（svwb）
+  wasm/     ブラウザ・Node から呼ぶ WASM
 src/
-  engine/   ルールエンジン（UI非依存の純TypeScript・決定的・シード付き乱数）
-  cards/    カード定義（data/cards.json からの読み込みと検証）
-  ai/       AI 実装（rule-based / mcts）と共通インターフェース
+  engine/   局面の型・能力の DSL と、WASM のエンジンを呼ぶ関数
+  cards/    カード定義（data/cards.json からの読み込みと検証）・能力の定義
+  ai/       選べる AI の一覧と、AI の思考を行う Web Worker
   ui/       ブラウザ UI
   sim/      AI vs AI の自動対戦ランナー（Node / Worker）
 data/
@@ -55,6 +59,9 @@ scripts/
 
 ## 開発
 
+Node と Rust（cargo）が要ります。WASM 向けのターゲットを入れておきます（`rustup target add wasm32-unknown-unknown`）。
+`npm test`・`npm run dev`・`npm run build` は先にエンジンの WASM を作ります（`npm run wasm`）。
+
 ```sh
 npm install
 npm run dev        # 開発サーバー
@@ -67,7 +74,7 @@ npm run compare    # 探索 AI の設定同士の比較（例: npm run compare -
                    # sim と compare は試合を CPU のコア数だけ並列に行う（並列数は環境変数 THREADS で指定）
 npm run sim-report # sim の --json の結果（--shard で分けたものも）を Markdown の表にまとめる
 npm run game       # 1試合だけ行い、行動の列を表示する（リプレイ画面の「再現に必要な情報」のコマンド）
-npm run tune       # 評価関数の重みを自己対戦で調整（例: npm run tune -- --deck リノセウスエルフ --iters 30）
+npm run svwb       # Rust 版の CLI（ゴールデンテスト・計測・自己対戦。rust/README.md）
 ```
 
 ## 公開
