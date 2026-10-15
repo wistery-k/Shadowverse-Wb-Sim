@@ -189,6 +189,12 @@ export interface SearchOptions {
    * 対戦では勝率が変わらず（1600 試合で 50.3%、リノセウス用 AI も同じ）、遅くなるだけなので既定は false
    */
   reuseAgree: boolean;
+  /**
+   * 先ドロー: 選んだ並びの途中にカードを引く手があれば、それを先頭に動かした並びを同じ決定化で打ち直し、
+   * ターン末の点数が下がらなければ、引く手を先に打つ（引いてから残りを探索し直す）。
+   * 決定化の中では引くカードが分かっているので、探索は「引いてから決める」値打ちを数えられない（docs/ai-notes.md）
+   */
+  drawFirst: boolean;
 }
 
 /** 全探索（SearchOptions.exhaustive）の集計（実験用。比較スクリプトが試合ごとに 0 に戻して読む） */
@@ -209,7 +215,7 @@ export const exhaustiveCounts = {
   byTurn: {} as Record<number, [number, number, number, number]>,
 };
 
-export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, mulliganCards: null, reanimateGuard: false, turn1ExtraPp: "always", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: { beamWidth: 4, maxDepth: 8 }, oppHandSamples: 1, peekOppHand: false, oppFuse: false, dangerRescore: 0, reuseAgree: false, extraEval: valueNetEval };
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = { samples: 3, beamWidth: 32, maxDepth: 8, rescoreTop: 4, lethal: true, weights: SEARCH_WEIGHTS, dedup: true, sameHandOnce: true, chain: true, chainFuse: false, scoreTurnEnd: "all", mulligan: "model", mulliganEvoBonus: 0, mulliganCards: null, reanimateGuard: false, turn1ExtraPp: "always", settleTrades: true, reusePlan: true, planCandidates: 3, perFirst: 0, nextLethal: 0, beamPp: 0, exhaustive: null, opponentSearch: { beamWidth: 4, maxDepth: 8 }, oppHandSamples: 1, peekOppHand: false, oppFuse: false, dangerRescore: 0, reuseAgree: false, drawFirst: false, extraEval: valueNetEval };
 
 /** 打った手の並び（後ろから前へのリスト）。各手を打った後の局面も持つ */
 interface Step {
@@ -645,6 +651,58 @@ export function turn1ExtraPpAllowed(state: GameState, a: Action, p: PlayerIndex,
   return state.players[p].hand.filter((h) => handCost(h) <= 2).length >= 2;
 }
 
+/** 並びを、手とそれに続く選択（choose・mode）のまとまりに分ける */
+function blocksOf(actions: readonly Action[]): Action[][] {
+  const out: Action[][] = [];
+  for (const a of actions) {
+    if ((a.type === "choose" || a.type === "mode") && out.length > 0) out[out.length - 1]!.push(a);
+    else out.push([a]);
+  }
+  return out;
+}
+
+/**
+ * 先ドロー（SearchOptions.drawFirst）: 並び steps の 2 つ目以降のまとまりでカードを引くものを、先頭に動かしても
+ * 決定化 root の上でターン末の点数が下がらなければ、その最初の手を返す
+ */
+function drawFirstAction(root: GameState, steps: readonly Step[], p: PlayerIndex, opts: SearchOptions, w: EvalWeights): Action | null {
+  const blocks = blocksOf(steps.map((s) => s.action));
+  if (blocks.length < 2) return null;
+  const extra = opts.extraEval;
+  const endScore = (state: GameState): number => {
+    const e = resolveTurnEnd(opts.settleTrades ? settleConvergingTrades(state, p) : state);
+    if (e.phase === "ended") return e.winner === p ? 1e6 : -1e6;
+    return evaluateWith(e, p, w) + (extra ? extra(e, p, "end") : 0) - (w.ppLeft !== 0 && state.phase === "main" && state.active === p ? w.ppLeft * state.players[p].pp : 0) - expiringExtraPp(state, p, w);
+  };
+  const run = (order: readonly Action[][]): GameState | null => {
+    let s: GameState | null = root;
+    for (const a of order.flat()) {
+      if (opts.allow && a.type !== "choose" && a.type !== "mode" && a.type !== "endTurn" && !opts.allow(s, a, p)) return null;
+      s = tryApply(s, a);
+      if (!s) return null;
+    }
+    return s;
+  };
+  const original = steps[steps.length - 1]!.state;
+  if (original.phase === "ended") return null;
+  const base = endScore(original);
+  let s: GameState = root;
+  for (let k = 0; k < blocks.length; k++) {
+    let next: GameState | null = s;
+    for (const a of blocks[k]!) next = next && tryApply(next, a);
+    if (!next) return null;
+    const draws = next.players[p].deck.length < s.players[p].deck.length;
+    if (k > 0 && draws) {
+      const moved = run([blocks[k]!, ...blocks.slice(0, k), ...blocks.slice(k + 1)]);
+      if (moved && moved.phase !== "ended" && endScore(moved) >= base) return blocks[k]![0]!;
+      return null;
+    }
+    if (k === 0 && draws) return null;
+    s = next;
+  }
+  return null;
+}
+
 export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
   const base = { ...DEFAULT_SEARCH_OPTIONS, ...options };
   const userAllow = base.allow;
@@ -695,9 +753,11 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
 
       const w = opts.weights === "byClass" ? weightsFor(real, p) : opts.weights;
       const totals = new Map<string, { action: Action; sum: number; count: number; plan: Plan; plans: Plan[] }>();
+      const roots = new Map<Plan, GameState>();
       for (let i = 0; i < opts.samples; i++) {
         const det = determinize(real, p, rng, { peekOppHand: opts.peekOppHand });
         for (const [k, sample] of planTurn(det, p, opts, w, rng)) {
+          if (opts.drawFirst) roots.set(sample, det);
           const t = totals.get(k) ?? { action: sample.action, sum: 0, count: 0, plan: sample, plans: [] };
           t.sum += sample.value;
           t.count++;
@@ -720,6 +780,11 @@ export function createSearchAgent(options: Partial<SearchOptions> = {}): Agent {
         }
       }
       if (best) {
+        if (opts.drawFirst) {
+          const root = roots.get(best.plan);
+          const early = root && drawFirstAction(root, best.plan.steps, p, opts, w);
+          if (early && legalKeys.has(keyOf(early))) return early;
+        }
         const steps = opts.reuseAgree ? best.plan.steps.slice(0, best.count < opts.samples ? 1 : agreedLength(best.plans)) : best.plan.steps;
         if (opts.reusePlan && steps.length > 1) {
           plans[p] = { steps, expected: steps.map((_, i) => (i === 0 ? "" : visibleKey(steps[i - 1]!.state, p))), index: 1 };

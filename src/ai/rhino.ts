@@ -44,10 +44,11 @@ const BUGS = "虫の知らせ";
 const LILY = "ピュアクリスタリア・リリィ";
 const OLIVIER = "勇壮の堕天使・オリヴィエ";
 const TAMER = "フェアリーテイマー";
+const MEI = "アドベンチャーエルフ・メイ";
 /** マリガンで1枚だけ残す序盤のカード（優先順） */
 const EARLY = ["フェアリーテイマー", "純粋なるウォーターフェアリー", "妖精の招集"];
 /** 上の2種（バックウッドと序盤のカード）がどちらもあるときに残すカード（優先順。杖は1枚まで） */
-const EXTRA_KEEP = [ROD, "アドベンチャーエルフ・メイ", "ピュアクリスタリア・リリィ"];
+const EXTRA_KEEP = [ROD, MEI, "ピュアクリスタリア・リリィ"];
 /** 1枚目のエクストラPP を使ってよい最後のターン（自分のターン数）。このターンに残っていれば使う */
 const FIRST_EXTRA_PP_DEADLINE = 5;
 
@@ -134,8 +135,10 @@ export interface RhinoHolds {
   rhino: boolean;
   /** 2 つ目のエクストラPP */
   extraPp: boolean;
+  /** メイ（コンボ 3 で 3 ダメージが出せないときは出さない）。勝率が変わらなかったので既定は false（docs/ai-notes.md） */
+  mei: boolean;
 }
-const ALL_HOLDS: RhinoHolds = { mystery: true, rhino: true, extraPp: true };
+const ALL_HOLDS: RhinoHolds = { mystery: true, rhino: true, extraPp: true, mei: false };
 
 /** ルールで打ってよい手か（リーサル以外の場面に使う） */
 export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolean {
@@ -156,6 +159,8 @@ function allowActionWith(holds: RhinoHolds, state: GameState, a: Action, p: Play
       if (holds.mystery && name === MYSTERY) return false; // リーサルまで温存
       // 手札に1枚しかないリノセウスはリーサルまで温存（2枚以上なら1枚は残る）
       if (holds.rhino && name === RHINO && handCount(state, p, RHINO) < 2) return false;
+      // メイは、出すとコンボ 3 になり相手の場にフォロワーがいるときだけ（1/1 として出すより、手札に残す方が良い。ユーザーの判断）
+      if (holds.mei && name === MEI && (pl.combo < 2 || !oppHasFollowers(state, p))) return false;
       if (forcesKeeperChoice(state, a, p)) return false;
       // 燐光の岩は、相手の盤面を全処理できた（フォロワーがいない）ときだけ（杖は何枚目でもよい。ユーザーの判断）
       if (name === ROCK) return !oppHasFollowers(state, p);

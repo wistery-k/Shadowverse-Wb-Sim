@@ -6,9 +6,10 @@
 //
 //   npm run td -- init --out m0.json [--hidden 32] [--seed 1] [--a 0.08] [--base stripped|current]
 //     L = 0 のモデルを作る（--base current なら今の評価関数をそのまま出発点にする）
-//   npm run td -- selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] --out d0.jsonl
+//   npm run td -- selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] --out d0.jsonl
 //     両方の席がモデルの評価で打つ探索 AI の自己対戦（7 デッキの全 49 組を順に回す）。
 //     各自分のターンの最初の局面（after）とターン末の局面（end）を、入力と S と一緒に JSON Lines で書き出す。
+//     --opp beam なら相手のターンを探索 AI の既定と同じビームサーチで読む（既定は貪欲法）。
 //     --eps の確率で、自分のターンの最初の手をランダムに打つ（探索。その局面は学習に使わず、1 つ前の局面の目標もそこで切る）
 //   npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001] [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1]
 //     λ 収益（G_t = (1-λ) V_{t+1} + λ G_{t+1}、最後は勝敗）を目標に、L と c（--fitA 1 なら a も）を交差エントロピーで学ぶ。
@@ -159,12 +160,12 @@ interface GameRecord {
   samples: [Sample[], Sample[]];
 }
 
-function modelOptions(model: ValueNetModel, net: CompiledValueNet): { opts: Partial<SearchOptions>; w: EvalWeights } {
+function modelOptions(model: ValueNetModel, net: CompiledValueNet, opp: "greedy" | "beam" = "greedy"): { opts: Partial<SearchOptions>; w: EvalWeights } {
   const w = { ...SEARCH_WEIGHTS, ...model.baseWeights } as EvalWeights;
   const zero = model.w2.every((x) => x === 0) && model.b2 === 0 && model.c === 0;
   // 補正が 0 のモデルは補正を足さない（探索 AI の既定の補正 data/value-net.json も外す）
-  // 相手のターンは、これまでの学習と同じく貪欲法で読む（既定のビームサーチは思考時間が約 2.4 倍）
-  return { opts: { weights: w, extraEval: zero ? null : valueNetExtraEval(net), opponentSearch: null }, w };
+  // 相手のターンは、既定ではこれまでの学習と同じく貪欲法で読む。--opp beam なら探索 AI の既定と同じビームサーチ（思考時間は約 2.4 倍）
+  return { opts: { weights: w, extraEval: zero ? null : valueNetExtraEval(net), ...(opp === "greedy" ? { opponentSearch: null } : {}) }, w };
 }
 
 async function selfplay(args: Args): Promise<number> {
@@ -175,7 +176,9 @@ async function selfplay(args: Args): Promise<number> {
   const eps = numArg(args, "eps", 0.1);
   const model = loadValueNet(modelPath);
   const net = compileValueNet(model);
-  const { opts, w } = modelOptions(model, net);
+  const opp = args.get("opp") ?? "greedy";
+  if (opp !== "greedy" && opp !== "beam") throw new Error(`--opp は greedy か beam: ${opp}`);
+  const { opts, w } = modelOptions(model, net, opp);
   const decks = DEFAULT_DECKS.filter((d) => !EXCLUDED_DECKS.includes(d.name));
   if (decks.length !== 7) throw new Error(`自己対戦のデッキは 7 つの想定です（${decks.map((d) => d.name).join(", ")}）`);
 
