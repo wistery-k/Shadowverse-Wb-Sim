@@ -4,10 +4,12 @@
 //!   svwb dump <game> <step> [--random-decks]  その試合のその手番の正規化した文字列を表示する
 //!   svwb coverage [games] [--random-decks]    実行された効果の種類を数える（--features coverage でビルド）
 //!   svwb bench [games]         速さの計測（npm run rust-diff -- bench と同じ 2 つ）
-//!   svwb ai-diff <expected.txt> TypeScript 版（npm run rust-ai-diff -- expect）の探索 AI どうしの試合の行動の列と突き合わせる
-//!   svwb ai-play [games] [start] 探索 AI どうしの試合を打って時間を測る
+//!   svwb ai-diff <expected.txt> TypeScript 版（npm run rust-ai-diff -- expect）の AI どうしの試合の行動の列と突き合わせる
+//!   svwb ai-play [games] [start] [search|rhino|rhino-lethal] AI どうしの試合を打って時間を測る
 
 use std::time::Instant;
+use svwb_engine::ai::rhino::{rhino_lethal_bound, search_lethal_for_rhino_turn, RhinoAgent};
+use svwb_engine::ai::rhino_lethal::{tag, Tag};
 use svwb_engine::ai::search::{SearchAgent, SearchOptions};
 use svwb_engine::ai::Agent;
 use svwb_engine::canonical::{action_canon, fnv, state_canon};
@@ -27,14 +29,60 @@ fn step_canon(s: &GameState, legal: &[svwb_engine::Action]) -> String {
     )
 }
 
-/// 探索 AI どうしで試合 g を打ち、行動の列（正規化した文字列）と勝者を返す
-fn ai_game(g: u32) -> (Vec<String>, Option<usize>) {
+/// 試合 g の AI（TypeScript 版 scripts/rust-ai-diff-main.ts の createAgent）
+fn ai_of(kind: &str) -> Box<dyn Agent> {
+    match kind {
+        "search" => Box::new(SearchAgent::new(SearchOptions::default())),
+        "rhino" => Box::new(RhinoAgent::new(true)),
+        "rhino-lethal" => Box::new(RhinoAgent::new(false)),
+        _ => panic!("未知の AI: {kind}"),
+    }
+}
+
+/// 相手の体力をリノセウスの上限の式の値にした局面でのリーサル探索（TypeScript 版 rust-ai-diff-main.ts の probe）
+fn probe(s: &GameState, elf: usize) -> Option<String> {
+    if s.phase != svwb_engine::Phase::Main || s.active != elf || s.pending.is_some() {
+        return None;
+    }
+    if !s.players[elf]
+        .hand
+        .iter()
+        .any(|h| tag(h.card) == Tag::Rhino)
+    {
+        return None;
+    }
+    let hp = rhino_lethal_bound(s, elf);
+    if hp < 1 {
+        return None;
+    }
+    let mut x = s.clone();
+    x.players[1 - elf].leader_hp = hp;
+    Some(match search_lethal_for_rhino_turn(&x, elf) {
+        Some(seq) => format!(
+            "?{}",
+            seq.iter().map(action_canon).collect::<Vec<_>>().join(",")
+        ),
+        None => "?-".to_string(),
+    })
+}
+
+/// AI どうしで試合 g を打ち、行動の列（正規化した文字列）と勝者を返す。
+/// rhino・rhino-lethal は片方の席をリノセウスエルフにする。with_probe ならエルフの手番ごとに probe の結果も並べる
+fn ai_game(g: u32, kind: &str, with_probe: bool) -> (Vec<String>, Option<usize>) {
     // TypeScript 版は 1 つの AI が両方の手番を打つ。計画はプレイヤーごとに持つので、席ごとに分けても同じ
-    let mut a = SearchAgent::new(SearchOptions::default());
-    let mut b = SearchAgent::new(SearchOptions::default());
-    let mut agents: [&mut dyn Agent; 2] = [&mut a, &mut b];
+    let mut a = ai_of(kind);
+    let mut b = ai_of(kind);
+    let mut agents: [&mut dyn Agent; 2] = [a.as_mut(), b.as_mut()];
     let mut log = Vec::new();
-    let end = play_ai(g, &mut agents, |_, act| log.push(action_canon(act)));
+    let elf = (g % 2) as usize;
+    let end = play_ai(g, kind != "search", &mut agents, |s, act| {
+        log.push(action_canon(act));
+        if with_probe {
+            if let Some(p) = probe(s, elf) {
+                log.push(p);
+            }
+        }
+    });
     (log, end.winner)
 }
 
@@ -45,12 +93,25 @@ fn main() {
             let text = std::fs::read_to_string(&args[1]).expect("ファイルを読めません");
             let (mut games, mut bad) = (0, 0);
             let t0 = Instant::now();
-            for line in text.lines().filter(|l| !l.is_empty()) {
+            // 先頭の行が「agent 種類 [probe]」なら、その AI で打つ（無ければ探索 AI）
+            let header: Vec<&str> = text
+                .lines()
+                .next()
+                .and_then(|l| l.strip_prefix("agent "))
+                .unwrap_or("search")
+                .split(' ')
+                .collect();
+            let kind = header[0].to_string();
+            let with_probe = header.get(1) == Some(&"probe");
+            for line in text
+                .lines()
+                .filter(|l| !l.is_empty() && !l.starts_with("agent "))
+            {
                 let mut it = line.split(' ');
                 let g: u32 = it.next().unwrap().parse().unwrap();
                 let winner = it.next().unwrap();
                 let expected: Vec<&str> = it.collect();
-                let (log, w) = ai_game(g);
+                let (log, w) = ai_game(g, &kind, with_probe);
                 games += 1;
                 let first_diff = (0..log.len().max(expected.len()))
                     .find(|&i| log.get(i).map(|s| s.as_str()) != expected.get(i).copied());
@@ -78,12 +139,14 @@ fn main() {
         Some("ai-play") => {
             let games: u32 = args.get(1).map(|s| s.parse().unwrap()).unwrap_or(14);
             let start: u32 = args.get(2).map(|s| s.parse().unwrap()).unwrap_or(0);
+            let kind = args.get(3).map(|s| s.as_str()).unwrap_or("search");
             let t0 = Instant::now();
             for g in start..start + games {
                 let t = Instant::now();
-                let (log, w) = ai_game(g);
+                let (log, w) = ai_game(g, kind, false);
+                let (searched, found) = svwb_engine::ai::exact_lethal::exact_lethal_counts();
                 println!(
-                    "試合 {g}: 勝者 {w:?}、{} 手、{:.2}秒",
+                    "試合 {g}: 勝者 {w:?}、{} 手、{:.2}秒（全探索のリーサル探索 {searched} 回、見つけた {found} 回）",
                     log.len(),
                     t.elapsed().as_secs_f64()
                 );

@@ -22,7 +22,8 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
 3. **状態遷移は純関数的に**: `applyAction(state, action) -> state`。状態は JSON シリアライズ可能に保つ（クラスインスタンスや関数を状態に入れない）。MCTS 用に高速に複製できる形を意識する
 4. **合法手列挙**: `legalActions(state)` をエンジンが提供し、UI と AI は同じ API だけを使う。UI/AI がルール判定を再実装しない
 5. **カード効果はデータ駆動**: 効果は `src/cards/abilities/<クラス>.ts` にカードIDをキーに宣言的に記述し（DSL は `src/engine/dsl.ts`、補助関数は `src/cards/abilities/helpers.ts`）、エンジンの効果プリミティブ（ダメージ、ドロー、召喚、バフ、キーワード付与 等）の組み合わせで表現する。表現できない効果が出たらプリミティブを足す。カード個別の `if (id === ...)` は書かない
-5.0 **Rust 版エンジン（`rust/`）**: 移行が終わるまでは TS 版と同じ処理順（乱数を引く順を含む）に保つ。エンジンやカード能力を変えたら `npm run rust-data` で書き出し直し、差分テスト（`npm run rust-diff` と `svwb diff`。CI でも行う）を通す
+5.0 **Rust 版エンジン・AI（`rust/`）**: 移行が終わるまでは TS 版と同じ処理順（乱数を引く順を含む）に保つ。エンジンやカード能力を変えたら `npm run rust-data` で書き出し直し、差分テスト（`npm run rust-diff` と `svwb diff`。CI でも行う）を通す。
+   AI（探索 AI・リノセウス用 AI）を変えたら Rust 側（`rust/engine/src/ai`）も同じに変え、AI の差分テスト（`npm run rust-ai-diff` と `svwb ai-diff`。CI でも行う）を通す
 5.1 **能力の解決**: `src/engine/effects.ts` が解決スタック（`state.stack`）と誘発待ち（`state.queue`）で解決する。プレイヤーの選択が必要になると `state.pending` を設定して中断し、`choose` / `mode` アクションで再開する。状態に関数を入れないため、継続はデータ（効果の配列とプログラムカウンタ）で持つ
 6. **非公開情報**: AI は実際の局面を直接先読みせず、`src/ai/determinize.ts` で作った「視点のプレイヤーから見て矛盾しない局面」（相手の手札・山札の中身と山札の順番を並べ直し、乱数の状態も新しくしたもの）で手を試す。新しい AI もこれに従う
 7. **AI インターフェース共通化**: `Agent.chooseAction(state, legalActions, rng) -> Action`（`src/ai/types.ts`）。選べる AI は `src/ai/registry.ts` に登録し、UI・自動対戦（`npm run sim`、「AI対戦」タブ）で共通に使う。UI では AI の思考を Web Worker（`src/ai/worker.ts`）で行う

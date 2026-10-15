@@ -83,24 +83,46 @@ pub fn play_random(
 }
 
 /// 探索 AI どうしの試合 g の組み合わせとシード（scripts/rust-ai-diff-main.ts・bench-main.ts と同じ）
-pub fn ai_game_setup(g: u32) -> ([Vec<CardIdx>; 2], u32) {
+pub fn ai_game_setup(g: u32, elf: bool) -> ([Vec<CardIdx>; 2], u32) {
     let decks: Vec<&crate::data::Deck> = data()
         .decks
         .iter()
         .filter(|d| d.name != "ランプドラゴン")
         .collect();
+    let seed = g * 7 + 1;
+    if elf {
+        // 試合ごとに席を入れ替えてリノセウスエルフと、それ以外のデッキ（2 試合ごとに次のデッキ）を当てる
+        let others: Vec<&crate::data::Deck> = decks
+            .iter()
+            .copied()
+            .filter(|d| d.name != "リノセウスエルフ")
+            .collect();
+        let elf_cards = decks
+            .iter()
+            .find(|d| d.name == "リノセウスエルフ")
+            .expect("リノセウスエルフのデッキ")
+            .cards
+            .clone();
+        let other = others[(g / 2) as usize % others.len()].cards.clone();
+        return if g.is_multiple_of(2) {
+            ([elf_cards, other], seed)
+        } else {
+            ([other, elf_cards], seed)
+        };
+    }
     let i = (g % 7) as usize;
     let j = ((g * 3 + 1 + g / 7) % 7) as usize;
-    ([decks[i].cards.clone(), decks[j].cards.clone()], g * 7 + 1)
+    ([decks[i].cards.clone(), decks[j].cards.clone()], seed)
 }
 
 /// 2 つの AI で試合 g を最後まで打つ（AI の乱数は playMatch と同じくシードから作る）。各手で visit を呼ぶ
 pub fn play_ai(
     g: u32,
+    elf: bool,
     agents: &mut [&mut dyn crate::ai::Agent; 2],
     mut visit: impl FnMut(&GameState, &Action),
 ) -> GameState {
-    let (decks, seed) = ai_game_setup(g);
+    let (decks, seed) = ai_game_setup(g, elf);
     let mut s = create_game([&decks[0], &decks[1]], seed);
     let mut rng = crate::ai::Rng::new(seed ^ 0x9e3779b9);
     let mut actions = 0;

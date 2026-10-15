@@ -6,10 +6,13 @@ pub mod aidata;
 pub mod converging;
 pub mod determinize;
 pub mod eval;
+pub mod exact_lethal;
 pub mod greedy;
 pub mod keys;
 pub mod lethal;
 pub mod mulligan;
+pub mod rhino;
+pub mod rhino_lethal;
 pub mod search;
 pub mod valuenet;
 

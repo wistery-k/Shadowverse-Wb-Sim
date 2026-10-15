@@ -38,3 +38,9 @@ jobs:
           rust/target/release/svwb diff expected.txt
           npm run -s rust-diff -- expect --games 1000 --random-decks --out expected-random.txt
           rust/target/release/svwb diff expected-random.txt
+      # 探索 AI・リノセウス用 AI が TypeScript 版と同じ手を選ぶか（--probe はエルフの手番ごとに全探索のリーサル探索も比べる）
+      - run: |
+          npm run -s rust-ai-diff -- expect --games 14 --out expected-ai.txt
+          rust/target/release/svwb ai-diff expected-ai.txt
+          npm run -s rust-ai-diff -- expect --games 6 --agent rhino --probe --out expected-rhino.txt
+          rust/target/release/svwb ai-diff expected-rhino.txt

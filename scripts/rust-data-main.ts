@@ -26,6 +26,7 @@ export function engineData() {
       const st = staticOf(c.id);
       return {
         id: c.id,
+        name: c.name,
         type: c.type,
         class: c.class,
         cost: c.cost,

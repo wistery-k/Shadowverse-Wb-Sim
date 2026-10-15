@@ -50,6 +50,11 @@ pub const AURA: Kw = Kw::one(8);
 
 impl Kw {
     pub const EMPTY: Kw = Kw { bits: 0, seq: 0 };
+    /// 並び順を含めた値（同じ並びのキーワードなら同じ値）
+    #[inline]
+    pub fn seq(self) -> u64 {
+        self.seq
+    }
     const fn one(i: u16) -> Kw {
         Kw {
             bits: 1 << i,
@@ -822,6 +827,8 @@ pub struct CardAbilities {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Card {
     pub id: String,
+    /// カード名（リノセウス用 AI のルールだけが使う。エンジンは使わない）
+    pub name: String,
     #[serde(rename = "type")]
     pub ctype: CardType,
     pub class: ClassId,
