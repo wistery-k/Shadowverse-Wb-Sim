@@ -378,6 +378,17 @@ pub fn attack_targets(s: &GameState, attacker: &OnBoard, out: &mut Vec<AttackTar
     }
 }
 
+/// どこを攻撃できるか（"leader": リーダーも、"follower": フォロワーだけ、"none": 攻撃できない。画面の表示用）
+pub fn attack_reach(s: &GameState, f: &OnBoard) -> &'static str {
+    if can_attack_leader(s, f) {
+        "leader"
+    } else if can_attack_followers(s, f) {
+        "follower"
+    } else {
+        "none"
+    }
+}
+
 fn can_evolve(s: &GameState, f: &OnBoard, kind: EvolveKind) -> bool {
     let p = s.active;
     let pl = &s.players[p];
@@ -435,6 +446,22 @@ fn fusion_materials(s: &GameState, p: PlayerIndex, host: &HandCard) -> Vec<usize
         })
         .map(|(i, _)| i)
         .collect()
+}
+
+/// 融合の素材にできる手札のカード（画面で素材を選ぶとき用）
+pub fn fusion_candidates(s: &GameState, host_iid: Iid) -> Vec<Iid> {
+    if s.phase != Phase::Main || s.pending.is_some() {
+        return Vec::new();
+    }
+    let p = s.active;
+    let hand = &s.players[p].hand;
+    match hand.iter().find(|c| c.iid == host_iid) {
+        Some(host) => fusion_materials(s, p, host)
+            .into_iter()
+            .map(|i| hand[i].iid)
+            .collect(),
+        None => Vec::new(),
+    }
 }
 
 fn mulligan_player(s: &GameState) -> Option<PlayerIndex> {

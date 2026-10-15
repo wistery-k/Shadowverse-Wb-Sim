@@ -8,6 +8,7 @@ pub mod canonical;
 pub mod data;
 pub mod effects;
 pub mod game;
+pub mod golden;
 pub mod jsnum;
 pub mod json;
 pub mod runner;

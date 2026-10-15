@@ -1,5 +1,6 @@
 //! svwb: Rust 版エンジンの差分テストと計測
 //!
+//!   svwb golden [write] [組…]  決まった試合の結果を tests/golden/ に保存したものと比べる（write なら保存し直す。src/golden.rs）
 //!   svwb diff <expected.txt>   TypeScript 版（npm run rust-diff -- expect）の手番ごとのハッシュと突き合わせる
 //!   svwb dump <game> <step> [--random-decks] [--json]  その試合のその手番の正規化した文字列（--json なら局面の JSON）を表示する
 //!   svwb coverage [games] [--random-decks]    実行された効果の種類を数える（--features coverage でビルド）
@@ -11,100 +12,12 @@
 //!   svwb td selfplay --model m.json --games N [--start S] [--eps 0.1] --out d.jsonl  TD 学習の自己対戦（npm run td -- selfplay と同じ）
 
 use std::time::Instant;
-use svwb_engine::ai::rhino::{rhino_lethal_bound, search_lethal_for_rhino_turn, RhinoAgent};
-use svwb_engine::ai::rhino_lethal::{tag, Tag};
-use svwb_engine::ai::search::{SearchAgent, SearchOptions};
-use svwb_engine::ai::Agent;
-use svwb_engine::canonical::{action_canon, fnv, state_canon};
-use svwb_engine::json::Json;
+use svwb_engine::canonical::fnv;
+use svwb_engine::golden::{ai_game, json_round_trip, step_canon, SETS};
 use svwb_engine::runner;
-use svwb_engine::sim::{play_ai, play_random};
-use svwb_engine::state_json::{state_from_json, state_to_json};
-use svwb_engine::{legal_actions, resolve_turn_end, try_apply_action, GameState};
-
-/// 手番の局面・合法手の一覧・ターン終了時の処理だけを行った局面
-fn step_canon(s: &GameState, legal: &[svwb_engine::Action]) -> String {
-    let end = resolve_turn_end(s)
-        .map(|e| state_canon(&e))
-        .unwrap_or_else(|| "-".into());
-    format!(
-        "{}#{}#{}",
-        state_canon(s),
-        legal.iter().map(action_canon).collect::<Vec<_>>().join(","),
-        end
-    )
-}
-
-/// 局面の JSON（項目を名前順）。読み込んで書き出し直しても同じで、同じ局面に戻ることも確かめる（違えば Err）
-fn json_round_trip(s: &GameState) -> Result<String, String> {
-    let j = state_to_json(s);
-    let c = j.canonical();
-    let back = state_from_json(&Json::parse(&j.stringify())?)?;
-    if state_to_json(&back).canonical() != c {
-        return Err(format!("読み込んで書き出すと変わる: {c}"));
-    }
-    if state_canon(&back) != state_canon(s) {
-        return Err(format!("読み込むと別の局面になる: {}", state_canon(&back)));
-    }
-    Ok(c)
-}
-
-/// 試合 g の AI（TypeScript 版 scripts/rust-ai-diff-main.ts の createAgent）
-fn ai_of(kind: &str) -> Box<dyn Agent> {
-    match kind {
-        "search" => Box::new(SearchAgent::new(SearchOptions::default())),
-        "rhino" => Box::new(RhinoAgent::new(true)),
-        "rhino-lethal" => Box::new(RhinoAgent::new(false)),
-        _ => panic!("未知の AI: {kind}"),
-    }
-}
-
-/// 相手の体力をリノセウスの上限の式の値にした局面でのリーサル探索（TypeScript 版 rust-ai-diff-main.ts の probe）
-fn probe(s: &GameState, elf: usize) -> Option<String> {
-    if s.phase != svwb_engine::Phase::Main || s.active != elf || s.pending.is_some() {
-        return None;
-    }
-    if !s.players[elf]
-        .hand
-        .iter()
-        .any(|h| tag(h.card) == Tag::Rhino)
-    {
-        return None;
-    }
-    let hp = rhino_lethal_bound(s, elf);
-    if hp < 1 {
-        return None;
-    }
-    let mut x = s.clone();
-    x.players[1 - elf].leader_hp = hp;
-    Some(match search_lethal_for_rhino_turn(&x, elf) {
-        Some(seq) => format!(
-            "?{}",
-            seq.iter().map(action_canon).collect::<Vec<_>>().join(",")
-        ),
-        None => "?-".to_string(),
-    })
-}
-
-/// AI どうしで試合 g を打ち、行動の列（正規化した文字列）と勝者を返す。
-/// rhino・rhino-lethal は片方の席をリノセウスエルフにする。with_probe ならエルフの手番ごとに probe の結果も並べる
-fn ai_game(g: u32, kind: &str, with_probe: bool) -> (Vec<String>, Option<usize>) {
-    // TypeScript 版は 1 つの AI が両方の手番を打つ。計画はプレイヤーごとに持つので、席ごとに分けても同じ
-    let mut a = ai_of(kind);
-    let mut b = ai_of(kind);
-    let mut agents: [&mut dyn Agent; 2] = [a.as_mut(), b.as_mut()];
-    let mut log = Vec::new();
-    let elf = (g % 2) as usize;
-    let end = play_ai(g, kind != "search", &mut agents, |s, act| {
-        log.push(action_canon(act));
-        if with_probe {
-            if let Some(p) = probe(s, elf) {
-                log.push(p);
-            }
-        }
-    });
-    (log, end.winner)
-}
+use svwb_engine::sim::play_random;
+use svwb_engine::state_json::state_to_json;
+use svwb_engine::{legal_actions, try_apply_action};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -294,6 +207,50 @@ fn main() {
             v.sort();
             for (k, n) in v {
                 println!("{k}\t{n}");
+            }
+        }
+        Some("golden") => {
+            // svwb golden write [組…]: 保存し直す。svwb golden [組…]: 保存したものと比べる
+            let write = args.get(1).map(|a| a == "write").unwrap_or(false);
+            let names: Vec<&str> = args[if write { 2 } else { 1 }..]
+                .iter()
+                .map(|s| s.as_str())
+                .collect();
+            let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden");
+            let mut bad = 0;
+            for set in SETS
+                .iter()
+                .filter(|s| names.is_empty() || names.contains(&s.name))
+            {
+                let path = format!("{dir}/{}.txt", set.name);
+                let t0 = Instant::now();
+                let r = if write {
+                    svwb_engine::golden::lines(set)
+                        .map(|l| std::fs::write(&path, l.join("\n") + "\n").expect("書けません"))
+                } else {
+                    let expected = std::fs::read_to_string(&path).unwrap_or_default();
+                    svwb_engine::golden::check(set, &expected)
+                };
+                match r {
+                    Ok(()) => println!(
+                        "{}: {} 試合 {}（{:.1}秒）",
+                        set.name,
+                        set.games,
+                        if write {
+                            "を保存しました"
+                        } else {
+                            "一致"
+                        },
+                        t0.elapsed().as_secs_f64()
+                    ),
+                    Err(e) => {
+                        bad += 1;
+                        println!("{e}");
+                    }
+                }
+            }
+            if bad > 0 {
+                std::process::exit(1);
             }
         }
         Some(cmd @ ("compare" | "rhino-compare" | "td")) => {

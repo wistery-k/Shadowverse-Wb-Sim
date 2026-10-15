@@ -6,3 +6,5 @@ declare const __BUILD_COMMIT__: string;
 declare const __BUILD_DATE__: string;
 /** ビルド時に未コミットの変更（追跡中のファイル）があったか */
 declare const __BUILD_DIRTY__: boolean;
+/** Node で読み込むエンジンの WASM の場所（src/engine/svwb.wasm の絶対パス） */
+declare const __SVWB_WASM_PATH__: string;

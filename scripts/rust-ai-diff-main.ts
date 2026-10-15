@@ -1,9 +1,9 @@
 // TypeScript 版と Rust 版（rust/）の探索 AI が同じ手を選ぶかの差分テスト（npm run rust-ai-diff）。
 //
-//   npm run rust-ai-diff -- expect --games 14 [--start 0] [--agent search|rhino|rhino-lethal] [--probe] --out expected-ai.txt
+//   npm run rust-ai-diff -- expect --games 14 [--start 0] [--agent search|search-classic|rhino|rhino-lethal|greedy|greedy-base|random] [--probe] --out expected-ai.txt
 //     AI どうしの試合（search は npm run bench と同じ組み合わせ・シード）を打ち、1 試合 1 行で行動の列を書き出す。
 //     rhino・rhino-lethal は、片方の席（試合ごとに入れ替える）をリノセウスエルフにして、両方の席をその AI で打つ
-//     （エルフ以外のデッキでは探索 AI と同じ）。
+//     （エルフ以外のデッキでは探索 AI と同じ）。それ以外の AI（src/ai/registry.ts の名前）は search と同じ組み合わせで打つ。
 //     --probe を付けると、エルフの手番で手を選ぶたびに、相手の体力をリノセウスの上限の式の値にした局面でも
 //     リーサル探索（searchLethalForRhinoTurn。全探索を含む）を行い、見つけた手順も書き出す（全探索の差分を多く調べるため）。
 //     全探索のメモと局面数の上限はターンの間で共有なので、probe なしとは試合の流れが変わる
@@ -12,6 +12,7 @@
 // 行動の書き方は rust/engine/src/canonical.rs の action_canon と同じ（scripts/rust-diff-main.ts の actionCanon）。
 
 import { writeFileSync } from "node:fs";
+import { agentOf } from "../src/ai/registry";
 import { createRhinoAgent, rhinoLethalBound, searchLethalForRhinoTurn } from "../src/ai/rhino";
 import { createSearchAgent } from "../src/ai/search";
 import type { Agent } from "../src/ai/types";
@@ -22,7 +23,7 @@ import { actionCanon } from "./rust-diff-main";
 const EXCLUDED_DECKS = ["ランプドラゴン"];
 const ELF = "リノセウスエルフ";
 
-const AGENT_KINDS = ["search", "rhino", "rhino-lethal"] as const;
+const AGENT_KINDS = ["search", "search-classic", "rhino", "rhino-lethal", "greedy", "greedy-base", "random"] as const;
 type AgentKind = (typeof AGENT_KINDS)[number];
 
 /**
@@ -43,10 +44,15 @@ export function aiGameSetup(g: number, elf = false): { decks: [readonly string[]
 }
 
 function createAgent(kind: AgentKind): Agent {
+  if (kind === "search") return createSearchAgent();
   if (kind === "rhino") return createRhinoAgent();
   if (kind === "rhino-lethal") return createRhinoAgent({}, { rules: false });
-  return createSearchAgent();
+  // 試合をまたいで覚えることのない AI は、登録したものをそのまま使う
+  return agentOf(kind);
 }
+
+/** リノセウスエルフを片方の席に入れる AI */
+const isRhinoKind = (kind: AgentKind): boolean => kind === "rhino" || kind === "rhino-lethal";
 
 /**
  * --probe: エルフ（elf の席）の手番で選択待ちでなく、手札にリノセウスがあれば、相手の体力を上限の式の値にした局面で
@@ -65,7 +71,7 @@ function probe(state: GameState, elf: PlayerIndex): string | null {
 }
 
 function play(g: number, kind: AgentKind, withProbe: boolean): { log: string[]; winner: number | null; ms: number } {
-  const { decks, seed } = aiGameSetup(g, kind !== "search");
+  const { decks, seed } = aiGameSetup(g, isRhinoKind(kind));
   const agent: Agent = createAgent(kind);
   let state = createGame({ decks, seed });
   const rng = rngFrom({ rng: (seed ^ 0x9e3779b9) >>> 0 });
@@ -90,7 +96,7 @@ const flag = (argv: string[], name: string, def: number) => {
 
 export async function main(argv: string[]): Promise<number> {
   if (argv[0] !== "expect") {
-    console.error("使い方: npm run rust-ai-diff -- expect --games N [--start S] [--agent search|rhino|rhino-lethal] [--probe] --out FILE");
+    console.error("使い方: npm run rust-ai-diff -- expect --games N [--start S] [--agent search|search-classic|rhino|rhino-lethal|greedy|greedy-base|random] [--probe] --out FILE");
     return 2;
   }
   const a = argv.indexOf("--agent");
@@ -100,7 +106,7 @@ export async function main(argv: string[]): Promise<number> {
     return 2;
   }
   const withProbe = argv.includes("--probe");
-  if (withProbe && kind === "search") {
+  if (withProbe && !isRhinoKind(kind)) {
     console.error("--probe は rhino・rhino-lethal と一緒に使う");
     return 2;
   }

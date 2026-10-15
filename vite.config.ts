@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import preact from "@preact/preset-vite";
 
@@ -24,6 +25,8 @@ export default defineConfig({
     __BUILD_COMMIT__: JSON.stringify(git.commit),
     __BUILD_DATE__: JSON.stringify(git.date),
     __BUILD_DIRTY__: JSON.stringify(git.dirty),
+    // Node（テスト・スクリプト）で読み込むエンジンの WASM（src/engine/wasm.ts）
+    __SVWB_WASM_PATH__: JSON.stringify(fileURLToPath(new URL("./src/engine/svwb.wasm", import.meta.url))),
   },
   test: {
     include: ["tests/**/*.test.ts"],
