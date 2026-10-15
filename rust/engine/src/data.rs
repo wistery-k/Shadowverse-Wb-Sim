@@ -55,7 +55,7 @@ impl Kw {
     pub fn seq(self) -> u64 {
         self.seq
     }
-    const fn one(i: u16) -> Kw {
+    pub const fn one(i: u16) -> Kw {
         Kw {
             bits: 1 << i,
             seq: i as u64 + 1,
@@ -978,10 +978,13 @@ pub fn load(json: &str) -> Data {
     }
 }
 
+/// 埋め込んだデータの JSON（局面の JSON の能力を読み書きするときにも使う）
+pub const ENGINE_DATA_JSON: &str = include_str!("../data/engine-data.json");
+
 static DATA: OnceLock<&'static Data> = OnceLock::new();
 
 /// 埋め込んだデータ（最初の呼び出しで読み込む）
 #[inline]
 pub fn data() -> &'static Data {
-    DATA.get_or_init(|| Box::leak(Box::new(load(include_str!("../data/engine-data.json")))))
+    DATA.get_or_init(|| Box::leak(Box::new(load(ENGINE_DATA_JSON))))
 }

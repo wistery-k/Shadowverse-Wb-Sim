@@ -5,8 +5,10 @@
 //     ハッシュ（FNV-1a）を 1 試合 1 行で書き出す。Rust 版の `svwb diff expected.txt` が同じ対戦を打って突き合わせる
 //     --random-decks: デフォルトデッキの代わりに、クラスのカードからランダムに組んだデッキで打つ（全カードの能力を試すため）。
 //     書き出すファイルの先頭行に印を付け、Rust 版も同じ組み方をする
-//   npm run rust-diff -- dump --game 12 --step 34
-//     その試合のその手番の正規化した文字列を表示する（食い違ったときに Rust 版の出力と見比べる）
+//     --json: 正規化した文字列の代わりに、局面の JSON（項目を名前順に並べたもの）のハッシュを書き出す。
+//     Rust 版が局面を TypeScript 版と同じ形の JSON で書き出せるか（rust/engine/src/state_json.rs）を、解決スタックの中身まで確かめる
+//   npm run rust-diff -- dump --game 12 --step 34 [--json]
+//     その試合のその手番の正規化した文字列（--json なら局面の JSON）を表示する（食い違ったときに Rust 版の出力と見比べる）
 //   npm run rust-diff -- bench --games 2000
 //     速さの計測。Rust 版の `svwb bench` と同じ 2 つを測る
 //       random: ランダムな手で対戦を最後まで打つ（合法手の列挙＋適用）
@@ -175,6 +177,30 @@ function stepCanon(state: GameState, legal: Action[]): string {
   return stateCanon(state) + "#" + legal.map(actionCanon).join(",") + "#" + (end === state ? "-" : stateCanon(end));
 }
 
+/**
+ * 局面の JSON を、オブジェクトの項目を名前順に並べて書く（Rust 版の Json::canonical と同じ形）。
+ * 文脈の sourceCardId は TypeScript 版だけが持ち、どこからも読まないので除く
+ */
+export function stateJsonCanon(state: GameState): string {
+  const sort = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(sort);
+    if (v === null || typeof v !== "object") return v;
+    const o = v as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.keys(o)
+        .sort()
+        .filter((k) => k !== "sourceCardId")
+        .map((k) => [k, sort(o[k])]),
+    );
+  };
+  return JSON.stringify(sort(JSON.parse(JSON.stringify(state))));
+}
+
+let jsonMode = false;
+
+/** 手番ごとに比べる文字列（--json なら局面の JSON） */
+const stepKey = (state: GameState, legal: Action[]): string => (jsonMode ? stateJsonCanon(state) : stepCanon(state, legal));
+
 function flag(argv: string[], name: string, def: number): number {
   const i = argv.indexOf(`--${name}`);
   return i >= 0 ? Number(argv[i + 1]) : def;
@@ -185,16 +211,18 @@ export async function main(argv: string[]): Promise<number> {
   const games = flag(argv, "games", 1000);
   const start = flag(argv, "start", 0);
   randomDecks = argv.includes("--random-decks");
+  jsonMode = argv.includes("--json");
   if (cmd === "expect") {
     const i = argv.indexOf("--out");
     const out = i >= 0 ? argv[i + 1]! : "expected.txt";
     const lines: string[] = [];
     for (let g = start; g < start + games; g++) {
       const hashes: string[] = [];
-      playRandom(g, (_, state, legal) => hashes.push(fnv(stepCanon(state, legal))));
+      playRandom(g, (_, state, legal) => hashes.push(fnv(stepKey(state, legal))));
       lines.push(`${g} ${hashes.join(" ")}`);
     }
-    writeFileSync(out, (randomDecks ? "random-decks\n" : "") + lines.join("\n") + "\n");
+    // 先頭の行に、Rust 版も同じにする設定を書く
+    writeFileSync(out, (randomDecks ? "random-decks\n" : "") + (jsonMode ? "json\n" : "") + lines.join("\n") + "\n");
     console.log(`${games} 試合（${lines.reduce((n, l) => n + l.split(" ").length - 1, 0)} 手番）を ${out} に書き出しました`);
     return 0;
   }
@@ -202,7 +230,7 @@ export async function main(argv: string[]): Promise<number> {
     const g = flag(argv, "game", 0);
     const k = flag(argv, "step", 0);
     playRandom(g, (step, state, legal) => {
-      if (step === k) console.log(stepCanon(state, legal));
+      if (step === k) console.log(stepKey(state, legal));
     });
     return 0;
   }

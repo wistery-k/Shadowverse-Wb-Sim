@@ -1,7 +1,7 @@
 //! svwb: Rust 版エンジンの差分テストと計測
 //!
 //!   svwb diff <expected.txt>   TypeScript 版（npm run rust-diff -- expect）の手番ごとのハッシュと突き合わせる
-//!   svwb dump <game> <step> [--random-decks]  その試合のその手番の正規化した文字列を表示する
+//!   svwb dump <game> <step> [--random-decks] [--json]  その試合のその手番の正規化した文字列（--json なら局面の JSON）を表示する
 //!   svwb coverage [games] [--random-decks]    実行された効果の種類を数える（--features coverage でビルド）
 //!   svwb bench [games]         速さの計測（npm run rust-diff -- bench と同じ 2 つ）
 //!   svwb ai-diff <expected.txt> TypeScript 版（npm run rust-ai-diff -- expect）の AI どうしの試合の行動の列と突き合わせる
@@ -16,8 +16,10 @@ use svwb_engine::ai::rhino_lethal::{tag, Tag};
 use svwb_engine::ai::search::{SearchAgent, SearchOptions};
 use svwb_engine::ai::Agent;
 use svwb_engine::canonical::{action_canon, fnv, state_canon};
+use svwb_engine::json::Json;
 use svwb_engine::runner;
 use svwb_engine::sim::{play_ai, play_random};
+use svwb_engine::state_json::{state_from_json, state_to_json};
 use svwb_engine::{legal_actions, resolve_turn_end, try_apply_action, GameState};
 
 /// 手番の局面・合法手の一覧・ターン終了時の処理だけを行った局面
@@ -31,6 +33,20 @@ fn step_canon(s: &GameState, legal: &[svwb_engine::Action]) -> String {
         legal.iter().map(action_canon).collect::<Vec<_>>().join(","),
         end
     )
+}
+
+/// 局面の JSON（項目を名前順）。読み込んで書き出し直しても同じで、同じ局面に戻ることも確かめる（違えば Err）
+fn json_round_trip(s: &GameState) -> Result<String, String> {
+    let j = state_to_json(s);
+    let c = j.canonical();
+    let back = state_from_json(&Json::parse(&j.stringify())?)?;
+    if state_to_json(&back).canonical() != c {
+        return Err(format!("読み込んで書き出すと変わる: {c}"));
+    }
+    if state_canon(&back) != state_canon(s) {
+        return Err(format!("読み込むと別の局面になる: {}", state_canon(&back)));
+    }
+    Ok(c)
 }
 
 /// 試合 g の AI（TypeScript 版 scripts/rust-ai-diff-main.ts の createAgent）
@@ -160,10 +176,12 @@ fn main() {
         Some("diff") => {
             let text = std::fs::read_to_string(&args[1]).expect("ファイルを読めません");
             let (mut games, mut steps, mut bad) = (0, 0, 0);
-            let random_decks = text.starts_with("random-decks");
+            // 先頭の設定の行（random-decks: ランダムなデッキ、json: 局面の JSON を比べる）
+            let random_decks = text.lines().any(|l| l == "random-decks");
+            let json = text.lines().any(|l| l == "json");
             for line in text
                 .lines()
-                .filter(|l| !l.is_empty() && *l != "random-decks")
+                .filter(|l| !l.is_empty() && *l != "random-decks" && *l != "json")
             {
                 let mut it = line.split(' ');
                 let g: u32 = it.next().unwrap().parse().unwrap();
@@ -175,7 +193,17 @@ fn main() {
                     if mismatch.is_some() {
                         return;
                     }
-                    let c = step_canon(s, legal);
+                    let c = if json {
+                        match json_round_trip(s) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                mismatch = Some((step, e));
+                                return;
+                            }
+                        }
+                    } else {
+                        step_canon(s, legal)
+                    };
                     if expected.get(step).copied() != Some(fnv(&c).as_str()) {
                         mismatch = Some((step, c));
                     }
@@ -202,9 +230,14 @@ fn main() {
             let g: u32 = args[1].parse().unwrap();
             let k: usize = args[2].parse().unwrap();
             let random_decks = args.iter().any(|a| a == "--random-decks");
+            let json = args.iter().any(|a| a == "--json");
             play_random(g, random_decks, |step, s, legal| {
                 if step == k {
-                    println!("{}", step_canon(s, legal));
+                    if json {
+                        println!("{}", state_to_json(s).canonical());
+                    } else {
+                        println!("{}", step_canon(s, legal));
+                    }
                 }
             });
         }

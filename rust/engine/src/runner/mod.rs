@@ -5,8 +5,6 @@
 //! 試合は CPU のコア数だけのスレッドで並列に行う（環境変数 THREADS で変えられる）。
 
 pub mod compare;
-pub mod jsnum;
-pub mod json;
 pub mod options;
 pub mod parallel;
 pub mod rhino_compare;
@@ -31,7 +29,7 @@ pub fn fixed(x: f64, f: usize) -> String {
     if x.is_nan() {
         "NaN".into()
     } else {
-        jsnum::to_fixed(x, f)
+        crate::jsnum::to_fixed(x, f)
     }
 }
 

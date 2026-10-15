@@ -6,7 +6,6 @@
 //! 比べるデッキ vs 他の 6 デッキ（相手は学習した補正を入れる前の探索 AI）を、両方の席で同じシードで打つ
 //! （試合の決め方は src/sim/humanCompare.ts）。序盤のターンを全探索する "exhaustive" は TypeScript 版だけにある。
 
-use super::json::Json;
 use super::options::{rhino_compare_options, rhino_options, search_options};
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
@@ -15,6 +14,7 @@ use crate::ai::rhino::RhinoAgent;
 use crate::ai::search::{SearchAgent, SearchOptions};
 use crate::ai::Agent;
 use crate::data::{data, Deck};
+use crate::json::Json;
 use crate::sim::play_match;
 use crate::state::{card, Action};
 use std::time::Instant;

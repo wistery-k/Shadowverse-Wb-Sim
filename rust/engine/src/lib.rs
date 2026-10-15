@@ -8,9 +8,12 @@ pub mod canonical;
 pub mod data;
 pub mod effects;
 pub mod game;
+pub mod jsnum;
+pub mod json;
 pub mod runner;
 pub mod sim;
 pub mod state;
+pub mod state_json;
 
 pub use game::{
     acting_player, apply_action, apply_in_place, apply_legal, create_game, is_legal, legal_actions,

@@ -3,11 +3,11 @@
 //! TypeScript 版と同じく、`"valueNet"` に学習した評価の補正のファイルを渡すと、重みをそのモデルの出発点にして補正を足す
 //! （scripts/valueNetOption.ts）。TypeScript 版だけにある実験用の項目（exhaustive 等）は、既定の値のときだけ受け付ける。
 
-use super::json::Json;
 use crate::ai::aidata::{weights_from, AI_DATA_JSON};
 use crate::ai::rhino::{rhino_search_options, RhinoHolds, ALL_HOLDS, RHINO_POTENTIAL};
 use crate::ai::search::{ExtraEval, MulliganMode, OpponentSearch, ScoreTurnEnd, SearchOptions};
 use crate::ai::valuenet::ValueNet;
+use crate::json::Json;
 use std::sync::{Arc, OnceLock};
 
 fn ai_json(key: &str) -> &'static Json {

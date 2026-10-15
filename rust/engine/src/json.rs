@@ -2,7 +2,7 @@
 //!
 //! serde_json の `Value` はオブジェクトの項目を名前順に並べるので、表示が TypeScript 版と変わる。
 
-use super::jsnum::js_num;
+use crate::jsnum::js_num;
 use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use std::fmt;
 
@@ -83,6 +83,24 @@ impl Json {
                     .map(|(k, v)| (k.clone(), v.to_value()))
                     .collect(),
             ),
+        }
+    }
+
+    /// 項目を名前順に並べた `JSON.stringify`（項目の順番によらず、同じ内容なら同じ文字列。比べる・引くための形）
+    pub fn canonical(&self) -> String {
+        self.sorted().stringify()
+    }
+
+    fn sorted(&self) -> Json {
+        match self {
+            Json::Arr(xs) => Json::Arr(xs.iter().map(Json::sorted).collect()),
+            Json::Obj(items) => {
+                let mut v: Vec<(String, Json)> =
+                    items.iter().map(|(k, x)| (k.clone(), x.sorted())).collect();
+                v.sort_by(|a, b| a.0.cmp(&b.0));
+                Json::Obj(v)
+            }
+            x => x.clone(),
         }
     }
 
