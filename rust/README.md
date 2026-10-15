@@ -62,7 +62,7 @@ npm run svwb -- ai-play 14 0 search                     # AI どうしの試合�
 npm run compare -- 105 '{}' '{"lethal":false}'                          # 探索 AI の設定どうしの勝率
 npm run rhino-compare -- --games 50 --opts '{"nextLethal":10}' --out r.jsonl
 npm run af-compare -- --games 50                                         # rhino-compare --subject af
-npm run svwb -- td selfplay --model m0.json --games 2000 --out d0.jsonl  # TD 学習の自己対戦（試合が終わった順に書く）
+npm run svwb -- td selfplay --model m0.json --games 2000 --out d0.jsonl  # TD 学習の自己対戦（試合が終わった順に書く。--opp beam・--iv k は td.rs の先頭の説明）
 ```
 
 - 設定の JSON は `"valueNet"` に学習した補正のファイル、`"weights"` のオブジェクト・`"default"`・`"holdScale"`、

@@ -11,10 +11,14 @@
 //     両方の席がモデルの評価で打つ探索 AI の自己対戦（7 デッキの全 49 組を順に回す）。
 //     各自分のターンの最初の局面（after）とターン末の局面（end）を、入力と S と一緒に JSON Lines で書き出す。
 //     --eps の確率で、自分のターンの最初の手をランダムに打つ（探索。その局面は学習に使わず、1 つ前の局面の目標もそこで切る）
-//   npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001] [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1]
+//   npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001] [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1]
 //     λ 収益（G_t = (1-λ) V_{t+1} + λ G_{t+1}、最後は勝敗）を目標に、L と c（--fitA 1 なら a も）を交差エントロピーで学ぶ。
 //     a を学ぶと、出発点の評価が勝敗をあまり当てないとき a が小さくなり、探索では補正 (c + L) / a の重みが増える。
-//     V は今のモデルの予測で、エポックごとに計算し直す。試合の --holdout の割合は学習に使わず、予測の確かめに使う
+//     V は今のモデルの予測で、エポックごとに計算し直す。試合の --holdout の割合は学習に使わず、予測の確かめに使う。
+//     td selfplay --iv で書き出した介入の試合（手札から 1 枚抜いた局面から打った試合）の局面は --ivWeight の重みで学ぶ（0 なら読まない）
+//   npm run td -- ivcheck --model m1.json --data d0.jsonl[,d1.jsonl] [--holdout 0]
+//     介入の試合で、抜いたカードごとに「測った価値」（もとの試合の勝敗 − 抜いた試合の勝敗の平均）と、
+//     モデルが見ている価値（その局面の勝つ確率の予測の差）を比べる（docs/ai-notes.md「介入データを TD 学習に混ぜる」）
 //   npm run td -- prune --model m4.json --data d0.jsonl,d1.jsonl,... --out data/value-net.json
 //     学習データに一度も現れなかった入力（デフォルトデッキに無いカードなど）の重みを 0 にする。学ばれずに初期値の乱数のまま残っているので、
 //     そのカードを使う自作デッキで補正がでたらめに動かないようにする（ファイルも小さくなる）
@@ -54,7 +58,8 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === "train") return train(args);
   if (cmd === "probe") return probe(args);
   if (cmd === "prune") return prune(args);
-  throw new Error("npm run td -- init|selfplay|train|probe|prune ...（scripts/td-main.ts の先頭の説明を参照）");
+  if (cmd === "ivcheck") return ivcheck(args);
+  throw new Error("npm run td -- init|selfplay|train|probe|prune|ivcheck ...（scripts/td-main.ts の先頭の説明を参照）");
 }
 
 type Args = Map<string, string>;
@@ -145,6 +150,8 @@ interface GameRecord {
   decks: [string, string];
   winner: PlayerIndex;
   turns: number;
+  /** 介入の試合: もとの試合 g のプレイヤー p の k 番目の局面から、手札のカード card を 1 枚抜いて打った */
+  iv?: { p: PlayerIndex; k: number; card: string };
   samples: [Sample[], Sample[]];
 }
 
@@ -164,14 +171,35 @@ interface Dataset {
   explored: Uint8Array;
   holdout: Uint8Array;
   phase: Uint8Array;
+  /** 局面の学習の重み（介入の試合の局面は --ivWeight） */
+  weight: Float64Array;
+  /** 介入の対（もとの局面と、カードを抜いた局面） */
+  pairs: IvPair[];
 }
 
-function loadData(files: string[], holdout: number): Dataset {
-  const off: number[] = [0], idx: number[] = [], val: number[] = [], s: number[] = [], next: number[] = [], outcome: number[] = [], explored: number[] = [], hold: number[] = [], phase: number[] = [];
+interface IvPair {
+  base: number;
+  variant: number;
+  card: string;
+  deck: string;
+}
+
+function loadData(files: string[], holdout: number, ivWeight = 1): Dataset {
+  const off: number[] = [0], idx: number[] = [], val: number[] = [], s: number[] = [], next: number[] = [], outcome: number[] = [], explored: number[] = [], hold: number[] = [], phase: number[] = [], weight: number[] = [];
+  const pairs: IvPair[] = [];
   for (const file of files) {
+    // もとの試合の各プレイヤーの最初の局面の添字（介入の対を作る）。介入の試合はもとの試合のすぐ後の行にある
+    const firstOf = new Map<number, [number, number]>();
     for (const line of readFileSync(file, "utf8").split("\n")) {
       if (!line.trim()) continue;
       const r = JSON.parse(line) as GameRecord;
+      if (r.iv && ivWeight === 0) continue;
+      if (r.iv) {
+        const first = firstOf.get(r.g);
+        if (first && r.samples[r.iv.p].length > 0) pairs.push({ base: first[r.iv.p] + r.iv.k, variant: s.length + (r.iv.p === 1 ? r.samples[0].length : 0), card: r.iv.card, deck: r.decks[r.iv.p] });
+      } else {
+        firstOf.set(r.g, [s.length, s.length + r.samples[0].length]);
+      }
       // 試合番号で決める（ファイルを足しても同じ試合は同じ側）
       const isHold = ((Math.imul(r.g, 2654435761) >>> 0) % 1000) / 1000 < holdout ? 1 : 0;
       r.samples.forEach((seq, p) => {
@@ -188,6 +216,7 @@ function loadData(files: string[], holdout: number): Dataset {
           explored.push(x.ex ? 1 : 0);
           hold.push(isHold);
           phase.push(x.ph);
+          weight.push(r.iv ? ivWeight : 1);
         });
       });
     }
@@ -202,6 +231,8 @@ function loadData(files: string[], holdout: number): Dataset {
     explored: Uint8Array.from(explored),
     holdout: Uint8Array.from(hold),
     phase: Uint8Array.from(phase),
+    weight: Float64Array.from(weight),
+    pairs,
   };
 }
 
@@ -279,7 +310,23 @@ function report(label: string, d: Dataset, v: Float64Array, targets: Float64Arra
     const ll = pred.reduce((x, p, k) => x + bce(p, y[k]!), 0) / Math.max(1, n);
     parts.push(`${name}(${n}) 勝敗の交差エントロピー ${ll.toFixed(4)} AUC ${auc(pred, y).toFixed(3)} TD ${(td / Math.max(1, n)).toFixed(4)}`);
   }
+  const iv = ivSummary(d, v, true);
+  if (iv) parts.push(iv);
   console.log(`${label}: ${parts.join(" / ")}`);
+}
+
+/** 介入の対の、測った価値（勝敗の差の平均）とモデルが見ている価値（予測の差の平均） */
+function ivSummary(d: Dataset, v: Float64Array, holdoutOnly: boolean): string | null {
+  let n = 0, measured = 0, predicted = 0;
+  for (const q of d.pairs) {
+    if (holdoutOnly && !d.holdout[q.base]) continue;
+    n++;
+    measured += d.outcome[q.base]! - d.outcome[q.variant]!;
+    predicted += v[q.base]! - v[q.variant]!;
+  }
+  if (n === 0) return null;
+  const pct = (x: number) => `${x >= 0 ? "+" : ""}${((x / n) * 100).toFixed(1)}%`;
+  return `介入(${n}) 測った価値 ${pct(measured)} 予測の差 ${pct(predicted)}`;
 }
 
 function train(args: Args): number {
@@ -294,9 +341,10 @@ function train(args: Args): number {
   const holdout = numArg(args, "holdout", 0.1);
   const fitA = numArg(args, "fitA", 1) !== 0;
   const holder = { rng: numArg(args, "seed", 1) >>> 0 };
+  const ivWeight = numArg(args, "ivWeight", 1);
 
   const t0 = Date.now();
-  const d = loadData(files, holdout);
+  const d = loadData(files, holdout, ivWeight);
   const n = d.s.length;
   console.log(`${files.join(", ")}: 局面 ${n}（確かめ用 ${d.holdout.reduce((x, y) => x + y, 0)}、ランダムに打った ${d.explored.reduce((x, y) => x + y, 0)}）、読み込み ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
@@ -342,7 +390,7 @@ function train(args: Args): number {
         const z = forwardAt(net, d, i, h);
         const p = sigmoid(net.model.a * d.s[i]! + net.model.c + z);
         lossSum += bce(p, targets[i]!);
-        const dz = (p - targets[i]!) / (end - b0);
+        const dz = (d.weight[i]! * (p - targets[i]!)) / (end - b0);
         grad[oC]! += dz;
         if (fitA) grad[oA]! += dz * d.s[i]!;
         grad[oB2]! += dz;
@@ -478,5 +526,53 @@ function prune(args: Args): number {
   const w1 = model.w1.map((w, k) => (used.has(Math.floor(k / H)) ? w : 0));
   writeFileSync(out, JSON.stringify({ ...model, w1 }));
   console.log(`${out}: 入力 ${n} のうち、データに現れた ${used.size} 個の重みを残し、${n - used.size} 個を 0 にしました`);
+  return 0;
+}
+
+// ---- ivcheck ----
+
+function ivcheck(args: Args): number {
+  const model = loadValueNet(need(args, "model"));
+  const d = loadData(need(args, "data").split(","), numArg(args, "holdout", 0));
+  const v = predictAll(compileValueNet(model), d);
+  const holdoutOnly = numArg(args, "holdout", 0) > 0;
+  console.log(ivSummary(d, v, holdoutOnly) ?? "介入の試合がありません");
+  const nameOf = new Map(ALL_CARDS.map((c): [string, string] => [c.id, c.name]));
+  // デッキ・カードごと
+  const by = new Map<string, { n: number; m: number; m2: number; p: number }>();
+  let negN = 0, negM = 0, negP = 0;
+  for (const q of d.pairs) {
+    if (holdoutOnly && !d.holdout[q.base]) continue;
+    const m = d.outcome[q.base]! - d.outcome[q.variant]!;
+    const p = v[q.base]! - v[q.variant]!;
+    const key = `${q.deck}\t${nameOf.get(q.card) ?? q.card}`;
+    const c = by.get(key) ?? { n: 0, m: 0, m2: 0, p: 0 };
+    c.n++;
+    c.m += m;
+    c.m2 += m * m;
+    c.p += p;
+    by.set(key, c);
+    if (p < 0) {
+      negN++;
+      negM += m;
+      negP += p;
+    }
+  }
+  const pct = (x: number) => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}%`;
+  if (negN > 0) console.log(`モデルが手札の 1 枚をマイナスに見た対 ${negN}: 測った価値 ${pct(negM / negN)}、予測の差 ${pct(negP / negN)}`);
+  console.log("");
+  console.log("| デッキ | カード | 対 | 測った価値 | SE | 予測の差 | ずれ / SE |");
+  console.log("| --- | --- | ---: | ---: | ---: | ---: | ---: |");
+  const rows = [...by].map(([key, c]) => {
+    const mean = c.m / c.n;
+    const se = Math.sqrt(Math.max(c.m2 / c.n - mean * mean, 0.01) / c.n);
+    return { key, c, mean, se, p: c.p / c.n, z: (mean - c.p / c.n) / se };
+  });
+  rows.sort((x, y) => x.key.localeCompare(y.key) || y.c.n - x.c.n);
+  for (const r of rows) {
+    if (r.c.n < numArg(args, "min", 30)) continue;
+    const [deck, card] = r.key.split("\t");
+    console.log(`| ${deck} | ${card} | ${r.c.n} | ${pct(r.mean)} | ${(r.se * 100).toFixed(1)}% | ${pct(r.p)} | ${r.z.toFixed(2)} |`);
+  }
   return 0;
 }

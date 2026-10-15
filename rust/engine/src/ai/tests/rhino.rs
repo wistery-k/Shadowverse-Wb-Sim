@@ -396,12 +396,21 @@ fn turn6_holds_single_rhinoceus_without_lethal() {
 }
 
 /// 7 ターン目（相手の場にフォロワーなし）。フェアリーの後に燐光の岩を出すとコンボ 2 で森の神秘が加わらない。
-/// 以前はビームで、手の順番が違うだけの局面（加わったフェアリーの iid が違う）がまとまらず枠を埋め、岩を 2 手目に出していた
+/// 以前はビームで、手の順番が違うだけの局面（加わったフェアリーの iid が違う）がまとまらず枠を埋め、岩を 2 手目に出していた。
+/// 確かめたいのは探索の同じ局面の判定なので、手で作った評価だけで打つ（介入データを混ぜた補正では、乱数 8 通り中 5 通りで
+/// 岩をコンボ 2 で出す。docs/ai-notes.md「介入データを TD 学習に混ぜる」）
 #[test]
 fn turn7_does_not_play_rock_after_fairy() {
     let s = state_1678126716(50);
     assert_eq!(s.players[1].combo, 1);
-    let mut agent = RhinoAgent::new(true);
+    let mut agent = RhinoAgent::with_options(
+        true,
+        rhino_search_options(RHINO_POTENTIAL, ALL_HOLDS, None),
+        SearchOptions {
+            extra_eval: None,
+            ..SearchOptions::default()
+        },
+    );
     let a = agent.choose_action(&s, &legal_actions(&s), &mut Rng::new(1));
     if let Action::Play(iid) = a {
         let c = s.hand_card(iid).expect("手札のカード").card;
