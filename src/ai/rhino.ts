@@ -29,7 +29,7 @@ import { determinize } from "./determinize";
 import { DEFAULT_EXACT_LETHAL_OPTIONS, resetExactLethalCache, searchExactLethal, type ExactLethalOptions } from "./exactLethal";
 import { DEFAULT_LETHAL_OPTIONS, DIRECT_SCORING, findLethal, searchLethal } from "./lethal";
 import { searchRhinoLethal } from "./rhinoLethal";
-import { createSearchAgent, type SearchOptions } from "./search";
+import { createSearchAgent, DEFAULT_SEARCH_OPTIONS, type SearchOptions } from "./search";
 import type { Agent } from "./types";
 import { deckClassOf } from "./weights";
 
@@ -204,8 +204,18 @@ function rhinoPotentialEval(potential: number) {
  */
 const RHINO_POTENTIAL = 1;
 
-/** リノセウス用 AI の設定。potential は rhinoPotentialEval の係数（0 なら足さない） */
+/**
+ * リノセウス用 AI の設定。potential は rhinoPotentialEval の係数（0 なら足さない）。
+ * extraEval は rhinoPotentialEval に足す評価（既定は汎用の探索 AI と同じ、TD 学習で作った補正。null なら足さない）
+ */
 export type RhinoOptions = Partial<SearchOptions> & { potential?: number; holds?: Partial<RhinoHolds> };
+
+/** 評価に足す項を 2 つ足し合わせる（どちらかが null ならもう一方） */
+function addEval(a: ((s: GameState, p: PlayerIndex) => number) | null, b: NonNullable<SearchOptions["extraEval"]> | null): NonNullable<SearchOptions["extraEval"]> | null {
+  if (!a) return b;
+  if (!b) return a;
+  return (s, p, phase) => a(s, p) + b(s, p, phase);
+}
 
 /** マリガンで入れ替えるカードの iid */
 export function mulliganSwap(state: GameState, p: PlayerIndex): number[] {
@@ -600,17 +610,18 @@ export interface RhinoAgentMode {
  * （seed 2510273090 の 4 ターン目・seed 954874822 の 7 ターン目。docs/ai-notes.md）
  */
 export function createRhinoAgent(options: RhinoOptions = {}, mode: RhinoAgentMode = { rules: true }): Agent {
-  const { potential = RHINO_POTENTIAL, holds, ...searchOptions } = options;
+  const { potential = RHINO_POTENTIAL, holds, extraEval: learned, ...searchOptions } = options;
+  const extraEval = learned === undefined ? (DEFAULT_SEARCH_OPTIONS.extraEval ?? null) : learned;
   const allHolds = { ...ALL_HOLDS, ...holds };
   const search = createSearchAgent({
     allow: (s, a, q) => allowActionWith(allHolds, s, a, q),
     lethal: false,
     perFirst: RHINO_PER_FIRST,
     nextLethalSearch: (s, q) => searchLethalForRhino(s, q) !== null,
-    ...(potential !== 0 ? { extraEval: rhinoPotentialEval(potential) } : {}),
+    extraEval: addEval(potential !== 0 ? rhinoPotentialEval(potential) : null, extraEval),
     ...searchOptions,
   });
-  const plainSearch = createSearchAgent();
+  const plainSearch = createSearchAgent({ extraEval });
   return {
     name: "rhino",
     chooseAction(real, legal, rng) {
