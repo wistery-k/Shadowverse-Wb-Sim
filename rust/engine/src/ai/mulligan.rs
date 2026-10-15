@@ -35,6 +35,15 @@ pub fn default_deck_name_of(s: &GameState, p: PlayerIndex) -> Option<&'static st
 pub fn weighted_mulligan_swap(s: &GameState, p: PlayerIndex) -> Option<Vec<Iid>> {
     let name = default_deck_name_of(s, p)?;
     let table = ai_data().mulligan_weights.get(name)?;
+    Some(weighted_swap(s, p, table))
+}
+
+/// カード → [1 枚目を残す重み, 2 枚目も残す重み] の表でマリガンする（表に無いカードはコスト 4 以上を返す）
+pub(crate) fn weighted_swap(
+    s: &GameState,
+    p: PlayerIndex,
+    table: &HashMap<CardIdx, [f64; 2]>,
+) -> Vec<Iid> {
     let mut seen: Vec<(CardIdx, u32)> = Vec::new();
     let mut swap = Vec::new();
     for h in &s.players[p].hand {
@@ -63,11 +72,11 @@ pub fn weighted_mulligan_swap(s: &GameState, p: PlayerIndex) -> Option<Vec<Iid>>
             swap.push(h.iid);
         }
     }
-    Some(swap)
+    swap
 }
 
 /// 残したカード（重複あり）と後攻かどうかから特徴を作る
-fn hand_features(kept: &[CardIdx], roles: &HashMap<CardIdx, Vec<usize>>, second: bool) -> Vec<f64> {
+pub(crate) fn hand_features(kept: &[CardIdx], roles: &HashMap<CardIdx, Vec<usize>>, second: bool) -> Vec<f64> {
     let n_roles = ai_data().roles.len();
     let mut count = vec![0i32; n_roles];
     for id in kept {
@@ -144,6 +153,16 @@ pub fn model_mulligan_swap(s: &GameState, p: PlayerIndex) -> Option<Vec<Iid>> {
     let name = default_deck_name_of(s, p)?;
     let deck = ad.mulligan_model.get(name)?;
     let roles = ad.mulligan_roles.get(name)?;
+    Some(model_swap(s, p, deck, roles))
+}
+
+/// デッキの係数と役割の表でマリガンする（予測が最も高い残し方）
+pub(crate) fn model_swap(
+    s: &GameState,
+    p: PlayerIndex,
+    deck: &MulliganDeckModel,
+    roles: &HashMap<CardIdx, Vec<usize>>,
+) -> Vec<Iid> {
     let hand = &s.players[p].hand;
     let second = s.first != p;
     let mut best: Vec<Iid> = Vec::new();
@@ -166,5 +185,5 @@ pub fn model_mulligan_swap(s: &GameState, p: PlayerIndex) -> Option<Vec<Iid>> {
                 .collect();
         }
     }
-    Some(best)
+    best
 }

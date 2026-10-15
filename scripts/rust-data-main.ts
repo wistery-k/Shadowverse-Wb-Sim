@@ -12,11 +12,8 @@ import { APOCALYPSE_DECK } from "../src/cards/abilities/special";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { enhanceCost, staticOf } from "../src/engine";
 import { id } from "../src/cards/abilities/helpers";
-import { DEFAULT_WEIGHTS, SEARCH_WEIGHTS } from "../src/ai/evaluate";
-import { MULLIGAN_WEIGHTS } from "../src/ai/mulligan";
-import { MODEL_FEATURES, MULLIGAN_MODEL, MULLIGAN_ROLES, ROLES } from "../src/ai/mulliganModel";
+import { CLASS_WEIGHTS, DEFAULT_WEIGHTS, MODEL_FEATURES, MULLIGAN_MODEL, MULLIGAN_ROLES, MULLIGAN_WEIGHTS, ROLES, SEARCH_WEIGHTS } from "../src/ai/data";
 import valueNet from "../data/value-net.json";
-import classWeights from "../data/ai-weights.json";
 
 export const RUST_DATA_PATH = "rust/engine/data/engine-data.json";
 export const RUST_AI_DATA_PATH = "rust/engine/data/ai-data.json";
@@ -50,7 +47,7 @@ export function engineData() {
   };
 }
 
-/** 探索 AI のデータ（src/ai の evaluate.ts・valueNetModel.ts・mulligan.ts・mulliganModel.ts・weights.ts が使うもの） */
+/** 探索 AI のデータ（src/ai/data.ts と、学習した評価の補正 data/value-net.json） */
 export function aiData() {
   return {
     defaultWeights: DEFAULT_WEIGHTS,
@@ -72,7 +69,7 @@ export function aiData() {
     mulliganRoles: MULLIGAN_ROLES,
     roles: ROLES,
     modelFeatures: MODEL_FEATURES,
-    classWeights,
+    classWeights: CLASS_WEIGHTS,
   };
 }
 

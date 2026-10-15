@@ -18,6 +18,9 @@ pub mod rhino_lethal;
 pub mod search;
 pub mod valuenet;
 
+#[cfg(test)]
+mod tests;
+
 use crate::state::{next_random, Action, GameState};
 
 /// AI の乱数（TypeScript 版の rngFrom と同じ mulberry32）

@@ -1,18 +1,16 @@
-// 学習した評価の補正（TD 学習の実験。docs/ai-notes.md「評価の項目を手で作らない（TD 学習）」）。
+// 学習した評価の補正のモデル（TD 学習の実験。docs/ai-notes.md「評価の項目を手で作らない（TD 学習）」）。学習（scripts/td-main.ts）が使う。
 //
 // 評価関数の項を手で作らず、生の入力（カード ID ごとの枚数など、視点のプレイヤーに見える情報だけ）から
 // 小さな NN（隠れ層 1 つ）で補正を出す。勝つ確率を σ(a × 探索の評価の点数 + c + NN の出力) とみなし、
-// 探索には SearchOptions.extraEval として (c + NN の出力) / a を足す（評価の点数の単位）。
-// a は固定（評価 1 点が勝率何 % か）。c と NN の重みを、学んだ評価で打った自己対戦から TD(λ) で学ぶ（scripts/td-main.ts）。
+// 探索には (c + NN の出力) / a を足す（評価の点数の単位）。
+// a は固定（評価 1 点が勝率何 % か）。c と NN の重みを、学んだ評価で打った自己対戦から TD(λ) で学ぶ。
+// 局面から入力を作るのと探索で使うのは Rust 版（rust/engine/src/ai/valuenet.rs）。入力の並び（VALUE_ZONES・VALUE_SCALARS）はそれと同じにする。
 //
 // 入力は、相手の手札の中身（公開済みのもの以外）と山札の中身・順番を見ない。探索は決定化した局面（相手の手札を作り直したもの）を
 // 評価するので、見えない情報を入力にすると、推論のときにでたらめな手札に振り回される。
 
-import { ALL_CARDS, ALL_CRESTS } from "../cards";
-import type { GameState, PlayerIndex } from "../engine";
-
-/** 評価する局面の種類。end: 自分のターン末（ターン終了時の処理の後）、after: 相手のターンを終えて自分のターンが始まった局面 */
-export type ValuePhase = "end" | "after";
+import { readFileSync } from "node:fs";
+import { ALL_CARDS, ALL_CRESTS } from "../src/cards";
 
 /** カード・クレストごとの入力の種類 */
 export const VALUE_ZONES = [
@@ -155,81 +153,6 @@ export function compileValueNet(model: ValueNetModel): CompiledValueNet {
   };
 }
 
-const zoneOf = (name: (typeof VALUE_ZONES)[number]): number => VALUE_ZONES.indexOf(name);
-const Z = {
-  myHand: zoneOf("myHand"),
-  myHandBoost: zoneOf("myHandBoost"),
-  myBoard: zoneOf("myBoard"),
-  myBoardCountdown: zoneOf("myBoardCountdown"),
-  myBoardEvolved: zoneOf("myBoardEvolved"),
-  myCrest: zoneOf("myCrest"),
-  oppBoard: zoneOf("oppBoard"),
-  oppBoardEvolved: zoneOf("oppBoardEvolved"),
-  oppCrest: zoneOf("oppCrest"),
-  oppHandRevealed: zoneOf("oppHandRevealed"),
-};
-
-/** 局面 state をプレイヤー p から見た入力にする（同じ添字は足し合わせる） */
-export function encodeState(net: Pick<CompiledValueNet, "index" | "model">, state: GameState, p: PlayerIndex, phase: ValuePhase): SparseInput {
-  const V = net.model.vocab.length;
-  const acc = new Map<number, number>();
-  const add = (zone: number, id: string, v: number) => {
-    const k = net.index.get(id);
-    if (k === undefined || v === 0) return;
-    const i = zone * V + k;
-    acc.set(i, (acc.get(i) ?? 0) + v);
-  };
-  const me = state.players[p];
-  const opp = state.players[p === 0 ? 1 : 0];
-  for (const h of me.hand) {
-    add(Z.myHand, h.cardId, 1);
-    add(Z.myHandBoost, h.cardId, Math.min(h.boosts, 10) / 5);
-  }
-  for (const c of me.board) {
-    add(Z.myBoard, c.cardId, 1);
-    if (c.kind === "amulet" && c.countdown !== null) add(Z.myBoardCountdown, c.cardId, c.countdown / 3);
-    if (c.kind === "follower" && c.evolve !== "none") add(Z.myBoardEvolved, c.cardId, 1);
-  }
-  for (const c of me.crests) add(Z.myCrest, `crest:${c.crestId}`, 1);
-  for (const c of opp.board) {
-    add(Z.oppBoard, c.cardId, 1);
-    if (c.kind === "follower" && c.evolve !== "none") add(Z.oppBoardEvolved, c.cardId, 1);
-  }
-  for (const c of opp.crests) add(Z.oppCrest, `crest:${c.crestId}`, 1);
-  for (const h of opp.hand) if (h.revealed) add(Z.oppHandRevealed, h.cardId, 1);
-
-  const base = net.model.zones.length * V;
-  const scalars: Record<(typeof VALUE_SCALARS)[number], number> = {
-    myHp: me.leaderHp / 20,
-    oppHp: opp.leaderHp / 20,
-    myMaxPp: me.maxPp / 10,
-    oppMaxPp: opp.maxPp / 10,
-    myTurn: me.turnCount / 10,
-    oppTurn: opp.turnCount / 10,
-    myPp: me.pp / 10,
-    myEp: me.ep / 3,
-    mySep: me.sep / 2,
-    oppEp: opp.ep / 3,
-    oppSep: opp.sep / 2,
-    myExtraPp: me.extraPpAvailable ? 1 : 0,
-    oppExtraPp: opp.extraPpAvailable ? 1 : 0,
-    myHandSize: me.hand.length / 9,
-    oppHandSize: opp.hand.length / 9,
-    myDeck: me.deck.length / 40,
-    oppDeck: opp.deck.length / 40,
-    myGraveyard: Math.min(me.graveyard, 30) / 20,
-    oppGraveyard: Math.min(opp.graveyard, 30) / 20,
-    after: phase === "after" ? 1 : 0,
-    first: state.first === p ? 1 : 0,
-  };
-  VALUE_SCALARS.forEach((name, j) => {
-    const v = scalars[name];
-    if (v !== 0) acc.set(base + j, v);
-  });
-  const idx = [...acc.keys()];
-  return { idx, val: idx.map((i) => acc.get(i)!) };
-}
-
 /** NN の出力（ロジットへの補正）。hidden を渡すと隠れ層の値（ReLU の後）を書き込む */
 export function forwardValueNet(net: CompiledValueNet, x: SparseInput, hidden?: Float64Array): number {
   const H = net.model.hidden;
@@ -248,12 +171,6 @@ export function forwardValueNet(net: CompiledValueNet, x: SparseInput, hidden?: 
   return z;
 }
 
-/** 探索の extraEval に渡す関数（評価の点数の単位の補正） */
-export function valueNetExtraEval(net: CompiledValueNet): (state: GameState, p: PlayerIndex, phase?: ValuePhase) => number {
-  const hidden = new Float64Array(net.model.hidden);
-  return (state, p, phase = "end") => {
-    if (state.phase === "ended") return 0;
-    const z = forwardValueNet(net, encodeState(net, state, p, phase), hidden);
-    return (net.model.c + z) / net.model.a;
-  };
+export function loadValueNet(path: string): ValueNetModel {
+  return parseValueNetModel(JSON.parse(readFileSync(path, "utf8")) as unknown);
 }

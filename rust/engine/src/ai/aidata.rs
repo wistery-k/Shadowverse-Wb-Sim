@@ -237,7 +237,7 @@ fn load(json: &str) -> AiData {
 }
 
 /// `{ ...DEFAULT_WEIGHTS, ...o, hold: { ...DEFAULT_WEIGHTS.hold, ...o.hold } }`
-fn class_weights_json(
+pub(crate) fn class_weights_json(
     base: &serde_json::Map<String, serde_json::Value>,
     o: &serde_json::Map<String, serde_json::Value>,
 ) -> serde_json::Map<String, serde_json::Value> {

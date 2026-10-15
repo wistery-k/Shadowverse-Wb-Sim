@@ -1,8 +1,8 @@
 // カード・クレストの能力定義の参照
 
-import { CREST_ABILITIES, CARD_ABILITIES } from "../cards/abilities";
+import { CARD_ABILITIES } from "../cards/abilities";
 import { CARDS_BY_ID, CRESTS_BY_ID, type Card, type Crest } from "../cards";
-import type { Ability, CardAbilities } from "./dsl";
+import type { CardAbilities } from "./dsl";
 import { parseStaticAbilities } from "./keywords";
 import type { StaticKeyword } from "./types";
 
@@ -25,10 +25,6 @@ const ABILITIES_BY_ID = new Map(Object.entries(CARD_ABILITIES));
 
 export function abilitiesOf(cardId: string): CardAbilities {
   return ABILITIES_BY_ID.get(cardId) ?? EMPTY;
-}
-
-export function crestAbilitiesOf(crestId: string): Ability[] {
-  return CREST_ABILITIES[crestId]?.abilities ?? [];
 }
 
 export interface StaticInfo {

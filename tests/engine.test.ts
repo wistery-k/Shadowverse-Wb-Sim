@@ -17,7 +17,9 @@ import {
   type GameState,
   type PlayerIndex,
 } from "../src/engine";
-import { randomAgent } from "../src/ai/random";
+import { agentOf } from "../src/ai/registry";
+
+const randomAgent = agentOf("random");
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { randomDeck } from "../src/sim/decks";
 import { playMatch } from "../src/sim/match";

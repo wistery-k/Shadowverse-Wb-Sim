@@ -1,6 +1,6 @@
 // AI の思考を UI のスレッドから外すための Web Worker
 
-import { rngFrom, type Action, type GameState } from "../engine";
+import { initEngine, rngFrom, type Action, type GameState } from "../engine";
 import { agentOf } from "./registry";
 
 export interface AgentRequest {
@@ -17,10 +17,11 @@ export interface AgentResponse {
   error?: string;
 }
 
-self.onmessage = (e: MessageEvent<AgentRequest>) => {
+self.onmessage = async (e: MessageEvent<AgentRequest>) => {
   const { id, agent, state, legal, seed } = e.data;
   let response: AgentResponse;
   try {
+    await initEngine();
     response = { id, action: agentOf(agent).chooseAction(state, legal, rngFrom({ rng: seed })) };
   } catch (err) {
     response = { id, error: String(err) };

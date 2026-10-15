@@ -51,8 +51,15 @@ export function initEngine(): Promise<void> {
     loadSync();
     return Promise.resolve();
   }
-  loading ??= WebAssembly.compileStreaming(fetch(new URL("./svwb.wasm", import.meta.url))).then(instantiate);
+  loading ??= compileFrom(new URL("./svwb.wasm", import.meta.url)).then(instantiate);
   return loading;
+}
+
+/** URL の WASM を読み込む（配信の Content-Type が application/wasm でなくても読めるよう、ストリーミングにはしない） */
+async function compileFrom(url: URL): Promise<WebAssembly.Module> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url.pathname} を読み込めません（${res.status}）`);
+  return WebAssembly.compile(await res.arrayBuffer());
 }
 
 function exports(): Exports {

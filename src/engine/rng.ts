@@ -9,10 +9,12 @@ export function nextRandom(state: number): [value: number, next: number] {
   return [((t ^ (t >>> 14)) >>> 0) / 4294967296, next];
 }
 
-/** 可変な乱数源。エンジン内部で GameState.rng を読み書きするために使う。 */
+/** 可変な乱数源（AI・デッキの生成等） */
 export interface Rng {
   /** [0, n) の整数 */
   int(n: number): number;
+  /** 今の状態（WASM の AI に渡し、使った分だけ進めた状態を書き戻す） */
+  state: number;
 }
 
 export function rngFrom(holder: { rng: number }): Rng {
@@ -21,6 +23,12 @@ export function rngFrom(holder: { rng: number }): Rng {
       const [v, next] = nextRandom(holder.rng);
       holder.rng = next;
       return Math.floor(v * n);
+    },
+    get state() {
+      return holder.rng;
+    },
+    set state(v: number) {
+      holder.rng = v >>> 0;
     },
   };
 }
