@@ -135,10 +135,10 @@ export interface RhinoHolds {
   rhino: boolean;
   /** 2 つ目のエクストラPP */
   extraPp: boolean;
-  /** メイ（コンボ 3 で 3 ダメージが出せないときは出さない） */
+  /** メイ（コンボ 3 で 3 ダメージが出せないときは出さない）。勝率が変わらなかったので既定は false（docs/ai-notes.md） */
   mei: boolean;
 }
-const ALL_HOLDS: RhinoHolds = { mystery: true, rhino: true, extraPp: true, mei: true };
+const ALL_HOLDS: RhinoHolds = { mystery: true, rhino: true, extraPp: true, mei: false };
 
 /** ルールで打ってよい手か（リーサル以外の場面に使う） */
 export function allowAction(state: GameState, a: Action, p: PlayerIndex): boolean {
