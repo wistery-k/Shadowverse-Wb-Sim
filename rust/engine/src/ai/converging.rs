@@ -308,7 +308,7 @@ pub fn dominated_attack(s: &GameState, action: &Action) -> bool {
                 }
             };
             let mut cheaper = me.board.iter().filter(|y| dominates(s, x, y)).peekable();
-            cheaper.peek().is_some() && trades(x) && cheaper.any(|y| trades(y))
+            cheaper.peek().is_some() && trades(x) && cheaper.any(trades)
         }
     }
 }
