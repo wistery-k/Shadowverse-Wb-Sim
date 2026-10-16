@@ -309,7 +309,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         cells.push(format!("{}秒", fixed(secs, 2)));
         let names: Vec<String> = decks.iter().map(|d| d.name.clone()).collect();
         record(&format!("| {} |", cells.join(" | ")), &names)?;
-        println!("{} に記録しました", doc_path());
+        println!("docs/yardstick.md に記録しました");
     }
     Ok(())
 }
