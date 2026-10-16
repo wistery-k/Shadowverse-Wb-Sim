@@ -25,6 +25,7 @@
     "dragon-compare": "node scripts/svwb.mjs rhino-compare --subject dragon",
     "nightmare-compare": "node scripts/svwb.mjs rhino-compare --subject nightmare",
     "royal-compare": "node scripts/svwb.mjs rhino-compare --subject royal",
+    "yardstick": "node scripts/svwb.mjs yardstick",
     "td": "node scripts/vite-run.mjs scripts/td-main.ts",
     "rust-data": "node scripts/vite-run.mjs scripts/rust-data-main.ts"
   },
