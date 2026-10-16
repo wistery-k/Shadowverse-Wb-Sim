@@ -6,7 +6,7 @@
 //! 4. 平均の評価が最も良い「最初の手」を選ぶ。このターンで勝てる並び（リーサル）が見つかれば最優先する
 
 use super::aidata::{ai_data, Weights};
-use super::converging::{converging_attacks, settle_converging_trades};
+use super::converging::{converging_attacks, dominated_attack, settle_converging_trades_with};
 use super::determinize::determinize;
 use super::eval::{evaluate_with, EvalWeights};
 use super::greedy::choose_greedy;
@@ -71,6 +71,8 @@ pub struct SearchOptions {
     pub mulligan_static: bool,
     pub mulligan_net: bool,
     pub settle_trades: bool,
+    /// 下位互換の味方で同じことができる攻撃を展開せず、合流する相打ちも下位互換の味方で打つ（converging.rs の dominated_attack）
+    pub dominance: bool,
     pub reuse_plan: bool,
     pub plan_candidates: usize,
     pub per_first: usize,
@@ -82,6 +84,8 @@ pub struct SearchOptions {
     pub weights: Option<Arc<Weights>>,
     pub opponent_search: Option<OpponentSearch>,
     pub opp_hand_samples: usize,
+    /// oppHandSamples で引き直す相手の手札を、読み直すどの終局面でも同じ並びにする（手どうしの差のぶれを減らす）
+    pub opp_hand_common: bool,
     pub peek_opp_hand: bool,
     pub opp_fuse: bool,
     pub danger_rescore: usize,
@@ -91,7 +95,7 @@ pub struct SearchOptions {
 impl Default for SearchOptions {
     fn default() -> Self {
         SearchOptions {
-            samples: 3,
+            samples: 1,
             beam_width: 32,
             max_depth: 8,
             rescore_top: 4,
@@ -107,8 +111,9 @@ impl Default for SearchOptions {
             mulligan_static: true,
             mulligan_net: true,
             settle_trades: true,
+            dominance: true,
             reuse_plan: true,
-            plan_candidates: 3,
+            plan_candidates: 1,
             per_first: 0,
             next_lethal: 0.0,
             next_lethal_search: None,
@@ -120,11 +125,26 @@ impl Default for SearchOptions {
                 max_depth: 8,
                 extra_eval: false,
             }),
-            opp_hand_samples: 1,
+            opp_hand_samples: 12,
+            opp_hand_common: true,
             peek_opp_hand: false,
             opp_fuse: false,
             danger_rescore: 0,
             reuse_agree: false,
+        }
+    }
+}
+
+impl SearchOptions {
+    /// 2026-10-16 より前の既定の読み方（決定化 3 回それぞれでビームを打ち、最初の手ごとに終局面を 3 つまで読み直す）。
+    /// 人間の記録との比較の相手（search-classic）と TD 学習の自己対戦は、今までと比べられるようこちらを使う
+    pub fn with_classic_sampling(self) -> SearchOptions {
+        SearchOptions {
+            samples: 3,
+            plan_candidates: 3,
+            opp_hand_samples: 1,
+            opp_hand_common: false,
+            ..self
         }
     }
 }
@@ -239,7 +259,7 @@ impl<'a> Planner<'a> {
     /// ターンを終える局面（合流する相打ちを打った後）。変わらなければ None
     fn settle(&self, s: &GameState) -> Option<GameState> {
         if self.opts().settle_trades {
-            settle_converging_trades(s, self.p)
+            settle_converging_trades_with(s, self.p, self.opts().dominance)
         } else {
             None
         }
@@ -297,7 +317,10 @@ impl<'a> Planner<'a> {
     }
 
     fn expand(&self, s: &GameState) -> Vec<Action> {
-        let legal = legal_actions(s);
+        let mut legal = legal_actions(s);
+        if self.opts().dominance {
+            legal.retain(|a| !dominated_attack(s, a));
+        }
         if self.opts().same_hand_once {
             distinct_plays(s, legal)
         } else {
@@ -561,6 +584,13 @@ pub fn plan_turn(
         out
     };
 
+    let common_seeds: Vec<u32> = if opts.opp_hand_common && opts.opp_hand_samples > 1 {
+        (0..opts.opp_hand_samples)
+            .map(|_| rng.int(u32::MAX as usize) as u32)
+            .collect()
+    } else {
+        Vec::new()
+    };
     let mut result: Vec<(Action, Plan)> = Vec::new();
     let mut rescored: Vec<usize> = Vec::new();
     let rescore_node = |i: usize, rng: &mut Rng, result: &mut Vec<(Action, Plan)>| {
@@ -574,9 +604,17 @@ pub fn plan_turn(
             let settled = pl.settle(&node.state);
             let base = settled.as_ref().unwrap_or(&node.state);
             let mut sum = 0.0;
-            for _ in 0..opts.opp_hand_samples {
-                let d = determinize(base, p, rng, opts.peek_opp_hand);
-                sum += read_once(&pl, &d, rng);
+            if opts.opp_hand_common {
+                for &seed in &common_seeds {
+                    let mut r = Rng::new(seed);
+                    let d = determinize(base, p, &mut r, opts.peek_opp_hand);
+                    sum += read_once(&pl, &d, &mut r);
+                }
+            } else {
+                for _ in 0..opts.opp_hand_samples {
+                    let d = determinize(base, p, rng, opts.peek_opp_hand);
+                    sum += read_once(&pl, &d, rng);
+                }
             }
             sum / opts.opp_hand_samples as f64 - pl.leftover(&node.state)
         };
@@ -745,7 +783,8 @@ pub fn simulate_opponent_turn_by_search(
             if let Some((action, last)) = best.as_ref().and_then(|b| b.steps.last()) {
                 if !matches!(action, Action::EndTurn) {
                     cur = if opts.settle_trades {
-                        settle_converging_trades(last, q).unwrap_or_else(|| (**last).clone())
+                        settle_converging_trades_with(last, q, opts.dominance)
+                            .unwrap_or_else(|| (**last).clone())
                     } else {
                         (**last).clone()
                     };

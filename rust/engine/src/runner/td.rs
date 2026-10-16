@@ -84,7 +84,9 @@ fn model_options(net: Arc<ValueNet>, opp_beam: bool) -> Result<Model, String> {
             None
         },
         ..SearchOptions::default()
-    };
+    }
+    // 読み方は今までの自己対戦と同じ（決定化 3 回）
+    .with_classic_sampling();
     Ok(Model {
         net,
         opts,

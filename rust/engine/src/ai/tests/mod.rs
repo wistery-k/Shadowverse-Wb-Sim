@@ -7,6 +7,7 @@
 
 mod converging;
 mod determinize;
+mod dominance;
 mod doomed;
 mod eval;
 mod keys;
