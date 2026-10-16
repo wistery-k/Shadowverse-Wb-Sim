@@ -1,7 +1,7 @@
 //! 合流する相打ちの検出（src/ai/convergingTrade.ts）。
 
 use crate::data::*;
-use crate::game::{attack_targets, try_apply_action};
+use crate::game::{attack_reach, attack_targets, try_apply_action};
 use crate::state::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -101,8 +101,62 @@ fn can_be_attacked_back(s: &GameState, p: PlayerIndex, a: &OnBoard, b: &OnBoard)
     })
 }
 
-/// 合流する攻撃と、打った後の局面。first なら最初の 1 つだけ探す
-fn converging_trades(s: &GameState, p: PlayerIndex, first: bool) -> Vec<(Action, GameState)> {
+/// 自分の a で相手の b を攻撃するのが合流する攻撃なら、その手と打った後の局面
+fn converging_pair(
+    s: &GameState,
+    p: PlayerIndex,
+    a: &OnBoard,
+    b: &OnBoard,
+    sensitive: &mut Option<bool>,
+    targets: &mut Vec<AttackTarget>,
+) -> Option<(Action, GameState)> {
+    if !a.is_follower || a.attacks_this_turn >= a.max_attacks || !symmetric_follower(a) {
+        return None;
+    }
+    if !b.is_follower || b.evolve == Evolve::SuperEvolved {
+        return None;
+    }
+    let bane = a.has_keyword(BANE);
+    if !bane && (a.attack_value() < b.defense || b.has_keyword(BARRIER)) {
+        return None;
+    }
+    if !symmetric_follower(b) || has_board_last_words(b) || !can_be_attacked_back(s, p, a, b) {
+        return None;
+    }
+    targets.clear();
+    attack_targets(s, a, targets);
+    if !targets.contains(&Some(b.iid)) {
+        return None;
+    }
+    if *sensitive.get_or_insert_with(|| has_timing_sensitive_ability(s)) {
+        return None;
+    }
+    let action = Action::Attack {
+        attacker: a.iid,
+        target: Some(b.iid),
+    };
+    let after = try_apply_action(s, &action)?;
+    if after.pending.is_some() || after.phase == Phase::Ended {
+        return None;
+    }
+    if after.players[opponent(p)]
+        .board
+        .iter()
+        .any(|c| c.iid == b.iid)
+    {
+        return None;
+    }
+    Some((action, after))
+}
+
+/// 合流する攻撃と、打った後の局面。first なら最初の 1 つだけ探す。
+/// cheapest なら、同じ相手に下位互換の味方を当てても同じ相打ちになるとき、そちらを打つ（`dominates`）
+fn converging_trades(
+    s: &GameState,
+    p: PlayerIndex,
+    first: bool,
+    cheapest: bool,
+) -> Vec<(Action, GameState)> {
     let mut out = Vec::new();
     if s.phase == Phase::Ended || s.active != p || s.pending.is_some() {
         return out;
@@ -112,60 +166,156 @@ fn converging_trades(s: &GameState, p: PlayerIndex, first: bool) -> Vec<(Action,
     let mut sensitive: Option<bool> = None;
     let mut targets = Vec::new();
     for a in &me.board {
-        if !a.is_follower || a.attacks_this_turn >= a.max_attacks || !symmetric_follower(a) {
-            continue;
-        }
         for b in &opp.board {
-            if !b.is_follower || b.evolve == Evolve::SuperEvolved {
-                continue;
-            }
-            let bane = a.has_keyword(BANE);
-            if !bane && (a.attack_value() < b.defense || b.has_keyword(BARRIER)) {
-                continue;
-            }
-            if !symmetric_follower(b)
-                || has_board_last_words(b)
-                || !can_be_attacked_back(s, p, a, b)
-            {
-                continue;
-            }
-            targets.clear();
-            attack_targets(s, a, &mut targets);
-            if !targets.contains(&Some(b.iid)) {
-                continue;
-            }
-            if *sensitive.get_or_insert_with(|| has_timing_sensitive_ability(s)) {
-                return Vec::new();
-            }
-            let action = Action::Attack {
-                attacker: a.iid,
-                target: Some(b.iid),
-            };
-            let Some(after) = try_apply_action(s, &action) else {
+            let Some((action, after)) = converging_pair(s, p, a, b, &mut sensitive, &mut targets)
+            else {
+                if sensitive == Some(true) {
+                    return Vec::new();
+                }
                 continue;
             };
-            if after.pending.is_some() || after.phase == Phase::Ended {
-                continue;
-            }
-            if after.players[opponent(p)]
-                .board
-                .iter()
-                .any(|c| c.iid == b.iid)
-            {
-                continue;
+            if first {
+                if cheapest && !alive(&after, a.iid) {
+                    for y in &me.board {
+                        if !dominates(s, a, y) {
+                            continue;
+                        }
+                        if let Some((ya, yafter)) =
+                            converging_pair(s, p, y, b, &mut sensitive, &mut targets)
+                        {
+                            if !alive(&yafter, y.iid) {
+                                return vec![(ya, yafter)];
+                            }
+                        }
+                    }
+                }
+                return vec![(action, after)];
             }
             out.push((action, after));
-            if first {
-                return out;
-            }
         }
     }
     out
 }
 
+fn alive(s: &GameState, iid: Iid) -> bool {
+    s.board_card(iid).is_some()
+}
+
+/// 場の x が y の上位互換か（y にできる攻撃は x にもでき、x が場に残る方が得）。
+/// y は能力を持たない（または x と同じカード）。x の能力は場を離れるときに働かないもの（ラストワード・自壊等を除く）。
+/// 攻撃力・体力・キーワード（疾走・突進を除く）・攻撃できる先が y 以上で、どれかが上回るか能力を持つ
+pub fn dominates(s: &GameState, x: &OnBoard, y: &OnBoard) -> bool {
+    if x.iid == y.iid || !x.is_follower || !y.is_follower {
+        return false;
+    }
+    if x.temp_attack != 0
+        || y.temp_attack != 0
+        || !x.temp_keywords.is_empty()
+        || !y.temp_keywords.is_empty()
+    {
+        return false;
+    }
+    if x.attacks_this_turn != 0 || y.attacks_this_turn != 0 || x.max_attacks != y.max_attacks {
+        return false;
+    }
+    let y_plain = y.abilities().next().is_none();
+    if !y_plain && y.card != x.card {
+        return false;
+    }
+    if !x
+        .abilities()
+        .all(|a| harmless_own(a.trigger.on()) && a.trigger.on() != On::LastWords)
+    {
+        return false;
+    }
+    if x.attack < y.attack || x.defense < y.defense || x.max_defense < y.max_defense {
+        return false;
+    }
+    // 疾走・突進は、このターンに攻撃できる先（下の reach）にしか効かない
+    let (xk, yk) = (
+        x.keywords.without(STORM.with(RUSH)),
+        y.keywords.without(STORM.with(RUSH)),
+    );
+    if yk.iter().any(|k| !xk.has(Kw::one(k))) {
+        return false;
+    }
+    let reach = |f: &OnBoard| match attack_reach(s, f) {
+        "leader" => 2,
+        "follower" => 1,
+        _ => 0,
+    };
+    if reach(x) < reach(y) {
+        return false;
+    }
+    x.attack > y.attack
+        || x.defense > y.defense
+        || x.max_defense > y.max_defense
+        || xk.len() > yk.len()
+        || (y_plain && x.abilities().next().is_some())
+}
+
+/// 下位互換の味方で同じことができる攻撃か（探索で展開しない手）。
+/// - x で相手のフォロワー t を攻撃して x も t も破壊されるとき、x の下位互換の y で攻撃しても同じになる
+/// - y でリーダーを攻撃するとき、まだ攻撃していない y の上位互換の x もリーダーを攻撃できる（x で攻撃する方が得か同じ）
+///
+/// どちらも、上位互換の方を残す同じ手順（攻撃の順番を変えたもの）が別にあるので、外しても失う局面は無い
+pub fn dominated_attack(s: &GameState, action: &Action) -> bool {
+    let Action::Attack { attacker, target } = action else {
+        return false;
+    };
+    if s.pending.is_some() {
+        return false;
+    }
+    let p = s.active;
+    let me = &s.players[p];
+    let Some(x) = me.board.iter().find(|c| c.iid == *attacker) else {
+        return false;
+    };
+    // 安い判定を先に行う
+    if !me
+        .board
+        .iter()
+        .any(|y| dominates(s, x, y) || dominates(s, y, x))
+    {
+        return false;
+    }
+    if has_timing_sensitive_ability(s) {
+        return false;
+    }
+    let mut targets = Vec::new();
+    match target {
+        None => me.board.iter().any(|y| {
+            dominates(s, y, x) && {
+                targets.clear();
+                attack_targets(s, y, &mut targets);
+                targets.contains(&None)
+            }
+        }),
+        Some(t) => {
+            let trades = |f: &OnBoard| -> bool {
+                let a = Action::Attack {
+                    attacker: f.iid,
+                    target: Some(*t),
+                };
+                match try_apply_action(s, &a) {
+                    Some(after) => {
+                        after.pending.is_none()
+                            && after.phase != Phase::Ended
+                            && !alive(&after, f.iid)
+                            && !alive(&after, *t)
+                    }
+                    None => false,
+                }
+            };
+            let mut cheaper = me.board.iter().filter(|y| dominates(s, x, y)).peekable();
+            cheaper.peek().is_some() && trades(x) && cheaper.any(|y| trades(y))
+        }
+    }
+}
+
 /// プレイヤー p の合流する攻撃
 pub fn converging_attacks(s: &GameState, p: PlayerIndex) -> Vec<Action> {
-    converging_trades(s, p, false)
+    converging_trades(s, p, false, false)
         .into_iter()
         .map(|(a, _)| a)
         .collect()
@@ -173,10 +323,22 @@ pub fn converging_attacks(s: &GameState, p: PlayerIndex) -> Vec<Action> {
 
 /// 合流する攻撃を、無くなるまで打った局面（無ければ None）
 pub fn settle_converging_trades(s: &GameState, p: PlayerIndex) -> Option<GameState> {
+    settle_converging_trades_with(s, p, false)
+}
+
+/// settle_converging_trades で、cheapest なら同じ相打ちは下位互換の味方で打つ
+pub fn settle_converging_trades_with(
+    s: &GameState,
+    p: PlayerIndex,
+    cheapest: bool,
+) -> Option<GameState> {
     let mut cur: Option<GameState> = None;
     for _ in 0..7 {
         let base = cur.as_ref().unwrap_or(s);
-        let Some((_, after)) = converging_trades(base, p, true).into_iter().next() else {
+        let Some((_, after)) = converging_trades(base, p, true, cheapest)
+            .into_iter()
+            .next()
+        else {
             break;
         };
         cur = Some(after);

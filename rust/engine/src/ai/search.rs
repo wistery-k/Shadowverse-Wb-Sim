@@ -6,7 +6,7 @@
 //! 4. 平均の評価が最も良い「最初の手」を選ぶ。このターンで勝てる並び（リーサル）が見つかれば最優先する
 
 use super::aidata::{ai_data, Weights};
-use super::converging::{converging_attacks, settle_converging_trades};
+use super::converging::{converging_attacks, dominated_attack, settle_converging_trades_with};
 use super::determinize::determinize;
 use super::eval::{evaluate_with, EvalWeights};
 use super::greedy::choose_greedy;
@@ -71,6 +71,8 @@ pub struct SearchOptions {
     pub mulligan_static: bool,
     pub mulligan_net: bool,
     pub settle_trades: bool,
+    /// 下位互換の味方で同じことができる攻撃を展開せず、合流する相打ちも下位互換の味方で打つ（converging.rs の dominated_attack）
+    pub dominance: bool,
     pub reuse_plan: bool,
     pub plan_candidates: usize,
     pub per_first: usize,
@@ -107,6 +109,7 @@ impl Default for SearchOptions {
             mulligan_static: true,
             mulligan_net: true,
             settle_trades: true,
+            dominance: true,
             reuse_plan: true,
             plan_candidates: 3,
             per_first: 0,
@@ -239,7 +242,7 @@ impl<'a> Planner<'a> {
     /// ターンを終える局面（合流する相打ちを打った後）。変わらなければ None
     fn settle(&self, s: &GameState) -> Option<GameState> {
         if self.opts().settle_trades {
-            settle_converging_trades(s, self.p)
+            settle_converging_trades_with(s, self.p, self.opts().dominance)
         } else {
             None
         }
@@ -297,7 +300,10 @@ impl<'a> Planner<'a> {
     }
 
     fn expand(&self, s: &GameState) -> Vec<Action> {
-        let legal = legal_actions(s);
+        let mut legal = legal_actions(s);
+        if self.opts().dominance {
+            legal.retain(|a| !dominated_attack(s, a));
+        }
         if self.opts().same_hand_once {
             distinct_plays(s, legal)
         } else {
@@ -745,7 +751,8 @@ pub fn simulate_opponent_turn_by_search(
             if let Some((action, last)) = best.as_ref().and_then(|b| b.steps.last()) {
                 if !matches!(action, Action::EndTurn) {
                     cur = if opts.settle_trades {
-                        settle_converging_trades(last, q).unwrap_or_else(|| (**last).clone())
+                        settle_converging_trades_with(last, q, opts.dominance)
+                            .unwrap_or_else(|| (**last).clone())
                     } else {
                         (**last).clone()
                     };
