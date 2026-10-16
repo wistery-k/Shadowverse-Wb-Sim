@@ -2,7 +2,7 @@
 //! モデルの JSON の読み込みは TypeScript 側（tests/ai.test.ts。学習は scripts/valueNet.ts）でも確かめる
 
 use super::*;
-use crate::ai::aidata::RawValueNet;
+use crate::ai::aidata::{RawValueNet, RawValueNetLayer};
 use crate::ai::search::{SearchAgent, SearchOptions};
 use crate::ai::valuenet::{ValueNet, ValuePhase};
 use std::sync::Arc;
@@ -27,6 +27,7 @@ fn model(hidden: usize, fill: impl Fn(usize) -> f64, w2: f64) -> RawValueNet {
         hidden,
         w1: (0..n * hidden).map(fill).collect(),
         b1: vec![0.1; hidden],
+        layers: Vec::new(),
         w2: vec![w2; hidden],
         b2: 0.0,
         a: 0.08,
@@ -184,4 +185,64 @@ fn widened_model_with_zero_rows_matches_old_layout() {
             wide.encode(&s, p, ValuePhase::End).len() > old.encode(&s, p, ValuePhase::End).len()
         );
     }
+}
+
+#[test]
+fn stacked_layers() {
+    // 隠れ層を重ねたモデル（npm run td -- init --hidden 4,4）: 単位行列の層を挟んでも補正は同じ（ReLU を 2 回かけても同じ）。
+    // 大きさが合わなければ止める
+    let one = model(4, |i| ((i * 31) % 11) as f64 / 10.0 - 0.5, 0.7);
+    let identity = RawValueNetLayer {
+        w: (0..16)
+            .map(|k| if k % 5 == 0 { 1.0 } else { 0.0 })
+            .collect(),
+        b: vec![0.0; 4],
+    };
+    let two = RawValueNet {
+        layers: vec![identity.clone()],
+        ..one.clone()
+    };
+    let s = mid_game();
+    let (a, b) = (
+        ValueNet::new(one.clone()).expect("モデル"),
+        ValueNet::new(two.clone()).expect("モデル"),
+    );
+    for p in 0..2 {
+        assert_ne!(a.eval(&s, p, ValuePhase::End), 0.0);
+        assert_eq!(
+            a.eval(&s, p, ValuePhase::End),
+            b.eval(&s, p, ValuePhase::End)
+        );
+    }
+    // 2 つ目の層を 2 倍にすると出力の重みに掛かる分も 2 倍
+    let doubled = RawValueNet {
+        layers: vec![RawValueNetLayer {
+            w: identity.w.iter().map(|x| x * 2.0).collect(),
+            b: vec![0.0; 4],
+        }],
+        ..one.clone()
+    };
+    let d = ValueNet::new(doubled).expect("モデル");
+    let z1 = a.eval(&s, 0, ValuePhase::End) * one.a - one.c - one.b2;
+    let z2 = d.eval(&s, 0, ValuePhase::End) * one.a - one.c - one.b2;
+    assert!((z2 - 2.0 * z1).abs() < 1e-9);
+    // 大きさ違い（3 → 出力の重み 4）・JSON の layers を読む
+    let bad = RawValueNet {
+        layers: vec![RawValueNetLayer {
+            w: vec![0.0; 12],
+            b: vec![0.0; 3],
+        }],
+        ..one.clone()
+    };
+    assert!(ValueNet::new(bad).is_err());
+    let json = serde_json::json!({
+        "kind": two.kind, "version": two.version, "vocab": two.vocab, "zones": two.zones, "scalars": two.scalars,
+        "hidden": two.hidden, "w1": two.w1, "b1": two.b1, "layers": [{"w": identity.w, "b": identity.b}],
+        "w2": two.w2, "b2": two.b2, "a": two.a, "c": two.c, "baseWeights": {}
+    });
+    let read = ValueNet::new(serde_json::from_value(json).expect("モデルの JSON")).expect("モデル");
+    assert_eq!(
+        read.eval(&s, 1, ValuePhase::After),
+        b.eval(&s, 1, ValuePhase::After)
+    );
 }

@@ -103,6 +103,8 @@ pub struct ValueNet {
     hidden: usize,
     w1: Vec<f64>,
     b1: Vec<f64>,
+    /// 最初の隠れ層の後に足す隠れ層（重み・バイアス）
+    layers: Vec<(Vec<f64>, Vec<f64>)>,
     w2: Vec<f64>,
     b2: f64,
     a: f64,
@@ -124,9 +126,16 @@ impl ValueNet {
             return Err("ValueNetModel の入力の並びが今のコードと違います".into());
         };
         let n = raw.zones.len() * raw.vocab.len() + raw.scalars.len();
+        let mut last = raw.hidden;
+        let mut layers_ok = true;
+        for l in &raw.layers {
+            layers_ok &= !l.b.is_empty() && l.w.len() == last * l.b.len();
+            last = l.b.len();
+        }
         if raw.w1.len() != n * raw.hidden
             || raw.b1.len() != raw.hidden
-            || raw.w2.len() != raw.hidden
+            || !layers_ok
+            || raw.w2.len() != last
         {
             return Err("ValueNetModel の重みの大きさが合いません".into());
         }
@@ -153,6 +162,7 @@ impl ValueNet {
             hidden: raw.hidden,
             w1: raw.w1,
             b1: raw.b1,
+            layers: raw.layers.into_iter().map(|l| (l.w, l.b)).collect(),
             w2: raw.w2,
             b2: raw.b2,
             a: raw.a,
@@ -189,7 +199,7 @@ impl ValueNet {
         }
         let hn = self.hidden;
         BUF.with(|buf| {
-            let (acc, h) = &mut *buf.borrow_mut();
+            let (acc, h, h2) = &mut *buf.borrow_mut();
             acc.0.clear();
             encode(self, s, p, phase, acc);
             h.clear();
@@ -200,12 +210,34 @@ impl ValueNet {
                     *hj += x * r;
                 }
             }
-            let mut z = self.b2;
-            for (hj, &w2) in h.iter_mut().zip(&self.w2) {
+            for hj in h.iter_mut() {
                 if *hj < 0.0 {
                     *hj = 0.0;
                 }
-                z += *hj * w2;
+            }
+            // 足した隠れ層（valueNet.ts の forwardRest と同じ順で足す）
+            for (w, b) in &self.layers {
+                let m = b.len();
+                h2.clear();
+                h2.extend_from_slice(b);
+                for (i, &x) in h.iter().enumerate() {
+                    if x == 0.0 {
+                        continue;
+                    }
+                    for (oj, &r) in h2.iter_mut().zip(&w[i * m..i * m + m]) {
+                        *oj += x * r;
+                    }
+                }
+                for oj in h2.iter_mut() {
+                    if *oj < 0.0 {
+                        *oj = 0.0;
+                    }
+                }
+                std::mem::swap(h, h2);
+            }
+            let mut z = self.b2;
+            for (&hj, &w2) in h.iter().zip(&self.w2) {
+                z += hj * w2;
             }
             (self.c + z) / self.a
         })
@@ -355,7 +387,7 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
 }
 
 thread_local! {
-    static BUF: RefCell<(Acc, Vec<f64>)> = const { RefCell::new((Acc(Vec::new()), Vec::new())) };
+    static BUF: RefCell<(Acc, Vec<f64>, Vec<f64>)> = const { RefCell::new((Acc(Vec::new()), Vec::new(), Vec::new())) };
 }
 
 /// 探索の extraEval（既定の補正。評価の点数の単位）
