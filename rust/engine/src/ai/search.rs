@@ -100,7 +100,8 @@ impl Default for SearchOptions {
     fn default() -> Self {
         SearchOptions {
             samples: 1,
-            beam_width: 32,
+            // 32 から 128 に（6400 試合で 52.9%、時間は 1 割ほど増える。docs/ai-notes.md「棋譜の指摘: ビームの幅」）
+            beam_width: 128,
             max_depth: 8,
             rescore_top: 4,
             lethal: true,
@@ -142,10 +143,11 @@ impl Default for SearchOptions {
 }
 
 impl SearchOptions {
-    /// 2026-10-16 より前の既定の読み方（決定化 3 回それぞれでビームを打ち、最初の手ごとに終局面を 3 つまで読み直す）。
+    /// 2026-10-16 より前の既定の読み方（決定化 3 回それぞれで幅 32 のビームを打ち、最初の手ごとに終局面を 3 つまで読み直す）。
     /// 人間の記録との比較の相手（search-classic）と TD 学習の自己対戦は、今までと比べられるようこちらを使う
     pub fn with_classic_sampling(self) -> SearchOptions {
         SearchOptions {
+            beam_width: 32,
             samples: 3,
             plan_candidates: 3,
             opp_hand_samples: 1,
