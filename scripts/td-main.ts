@@ -4,14 +4,16 @@
 // 勝つ確率 σ(a × S + c + L(局面)) の補正 L（scripts/valueNet.ts。探索で使う推論は rust/engine/src/ai/valuenet.rs）を、その評価で打った自己対戦から TD(λ) で学ぶ。
 // 外した項を学習で取り戻せるか（今の AI との勝率の差が縮まるか）で、学習が「眺めるだけ」を越えるかを確かめる。
 //
-//   npm run td -- init --out m0.json [--hidden 32] [--seed 1] [--a 0.08] [--base stripped|current]
-//     L = 0 のモデルを作る（--base current なら今の評価関数をそのまま出発点にする）
+//   npm run td -- init --out m0.json [--hidden 32] [--seed 1] [--a 0.08] [--base stripped|current] [--inputs v2|v1]
+//     L = 0 のモデルを作る（--base current なら今の評価関数をそのまま出発点にする。--inputs v1 なら場の攻撃力・体力等を足す前の入力）
+//   npm run td -- extend --model data/value-net.json --out m0.json
+//     モデルの入力を今の並び（VALUE_ZONES・VALUE_SCALARS）に広げる。足した入力の重みは 0 なので、補正は元のモデルと同じ
 //   rust/target/release/svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] --out d0.jsonl
 //     自己対戦は Rust 版で行う（rust/engine/src/runner/td.rs。cd rust && cargo build --release で作る）。
 //     両方の席がモデルの評価で打つ探索 AI の自己対戦（7 デッキの全 49 組を順に回す）。
 //     各自分のターンの最初の局面（after）とターン末の局面（end）を、入力と S と一緒に JSON Lines で書き出す。
 //     --eps の確率で、自分のターンの最初の手をランダムに打つ（探索。その局面は学習に使わず、1 つ前の局面の目標もそこで切る）
-//   npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001] [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1]
+//   npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001] [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--v1Only 0]
 //     λ 収益（G_t = (1-λ) V_{t+1} + λ G_{t+1}、最後は勝敗）を目標に、L と c（--fitA 1 なら a も）を交差エントロピーで学ぶ。
 //     a を学ぶと、出発点の評価が勝敗をあまり当てないとき a が小さくなり、探索では補正 (c + L) / a の重みが増える。
 //     V は今のモデルの予測で、エポックごとに計算し直す。試合の --holdout の割合は学習に使わず、予測の確かめに使う。
@@ -37,7 +39,9 @@ import {
   inputSize,
   loadValueNet,
   VALUE_SCALARS,
+  VALUE_SCALARS_V1,
   VALUE_ZONES,
+  VALUE_ZONES_V1,
   type CompiledValueNet,
   type SparseInput,
   type ValueNetModel,
@@ -54,12 +58,13 @@ export async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
   const args = parseArgs(rest);
   if (cmd === "init") return init(args);
+  if (cmd === "extend") return extend(args);
   if (cmd === "selfplay") throw new Error("自己対戦は Rust 版で行う: rust/target/release/svwb td selfplay ...（cd rust && cargo build --release で作る）");
   if (cmd === "train") return train(args);
   if (cmd === "probe") return probe(args);
   if (cmd === "prune") return prune(args);
   if (cmd === "ivcheck") return ivcheck(args);
-  throw new Error("npm run td -- init|selfplay|train|probe|prune|ivcheck ...（scripts/td-main.ts の先頭の説明を参照）");
+  throw new Error("npm run td -- init|extend|selfplay|train|probe|prune|ivcheck ...（scripts/td-main.ts の先頭の説明を参照）");
 }
 
 type Args = Map<string, string>;
@@ -107,16 +112,20 @@ function init(args: Args): number {
   const hidden = numArg(args, "hidden", 32);
   const base = args.get("base") ?? "stripped";
   if (base !== "stripped" && base !== "current") throw new Error(`--base は stripped か current: ${base}`);
+  const inputs = args.get("inputs") ?? "v2";
+  if (inputs !== "v1" && inputs !== "v2") throw new Error(`--inputs は v2 か v1: ${inputs}`);
+  const zones: string[] = inputs === "v1" ? [...VALUE_ZONES_V1] : [...VALUE_ZONES];
+  const scalars: string[] = inputs === "v1" ? [...VALUE_SCALARS_V1] : [...VALUE_SCALARS];
   const holder = { rng: numArg(args, "seed", 1) >>> 0 };
   const vocab = defaultVocab();
-  const n = inputSize({ vocab, zones: [...VALUE_ZONES], scalars: [...VALUE_SCALARS] });
+  const n = inputSize({ vocab, zones, scalars });
   // 出力の重み w2 を 0 にするので、最初は L = 0（出発点の評価そのもの）
   const model: ValueNetModel = {
     kind: "td-value-net",
     version: 1,
     vocab,
-    zones: [...VALUE_ZONES],
-    scalars: [...VALUE_SCALARS],
+    zones,
+    scalars,
     hidden,
     w1: Array.from({ length: n * hidden }, () => round(gaussian(holder) * 0.1, 6)),
     b1: Array.from({ length: hidden }, () => 0.1),
@@ -127,7 +136,34 @@ function init(args: Args): number {
     baseWeights: base === "stripped" ? STRIPPED : {},
   };
   writeFileSync(out, JSON.stringify(model));
-  console.log(`${out}: 入力 ${n}（カード・クレスト ${vocab.length} × ${VALUE_ZONES.length} ＋ 数値 ${VALUE_SCALARS.length}）、隠れ層 ${hidden}、出発点 ${base}`);
+  console.log(`${out}: 入力 ${n}（カード・クレスト ${vocab.length} × ${zones.length} ＋ 数値 ${scalars.length}）、隠れ層 ${hidden}、出発点 ${base}`);
+  return 0;
+}
+
+// ---- extend ----
+
+function extend(args: Args): number {
+  const model = loadValueNet(need(args, "model"));
+  compileValueNet(model);
+  const out = need(args, "out");
+  const H = model.hidden;
+  const V = model.vocab.length;
+  const zones: string[] = [...VALUE_ZONES];
+  const scalars: string[] = [...VALUE_SCALARS];
+  // 新しい入力の添字ごとに、元のモデルの入力の添字（無ければ -1）
+  const from: number[] = [];
+  for (const z of zones) {
+    const k = model.zones.indexOf(z);
+    for (let i = 0; i < V; i++) from.push(k < 0 ? -1 : k * V + i);
+  }
+  for (const sc of scalars) {
+    const k = model.scalars.indexOf(sc);
+    from.push(k < 0 ? -1 : model.zones.length * V + k);
+  }
+  const w1: number[] = [];
+  for (const k of from) for (let j = 0; j < H; j++) w1.push(k < 0 ? 0 : model.w1[k * H + j]!);
+  writeFileSync(out, JSON.stringify({ ...model, zones, scalars, w1 }));
+  console.log(`${out}: 入力 ${model.w1.length / H} → ${from.length}（足した ${from.filter((k) => k < 0).length} 個の重みは 0）`);
   return 0;
 }
 
@@ -184,7 +220,7 @@ interface IvPair {
   deck: string;
 }
 
-function loadData(files: string[], holdout: number, ivWeight = 1): Dataset {
+function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: number) => boolean): Dataset {
   const off: number[] = [0], idx: number[] = [], val: number[] = [], s: number[] = [], next: number[] = [], outcome: number[] = [], explored: number[] = [], hold: number[] = [], phase: number[] = [], weight: number[] = [];
   const pairs: IvPair[] = [];
   for (const file of files) {
@@ -206,6 +242,7 @@ function loadData(files: string[], holdout: number, ivWeight = 1): Dataset {
         seq.forEach((x, k) => {
           const i = s.length;
           for (let j = 0; j < x.x.length; j++) {
+            if (keep && !keep(x.x[j]!)) continue;
             idx.push(x.x[j]!);
             val.push(x.v[j]!);
           }
@@ -344,7 +381,17 @@ function train(args: Args): number {
   const ivWeight = numArg(args, "ivWeight", 1);
 
   const t0 = Date.now();
-  const d = loadData(files, holdout, ivWeight);
+  // --v1Only 1: 場の攻撃力・体力等を足す前の入力（VALUE_ZONES_V1・VALUE_SCALARS_V1）だけで学ぶ（足した入力の効き目を分ける対照）
+  const v1Only = numArg(args, "v1Only", 0) !== 0;
+  const V = model.vocab.length;
+  const keep = v1Only
+    ? (i: number): boolean => {
+        const z = Math.floor(i / V);
+        if (z < model.zones.length) return (VALUE_ZONES_V1 as readonly string[]).includes(model.zones[z]!);
+        return (VALUE_SCALARS_V1 as readonly string[]).includes(model.scalars[i - model.zones.length * V]!);
+      }
+    : undefined;
+  const d = loadData(files, holdout, ivWeight, keep);
   const n = d.s.length;
   console.log(`${files.join(", ")}: 局面 ${n}（確かめ用 ${d.holdout.reduce((x, y) => x + y, 0)}、ランダムに打った ${d.explored.reduce((x, y) => x + y, 0)}）、読み込み ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
@@ -449,8 +496,8 @@ function probe(args: Args): number {
   const per = numArg(args, "per", 2000);
   const V = model.vocab.length;
   const base = model.zones.length * V;
-  const zone = (name: (typeof VALUE_ZONES)[number]) => VALUE_ZONES.indexOf(name) * V;
-  const scalar = (name: (typeof VALUE_SCALARS)[number]) => base + VALUE_SCALARS.indexOf(name);
+  const zone = (name: (typeof VALUE_ZONES)[number]) => model.zones.indexOf(name) * V;
+  const scalar = (name: (typeof VALUE_SCALARS)[number]) => base + model.scalars.indexOf(name);
   const nameOf = new Map([...ALL_CARDS.map((c): [string, string] => [c.id, c.name]), ...ALL_CRESTS.map((c): [string, string] => [`crest:${c.id}`, c.name])]);
   // デッキごとのターン末の局面
   const byDeck = new Map<string, SparseInput[]>();
@@ -489,7 +536,7 @@ function probe(args: Args): number {
       .map(([name, d, label]) => `${label} ${effect(list, scalar(name), d)[0].toFixed(2)}`)
       .join("、");
     console.log(`== ${deck}（${list.length} 局面、補正の平均 ${mean.toFixed(1)} 点）: ${sc}`);
-    for (const z of ["myHand", "myBoard"] as const) {
+    for (const z of ["myHand", "myBoard", "oppBoard"] as const) {
       // その局面で使われているカード（そのゾーンに 1 回でも現れたもの）
       const seen = new Set<number>();
       for (const x of list) for (const i of x.idx) if (i >= zone(z) && i < zone(z) + V) seen.add(i);

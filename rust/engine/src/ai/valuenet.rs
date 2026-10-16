@@ -1,12 +1,15 @@
 //! 学習した評価の補正（src/ai/valueNet.ts の encodeState・forwardValueNet・valueNetExtraEval）。
 
 use super::aidata::{ai_data, RawValueNet};
-use crate::data::data;
+use crate::data::{data, AMBUSH, BANE, BARRIER, WARD};
 use crate::state::*;
 use std::cell::RefCell;
 use std::sync::OnceLock;
 
-const ZONES: [&str; 10] = [
+/// カード・クレストごとの入力の種類。モデルはこの並びの部分列を持つ（足す前のモデルも読める）。
+/// 後ろの 4 つは場のフォロワーの攻撃力・体力（カードごとの合計を 5 で割る）。カードの枚数だけでは、
+/// バフを受けたナイトと素のナイトを区別できない（docs/ai-notes.md「補正の入力に攻撃力・体力を足す」）
+pub const ZONES: [&str; 14] = [
     "myHand",
     "myHandBoost",
     "myBoard",
@@ -17,8 +20,14 @@ const ZONES: [&str; 10] = [
     "oppBoardEvolved",
     "oppCrest",
     "oppHandRevealed",
+    "myBoardAtk",
+    "myBoardDef",
+    "oppBoardAtk",
+    "oppBoardDef",
 ];
-const SCALARS: [&str; 21] = [
+/// 数値の入力（ZONES と同じく、モデルはこの並びの部分列を持つ）。
+/// "after" より後ろは場のフォロワーの合計とキーワードを持つ数（同上）
+pub const SCALARS: [&str; 33] = [
     "myHp",
     "oppHp",
     "myMaxPp",
@@ -40,7 +49,39 @@ const SCALARS: [&str; 21] = [
     "oppGraveyard",
     "after",
     "first",
+    "myAtkSum",
+    "myDefSum",
+    "oppAtkSum",
+    "oppDefSum",
+    "myWard",
+    "oppWard",
+    "myBane",
+    "oppBane",
+    "myBarrier",
+    "oppBarrier",
+    "myAmbush",
+    "oppAmbush",
 ];
+
+/// names が all の部分列（順番を保つ）なら、all の各項目のモデルでの添字（無ければ None）
+fn subsequence_slots<const N: usize>(
+    names: &[String],
+    all: &[&str; N],
+) -> Option<[Option<usize>; N]> {
+    let mut slots = [None; N];
+    let mut j = 0;
+    for (k, n) in names.iter().enumerate() {
+        while j < N && all[j] != n {
+            j += 1;
+        }
+        if j == N {
+            return None;
+        }
+        slots[j] = Some(k);
+        j += 1;
+    }
+    Some(slots)
+}
 
 /// 評価する局面の種類（end: 自分のターン末、after: 相手のターンを読んだ後）
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -55,6 +96,10 @@ pub struct ValueNet {
     vocab_card: Vec<Option<usize>>,
     vocab_crest: Vec<Option<usize>>,
     vocab_len: usize,
+    /// ZONES・SCALARS の各項目の、モデルの入力での添字（モデルに無い項目は None）
+    zone_slot: [Option<usize>; ZONES.len()],
+    scalar_slot: [Option<usize>; SCALARS.len()],
+    n_zones: usize,
     hidden: usize,
     w1: Vec<f64>,
     b1: Vec<f64>,
@@ -72,12 +117,13 @@ impl ValueNet {
         if raw.kind != "td-value-net" || raw.version != 1 {
             return Err("ValueNetModel の kind・version が違います".into());
         }
-        if !(raw.zones.iter().map(|s| s.as_str()).eq(ZONES)
-            && raw.scalars.iter().map(|s| s.as_str()).eq(SCALARS))
-        {
+        let (Some(zone_slot), Some(scalar_slot)) = (
+            subsequence_slots(&raw.zones, &ZONES),
+            subsequence_slots(&raw.scalars, &SCALARS),
+        ) else {
             return Err("ValueNetModel の入力の並びが今のコードと違います".into());
-        }
-        let n = ZONES.len() * raw.vocab.len() + SCALARS.len();
+        };
+        let n = raw.zones.len() * raw.vocab.len() + raw.scalars.len();
         if raw.w1.len() != n * raw.hidden
             || raw.b1.len() != raw.hidden
             || raw.w2.len() != raw.hidden
@@ -101,6 +147,9 @@ impl ValueNet {
             vocab_card,
             vocab_crest,
             vocab_len: raw.vocab.len(),
+            zone_slot,
+            scalar_slot,
+            n_zones: raw.zones.len(),
             hidden: raw.hidden,
             w1: raw.w1,
             b1: raw.b1,
@@ -200,9 +249,9 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
     let v = net.vocab_len;
     let card_k = |c: crate::data::CardIdx| net.vocab_card[c as usize];
     let mut add = |zone: usize, k: Option<usize>, x: f64| {
-        if let Some(k) = k {
+        if let (Some(z), Some(k)) = (net.zone_slot[zone], k) {
             if x != 0.0 {
-                acc.add(zone * v + k, x);
+                acc.add(z * v + k, x);
             }
         }
     };
@@ -240,9 +289,28 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
             add(9, card_k(h.card), 1.0);
         }
     }
-    let base = ZONES.len() * v;
+    // 場のフォロワーの攻撃力・体力と、キーワードを持つ数（自分・相手）
+    let mut sums = [[0.0f64; 6]; 2];
+    for (side, pl) in [me, opp].into_iter().enumerate() {
+        for c in pl.board.iter().filter(|c| c.is_follower) {
+            let atk = c.attack_value() as f64 / 5.0;
+            let def = c.defense.max(0) as f64 / 5.0;
+            add(10 + 2 * side, card_k(c.card), atk);
+            add(11 + 2 * side, card_k(c.card), def);
+            let t = &mut sums[side];
+            t[0] += atk;
+            t[1] += def;
+            for (j, k) in [WARD, BANE, BARRIER, AMBUSH].into_iter().enumerate() {
+                if c.has_keyword(k) {
+                    t[2 + j] += 1.0;
+                }
+            }
+        }
+    }
+    let base = net.n_zones * v;
     let b = |x: bool| if x { 1.0 } else { 0.0 };
-    let scalars: [f64; 21] = [
+    let (m, o) = (&sums[0], &sums[1]);
+    let scalars: [f64; SCALARS.len()] = [
         me.leader_hp as f64 / 20.0,
         opp.leader_hp as f64 / 20.0,
         me.max_pp as f64 / 10.0,
@@ -264,10 +332,24 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
         opp.graveyard.min(30) as f64 / 20.0,
         b(phase == ValuePhase::After),
         b(s.first == p),
+        m[0] / 4.0,
+        m[1] / 4.0,
+        o[0] / 4.0,
+        o[1] / 4.0,
+        m[2] / 2.0,
+        o[2] / 2.0,
+        m[3] / 2.0,
+        o[3] / 2.0,
+        m[4] / 2.0,
+        o[4] / 2.0,
+        m[5] / 2.0,
+        o[5] / 2.0,
     ];
     for (j, &x) in scalars.iter().enumerate() {
-        if x != 0.0 {
-            acc.set(base + j, x);
+        if let Some(k) = net.scalar_slot[j] {
+            if x != 0.0 {
+                acc.set(base + k, x);
+            }
         }
     }
 }

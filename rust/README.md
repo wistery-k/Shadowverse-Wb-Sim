@@ -63,7 +63,7 @@ npm run compare -- 105 '{}' '{"lethal":false}'                          # 探索
 npm run rhino-compare -- --games 50 --opts '{"nextLethal":10}' --out r.jsonl
 npm run af-compare -- --games 50                                         # rhino-compare --subject af
 npm run svwb -- mulligan-compare --games 50 --a '{"mulligan":"sample"}'  # マリガンの設定どうしを同じシードの試合で打ち比べる（相手は今の探索 AI）
-npm run svwb -- td selfplay --model m0.json --games 2000 --out d0.jsonl  # TD 学習の自己対戦（試合が終わった順に書く。--opp beam・--iv k は td.rs の先頭の説明）
+npm run svwb -- td selfplay --model m0.json --games 2000 --out d0.jsonl  # TD 学習の自己対戦（試合が終わった順に書く。--opp beam・--iv k・--sampling default は td.rs の先頭の説明）
 npm run yardstick -- --opts '{}' --games 1000 --label 名前 --record    # 固定した相手との勝率を docs/yardstick.md の表に足す（強さの物差し）
 ```
 
@@ -72,7 +72,7 @@ npm run yardstick -- --opts '{}' --games 1000 --label 名前 --record    # 固�
   `"exhaustive"` 等）はエラーになる（既定の値なら受け付ける）。知らない項目もエラーにする
 - rhino-compare の `--agent` は rhino・rhino-lethal・search・search-classic
 - マリガンの設定 `"mulligan"` は model（既定）・weights・cost・sample（返し方 16 通りごとに引き直しを `"mulliganSamples"` 回（既定 100）試し、評価関数の平均で選ぶ）
-- td の init・train・probe・prune は `npm run td -- …`（`scripts/td-main.ts`）で行い、td selfplay の書き出したファイルをそのまま渡せる
+- td の init・extend・train・probe・prune は `npm run td -- …`（`scripts/td-main.ts`）で行い、td selfplay の書き出したファイルをそのまま渡せる
 
 ## 構成
 
