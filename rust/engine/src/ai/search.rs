@@ -90,13 +90,18 @@ pub struct SearchOptions {
     pub opp_fuse: bool,
     pub danger_rescore: usize,
     pub reuse_agree: bool,
+    /// 上位の手を読み直すとき、このターンに引いて手札に残っているカードも引き直す（oppHandSamples の引き直しごと。ビームで決めた 1 通りの引きで手を比べない）
+    pub resample_draws: bool,
+    /// 選んだ並びの途中でカードを引く手を、先に打っても並びの残りが打てて点数が下がらなければ先に打つ（引いたカードを見てから残りを決める）
+    pub draw_first: bool,
 }
 
 impl Default for SearchOptions {
     fn default() -> Self {
         SearchOptions {
             samples: 1,
-            beam_width: 32,
+            // 32 から 128 に（6400 試合で 52.9%、時間は 1 割ほど増える。docs/ai-notes.md「棋譜の指摘: ビームの幅」）
+            beam_width: 128,
             max_depth: 8,
             rescore_top: 4,
             lethal: true,
@@ -131,15 +136,18 @@ impl Default for SearchOptions {
             opp_fuse: false,
             danger_rescore: 0,
             reuse_agree: false,
+            resample_draws: false,
+            draw_first: false,
         }
     }
 }
 
 impl SearchOptions {
-    /// 2026-10-16 より前の既定の読み方（決定化 3 回それぞれでビームを打ち、最初の手ごとに終局面を 3 つまで読み直す）。
+    /// 2026-10-16 より前の既定の読み方（決定化 3 回それぞれで幅 32 のビームを打ち、最初の手ごとに終局面を 3 つまで読み直す）。
     /// 人間の記録との比較の相手（search-classic）と TD 学習の自己対戦は、今までと比べられるようこちらを使う
     pub fn with_classic_sampling(self) -> SearchOptions {
         SearchOptions {
+            beam_width: 32,
             samples: 3,
             plan_candidates: 3,
             opp_hand_samples: 1,
@@ -607,7 +615,10 @@ pub fn plan_turn(
             if opts.opp_hand_common {
                 for &seed in &common_seeds {
                     let mut r = Rng::new(seed);
-                    let d = determinize(base, p, &mut r, opts.peek_opp_hand);
+                    let mut d = determinize(base, p, &mut r, opts.peek_opp_hand);
+                    if opts.resample_draws {
+                        resample_own_draws(&mut d, root, p, &mut r);
+                    }
                     sum += read_once(&pl, &d, &mut r);
                 }
             } else {
@@ -661,6 +672,116 @@ pub fn plan_turn(
         }
     }
     result
+}
+
+/// このターンに山札から引いて手札に残っている p のカード（root の山札にあったもの。条件付きで引いたもの・公開されたものは除く）を、
+/// p の山札と合わせて並べ直す（resampleDraws）。受けたスペルブーストは引き直したカードにかけ直す
+fn resample_own_draws(s: &mut GameState, root: &GameState, p: PlayerIndex, rng: &mut Rng) {
+    let root_deck = &root.players[p].deck;
+    let idx: Vec<usize> = (0..s.players[p].hand.len())
+        .filter(|&i| {
+            let h = &s.players[p].hand[i];
+            !h.revealed && h.drawn_by.is_none() && root_deck.iter().any(|c| c.iid == h.iid)
+        })
+        .collect();
+    if idx.is_empty() {
+        return;
+    }
+    let mut pool: Vec<crate::data::CardIdx> = idx
+        .iter()
+        .map(|&i| s.players[p].hand[i].card)
+        .chain(s.players[p].deck.iter().map(|c| c.card))
+        .collect();
+    rng.shuffle(&mut pool);
+    let mut boosted: Vec<(Iid, i32)> = Vec::new();
+    for (k, &i) in idx.iter().enumerate() {
+        let old = &s.players[p].hand[i];
+        let (iid, boosts) = (old.iid, old.boosts);
+        let h = s.new_hand_card(pool[k], Some(iid));
+        s.players[p].hand[i] = h;
+        if boosts > 0 {
+            boosted.push((iid, boosts));
+        }
+    }
+    let n = idx.len();
+    for (j, c) in s.players[p].deck.iter_mut().enumerate() {
+        c.card = pool[n + j];
+    }
+    for (iid, boosts) in boosted {
+        crate::effects::fire_spellboost(s, p, iid, boosts);
+    }
+    crate::effects::run(s);
+}
+
+/// drawFirst で、先に引く並びのターン末の点数が元の並びをこれだけ下回っても先に引く（引いたカードの受けるスペルブースト等で学習した補正が少し動く分。
+/// 先に引いて残りを決め直せる価値は点数に入っていない）
+const DRAW_FIRST_SLACK: f64 = 1.0;
+
+/// 並び steps（root から）の途中でカードを引く手を先頭に動かした並び（drawFirst）。
+/// 残りの手がすべて合法で、ターン末の点数が元の並びから DRAW_FIRST_SLACK 以内のときだけ返す
+fn draw_first_steps(
+    root: &Rc<GameState>,
+    steps: &[(Action, Rc<GameState>)],
+    p: PlayerIndex,
+    env: &Env,
+) -> Option<Vec<(Action, Rc<GameState>)>> {
+    let pl = Planner {
+        env,
+        p,
+        steps: Vec::new(),
+    };
+    let root_legal = legal_actions(root);
+    let base = pl.end_score(&steps.last()?.1);
+    for i in 1..steps.len() {
+        let (a, st) = &steps[i];
+        let prev = &steps[i - 1].1;
+        if !matches!(
+            a,
+            Action::Play(_) | Action::Act(_) | Action::Evolve(_) | Action::SuperEvolve(_)
+        ) || st.pending.is_some()
+            || st.active != p
+            || st.players[p].deck.len() >= prev.players[p].deck.len()
+            || !root_legal.contains(a)
+        {
+            continue;
+        }
+        // PP が足りなければ、並びの中のエクストラPP も一緒に先に使う
+        let xpp = steps.iter().position(|x| matches!(x.0, Action::ExtraPp));
+        let mut orders: Vec<Vec<&Action>> = Vec::new();
+        let rest = |skip: Option<usize>| {
+            steps
+                .iter()
+                .enumerate()
+                .filter(move |(j, _)| *j != i && Some(*j) != skip)
+                .map(|(_, x)| &x.0)
+        };
+        orders.push(std::iter::once(a).chain(rest(None)).collect());
+        if let Some(j) = xpp.filter(|&j| j > 0) {
+            orders.push([&steps[j].0, a].into_iter().chain(rest(Some(j))).collect());
+        }
+        for order in orders {
+            if let Some(out) = replay(root, &order) {
+                if pl.end_score(&out.last()?.1) >= base - DRAW_FIRST_SLACK {
+                    return Some(out);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// root から手を順に打った並び（どれかが合法でなければ None）
+fn replay(root: &Rc<GameState>, order: &[&Action]) -> Option<Vec<(Action, Rc<GameState>)>> {
+    let mut cur: Rc<GameState> = root.clone();
+    let mut out: Vec<(Action, Rc<GameState>)> = Vec::new();
+    for &b in order {
+        if !legal_actions(&cur).contains(b) {
+            return None;
+        }
+        cur = Rc::new(try_apply_action(&cur, b)?);
+        out.push((b.clone(), cur.clone()));
+    }
+    Some(out)
 }
 
 fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng) -> f64 {
@@ -816,6 +937,8 @@ struct Total {
     count: usize,
     plan: Plan,
     plans: Vec<Plan>,
+    /// plan を求めたサンプルの局面
+    root: Rc<GameState>,
 }
 
 /// 探索 AI（search.ts の createSearchAgent）
@@ -956,6 +1079,7 @@ impl Agent for SearchAgent {
                         // 並びは、その手の評価が最も高かったサンプルのものを使う
                         if sample.value > t.plan.value {
                             t.plan = sample;
+                            t.root = det.clone();
                         }
                     }
                     None => totals.push(Total {
@@ -964,6 +1088,7 @@ impl Agent for SearchAgent {
                         count: 1,
                         plans: vec![sample.clone()],
                         plan: sample,
+                        root: det.clone(),
                     }),
                 }
             }
@@ -992,7 +1117,14 @@ impl Agent for SearchAgent {
             } else {
                 best.plan.steps.clone()
             };
-            let action = best.action.clone();
+            let mut steps = steps;
+            let mut action = best.action.clone();
+            if opts.draw_first && steps.len() > 1 {
+                if let Some(s2) = draw_first_steps(&best.root, &steps, p, &env) {
+                    action = s2[0].0.clone();
+                    steps = s2;
+                }
+            }
             if opts.reuse_plan && steps.len() > 1 {
                 self.plans[p] = Some(PlanState { steps, index: 1 });
             }

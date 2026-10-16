@@ -5,6 +5,7 @@
 //! 実験用の設定（reanimateGuard・turn1ExtraPp の never/keepTurn2・マリガンの evoBonus 等）は Rust 版に移していないので、
 //! そのテストも移していない。
 
+mod beam;
 mod converging;
 mod determinize;
 mod dominance;

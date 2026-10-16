@@ -140,6 +140,12 @@ export interface EvalWeights {
    * そのターンに使えるので価値がある）
    */
   extraPpExpiring: number;
+  /**
+   * 場にいる間に働く誘発能力（味方が場に出たとき・ターン終了時・味方が破壊されたとき等。自壊するものは除く）を持つフォロワー 1 枚あたり。
+   * 勇猛のルミナスランサー（兵士に突進）のように、能力値は低いが残すと後で効くフォロワーを、能力値だけで数えて安く見ていた（棋譜の指摘、docs/ai-notes.md）。
+   * 相手の場のものも同じく数える（oppBoard を掛けて引く）。0 なら見ない
+   */
+  passive: number;
 }
 
 /** 数値の重みの名前（hold を除く） */
@@ -185,6 +191,7 @@ export const DEFAULT_WEIGHTS: EvalWeights = {
   doomed: 1,
   ppLeft: 0,
   extraPpExpiring: 1,
+  passive: 0,
 };
 
 /**

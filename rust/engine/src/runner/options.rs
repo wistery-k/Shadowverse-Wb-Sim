@@ -134,6 +134,8 @@ pub fn search_options(
             "oppFuse" => o.opp_fuse = flag(k, v)?,
             "oppHandCommon" => o.opp_hand_common = flag(k, v)?,
             "reuseAgree" => o.reuse_agree = flag(k, v)?,
+            "resampleDraws" => o.resample_draws = flag(k, v)?,
+            "drawFirst" => o.draw_first = flag(k, v)?,
             "nextLethal" => o.next_lethal = number(k, v)?,
             "beamPp" => o.beam_pp = number(k, v)?,
             "scoreTurnEnd" => {
