@@ -9,6 +9,7 @@
 //!   svwb rhino-compare [--subject …] [--games …] [--opts …] [--out …]  デッキ専用の AI の勝率（npm run rhino-compare と同じ）
 //!   svwb mulligan-compare [--games 50] [--a …] [--b …]  マリガンの設定どうしを同じシードの試合で打ち比べる
 //!   svwb td selfplay --model m.json --games N [--start S] [--eps 0.1] --out d.jsonl  TD 学習の自己対戦
+//!   svwb yardstick [--opts …] [--games 1000] [--label …] [--record]  固定した相手との勝率（強さの物差し。docs/yardstick.md）
 
 use std::time::Instant;
 use svwb_engine::golden::{ai_game, step_canon, SETS};
@@ -151,12 +152,13 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Some(cmd @ ("compare" | "rhino-compare" | "mulligan-compare" | "td")) => {
+        Some(cmd @ ("compare" | "rhino-compare" | "mulligan-compare" | "td" | "yardstick")) => {
             let rest = &args[1..];
             let r = match cmd {
                 "compare" => runner::compare::main(rest),
                 "mulligan-compare" => runner::mulligan_compare::main(rest),
                 "rhino-compare" => runner::rhino_compare::main(rest),
+                "yardstick" => runner::yardstick::main(rest),
                 _ => runner::td::main(rest),
             };
             if let Err(e) = r {
@@ -165,7 +167,7 @@ fn main() {
             }
         }
         _ => {
-            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | mulligan-compare … | td selfplay …（rust/README.md）");
+            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | mulligan-compare … | td selfplay … | yardstick …（rust/README.md）");
             std::process::exit(2);
         }
     }
