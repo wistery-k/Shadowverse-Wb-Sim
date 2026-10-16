@@ -31,10 +31,34 @@ pub struct Tables {
     pub doomed: Vec<bool>,
     pub last_words_payoff: Vec<Option<(i32, i32)>>,
     pub fusion_set: Vec<bool>,
+    pub passive: Vec<bool>,
 }
 
 fn has_on(c: CardIdx, f: impl Fn(&Ability) -> bool) -> bool {
     abilities_of(c).abilities.iter().any(f)
+}
+
+/// 場にいる間に働く誘発能力（自壊するものは除く。Weights.passive）
+fn is_passive(a: &Ability) -> bool {
+    matches!(
+        a.trigger,
+        Trigger::TurnStart
+            | Trigger::TurnEnd { .. }
+            | Trigger::AllyEnter { .. }
+            | Trigger::AllyAct
+            | Trigger::AllyFuse
+            | Trigger::AllyLeaveInHand
+            | Trigger::AllyDestroyed { .. }
+            | Trigger::LeaderHealed
+    ) && !a.effects.iter().any(|e| {
+        matches!(
+            e,
+            Effect::Destroy {
+                target: Target::This,
+                ..
+            }
+        )
+    })
 }
 
 pub fn is_self_destroy_at_opponent_turn_end(a: &Ability) -> bool {
@@ -186,6 +210,9 @@ pub fn tables() -> &'static Tables {
                 })
                 .collect(),
             fusion_set: all().map(|c| ad.fusion_set.contains(&c)).collect(),
+            passive: all()
+                .map(|c| follower(c) && has_on(c, is_passive))
+                .collect(),
         }
     })
 }
@@ -312,6 +339,9 @@ fn follower_value(f: &OnBoard, ew: &EvalWeights) -> f64 {
     }
     for k in f.temp_keywords.iter() {
         v += kw_value(k) * w.keywords;
+    }
+    if w.passive != 0.0 && tables().passive[f.card as usize] {
+        v += w.passive;
     }
     if w.last_words_summon != 0.0 {
         let mut s = ew.summon_of(f.card);

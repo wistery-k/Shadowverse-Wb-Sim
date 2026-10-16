@@ -50,6 +50,7 @@ pub struct Weights {
     pub doomed: f64,
     pub pp_left: f64,
     pub extra_pp_expiring: f64,
+    pub passive: f64,
 }
 
 fn de_hold<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<f64>, D::Error> {
