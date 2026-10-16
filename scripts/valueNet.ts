@@ -12,7 +12,10 @@
 import { readFileSync } from "node:fs";
 import { ALL_CARDS, ALL_CRESTS } from "../src/cards";
 
-/** カード・クレストごとの入力の種類 */
+/**
+ * カード・クレストごとの入力の種類。モデルはこの並びの部分列を持つ（足す前のモデルも読める）。
+ * 後ろの 4 つは場のフォロワーの攻撃力・体力（カードごとの合計を 5 で割る）
+ */
 export const VALUE_ZONES = [
   "myHand",
   "myHandBoost",
@@ -24,9 +27,13 @@ export const VALUE_ZONES = [
   "oppBoardEvolved",
   "oppCrest",
   "oppHandRevealed",
+  "myBoardAtk",
+  "myBoardDef",
+  "oppBoardAtk",
+  "oppBoardDef",
 ] as const;
 
-/** 数値の入力（おおよそ 0〜1 に収まるように割る） */
+/** 数値の入力（おおよそ 0〜1 に収まるように割る。VALUE_ZONES と同じく、モデルはこの並びの部分列を持つ）。"first" より後ろは場のフォロワーの合計とキーワードを持つ数 */
 export const VALUE_SCALARS = [
   "myHp",
   "oppHp",
@@ -49,7 +56,34 @@ export const VALUE_SCALARS = [
   "oppGraveyard",
   "after",
   "first",
+  "myAtkSum",
+  "myDefSum",
+  "oppAtkSum",
+  "oppDefSum",
+  "myWard",
+  "oppWard",
+  "myBane",
+  "oppBane",
+  "myBarrier",
+  "oppBarrier",
+  "myAmbush",
+  "oppAmbush",
 ] as const;
+
+/** 足す前（2026-10-16 まで）の入力の並び（npm run td -- init --inputs v1） */
+export const VALUE_ZONES_V1 = VALUE_ZONES.slice(0, 10);
+export const VALUE_SCALARS_V1 = VALUE_SCALARS.slice(0, 21);
+
+/** names が all の部分列（順番を保つ）か */
+function isSubsequence(names: readonly string[], all: readonly string[]): boolean {
+  let j = 0;
+  for (const n of names) {
+    while (j < all.length && all[j] !== n) j++;
+    if (j === all.length) return false;
+    j++;
+  }
+  return true;
+}
 
 /** 学習した補正（JSON で保存する） */
 export interface ValueNetModel {
@@ -137,9 +171,7 @@ export interface CompiledValueNet {
 }
 
 export function compileValueNet(model: ValueNetModel): CompiledValueNet {
-  const zonesOk = model.zones.length === VALUE_ZONES.length && model.zones.every((z, i) => z === VALUE_ZONES[i]);
-  const scalarsOk = model.scalars.length === VALUE_SCALARS.length && model.scalars.every((s, i) => s === VALUE_SCALARS[i]);
-  if (!zonesOk || !scalarsOk) throw new Error("ValueNetModel の入力の並びが今のコードと違います");
+  if (!isSubsequence(model.zones, VALUE_ZONES) || !isSubsequence(model.scalars, VALUE_SCALARS)) throw new Error("ValueNetModel の入力の並びが今のコードと違います");
   const n = inputSize(model);
   if (model.w1.length !== n * model.hidden || model.b1.length !== model.hidden || model.w2.length !== model.hidden) {
     throw new Error("ValueNetModel の重みの大きさが合いません");

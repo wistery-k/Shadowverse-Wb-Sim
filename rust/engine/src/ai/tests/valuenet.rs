@@ -135,3 +135,53 @@ fn reads_model_json_and_checks_sizes() {
     bad["w2"] = serde_json::json!(["x"]);
     assert!(serde_json::from_value::<RawValueNet>(bad).is_err());
 }
+
+#[test]
+fn widened_model_with_zero_rows_matches_old_layout() {
+    // 場の攻撃力・体力等を足す前の並びのモデルも読め、足した入力の重みを 0 にして広げたモデルと同じ補正になる（npm run td -- extend）
+    use crate::ai::valuenet::{SCALARS, ZONES};
+    let old = model(4, |i| ((i * 7919) % 13) as f64 / 20.0 - 0.3, 0.7);
+    assert_eq!(old.zones.len(), 10);
+    assert_eq!(old.scalars.len(), 21);
+    let v = old.vocab.len();
+    let h = old.hidden;
+    let mut w1 = Vec::new();
+    for z in ZONES {
+        let k = old.zones.iter().position(|x| x == z);
+        for i in 0..v {
+            for j in 0..h {
+                w1.push(k.map_or(0.0, |k| old.w1[(k * v + i) * h + j]));
+            }
+        }
+    }
+    for sc in SCALARS {
+        let k = old.scalars.iter().position(|x| x == sc);
+        for j in 0..h {
+            w1.push(k.map_or(0.0, |k| old.w1[(old.zones.len() * v + k) * h + j]));
+        }
+    }
+    let wide = RawValueNet {
+        zones: ZONES.iter().map(|s| s.to_string()).collect(),
+        scalars: SCALARS.iter().map(|s| s.to_string()).collect(),
+        w1,
+        ..old.clone()
+    };
+    let (old, wide) = (
+        ValueNet::new(old).expect("モデル"),
+        ValueNet::new(wide).expect("モデル"),
+    );
+    let s = mid_game();
+    assert!(s
+        .players
+        .iter()
+        .any(|p| p.board.iter().any(|c| c.is_follower)));
+    for p in 0..2 {
+        for phase in [ValuePhase::End, ValuePhase::After] {
+            assert_eq!(wide.eval(&s, p, phase), old.eval(&s, p, phase));
+        }
+        // 広げたモデルは攻撃力・体力も入力にする
+        assert!(
+            wide.encode(&s, p, ValuePhase::End).len() > old.encode(&s, p, ValuePhase::End).len()
+        );
+    }
+}
