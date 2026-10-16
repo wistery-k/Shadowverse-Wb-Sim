@@ -84,6 +84,8 @@ pub struct SearchOptions {
     pub weights: Option<Arc<Weights>>,
     pub opponent_search: Option<OpponentSearch>,
     pub opp_hand_samples: usize,
+    /// oppHandSamples で引き直す相手の手札を、読み直すどの終局面でも同じ並びにする（手どうしの差のぶれを減らす）
+    pub opp_hand_common: bool,
     pub peek_opp_hand: bool,
     pub opp_fuse: bool,
     pub danger_rescore: usize,
@@ -124,6 +126,7 @@ impl Default for SearchOptions {
                 extra_eval: false,
             }),
             opp_hand_samples: 1,
+            opp_hand_common: false,
             peek_opp_hand: false,
             opp_fuse: false,
             danger_rescore: 0,
@@ -567,6 +570,13 @@ pub fn plan_turn(
         out
     };
 
+    let common_seeds: Vec<u32> = if opts.opp_hand_common && opts.opp_hand_samples > 1 {
+        (0..opts.opp_hand_samples)
+            .map(|_| rng.int(u32::MAX as usize) as u32)
+            .collect()
+    } else {
+        Vec::new()
+    };
     let mut result: Vec<(Action, Plan)> = Vec::new();
     let mut rescored: Vec<usize> = Vec::new();
     let rescore_node = |i: usize, rng: &mut Rng, result: &mut Vec<(Action, Plan)>| {
@@ -580,9 +590,17 @@ pub fn plan_turn(
             let settled = pl.settle(&node.state);
             let base = settled.as_ref().unwrap_or(&node.state);
             let mut sum = 0.0;
-            for _ in 0..opts.opp_hand_samples {
-                let d = determinize(base, p, rng, opts.peek_opp_hand);
-                sum += read_once(&pl, &d, rng);
+            if opts.opp_hand_common {
+                for &seed in &common_seeds {
+                    let mut r = Rng::new(seed);
+                    let d = determinize(base, p, &mut r, opts.peek_opp_hand);
+                    sum += read_once(&pl, &d, &mut r);
+                }
+            } else {
+                for _ in 0..opts.opp_hand_samples {
+                    let d = determinize(base, p, rng, opts.peek_opp_hand);
+                    sum += read_once(&pl, &d, rng);
+                }
             }
             sum / opts.opp_hand_samples as f64 - pl.leftover(&node.state)
         };
