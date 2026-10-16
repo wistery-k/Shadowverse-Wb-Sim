@@ -95,7 +95,7 @@ pub struct SearchOptions {
 impl Default for SearchOptions {
     fn default() -> Self {
         SearchOptions {
-            samples: 3,
+            samples: 1,
             beam_width: 32,
             max_depth: 8,
             rescore_top: 4,
@@ -113,7 +113,7 @@ impl Default for SearchOptions {
             settle_trades: true,
             dominance: true,
             reuse_plan: true,
-            plan_candidates: 3,
+            plan_candidates: 1,
             per_first: 0,
             next_lethal: 0.0,
             next_lethal_search: None,
@@ -125,12 +125,26 @@ impl Default for SearchOptions {
                 max_depth: 8,
                 extra_eval: false,
             }),
-            opp_hand_samples: 1,
-            opp_hand_common: false,
+            opp_hand_samples: 12,
+            opp_hand_common: true,
             peek_opp_hand: false,
             opp_fuse: false,
             danger_rescore: 0,
             reuse_agree: false,
+        }
+    }
+}
+
+impl SearchOptions {
+    /// 2026-10-16 より前の既定の読み方（決定化 3 回それぞれでビームを打ち、最初の手ごとに終局面を 3 つまで読み直す）。
+    /// 人間の記録との比較の相手（search-classic）と TD 学習の自己対戦は、今までと比べられるようこちらを使う
+    pub fn with_classic_sampling(self) -> SearchOptions {
+        SearchOptions {
+            samples: 3,
+            plan_candidates: 3,
+            opp_hand_samples: 1,
+            opp_hand_common: false,
+            ..self
         }
     }
 }

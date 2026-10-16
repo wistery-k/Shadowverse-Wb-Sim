@@ -18,13 +18,14 @@ pub const AGENTS: [(&str, &str); 7] = [
     ("random", "ランダム"),
 ];
 
-/// 学習した評価の補正と相手のターンのビームサーチを入れる前の探索 AI（人間との比較の相手）
+/// 学習した評価の補正と相手のターンのビームサーチ、相手の手札を引き直す読み直しを入れる前の探索 AI（人間との比較の相手）
 pub fn search_classic_options() -> SearchOptions {
     SearchOptions {
         extra_eval: None,
         opponent_search: None,
         ..SearchOptions::default()
     }
+    .with_classic_sampling()
 }
 
 /// 名前から AI を作る（知らない名前なら None）
