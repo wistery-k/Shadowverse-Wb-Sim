@@ -64,6 +64,7 @@ npm run rhino-compare -- --games 50 --opts '{"nextLethal":10}' --out r.jsonl
 npm run af-compare -- --games 50                                         # rhino-compare --subject af
 npm run svwb -- mulligan-compare --games 50 --a '{"mulligan":"sample"}'  # マリガンの設定どうしを同じシードの試合で打ち比べる（相手は今の探索 AI）
 npm run svwb -- td selfplay --model m0.json --games 2000 --out d0.jsonl  # TD 学習の自己対戦（試合が終わった順に書く。--opp beam・--iv k は td.rs の先頭の説明）
+npm run yardstick -- --opts '{}' --games 1000 --label 名前 --record    # 固定した相手との勝率を docs/yardstick.md の表に足す（強さの物差し）
 ```
 
 - 設定の JSON は `"valueNet"` に学習した補正のファイル、`"weights"` のオブジェクト・`"default"`・`"holdScale"`、
@@ -81,7 +82,7 @@ npm run svwb -- td selfplay --model m0.json --games 2000 --out d0.jsonl  # TD �
 - `engine/src/effects.rs`: 能力の解釈と解決スタック
 - `engine/src/game.rs`: 対戦の生成・合法手・行動の適用
 - `engine/src/golden.rs`・`canonical.rs`・`sim.rs`・`main.rs`: ゴールデンテスト・計測・CLI
-- `engine/src/runner/`: 実験のランナー（compare・rhino-compare・mulligan-compare・td selfplay）。`parallel.rs`（並列実行）、`options.rs`（設定の JSON）、
+- `engine/src/runner/`: 実験のランナー（compare・rhino-compare・mulligan-compare・td selfplay・yardstick）。`parallel.rs`（並列実行）、`options.rs`（設定の JSON）、
   `json.rs`（項目の順番を保つ JSON）、`jsnum.rs`（JavaScript の `Number#toString`・`toPrecision`・`toFixed` と同じ数の書き方）
 - `engine/src/ai/`: AI。`registry.rs`（選べる AI の一覧）、`search.rs`（ターン単位のビームサーチ・相手のターンの読み）、`eval.rs`（評価関数）、
   `valuenet.rs`（学習した補正の推論）、`lethal.rs`（リーサル探索）、`lethal_hint.rs`（対戦画面の「リーサル」表示）、`determinize.rs`、
