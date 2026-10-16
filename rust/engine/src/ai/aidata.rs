@@ -82,12 +82,22 @@ pub struct RawValueNet {
     pub hidden: usize,
     pub w1: Vec<f64>,
     pub b1: Vec<f64>,
+    /// 最初の隠れ層の後に足す隠れ層（valueNet.ts の layers。無ければ隠れ層 1 つ）
+    #[serde(default)]
+    pub layers: Vec<RawValueNetLayer>,
     pub w2: Vec<f64>,
     pub b2: f64,
     pub a: f64,
     pub c: f64,
     #[serde(rename = "baseWeights")]
     pub base_weights: serde_json::Map<String, serde_json::Value>,
+}
+
+/// 足した隠れ層（w は前の層 × この層。前の層の値ごとに b.len() 個ずつ並べる）
+#[derive(Deserialize, Clone)]
+pub struct RawValueNetLayer {
+    pub w: Vec<f64>,
+    pub b: Vec<f64>,
 }
 
 #[derive(Deserialize)]

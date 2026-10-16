@@ -5,7 +5,8 @@
 // 外した項を学習で取り戻せるか（今の AI との勝率の差が縮まるか）で、学習が「眺めるだけ」を越えるかを確かめる。
 //
 //   npm run td -- init --out m0.json [--hidden 32] [--seed 1] [--a 0.08] [--base stripped|current] [--inputs v2|v1]
-//     L = 0 のモデルを作る（--base current なら今の評価関数をそのまま出発点にする。--inputs v1 なら場の攻撃力・体力等を足す前の入力）
+//     L = 0 のモデルを作る（--base current なら今の評価関数をそのまま出発点にする。--inputs v1 なら場の攻撃力・体力等を足す前の入力）。
+//     --hidden 256,32 のように並べると隠れ層を重ねる（最初の層の後ろは全結合。docs/ai-notes.md「大きなネットワークで一から学び直す」）
 //   npm run td -- extend --model data/value-net.json --out m0.json
 //     モデルの入力を今の並び（VALUE_ZONES・VALUE_SCALARS）に広げる。足した入力の重みは 0 なので、補正は元のモデルと同じ
 //   rust/target/release/svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] --out d0.jsonl
@@ -35,7 +36,10 @@ import { nextRandom, type PlayerIndex } from "../src/engine";
 import {
   compileValueNet,
   defaultVocab,
+  forwardRest,
   forwardValueNet,
+  layerSizes,
+  newActs,
   inputSize,
   loadValueNet,
   VALUE_SCALARS,
@@ -109,7 +113,9 @@ const round = (x: number, digits: number): number => Number(x.toPrecision(digits
 
 function init(args: Args): number {
   const out = need(args, "out");
-  const hidden = numArg(args, "hidden", 32);
+  const sizes = (args.get("hidden") ?? "32").split(",").map(Number);
+  if (!sizes.every((k) => Number.isInteger(k) && k > 0)) throw new Error(`--hidden は正の整数をコンマで並べる: ${args.get("hidden")}`);
+  const hidden = sizes[0]!;
   const base = args.get("base") ?? "stripped";
   if (base !== "stripped" && base !== "current") throw new Error(`--base は stripped か current: ${base}`);
   const inputs = args.get("inputs") ?? "v2";
@@ -129,14 +135,23 @@ function init(args: Args): number {
     hidden,
     w1: Array.from({ length: n * hidden }, () => round(gaussian(holder) * 0.1, 6)),
     b1: Array.from({ length: hidden }, () => 0.1),
-    w2: Array.from({ length: hidden }, () => 0),
+    // 足す隠れ層は He の初期化（ReLU の前の値の分散を前の層と同じくらいに保つ）
+    ...(sizes.length > 1
+      ? {
+          layers: sizes.slice(1).map((m, k) => ({
+            w: Array.from({ length: sizes[k]! * m }, () => round(gaussian(holder) * Math.sqrt(2 / sizes[k]!), 6)),
+            b: Array.from({ length: m }, () => 0.1),
+          })),
+        }
+      : {}),
+    w2: Array.from({ length: sizes[sizes.length - 1]! }, () => 0),
     b2: 0,
     a: numArg(args, "a", 0.08),
     c: 0,
     baseWeights: base === "stripped" ? STRIPPED : {},
   };
   writeFileSync(out, JSON.stringify(model));
-  console.log(`${out}: 入力 ${n}（カード・クレスト ${vocab.length} × ${zones.length} ＋ 数値 ${scalars.length}）、隠れ層 ${hidden}、出発点 ${base}`);
+  console.log(`${out}: 入力 ${n}（カード・クレスト ${vocab.length} × ${zones.length} ＋ 数値 ${scalars.length}）、隠れ層 ${sizes.join("・")}、出発点 ${base}`);
   return 0;
 }
 
@@ -275,25 +290,21 @@ function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: num
 
 const sigmoid = (z: number): number => 1 / (1 + Math.exp(-z));
 
-/** 局面 i の NN の出力（hidden に隠れ層の値（ReLU の後）を書く。forwardValueNet と同じ計算） */
-function forwardAt(net: CompiledValueNet, d: Dataset, i: number, hidden: Float64Array): number {
+/** 局面 i の NN の出力（acts に各隠れ層の値（ReLU の後）を書く。forwardValueNet と同じ計算） */
+function forwardAt(net: CompiledValueNet, d: Dataset, i: number, acts: Float64Array[]): number {
   const H = net.model.hidden;
+  const hidden = acts[0]!;
   hidden.set(net.b1);
   for (let q = d.off[i]!; q < d.off[i + 1]!; q++) {
     const row = d.idx[q]! * H, x = d.val[q]!;
     for (let j = 0; j < H; j++) hidden[j]! += x * net.w1[row + j]!;
   }
-  let z = net.model.b2;
-  for (let j = 0; j < H; j++) {
-    if (hidden[j]! < 0) hidden[j] = 0;
-    z += hidden[j]! * net.w2[j]!;
-  }
-  return z;
+  return forwardRest(net, net.model.b2, acts);
 }
 
 /** 全局面の勝つ確率の予測 */
 function predictAll(net: CompiledValueNet, d: Dataset): Float64Array {
-  const h = new Float64Array(net.model.hidden);
+  const h = newActs(net.model);
   const v = new Float64Array(d.s.length);
   for (let i = 0; i < v.length; i++) v[i] = sigmoid(net.model.a * d.s[i]! + net.model.c + forwardAt(net, d, i, h));
   return v;
@@ -396,16 +407,34 @@ function train(args: Args): number {
   console.log(`${files.join(", ")}: 局面 ${n}（確かめ用 ${d.holdout.reduce((x, y) => x + y, 0)}、ランダムに打った ${d.explored.reduce((x, y) => x + y, 0)}）、読み込み ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
   const H = model.hidden;
+  const sizes = layerSizes(model);
+  const L = sizes.length;
   const nIn = inputSize(model);
-  // 学ぶ値を 1 つの配列に並べる: [w1 | b1 | w2 | b2 | c | a]
-  const oB1 = nIn * H, oW2 = oB1 + H, oB2 = oW2 + H, oC = oB2 + 1, oA = oC + 1, size = oA + 1;
+  // 学ぶ値を 1 つの配列に並べる: [w1 | b1 | (足した層の w | b)… | w2 | b2 | c | a]
+  const oB1 = nIn * H;
+  const layerOff: { w: number; b: number }[] = [];
+  let o = oB1 + H;
+  for (let k = 1; k < L; k++) {
+    layerOff.push({ w: o, b: o + sizes[k - 1]! * sizes[k]! });
+    o += (sizes[k - 1]! + 1) * sizes[k]!;
+  }
+  const oW2 = o, oB2 = oW2 + sizes[L - 1]!, oC = oB2 + 1, oA = oC + 1, size = oA + 1;
   const params = new Float64Array(size);
   params.set(model.w1, 0);
   params.set(model.b1, oB1);
+  (model.layers ?? []).forEach((l, k) => {
+    params.set(l.w, layerOff[k]!.w);
+    params.set(l.b, layerOff[k]!.b);
+  });
   params.set(model.w2, oW2);
   params[oB2] = model.b2;
   params[oC] = model.c;
   params[oA] = model.a;
+  // 減衰させる重み（w1・足した層の w・w2。バイアスと c・a は減衰させない）
+  const decayed = new Uint8Array(size);
+  decayed.fill(1, 0, oB1);
+  for (let k = 1; k < L; k++) decayed.fill(1, layerOff[k - 1]!.w, layerOff[k - 1]!.b);
+  decayed.fill(1, oW2, oB2);
   const grad = new Float64Array(size), m1 = new Float64Array(size), m2 = new Float64Array(size);
   const beta1 = 0.9, beta2 = 0.999;
   let step = 0;
@@ -413,11 +442,12 @@ function train(args: Args): number {
   // 推論用の CompiledValueNet は params と配列を共有する（学習中の値で予測する）
   const current = (): CompiledValueNet => {
     const mdl: ValueNetModel = { ...model, b2: params[oB2]!, c: params[oC]!, a: params[oA]! };
-    return { model: mdl, index: new Map(), w1: params.subarray(0, oB1), b1: params.subarray(oB1, oW2), w2: params.subarray(oW2, oB2) };
+    const layers = layerOff.map((lo, k) => ({ w: params.subarray(lo.w, lo.b), b: params.subarray(lo.b, lo.b + sizes[k + 1]!) }));
+    return { model: mdl, index: new Map(), w1: params.subarray(0, oB1), b1: params.subarray(oB1, oB1 + H), layers, w2: params.subarray(oW2, oB2) };
   };
 
   const trainIdx = Array.from({ length: n }, (_, i) => i).filter((i) => !d.holdout[i] && !d.explored[i]);
-  const h = new Float64Array(H), dh = new Float64Array(H);
+  const acts = newActs(model), dacts = newActs(model);
   const v0 = predictAll(current(), d);
   report("学習前", d, v0, lambdaReturns(d, v0, lambda));
   for (let epoch = 0; epoch < epochs; epoch++) {
@@ -434,31 +464,53 @@ function train(args: Args): number {
       grad.fill(0);
       for (let k = b0; k < end; k++) {
         const i = trainIdx[k]!;
-        const z = forwardAt(net, d, i, h);
+        const z = forwardAt(net, d, i, acts);
         const p = sigmoid(net.model.a * d.s[i]! + net.model.c + z);
         lossSum += bce(p, targets[i]!);
         const dz = (d.weight[i]! * (p - targets[i]!)) / (end - b0);
         grad[oC]! += dz;
         if (fitA) grad[oA]! += dz * d.s[i]!;
         grad[oB2]! += dz;
-        for (let j = 0; j < H; j++) {
-          grad[oW2 + j]! += dz * h[j]!;
-          dh[j] = h[j]! > 0 ? dz * params[oW2 + j]! : 0;
-          grad[oB1 + j]! += dh[j]!;
+        const last = acts[L - 1]!, dLast = dacts[L - 1]!;
+        for (let j = 0; j < last.length; j++) {
+          grad[oW2 + j]! += dz * last[j]!;
+          dLast[j] = last[j]! > 0 ? dz * params[oW2 + j]! : 0;
         }
+        // 足した層を後ろから（ReLU の後の値が 0 の所は、その前の値が負なので勾配も 0）
+        for (let k = L - 1; k >= 1; k--) {
+          const lo = layerOff[k - 1]!, m = sizes[k]!;
+          const hin = acts[k - 1]!, dout = dacts[k]!, din = dacts[k - 1]!;
+          for (let j = 0; j < m; j++) grad[lo.b + j]! += dout[j]!;
+          for (let r = 0; r < hin.length; r++) {
+            const x = hin[r]!;
+            if (x <= 0) {
+              din[r] = 0;
+              continue;
+            }
+            const row = lo.w + r * m;
+            let back = 0;
+            for (let j = 0; j < m; j++) {
+              grad[row + j]! += x * dout[j]!;
+              back += params[row + j]! * dout[j]!;
+            }
+            din[r] = back;
+          }
+        }
+        const dh = dacts[0]!;
+        for (let j = 0; j < H; j++) grad[oB1 + j]! += dh[j]!;
         for (let q = d.off[i]!; q < d.off[i + 1]!; q++) {
           const row = d.idx[q]! * H, x = d.val[q]!;
           for (let j = 0; j < H; j++) grad[row + j]! += dh[j]! * x;
         }
       }
-      // Adam（重み w1・w2 は減衰させる）
+      // Adam（重みは減衰させる）
       step++;
       const c1 = 1 - beta1 ** step, c2 = 1 - beta2 ** step;
       for (let q = 0; q < size; q++) {
         const gq = grad[q]!;
         m1[q] = beta1 * m1[q]! + (1 - beta1) * gq;
         m2[q] = beta2 * m2[q]! + (1 - beta2) * gq * gq;
-        const decay = q < oB1 || (q >= oW2 && q < oB2) ? l2 * params[q]! : 0;
+        const decay = decayed[q] ? l2 * params[q]! : 0;
         params[q]! -= lr * ((m1[q]! / c1) / (Math.sqrt(m2[q]! / c2) + 1e-8) + decay);
       }
       // a が 0 に近いと補正 (c + L) / a が発散するので下限を置く
@@ -469,7 +521,7 @@ function train(args: Args): number {
   }
   // 補正の大きさ（評価の点数の単位）
   const net = current();
-  const hBuf = new Float64Array(H);
+  const hBuf = newActs(model);
   let absSum = 0;
   for (let i = 0; i < n; i++) absSum += Math.abs((net.model.c + forwardAt(net, d, i, hBuf)) / net.model.a);
   console.log(`補正 (c + L) / a の絶対値の平均 ${(absSum / n).toFixed(2)} 点、${((Date.now() - t0) / 1000).toFixed(1)}s`);
@@ -477,7 +529,8 @@ function train(args: Args): number {
   const outModel: ValueNetModel = {
     ...model,
     w1: Array.from(params.subarray(0, oB1), (x) => round(x, 6)),
-    b1: Array.from(params.subarray(oB1, oW2), (x) => round(x, 6)),
+    b1: Array.from(params.subarray(oB1, oB1 + H), (x) => round(x, 6)),
+    ...(L > 1 ? { layers: current().layers.map((l) => ({ w: Array.from(l.w, (x) => round(x, 6)), b: Array.from(l.b, (x) => round(x, 6)) })) } : {}),
     w2: Array.from(params.subarray(oW2, oB2), (x) => round(x, 6)),
     b2: round(params[oB2]!, 6),
     c: round(params[oC]!, 6),

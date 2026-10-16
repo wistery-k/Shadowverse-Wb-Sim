@@ -8,7 +8,7 @@ import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { rngFrom } from "../src/engine";
 import { randomDeck } from "../src/sim/decks";
 import { playMatch } from "../src/sim/match";
-import { compileValueNet, defaultVocab, inputSize, parseValueNetModel, VALUE_SCALARS, VALUE_ZONES, type ValueNetModel } from "../scripts/valueNet";
+import { compileValueNet, defaultVocab, forwardValueNet, inputSize, layerSizes, parseValueNetModel, VALUE_SCALARS, VALUE_ZONES, type ValueNetModel } from "../scripts/valueNet";
 
 const CLASSES = ["elf", "royal", "witch", "dragon", "nightmare", "bishop", "nemesis"] as const;
 
@@ -108,5 +108,19 @@ describe("TD 学習の評価の補正のモデル（scripts/valueNet.ts）", () 
     expect(() => compileValueNet({ ...m, w1: m.w1.slice(1) })).toThrow();
     expect(() => compileValueNet({ ...m, zones: [...m.zones].reverse() })).toThrow();
     expect(() => parseValueNetModel({ ...m, w2: ["x"] })).toThrow();
+  });
+
+  it("隠れ層を重ねたモデル（layers）を読み、単位行列の層を挟んでも出力は同じ", () => {
+    const m = model(3, (i) => ((i * 31) % 11) / 10 - 0.5, 0.7);
+    const identity = { w: Array.from({ length: 9 }, (_, k) => (k % 4 === 0 ? 1 : 0)), b: [0, 0, 0] };
+    const two = parseValueNetModel(JSON.parse(JSON.stringify({ ...m, layers: [identity] })) as unknown);
+    expect(two.layers).toEqual([identity]);
+    expect(layerSizes(two)).toEqual([3, 3]);
+    const x = { idx: [5, 300, 3000], val: [1, 0.5, 2] };
+    const z1 = forwardValueNet(compileValueNet(m), x);
+    expect(z1).not.toBe(0);
+    expect(forwardValueNet(compileValueNet(two), x)).toBe(z1);
+    expect(() => compileValueNet({ ...m, layers: [{ w: [0, 0, 0, 0, 0, 0], b: [0, 0] }] })).toThrow();
+    expect(() => parseValueNetModel({ ...m, layers: [{ w: ["x"], b: [] }] })).toThrow();
   });
 });
