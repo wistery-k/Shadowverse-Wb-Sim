@@ -1,7 +1,9 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--sampling classic|default] --out d0.jsonl
 //!
+//! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・幅 128、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
+//! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
 //! --opp beam なら相手のターンを探索 AI の既定と同じビームサーチで読む（既定は貪欲法）。
 //! --iv k なら、各試合で 1 つの自分のターンの最初（どちらかのプレイヤーの 3〜8 ターン目）から、手札のカードを 1 枚抜いた局面を
 //! k 個（小数なら平均 k 個。抜くカードは別々）作り、そこから最後まで同じ --eps で打った試合も書き出す（"iv": {"p", "k", "card"} 付きの行。
@@ -68,7 +70,7 @@ struct Model {
     w: EvalWeights,
 }
 
-fn model_options(net: Arc<ValueNet>, opp_beam: bool) -> Result<Model, String> {
+fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Model, String> {
     let weights = weights_with(&ai_data().search_weights_raw, &net.base_weights)?;
     let opts = SearchOptions {
         weights: Some(Arc::new(weights.clone())),
@@ -84,9 +86,13 @@ fn model_options(net: Arc<ValueNet>, opp_beam: bool) -> Result<Model, String> {
             None
         },
         ..SearchOptions::default()
-    }
-    // 読み方は今までの自己対戦と同じ（決定化 3 回）
-    .with_classic_sampling();
+    };
+    // 既定の読み方は今までの自己対戦と同じ（決定化 3 回・幅 32）。--sampling default なら探索 AI の既定の読み方
+    let opts = if classic {
+        opts.with_classic_sampling()
+    } else {
+        opts
+    };
     Ok(Model {
         net,
         opts,
@@ -372,7 +378,12 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     if games < 0.0 || games.fract() != 0.0 || start < 0.0 || start.fract() != 0.0 {
         return Err("--games・--start は 0 以上の整数".into());
     }
-    let m = model_options(Arc::new(ValueNet::load(model_path)?), opp_beam)?;
+    let classic = match arg(args, "sampling").unwrap_or("classic") {
+        "classic" => true,
+        "default" => false,
+        x => return Err(format!("--sampling は classic か default: {x}")),
+    };
+    let m = model_options(Arc::new(ValueNet::load(model_path)?), opp_beam, classic)?;
     let decks = compare_decks();
     if decks.len() != 7 {
         return Err("自己対戦のデッキは 7 つの想定です".into());
