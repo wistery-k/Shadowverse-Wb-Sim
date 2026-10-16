@@ -9,12 +9,16 @@
 //     --hidden 256,32 のように並べると隠れ層を重ねる（最初の層の後ろは全結合。docs/ai-notes.md「大きなネットワークで一から学び直す」）
 //   npm run td -- extend --model data/value-net.json --out m0.json
 //     モデルの入力を今の並び（VALUE_ZONES・VALUE_SCALARS）に広げる。足した入力の重みは 0 なので、補正は元のモデルと同じ
+//   npm run td -- widen --model m.json --hidden 256,32 --out w0.json [--seed 1]
+//     隠れ層 1 つのモデルを、補正を変えずに大きい形に移す。最初の層の先頭に元の層を写し、足した部分は乱数で始めて、
+//     2 つ目の層は元の層の値をそのまま通す（足した部分からの重みは 0）。docs/ai-notes.md「今のモデルを広げて学習を続ける」
 //   rust/target/release/svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] --out d0.jsonl
 //     自己対戦は Rust 版で行う（rust/engine/src/runner/td.rs。cd rust && cargo build --release で作る）。
 //     両方の席がモデルの評価で打つ探索 AI の自己対戦（7 デッキの全 49 組を順に回す）。
 //     各自分のターンの最初の局面（after）とターン末の局面（end）を、入力と S と一緒に JSON Lines で書き出す。
 //     --eps の確率で、自分のターンの最初の手をランダムに打つ（探索。その局面は学習に使わず、1 つ前の局面の目標もそこで切る）
-//   npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001] [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--v1Only 0]
+//   npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001] [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--v1Only 0] [--best 0]
+//     --best 1 なら、確かめ用の局面の勝敗の交差エントロピーが一番小さかったエポック（学習前も含む）の重みを書き出す（途中で止めるのと同じ）
 //     λ 収益（G_t = (1-λ) V_{t+1} + λ G_{t+1}、最後は勝敗）を目標に、L と c（--fitA 1 なら a も）を交差エントロピーで学ぶ。
 //     a を学ぶと、出発点の評価が勝敗をあまり当てないとき a が小さくなり、探索では補正 (c + L) / a の重みが増える。
 //     V は今のモデルの予測で、エポックごとに計算し直す。試合の --holdout の割合は学習に使わず、予測の確かめに使う。
@@ -63,6 +67,7 @@ export async function main(argv: string[]): Promise<number> {
   const args = parseArgs(rest);
   if (cmd === "init") return init(args);
   if (cmd === "extend") return extend(args);
+  if (cmd === "widen") return widen(args);
   if (cmd === "selfplay") throw new Error("自己対戦は Rust 版で行う: rust/target/release/svwb td selfplay ...（cd rust && cargo build --release で作る）");
   if (cmd === "train") return train(args);
   if (cmd === "probe") return probe(args);
@@ -179,6 +184,42 @@ function extend(args: Args): number {
   for (const k of from) for (let j = 0; j < H; j++) w1.push(k < 0 ? 0 : model.w1[k * H + j]!);
   writeFileSync(out, JSON.stringify({ ...model, zones, scalars, w1 }));
   console.log(`${out}: 入力 ${model.w1.length / H} → ${from.length}（足した ${from.filter((k) => k < 0).length} 個の重みは 0）`);
+  return 0;
+}
+
+// ---- widen ----
+
+function widen(args: Args): number {
+  const model = loadValueNet(need(args, "model"));
+  compileValueNet(model);
+  if (model.layers?.length) throw new Error("widen は隠れ層 1 つのモデルだけ");
+  const out = need(args, "out");
+  const sizes = need(args, "hidden").split(",").map(Number);
+  const H0 = model.hidden;
+  if (sizes.length !== 2 || !sizes.every((k) => Number.isInteger(k) && k >= H0)) throw new Error(`--hidden は元の隠れ層（${H0}）以上の 2 つの数: ${args.get("hidden")}`);
+  const [H1, H2] = sizes as [number, number];
+  const holder = { rng: numArg(args, "seed", 1) >>> 0 };
+  const nIn = inputSize(model);
+  // 最初の層: 各入力の行の先頭 H0 個は元の重み、足した H1 - H0 個は init と同じ乱数
+  const w1: number[] = [];
+  for (let i = 0; i < nIn; i++) {
+    for (let j = 0; j < H0; j++) w1.push(model.w1[i * H0 + j]!);
+    for (let j = H0; j < H1; j++) w1.push(round(gaussian(holder) * 0.1, 6));
+  }
+  const b1 = [...model.b1, ...Array.from({ length: H1 - H0 }, () => 0.1)];
+  // 2 つ目の層: 元の層の値 j は自分の j 番目にそのまま通す（ReLU を 2 回かけても同じ）。足した値からの重みは 0。
+  // 足した H2 - H0 個は元の層の値から He の初期化で受け、出力への重みは 0
+  const w: number[] = [];
+  for (let i = 0; i < H1; i++) {
+    for (let j = 0; j < H2; j++) {
+      if (j < H0) w.push(i === j ? 1 : 0);
+      else w.push(i < H0 ? round(gaussian(holder) * Math.sqrt(2 / H0), 6) : 0);
+    }
+  }
+  const b = [...Array.from({ length: H0 }, () => 0), ...Array.from({ length: H2 - H0 }, () => 0.1)];
+  const w2 = [...model.w2, ...Array.from({ length: H2 - H0 }, () => 0)];
+  writeFileSync(out, JSON.stringify({ ...model, hidden: H1, w1, b1, layers: [{ w, b }], w2 }));
+  console.log(`${out}: 隠れ層 ${H0} → ${H1}・${H2}（補正は元のモデルと同じ）`);
   return 0;
 }
 
@@ -342,6 +383,17 @@ function auc(pred: number[], y: number[]): number {
   return pos === 0 || neg === 0 ? 0.5 : (rankSum - (pos * (pos + 1)) / 2) / (pos * neg);
 }
 
+/** 確かめ用の局面（holdout。ランダムに打った局面を除く）の、勝敗に対する交差エントロピー */
+function holdoutLoss(d: Dataset, v: Float64Array): number {
+  let sum = 0, n = 0;
+  for (let i = 0; i < v.length; i++) {
+    if (!d.holdout[i] || d.explored[i]) continue;
+    sum += bce(v[i]!, d.outcome[i]!);
+    n++;
+  }
+  return sum / Math.max(1, n);
+}
+
 /** 確かめ用の局面（holdout）での、勝敗に対する交差エントロピーと AUC（全体・ターン末・ターンの最初） */
 function report(label: string, d: Dataset, v: Float64Array, targets: Float64Array): void {
   const parts: string[] = [];
@@ -390,6 +442,7 @@ function train(args: Args): number {
   const fitA = numArg(args, "fitA", 1) !== 0;
   const holder = { rng: numArg(args, "seed", 1) >>> 0 };
   const ivWeight = numArg(args, "ivWeight", 1);
+  const keepBest = numArg(args, "best", 0) !== 0;
 
   const t0 = Date.now();
   // --v1Only 1: 場の攻撃力・体力等を足す前の入力（VALUE_ZONES_V1・VALUE_SCALARS_V1）だけで学ぶ（足した入力の効き目を分ける対照）
@@ -450,6 +503,8 @@ function train(args: Args): number {
   const acts = newActs(model), dacts = newActs(model);
   const v0 = predictAll(current(), d);
   report("学習前", d, v0, lambdaReturns(d, v0, lambda));
+  // --best 1: 確かめ用の局面の勝敗の交差エントロピーが一番小さかったエポックの重み
+  let best = { loss: holdoutLoss(d, v0), epoch: 0, params: keepBest ? params.slice() : params };
   for (let epoch = 0; epoch < epochs; epoch++) {
     const targets = lambdaReturns(d, predictAll(current(), d), lambda);
     // 並べ替え（Fisher-Yates）
@@ -518,6 +573,12 @@ function train(args: Args): number {
     }
     const v = predictAll(current(), d);
     report(`エポック ${epoch + 1}（学習の TD ${(lossSum / trainIdx.length).toFixed(4)}、a ${params[oA]!.toFixed(4)}、c ${params[oC]!.toFixed(3)}）`, d, v, lambdaReturns(d, v, lambda));
+    const loss = holdoutLoss(d, v);
+    if (keepBest && loss < best.loss) best = { loss, epoch: epoch + 1, params: params.slice() };
+  }
+  if (keepBest) {
+    params.set(best.params);
+    console.log(`確かめ用の局面の勝敗の交差エントロピーが一番小さい ${best.epoch === 0 ? "学習前" : `エポック ${best.epoch}`}（${best.loss.toFixed(4)}）の重みを書き出す`);
   }
   // 補正の大きさ（評価の点数の単位）
   const net = current();
