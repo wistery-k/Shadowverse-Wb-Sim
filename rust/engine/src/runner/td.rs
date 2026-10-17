@@ -1,6 +1,6 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board] [--sampling classic|default] [--cmp 0] [--rollouts 8] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both] [--sampling classic|default] [--cmp 0] [--rollouts 8] --out d0.jsonl
 //!
 //! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・幅 128、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
 //! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
@@ -10,6 +10,7 @@
 //! k はもとの試合のその局面の添字）。カードを抜くのは打ち方と関係ないので、学習した補正が手札のカードの価値を
 //! 相関で覚える偏り（勝っている局面にあったカードを高く見る等）を打ち消す方向に働くと考えた。docs/ai-notes.md「介入データを TD 学習に混ぜる」
 //! --ivZone board なら、手札の代わりに場のカード（自分と相手の場のフォロワー・アミュレット）を 1 枚消す（"zone": "board" か "oppBoard" が付く）。
+//! both なら手札と場のカードを合わせた中から選ぶ。
 //! 場にいる間に働く能力の価値を、相関ではなく消した結果から学ばせる。docs/ai-notes.md「場のカードを消す介入を混ぜる」
 //!
 //! --cmp k なら、各試合で 1 つの自分のターンの最初（--iv と同じ選び方）から、探索が読んだ点数の高い順に最初の手の違う並びを k 個まで選び、
@@ -171,6 +172,8 @@ struct Intervention {
 enum IvZone {
     Hand,
     Board,
+    /// 手札と場のカードから選ぶ
+    Both,
 }
 
 /// 局面から最後まで打った結果
@@ -454,39 +457,40 @@ fn play_one(
         }
     }
     if let (Some(plan), Some((at, k))) = (plan, base.branch.as_ref()) {
-        // 消すカード（側, 添字, 場所の名前）。同じ側の同じカードは 1 回だけ。手札は p の手札、場は p と相手の場
+        // 消すカード（側, 添字, 場所の名前）。同じ場所の同じカードは 1 回だけ。手札は p の手札、場は p と相手の場
+        let card_at = |side: PlayerIndex, i: usize, name: &str| -> CardIdx {
+            if name == "hand" {
+                at.players[side].hand[i].card
+            } else {
+                at.players[side].board[i].card
+            }
+        };
         let mut cards: Vec<(PlayerIndex, usize, &'static str)> = Vec::new();
-        let mut add = |side: PlayerIndex, i: usize, card: CardIdx, name: &'static str| {
-            let same = |&(s2, j, _): &(PlayerIndex, usize, &str)| {
-                s2 == side
-                    && if zone == IvZone::Hand {
-                        at.players[s2].hand[j].card == card
-                    } else {
-                        at.players[s2].board[j].card == card
-                    }
-            };
-            if !cards.iter().any(same) {
+        let mut add = |side: PlayerIndex, i: usize, name: &'static str| {
+            let card = card_at(side, i, name);
+            if !cards
+                .iter()
+                .any(|&(s2, j, n2)| n2 == name && card_at(s2, j, n2) == card)
+            {
                 cards.push((side, i, name));
             }
         };
-        match zone {
-            IvZone::Hand => {
-                for (i, h) in at.players[plan.p].hand.iter().enumerate() {
-                    add(plan.p, i, h.card, "hand");
-                }
+        if zone != IvZone::Board {
+            for i in 0..at.players[plan.p].hand.len() {
+                add(plan.p, i, "hand");
             }
-            IvZone::Board => {
-                for (side, name) in [(plan.p, "board"), (1 - plan.p, "oppBoard")] {
-                    for (i, b) in at.players[side].board.iter().enumerate() {
-                        add(side, i, b.card, name);
-                    }
+        }
+        if zone != IvZone::Hand {
+            for (side, name) in [(plan.p, "board"), (1 - plan.p, "oppBoard")] {
+                for i in 0..at.players[side].board.len() {
+                    add(side, i, name);
                 }
             }
         }
         for v in 0..plan.variants.min(cards.len()) {
             let (side, pick, name) = cards.swap_remove(ivr.int(cards.len()));
             let mut s = at.clone();
-            let removed = if zone == IvZone::Hand {
+            let removed = if name == "hand" {
                 s.players[side].hand.remove(pick).card
             } else {
                 s.players[side].board.remove(pick).card
@@ -503,7 +507,7 @@ fn play_one(
                 "{{\"p\":{},\"k\":{k},\"card\":{}{}}}",
                 plan.p,
                 serde_json::to_string(&data().cards[removed as usize].id).expect("ID"),
-                if zone == IvZone::Hand {
+                if name == "hand" {
                     String::new()
                 } else {
                     format!(",\"zone\":\"{name}\"")
@@ -540,7 +544,8 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     let zone = match arg(args, "ivZone").unwrap_or("hand") {
         "hand" => IvZone::Hand,
         "board" => IvZone::Board,
-        x => return Err(format!("--ivZone は hand か board: {x}")),
+        "both" => IvZone::Both,
+        x => return Err(format!("--ivZone は hand・board・both: {x}")),
     };
     let opp_beam = match arg(args, "opp").unwrap_or("greedy") {
         "greedy" => false,
