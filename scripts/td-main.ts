@@ -25,7 +25,7 @@
 //     λ 収益（G_t = (1-λ) V_{t+1} + λ G_{t+1}、最後は勝敗）を目標に、L と c（--fitA 1 なら a も）を交差エントロピーで学ぶ。
 //     a を学ぶと、出発点の評価が勝敗をあまり当てないとき a が小さくなり、探索では補正 (c + L) / a の重みが増える。
 //     V は今のモデルの予測で、エポックごとに計算し直す。試合の --holdout の割合は学習に使わず、予測の確かめに使う。
-//     td selfplay --iv で書き出した介入の試合（手札から 1 枚抜いた局面から打った試合）の局面は --ivWeight の重みで学ぶ（0 なら読まない）
+//     td selfplay --iv で書き出した介入の試合（手札から 1 枚抜いた局面か、--ivZone board で場のカードを 1 枚消した局面から打った試合）の局面は --ivWeight の重みで学ぶ（0 なら読まない）
 //   npm run td -- ivcheck --model m1.json --data d0.jsonl[,d1.jsonl] [--holdout 0]
 //     介入の試合で、抜いたカードごとに「測った価値」（もとの試合の勝敗 − 抜いた試合の勝敗の平均）と、
 //     モデルが見ている価値（その局面の勝つ確率の予測の差）を比べる（docs/ai-notes.md「介入データを TD 学習に混ぜる」）
@@ -245,8 +245,8 @@ interface GameRecord {
   decks: [string, string];
   winner: PlayerIndex;
   turns: number;
-  /** 介入の試合: もとの試合 g のプレイヤー p の k 番目の局面から、手札のカード card を 1 枚抜いて打った */
-  iv?: { p: PlayerIndex; k: number; card: string };
+  /** 介入の試合: もとの試合 g のプレイヤー p の k 番目の局面から、カード card を 1 枚消して打った。zone が無ければ p の手札、board は p の場、oppBoard は相手の場 */
+  iv?: { p: PlayerIndex; k: number; card: string; zone?: IvZone };
   samples: [Sample[], Sample[]];
 }
 
@@ -290,12 +290,20 @@ interface Dataset {
   pairs: IvPair[];
 }
 
+type IvZone = "hand" | "board" | "oppBoard";
+
+/** 介入の対。測った価値・予測の差は、消したカードの持ち主から見た値（相手の場のカードなら符号を逆にする） */
 interface IvPair {
   base: number;
   variant: number;
   card: string;
+  /** カードの持ち主のデッキ */
   deck: string;
+  zone: IvZone;
 }
+
+/** 消したカードの持ち主から見た向き */
+const ivSign = (q: IvPair): number => (q.zone === "oppBoard" ? -1 : 1);
 
 function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: number) => boolean): Dataset {
   const off: number[] = [0], idx: number[] = [], val: number[] = [], s: number[] = [], next: number[] = [], outcome: number[] = [], explored: number[] = [], hold: number[] = [], phase: number[] = [], weight: number[] = [];
@@ -310,7 +318,9 @@ function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: num
       if (r.iv && ivWeight === 0) continue;
       if (r.iv) {
         const first = firstOf.get(r.g);
-        if (first && r.samples[r.iv.p].length > 0) pairs.push({ base: first[r.iv.p] + r.iv.k, variant: s.length + (r.iv.p === 1 ? r.samples[0].length : 0), card: r.iv.card, deck: r.decks[r.iv.p] });
+        const zone = r.iv.zone ?? "hand";
+        const owner = zone === "oppBoard" ? 1 - r.iv.p : r.iv.p;
+        if (first && r.samples[r.iv.p].length > 0) pairs.push({ base: first[r.iv.p] + r.iv.k, variant: s.length + (r.iv.p === 1 ? r.samples[0].length : 0), card: r.iv.card, deck: r.decks[owner]!, zone });
       } else {
         firstOf.set(r.g, [s.length, s.length + r.samples[0].length]);
       }
@@ -527,17 +537,23 @@ function report(label: string, d: Dataset, v: Float64Array, targets: Float64Arra
 }
 
 /** 介入の対の、測った価値（勝敗の差の平均）とモデルが見ている価値（予測の差の平均） */
+const IV_ZONE_NAME: Record<IvZone, string> = { hand: "", board: "自分の場", oppBoard: "相手の場" };
+
 function ivSummary(d: Dataset, v: Float64Array, holdoutOnly: boolean): string | null {
-  let n = 0, measured = 0, predicted = 0;
-  for (const q of d.pairs) {
-    if (holdoutOnly && !d.holdout[q.base]) continue;
-    n++;
-    measured += d.outcome[q.base]! - d.outcome[q.variant]!;
-    predicted += v[q.base]! - v[q.variant]!;
+  const parts: string[] = [];
+  for (const zone of ["hand", "board", "oppBoard"] as const) {
+    let n = 0, measured = 0, predicted = 0;
+    for (const q of d.pairs) {
+      if (q.zone !== zone || (holdoutOnly && !d.holdout[q.base])) continue;
+      n++;
+      measured += ivSign(q) * (d.outcome[q.base]! - d.outcome[q.variant]!);
+      predicted += ivSign(q) * (v[q.base]! - v[q.variant]!);
+    }
+    if (n === 0) continue;
+    const pct = (x: number) => `${x >= 0 ? "+" : ""}${((x / n) * 100).toFixed(1)}%`;
+    parts.push(`介入${IV_ZONE_NAME[zone]}(${n}) 測った価値 ${pct(measured)} 予測の差 ${pct(predicted)}`);
   }
-  if (n === 0) return null;
-  const pct = (x: number) => `${x >= 0 ? "+" : ""}${((x / n) * 100).toFixed(1)}%`;
-  return `介入(${n}) 測った価値 ${pct(measured)} 予測の差 ${pct(predicted)}`;
+  return parts.length > 0 ? parts.join(" / ") : null;
 }
 
 function train(args: Args): number {
@@ -878,9 +894,9 @@ function ivcheck(args: Args): number {
   let negN = 0, negM = 0, negP = 0;
   for (const q of d.pairs) {
     if (holdoutOnly && !d.holdout[q.base]) continue;
-    const m = d.outcome[q.base]! - d.outcome[q.variant]!;
-    const p = v[q.base]! - v[q.variant]!;
-    const key = `${q.deck}\t${nameOf.get(q.card) ?? q.card}`;
+    const m = ivSign(q) * (d.outcome[q.base]! - d.outcome[q.variant]!);
+    const p = ivSign(q) * (v[q.base]! - v[q.variant]!);
+    const key = `${q.deck}\t${nameOf.get(q.card) ?? q.card}${q.zone === "hand" ? "" : `（場）`}`;
     const c = by.get(key) ?? { n: 0, m: 0, m2: 0, p: 0 };
     c.n++;
     c.m += m;
@@ -894,7 +910,7 @@ function ivcheck(args: Args): number {
     }
   }
   const pct = (x: number) => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}%`;
-  if (negN > 0) console.log(`モデルが手札の 1 枚をマイナスに見た対 ${negN}: 測った価値 ${pct(negM / negN)}、予測の差 ${pct(negP / negN)}`);
+  if (negN > 0) console.log(`モデルがカードの 1 枚をマイナスに見た対 ${negN}: 測った価値 ${pct(negM / negN)}、予測の差 ${pct(negP / negN)}`);
   console.log("");
   console.log("| デッキ | カード | 対 | 測った価値 | SE | 予測の差 | ずれ / SE |");
   console.log("| --- | --- | ---: | ---: | ---: | ---: | ---: |");

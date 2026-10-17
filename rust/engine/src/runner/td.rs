@@ -1,6 +1,6 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--sampling classic|default] [--cmp 0] [--rollouts 8] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both] [--sampling classic|default] [--cmp 0] [--rollouts 8] --out d0.jsonl
 //!
 //! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・幅 128、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
 //! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
@@ -9,6 +9,9 @@
 //! k 個（小数なら平均 k 個。抜くカードは別々）作り、そこから最後まで同じ --eps で打った試合も書き出す（"iv": {"p", "k", "card"} 付きの行。
 //! k はもとの試合のその局面の添字）。カードを抜くのは打ち方と関係ないので、学習した補正が手札のカードの価値を
 //! 相関で覚える偏り（勝っている局面にあったカードを高く見る等）を打ち消す方向に働くと考えた。docs/ai-notes.md「介入データを TD 学習に混ぜる」
+//! --ivZone board なら、手札の代わりに場のカード（自分と相手の場のフォロワー・アミュレット）を 1 枚消す（"zone": "board" か "oppBoard" が付く）。
+//! both なら手札と場のカードを合わせた中から選ぶ。
+//! 場にいる間に働く能力の価値を、相関ではなく消した結果から学ばせる。docs/ai-notes.md「場のカードを消す介入を混ぜる」
 //!
 //! --cmp k なら、各試合で 1 つの自分のターンの最初（--iv と同じ選び方）から、探索が読んだ点数の高い順に最初の手の違う並びを k 個まで選び、
 //! 並びごとにターン末から最後まで --rollouts 回打った勝ち数を書き出す（"cmp" 付きの行。打ち比べ）。r 回目はどの並びも同じ乱数で
@@ -28,7 +31,7 @@ use crate::ai::eval::{evaluate_with, EvalWeights};
 use crate::ai::search::{SearchAgent, SearchOptions};
 use crate::ai::valuenet::{ValueNet, ValuePhase};
 use crate::ai::{Agent, Rng};
-use crate::data::{data, Deck};
+use crate::data::{data, CardIdx, Deck};
 use crate::game::{acting_player, apply_action, create_game, legal_actions, resolve_turn_end};
 use crate::jsnum::{js_num, round_precision};
 use crate::state::{next_random, Action, GameState, Phase, PlayerIndex};
@@ -164,6 +167,15 @@ struct Intervention {
     variants: usize,
 }
 
+/// 介入で消すカードの場所（--ivZone）
+#[derive(Clone, Copy, PartialEq)]
+enum IvZone {
+    Hand,
+    Board,
+    /// 手札と場のカードから選ぶ
+    Both,
+}
+
 /// 局面から最後まで打った結果
 struct Played {
     state: GameState,
@@ -227,7 +239,6 @@ fn play_out(
             if branch_at == Some((actor, state.players[actor].turn_count))
                 && state.stack.is_empty()
                 && state.queue.is_empty()
-                && !state.players[actor].hand.is_empty()
             {
                 branch = Some((state.clone(), counts[actor]));
             }
@@ -394,6 +405,7 @@ fn play_one(
     m: &Model,
     eps: f64,
     iv: f64,
+    zone: IvZone,
     cmp: Option<&Compare>,
 ) -> Summary {
     let (di, dj) = ((g % 7) as usize, ((g / 7) % 7) as usize);
@@ -433,7 +445,9 @@ fn play_one(
     let mut ivs = 0;
     let mut groups = 0;
     if let (Some(c), Some((p, _)), Some((at, _))) = (cmp, cmp_at, base.branch.as_ref()) {
-        if let Some(info) = compare_plans(at, p, m, c, seed) {
+        if at.players[p].hand.is_empty() {
+            // 手札が無い局面は打ち比べない（手札を抜く介入と同じ局面の選び方）
+        } else if let Some(info) = compare_plans(at, p, m, c, seed) {
             line.push_str(&format!(
                 "\n{{\"g\":{g},\"decks\":[{},{}],\"cmp\":{info}}}",
                 serde_json::to_string(&names[0]).expect("名前"),
@@ -443,20 +457,44 @@ fn play_one(
         }
     }
     if let (Some(plan), Some((at, k))) = (plan, base.branch.as_ref()) {
-        // 抜くカード（同じカードは 1 回だけ）
-        let mut cards: Vec<usize> = Vec::new();
-        for (i, h) in at.players[plan.p].hand.iter().enumerate() {
+        // 消すカード（側, 添字, 場所の名前）。同じ場所の同じカードは 1 回だけ。手札は p の手札、場は p と相手の場
+        let card_at = |side: PlayerIndex, i: usize, name: &str| -> CardIdx {
+            if name == "hand" {
+                at.players[side].hand[i].card
+            } else {
+                at.players[side].board[i].card
+            }
+        };
+        let mut cards: Vec<(PlayerIndex, usize, &'static str)> = Vec::new();
+        let mut add = |side: PlayerIndex, i: usize, name: &'static str| {
+            let card = card_at(side, i, name);
             if !cards
                 .iter()
-                .any(|&j| at.players[plan.p].hand[j].card == h.card)
+                .any(|&(s2, j, n2)| n2 == name && card_at(s2, j, n2) == card)
             {
-                cards.push(i);
+                cards.push((side, i, name));
+            }
+        };
+        if zone != IvZone::Board {
+            for i in 0..at.players[plan.p].hand.len() {
+                add(plan.p, i, "hand");
+            }
+        }
+        if zone != IvZone::Hand {
+            for (side, name) in [(plan.p, "board"), (1 - plan.p, "oppBoard")] {
+                for i in 0..at.players[side].board.len() {
+                    add(side, i, name);
+                }
             }
         }
         for v in 0..plan.variants.min(cards.len()) {
-            let pick = cards.swap_remove(ivr.int(cards.len()));
+            let (side, pick, name) = cards.swap_remove(ivr.int(cards.len()));
             let mut s = at.clone();
-            let removed = s.players[plan.p].hand.remove(pick);
+            let removed = if name == "hand" {
+                s.players[side].hand.remove(pick).card
+            } else {
+                s.players[side].board.remove(pick).card
+            };
             let r = play_out(
                 g,
                 s,
@@ -466,9 +504,14 @@ fn play_one(
                 None,
             );
             let info = format!(
-                "{{\"p\":{},\"k\":{k},\"card\":{}}}",
+                "{{\"p\":{},\"k\":{k},\"card\":{}{}}}",
                 plan.p,
-                serde_json::to_string(&data().cards[removed.card as usize].id).expect("ID")
+                serde_json::to_string(&data().cards[removed as usize].id).expect("ID"),
+                if name == "hand" {
+                    String::new()
+                } else {
+                    format!(",\"zone\":\"{name}\"")
+                }
             );
             line.push('\n');
             line.push_str(&record_line(g, &names, &r, Some(info)));
@@ -498,6 +541,12 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     if iv < 0.0 {
         return Err("--iv は 0 以上".into());
     }
+    let zone = match arg(args, "ivZone").unwrap_or("hand") {
+        "hand" => IvZone::Hand,
+        "board" => IvZone::Board,
+        "both" => IvZone::Both,
+        x => return Err(format!("--ivZone は hand・board・both: {x}")),
+    };
     let opp_beam = match arg(args, "opp").unwrap_or("greedy") {
         "greedy" => false,
         "beam" => true,
@@ -544,7 +593,7 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     let tasks: Vec<u32> = (0..games as u32).map(|k| start as u32 + k).collect();
     let mut summaries = parallel_map(
         &tasks,
-        |&g, _| play_one(g, &decks, &m, eps, iv, cmp.as_ref()),
+        |&g, _| play_one(g, &decks, &m, eps, iv, zone, cmp.as_ref()),
         |done, total, r, _| {
             writeln!(file, "{}", r.line).unwrap_or_else(|e| panic!("{out} に書けません: {e}"));
             if done % 100 == 0 || done == total {
