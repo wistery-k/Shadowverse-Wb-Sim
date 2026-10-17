@@ -18,7 +18,10 @@
 //     各自分のターンの最初の局面（after）とターン末の局面（end）を、入力と S と一緒に JSON Lines で書き出す。
 //     --eps の確率で、自分のターンの最初の手をランダムに打つ（探索。その局面は学習に使わず、1 つ前の局面の目標もそこで切る）
 //   npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001] [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--v1Only 0] [--best 0]
-//     --best 1 なら、確かめ用の局面の勝敗の交差エントロピーが一番小さかったエポック（学習前も含む）の重みを書き出す（途中で止めるのと同じ）
+//     --best 1 なら、確かめ用の局面の勝敗の交差エントロピーが一番小さかったエポック（学習前も含む）の重みを書き出す（途中で止めるのと同じ）。
+//     --cmpWeight w（既定 0）なら、td selfplay --cmp の打ち比べ（同じ局面からの並びごとに最後まで打った勝率）も学ぶ:
+//     同じ局面の並びどうしで、予測した勝つ確率の平均からのずれが、測った勝率の平均からのずれに合うように（二乗誤差 × w。--cmpBatch 局面ずつ）。
+//     打ち比べの局面は TD の局面と同じ並びで学ぶ（ミニバッチを混ぜて並べ替える）。docs/ai-notes.md「同じ局面からの手の比べ合いを学ぶ」
 //     λ 収益（G_t = (1-λ) V_{t+1} + λ G_{t+1}、最後は勝敗）を目標に、L と c（--fitA 1 なら a も）を交差エントロピーで学ぶ。
 //     a を学ぶと、出発点の評価が勝敗をあまり当てないとき a が小さくなり、探索では補正 (c + L) / a の重みが増える。
 //     V は今のモデルの予測で、エポックごとに計算し直す。試合の --holdout の割合は学習に使わず、予測の確かめに使う。
@@ -247,6 +250,24 @@ interface GameRecord {
   samples: [Sample[], Sample[]];
 }
 
+/** 打ち比べ（td selfplay --cmp）の行。試合の行の直後にある */
+interface CmpRecord {
+  g: number;
+  decks: [string, string];
+  cmp: {
+    p: PlayerIndex;
+    turn: number;
+    /** 並びごとに最後まで打った回数 */
+    n: number;
+    /** 探索の点数の高い順。val は探索の点数、w は勝ち数、sample はターン末の局面 */
+    cands: { val: number; w: number; sample: Sample }[];
+  };
+}
+
+/** JSON Lines の 1 行（試合か打ち比べ） */
+const parseLine = (line: string): GameRecord | CmpRecord => JSON.parse(line) as GameRecord | CmpRecord;
+const isCmp = (r: GameRecord | CmpRecord): r is CmpRecord => "cmp" in r;
+
 // ---- train ----
 
 /** 学習用にまとめた局面 */
@@ -284,7 +305,8 @@ function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: num
     const firstOf = new Map<number, [number, number]>();
     for (const line of readFileSync(file, "utf8").split("\n")) {
       if (!line.trim()) continue;
-      const r = JSON.parse(line) as GameRecord;
+      const r = parseLine(line);
+      if (isCmp(r)) continue;
       if (r.iv && ivWeight === 0) continue;
       if (r.iv) {
         const first = firstOf.get(r.g);
@@ -329,10 +351,99 @@ function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: num
   };
 }
 
+/** 打ち比べの局面（td selfplay --cmp） */
+interface CmpData {
+  /** 並び i のターン末の局面の入力は idx・val の off[i]〜off[i+1] */
+  off: Int32Array;
+  idx: Int32Array;
+  val: Float32Array;
+  s: Float64Array;
+  /** 並び i の測った勝率（勝ち数 / 打った回数） */
+  win: Float64Array;
+  /** 並び i の探索の点数 */
+  search: Float64Array;
+  /** 局面 g の並びは goff[g]〜goff[g+1] */
+  goff: Int32Array;
+  holdout: Uint8Array;
+}
+
+function loadGroups(files: string[], holdout: number): CmpData {
+  const off: number[] = [0], idx: number[] = [], val: number[] = [], s: number[] = [], win: number[] = [], search: number[] = [], goff: number[] = [0], hold: number[] = [];
+  for (const file of files) {
+    for (const line of readFileSync(file, "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      const r = parseLine(line);
+      if (!isCmp(r)) continue;
+      for (const c of r.cmp.cands) {
+        for (let j = 0; j < c.sample.x.length; j++) {
+          idx.push(c.sample.x[j]!);
+          val.push(c.sample.v[j]!);
+        }
+        off.push(idx.length);
+        s.push(c.sample.s);
+        win.push(c.w / r.cmp.n);
+        search.push(c.val);
+      }
+      goff.push(s.length);
+      // 試合の行と同じ決め方（同じ試合の打ち比べは同じ側）
+      hold.push(((Math.imul(r.g, 2654435761) >>> 0) % 1000) / 1000 < holdout ? 1 : 0);
+    }
+  }
+  return {
+    off: Int32Array.from(off),
+    idx: Int32Array.from(idx),
+    val: Float32Array.from(val),
+    s: Float64Array.from(s),
+    win: Float64Array.from(win),
+    search: Float64Array.from(search),
+    goff: Int32Array.from(goff),
+    holdout: Uint8Array.from(hold),
+  };
+}
+
+/**
+ * 打ち比べの確かめ用（holdout）の局面での、平均からのずれの二乗誤差（局面ごとの和の平均）と、
+ * 測った勝率の差が 25% 以上ある並びの対で、予測（と探索の点数）の大小が測った勝率の大小と合う割合
+ */
+function cmpReport(c: CmpData, v: Float64Array): string {
+  let groups = 0, sq = 0, pairs = 0, agree = 0, searchAgree = 0;
+  for (let g = 0; g + 1 < c.goff.length; g++) {
+    if (!c.holdout[g]) continue;
+    const a = c.goff[g]!, b = c.goff[g + 1]!;
+    let mp = 0, mw = 0;
+    for (let i = a; i < b; i++) {
+      mp += v[i]!;
+      mw += c.win[i]!;
+    }
+    mp /= b - a;
+    mw /= b - a;
+    for (let i = a; i < b; i++) sq += (v[i]! - mp - (c.win[i]! - mw)) ** 2;
+    groups++;
+    for (let i = a; i < b; i++) {
+      for (let j = i + 1; j < b; j++) {
+        const dw = c.win[i]! - c.win[j]!;
+        if (Math.abs(dw) < 0.25) continue;
+        pairs++;
+        if ((v[i]! - v[j]!) * dw > 0) agree++;
+        if ((c.search[i]! - c.search[j]!) * dw > 0) searchAgree++;
+      }
+    }
+  }
+  const pct = (x: number) => `${((x / Math.max(1, pairs)) * 100).toFixed(1)}%`;
+  return `打ち比べ(${groups}) ずれの二乗誤差 ${(sq / Math.max(1, groups)).toFixed(4)} 大小が合う ${pct(agree)}（探索の点数 ${pct(searchAgree)}、${pairs} 対）`;
+}
+
 const sigmoid = (z: number): number => 1 / (1 + Math.exp(-z));
 
+/** 局面ごとの疎な入力 */
+interface SparseRows {
+  off: Int32Array;
+  idx: Int32Array;
+  val: Float32Array;
+}
+
 /** 局面 i の NN の出力（acts に各隠れ層の値（ReLU の後）を書く。forwardValueNet と同じ計算） */
-function forwardAt(net: CompiledValueNet, d: Dataset, i: number, acts: Float64Array[]): number {
+function forwardAt(net: CompiledValueNet, d: SparseRows, i: number, acts: Float64Array[]): number {
   const H = net.model.hidden;
   const hidden = acts[0]!;
   hidden.set(net.b1);
@@ -344,7 +455,7 @@ function forwardAt(net: CompiledValueNet, d: Dataset, i: number, acts: Float64Ar
 }
 
 /** 全局面の勝つ確率の予測 */
-function predictAll(net: CompiledValueNet, d: Dataset): Float64Array {
+function predictAll(net: CompiledValueNet, d: SparseRows & { s: Float64Array }): Float64Array {
   const h = newActs(net.model);
   const v = new Float64Array(d.s.length);
   for (let i = 0; i < v.length; i++) v[i] = sigmoid(net.model.a * d.s[i]! + net.model.c + forwardAt(net, d, i, h));
@@ -443,6 +554,8 @@ function train(args: Args): number {
   const holder = { rng: numArg(args, "seed", 1) >>> 0 };
   const ivWeight = numArg(args, "ivWeight", 1);
   const keepBest = numArg(args, "best", 0) !== 0;
+  const cmpWeight = numArg(args, "cmpWeight", 0);
+  const cmpBatch = numArg(args, "cmpBatch", 16);
 
   const t0 = Date.now();
   // --v1Only 1: 場の攻撃力・体力等を足す前の入力（VALUE_ZONES_V1・VALUE_SCALARS_V1）だけで学ぶ（足した入力の効き目を分ける対照）
@@ -459,6 +572,8 @@ function train(args: Args): number {
   const n = d.s.length;
   console.log(`${files.join(", ")}: 局面 ${n}（確かめ用 ${d.holdout.reduce((x, y) => x + y, 0)}、ランダムに打った ${d.explored.reduce((x, y) => x + y, 0)}）、読み込み ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
+  const cmp = cmpWeight > 0 ? loadGroups(files, holdout) : null;
+  if (cmp) console.log(`打ち比べ ${cmp.goff.length - 1} 局面・${cmp.s.length} 並び（確かめ用 ${cmp.holdout.reduce((x, y) => x + y, 0)} 局面）`);
   const H = model.hidden;
   const sizes = layerSizes(model);
   const L = sizes.length;
@@ -500,9 +615,78 @@ function train(args: Args): number {
   };
 
   const trainIdx = Array.from({ length: n }, (_, i) => i).filter((i) => !d.holdout[i] && !d.explored[i]);
+  const trainGroups = cmp ? Array.from({ length: cmp.goff.length - 1 }, (_, g) => g).filter((g) => !cmp.holdout[g]) : [];
   const acts = newActs(model), dacts = newActs(model);
+
+  /** 出力 z の勾配 dz の局面（入力は rows の i 番目、各隠れ層の値は a）の勾配を grad に足す */
+  const backward = (dz: number, s: number, a: Float64Array[], rows: SparseRows, i: number): void => {
+    grad[oC]! += dz;
+    if (fitA) grad[oA]! += dz * s;
+    grad[oB2]! += dz;
+    const last = a[L - 1]!, dLast = dacts[L - 1]!;
+    for (let j = 0; j < last.length; j++) {
+      grad[oW2 + j]! += dz * last[j]!;
+      dLast[j] = last[j]! > 0 ? dz * params[oW2 + j]! : 0;
+    }
+    // 足した層を後ろから（ReLU の後の値が 0 の所は、その前の値が負なので勾配も 0）
+    for (let k = L - 1; k >= 1; k--) {
+      const lo = layerOff[k - 1]!, m = sizes[k]!;
+      const hin = a[k - 1]!, dout = dacts[k]!, din = dacts[k - 1]!;
+      for (let j = 0; j < m; j++) grad[lo.b + j]! += dout[j]!;
+      for (let r = 0; r < hin.length; r++) {
+        const x = hin[r]!;
+        if (x <= 0) {
+          din[r] = 0;
+          continue;
+        }
+        const row = lo.w + r * m;
+        let back = 0;
+        for (let j = 0; j < m; j++) {
+          grad[row + j]! += x * dout[j]!;
+          back += params[row + j]! * dout[j]!;
+        }
+        din[r] = back;
+      }
+    }
+    const dh = dacts[0]!;
+    for (let j = 0; j < H; j++) grad[oB1 + j]! += dh[j]!;
+    for (let q = rows.off[i]!; q < rows.off[i + 1]!; q++) {
+      const row = rows.idx[q]! * H, x = rows.val[q]!;
+      for (let j = 0; j < H; j++) grad[row + j]! += dh[j]! * x;
+    }
+  };
+
+  /** 打ち比べの局面 groups の勾配を grad に足し、損失（二乗誤差 × cmpWeight の和）を返す */
+  const candActs: Float64Array[][] = [];
+  const cmpStep = (net: CompiledValueNet, c: CmpData, groups: number[]): number => {
+    let loss = 0;
+    for (const g of groups) {
+      const a = c.goff[g]!, b = c.goff[g + 1]!, k = b - a;
+      while (candActs.length < k) candActs.push(newActs(model));
+      const p: number[] = [];
+      let mp = 0, mw = 0;
+      for (let t = 0; t < k; t++) {
+        const pr = sigmoid(net.model.a * c.s[a + t]! + net.model.c + forwardAt(net, c, a + t, candActs[t]!));
+        p.push(pr);
+        mp += pr;
+        mw += c.win[a + t]!;
+      }
+      mp /= k;
+      mw /= k;
+      for (let t = 0; t < k; t++) {
+        const e = p[t]! - mp - (c.win[a + t]! - mw);
+        loss += cmpWeight * e * e;
+        // ずれの和は 0 なので、平均を引く分の勾配は消える
+        const dz = (cmpWeight * 2 * e * p[t]! * (1 - p[t]!)) / groups.length;
+        backward(dz, c.s[a + t]!, candActs[t]!, c, a + t);
+      }
+    }
+    return loss;
+  };
+
   const v0 = predictAll(current(), d);
   report("学習前", d, v0, lambdaReturns(d, v0, lambda));
+  if (cmp) console.log(`学習前: ${cmpReport(cmp, predictAll(current(), cmp))}`);
   // --best 1: 確かめ用の局面の勝敗の交差エントロピーが一番小さかったエポックの重み
   let best = { loss: holdoutLoss(d, v0), epoch: 0, params: keepBest ? params.slice() : params };
   for (let epoch = 0; epoch < epochs; epoch++) {
@@ -512,50 +696,37 @@ function train(args: Args): number {
       const j = Math.floor(nextFloat(holder) * (i + 1));
       [trainIdx[i], trainIdx[j]] = [trainIdx[j]!, trainIdx[i]!];
     }
-    let lossSum = 0;
-    for (let b0 = 0; b0 < trainIdx.length; b0 += batch) {
+    let lossSum = 0, cmpLoss = 0;
+    // ミニバッチの並び（TD の局面の b0 は 0 以上、打ち比べの局面の g0 は -1 - g0。打ち比べが無ければ今までどおり TD の順）
+    const jobs: number[] = [];
+    for (let b0 = 0; b0 < trainIdx.length; b0 += batch) jobs.push(b0);
+    if (cmp) {
+      for (let i = trainGroups.length - 1; i > 0; i--) {
+        const j = Math.floor(nextFloat(holder) * (i + 1));
+        [trainGroups[i], trainGroups[j]] = [trainGroups[j]!, trainGroups[i]!];
+      }
+      for (let g0 = 0; g0 < trainGroups.length; g0 += cmpBatch) jobs.push(-1 - g0);
+      for (let i = jobs.length - 1; i > 0; i--) {
+        const j = Math.floor(nextFloat(holder) * (i + 1));
+        [jobs[i], jobs[j]] = [jobs[j]!, jobs[i]!];
+      }
+    }
+    for (const job of jobs) {
       const net = current();
-      const end = Math.min(trainIdx.length, b0 + batch);
       grad.fill(0);
-      for (let k = b0; k < end; k++) {
-        const i = trainIdx[k]!;
-        const z = forwardAt(net, d, i, acts);
-        const p = sigmoid(net.model.a * d.s[i]! + net.model.c + z);
-        lossSum += bce(p, targets[i]!);
-        const dz = (d.weight[i]! * (p - targets[i]!)) / (end - b0);
-        grad[oC]! += dz;
-        if (fitA) grad[oA]! += dz * d.s[i]!;
-        grad[oB2]! += dz;
-        const last = acts[L - 1]!, dLast = dacts[L - 1]!;
-        for (let j = 0; j < last.length; j++) {
-          grad[oW2 + j]! += dz * last[j]!;
-          dLast[j] = last[j]! > 0 ? dz * params[oW2 + j]! : 0;
-        }
-        // 足した層を後ろから（ReLU の後の値が 0 の所は、その前の値が負なので勾配も 0）
-        for (let k = L - 1; k >= 1; k--) {
-          const lo = layerOff[k - 1]!, m = sizes[k]!;
-          const hin = acts[k - 1]!, dout = dacts[k]!, din = dacts[k - 1]!;
-          for (let j = 0; j < m; j++) grad[lo.b + j]! += dout[j]!;
-          for (let r = 0; r < hin.length; r++) {
-            const x = hin[r]!;
-            if (x <= 0) {
-              din[r] = 0;
-              continue;
-            }
-            const row = lo.w + r * m;
-            let back = 0;
-            for (let j = 0; j < m; j++) {
-              grad[row + j]! += x * dout[j]!;
-              back += params[row + j]! * dout[j]!;
-            }
-            din[r] = back;
-          }
-        }
-        const dh = dacts[0]!;
-        for (let j = 0; j < H; j++) grad[oB1 + j]! += dh[j]!;
-        for (let q = d.off[i]!; q < d.off[i + 1]!; q++) {
-          const row = d.idx[q]! * H, x = d.val[q]!;
-          for (let j = 0; j < H; j++) grad[row + j]! += dh[j]! * x;
+      if (job < 0) {
+        const g0 = -1 - job;
+        cmpLoss += cmpStep(net, cmp!, trainGroups.slice(g0, g0 + cmpBatch));
+      } else {
+        const b0 = job;
+        const end = Math.min(trainIdx.length, b0 + batch);
+        for (let k = b0; k < end; k++) {
+          const i = trainIdx[k]!;
+          const z = forwardAt(net, d, i, acts);
+          const p = sigmoid(net.model.a * d.s[i]! + net.model.c + z);
+          lossSum += bce(p, targets[i]!);
+          const dz = (d.weight[i]! * (p - targets[i]!)) / (end - b0);
+          backward(dz, d.s[i]!, acts, d, i);
         }
       }
       // Adam（重みは減衰させる）
@@ -573,6 +744,7 @@ function train(args: Args): number {
     }
     const v = predictAll(current(), d);
     report(`エポック ${epoch + 1}（学習の TD ${(lossSum / trainIdx.length).toFixed(4)}、a ${params[oA]!.toFixed(4)}、c ${params[oC]!.toFixed(3)}）`, d, v, lambdaReturns(d, v, lambda));
+    if (cmp) console.log(`エポック ${epoch + 1}（学習の打ち比べ ${(cmpLoss / Math.max(1, trainGroups.length)).toFixed(4)}）: ${cmpReport(cmp, predictAll(current(), cmp))}`);
     const loss = holdoutLoss(d, v);
     if (keepBest && loss < best.loss) best = { loss, epoch: epoch + 1, params: params.slice() };
   }
@@ -618,7 +790,8 @@ function probe(args: Args): number {
   for (const file of need(args, "data").split(",")) {
     for (const line of readFileSync(file, "utf8").split("\n")) {
       if (!line.trim()) continue;
-      const r = JSON.parse(line) as GameRecord;
+      const r = parseLine(line);
+      if (isCmp(r)) continue;
       r.samples.forEach((seq, p) => {
         const list = byDeck.get(r.decks[p]!) ?? [];
         for (const x of seq) if (x.ph === 0 && list.length < per) list.push({ idx: x.x, val: x.v });
@@ -678,7 +851,8 @@ function prune(args: Args): number {
   for (const file of files) {
     for (const line of readFileSync(file, "utf8").split("\n")) {
       if (!line.trim()) continue;
-      const r = JSON.parse(line) as GameRecord;
+      const r = parseLine(line);
+      if (isCmp(r)) continue;
       for (const seq of r.samples) for (const x of seq) for (const i of x.x) used.add(i);
     }
   }

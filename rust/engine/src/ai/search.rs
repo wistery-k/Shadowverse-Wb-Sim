@@ -971,6 +971,26 @@ impl SearchAgent {
     }
 }
 
+impl SearchAgent {
+    /// 局面 root で p が打てる並びを、最初の手ごとに 1 つずつ、相手のターンを読み直した点数の高い順に返す
+    /// （読み直すのは点数の高い rescore_top 個の最初の手だけ）。root を決定化せずにそのまま読む。
+    /// TD 学習の打ち比べ（runner/td.rs の --cmp）が、同じ局面から打ち比べる手の候補に使う
+    pub fn ranked_plans(&self, root: &GameState, p: PlayerIndex, rng: &mut Rng) -> Vec<Plan> {
+        let env = Env {
+            opts: &self.opts,
+            w: &self.w,
+            policy_w: &self.policy_w,
+        };
+        let root = Rc::new(root.clone());
+        let mut plans: Vec<Plan> = plan_turn(&root, p, &env, rng, true)
+            .into_iter()
+            .map(|(_, x)| x)
+            .collect();
+        plans.sort_by(|x, y| by_value_desc(x.value, y.value));
+        plans
+    }
+}
+
 /// 並びの、先頭から手がすべて同じ部分の長さ（reuseAgree）
 fn agreed_length(plans: &[Plan]) -> usize {
     let Some(first) = plans.first() else { return 0 };
