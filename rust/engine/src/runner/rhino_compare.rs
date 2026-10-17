@@ -11,7 +11,7 @@ use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
 use crate::ai::exact_lethal::exact_lethal_counts;
 use crate::ai::registry::search_classic_options;
-use crate::ai::rhino::{RhinoAgent, RhinoHolds};
+use crate::ai::rhino::RhinoAgent;
 use crate::ai::search::{SearchAgent, SearchOptions};
 use crate::ai::Agent;
 use crate::data::{data, Deck};
@@ -38,11 +38,9 @@ const AMULET_TOKENS: [&str; 2] = ["ホーリーフレイムタイガー", "壮�
 
 /// 比べるデッキの AI の設定
 #[derive(Clone)]
-#[allow(clippy::large_enum_variant)]
 enum AgentConfig {
     Rhino {
-        rules: bool,
-        holds: RhinoHolds,
+        rhino_eval: bool,
         search: SearchOptions,
         plain: SearchOptions,
     },
@@ -53,13 +51,14 @@ impl AgentConfig {
     fn create(&self) -> Box<dyn Agent> {
         match self {
             AgentConfig::Rhino {
-                rules,
-                holds,
+                rhino_eval,
                 search,
                 plain,
-            } => Box::new(
-                RhinoAgent::with_options(*rules, search.clone(), plain.clone()).with_holds(*holds),
-            ),
+            } => Box::new(RhinoAgent::with_options(
+                *rhino_eval,
+                search.clone(),
+                plain.clone(),
+            )),
             AgentConfig::Search(o) => Box::new(SearchAgent::new(o.clone())),
         }
     }
@@ -263,10 +262,10 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     // --opts は rhino・rhino-lethal・search のときだけ使う
     let agent = match agent_key.as_str() {
         "rhino" | "rhino-lethal" => {
-            let (search, plain, holds) = rhino_options(&opts, model.as_ref())?;
-            AgentConfig::Rhino { rules: agent_key == "rhino", holds, search, plain }
+            let (search, plain) = rhino_options(&opts, model.as_ref())?;
+            AgentConfig::Rhino { rhino_eval: agent_key == "rhino", search, plain }
         }
-        "search" => AgentConfig::Search(search_options(&opts, model.as_ref(), SearchOptions::default(), &["potential", "holds", "rules"])?),
+        "search" => AgentConfig::Search(search_options(&opts, model.as_ref(), SearchOptions::default(), &["potential"])?),
         "search-classic" => AgentConfig::Search(search_classic_options()),
         _ => return Err(format!("Rust 版で使える --agent は rhino / rhino-lethal / search / search-classic: {agent_key}")),
     };

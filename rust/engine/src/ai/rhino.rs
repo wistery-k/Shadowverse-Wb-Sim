@@ -1,7 +1,9 @@
-//! リノセウスエルフ用のルールベース AI（src/ai/rhino.ts）。
+//! リノセウスエルフ用の AI（もとは src/ai/rhino.ts）。
 //!
-//! ルールで決まる手（リーサル、1枚目の聖樹の杖、エクストラPP 等）は最優先で打ち、
-//! ルールで禁じる手（最後の杖のアクト、森の神秘 等）は探索から外し、残りは探索 AI に任せる。
+//! リノセウス専用のリーサル探索で倒しきれれば最優先で打ち、それ以外は探索 AI に任せる。
+//! エルフの探索には、次のターンのリノセウスの打点の項（potential）を評価に足す。
+//! 以前はユーザーが作ったルール（マリガン・温存・1 枚目の杖・燐光の岩・最後の杖と岩を残す 等）も重ねていたが、
+//! 学習した補正を入れた後はルールを外したほうが強かったので消した（docs/ai-notes.md「リノセウス用 AI のルールを消す」）。
 //! エルフ以外のデッキでは探索 AI と同じ。
 
 use super::determinize::determinize;
@@ -20,210 +22,9 @@ use crate::data::{ClassId, AMBUSH, INTIMIDATE, STORM, WARD};
 use crate::game::{acting_player, legal_actions, try_apply_action};
 use crate::state::*;
 use std::sync::Arc;
-use std::sync::OnceLock;
 
-/// マリガンで1枚だけ残す序盤のカード（優先順）
-const EARLY: [Tag; 3] = [Tag::Tamer, Tag::WaterFairy, Tag::FairyCall];
-/// バックウッドと序盤のカードがどちらもあるときに残すカード（優先順。杖は1枚まで）
-const EXTRA_KEEP: [Tag; 3] = [Tag::Rod, Tag::May, Tag::Lily];
-/// 1枚目のエクストラPP を使ってよい最後のターン（自分のターン数）
-const FIRST_EXTRA_PP_DEADLINE: i32 = 5;
 /// ビームに最初の手ごとに残す局面の数（SearchOptions.perFirst）
 const RHINO_PER_FIRST: usize = 4;
-
-fn board_count(s: &GameState, p: PlayerIndex, name: Tag) -> i32 {
-    s.players[p]
-        .board
-        .iter()
-        .filter(|c| tag(c.card) == name)
-        .count() as i32
-}
-
-fn hand_count(s: &GameState, p: PlayerIndex, name: Tag) -> i32 {
-    s.players[p]
-        .hand
-        .iter()
-        .filter(|h| tag(h.card) == name)
-        .count() as i32
-}
-
-fn opp_has_followers(s: &GameState, p: PlayerIndex) -> bool {
-    s.players[opponent(p)].board.iter().any(|c| c.is_follower)
-}
-
-/// ファンファーレに【コンボ】の条件があるカード（TypeScript 版は能力の JSON に "kind":"combo" があるか）
-fn has_combo_fanfare(c: crate::data::CardIdx) -> bool {
-    static TABLE: OnceLock<Vec<bool>> = OnceLock::new();
-    TABLE.get_or_init(|| {
-        crate::data::data()
-            .abilities
-            .iter()
-            .map(|ab| {
-                ab.abilities.iter().any(|a| {
-                    // Debug では {kind:"combo"} の値・条件が `Combo`、{kind:"addCombo"} の効果が `AddCombo` になる
-                    a.trigger.on() == crate::data::On::Fanfare
-                        && format!("{a:?}").replace("AddCombo", "").contains("Combo")
-                })
-            })
-            .collect()
-    })[c as usize]
-}
-
-fn played_tag(s: &GameState, a: &Action, p: PlayerIndex) -> Option<Tag> {
-    let Action::Play(iid) = a else { return None };
-    s.players[p]
-        .hand
-        .iter()
-        .find(|h| h.iid == *iid)
-        .map(|h| tag(h.card))
-}
-
-/// 1枚目のエクストラPP で、今は出せないが使えば出せるようになる「使う理由のある」カードがあるか
-fn extra_pp_enables_key_play(s: &GameState, p: PlayerIndex) -> bool {
-    let Some(after) = try_apply_action(s, &Action::ExtraPp) else {
-        return false;
-    };
-    let now = legal_actions(s);
-    let combo = s.players[p].combo;
-    legal_actions(&after).iter().any(|a| {
-        let Action::Play(iid) = a else { return false };
-        if now.contains(a) {
-            return false;
-        }
-        let card = after.players[p]
-            .hand
-            .iter()
-            .find(|h| h.iid == *iid)
-            .map(|h| h.card);
-        if card.is_some_and(|c| tag(c) == Tag::Backwood) {
-            return true;
-        }
-        // プレイすると【コンボ_3】を満たす（プレイしたカード自身も数える）
-        card.is_some_and(has_combo_fanfare) && combo + 1 >= 3
-    })
-}
-
-/// 場に1個しかない杖・燐光の岩（手札に戻す等の対象に選ばない）
-fn last_keepers(s: &GameState, p: PlayerIndex) -> Vec<Iid> {
-    let mut out = Vec::new();
-    for name in [Tag::Rod, Tag::Rock] {
-        let mut cards = s.players[p].board.iter().filter(|c| tag(c.card) == name);
-        if let (Some(c), None) = (cards.next(), cards.next()) {
-            out.push(c.iid);
-        }
-    }
-    out
-}
-
-/// 手を打つと、最後の杖・燐光の岩が場から離れるか、それを選ぶしかない選択待ちになるか
-fn forces_keeper_choice(s: &GameState, a: &Action, p: PlayerIndex) -> bool {
-    let keepers = last_keepers(s, p);
-    if keepers.is_empty() {
-        return false;
-    }
-    let Some(after) = try_apply_action(s, a) else {
-        return false;
-    };
-    let on_board = &after.players[p].board;
-    if keepers
-        .iter()
-        .any(|k| !on_board.iter().any(|c| c.iid == *k))
-    {
-        return true;
-    }
-    match &after.pending {
-        Some(Pending::Choose { player, .. }) if *player == p => {}
-        _ => return false,
-    }
-    legal_actions(&after).iter().all(|c| match c {
-        Action::Choose(targets) => targets.iter().any(|t| keepers.contains(t)),
-        _ => false,
-    })
-}
-
-/// リノセウス用 AI のルール。温存のルール（リーサルまで出さない・使わない）3 つと、その他のルール。
-/// false にしたルールは使わない（ルールごとの値打ちを比べるため。設定の JSON の "holds"・"rules"）
-#[derive(Clone, Copy)]
-pub struct RhinoHolds {
-    /// 森の神秘
-    pub mystery: bool,
-    /// 手札に 1 枚しかないリノセウス
-    pub rhino: bool,
-    /// 2 つ目のエクストラPP
-    pub extra_pp: bool,
-    /// マリガン（mulligan_swap）
-    pub mulligan: bool,
-    /// 1 つ目のエクストラPP が期限のターンに残っていれば使う
-    pub extra_pp_deadline: bool,
-    /// 1 つ目のエクストラPP は使う理由があるときだけ使う
-    pub first_extra_pp: bool,
-    /// 1 枚目の杖を最優先で置く
-    pub rod_first: bool,
-    /// 燐光の岩は相手の場にフォロワーがいないときだけ置く
-    pub rock: bool,
-    /// 場に 1 個しかない杖・燐光の岩はアクトしない・手札に戻す等の対象に選ばない
-    pub keepers: bool,
-}
-
-pub const ALL_HOLDS: RhinoHolds = RhinoHolds {
-    mystery: true,
-    rhino: true,
-    extra_pp: true,
-    mulligan: true,
-    extra_pp_deadline: true,
-    first_extra_pp: true,
-    rod_first: true,
-    rock: true,
-    keepers: true,
-};
-
-/// ルールで打ってよい手か（リーサル以外の場面に使う）
-pub fn allow_action_with(holds: RhinoHolds, s: &GameState, a: &Action, p: PlayerIndex) -> bool {
-    let pl = &s.players[p];
-    match a {
-        Action::Choose(targets) => {
-            // 最後の杖・燐光の岩は選ばない
-            if !holds.keepers || s.pending.as_ref().map(|pd| pd.player()) != Some(p) {
-                return true;
-            }
-            let keepers = last_keepers(s, p);
-            !targets.iter().any(|t| keepers.contains(t))
-        }
-        Action::Play(_) => {
-            let name = played_tag(s, a, p);
-            if holds.mystery && name == Some(Tag::Mystery) {
-                return false;
-            }
-            if holds.rhino && name == Some(Tag::Rhino) && hand_count(s, p, Tag::Rhino) < 2 {
-                return false;
-            }
-            if holds.keepers && forces_keeper_choice(s, a, p) {
-                return false;
-            }
-            if holds.rock && name == Some(Tag::Rock) {
-                return !opp_has_followers(s, p);
-            }
-            true
-        }
-        Action::Act(_) if !holds.keepers => true,
-        Action::Act(iid) => {
-            let name = pl.board.iter().find(|c| c.iid == *iid).map(|c| tag(c.card));
-            // 杖と燐光の岩は、場に1個は残す
-            if let Some(n @ (Tag::Rod | Tag::Rock)) = name {
-                return board_count(s, p, n) >= 2;
-            }
-            !forces_keeper_choice(s, a, p)
-        }
-        Action::ExtraPp => {
-            // 2つ目はリーサルまで温存。1つ目は使う理由があるときだけ
-            if holds.extra_pp && pl.turn_count >= EXTRA_PP_REFRESH_TURN {
-                return false;
-            }
-            !holds.first_extra_pp || extra_pp_enables_key_play(s, p)
-        }
-        _ => true,
-    }
-}
 
 /// 上限の式が見るプレイヤーの状態（次のターンの見積もりでは、PP 等を変え、場のフォロワーを除いたもの）
 #[derive(Clone, Copy)]
@@ -454,15 +255,8 @@ pub fn rhino_extra_eval(potential: f64, learned: Option<ExtraEval>) -> Option<Ex
 }
 
 /// リノセウス用 AI の探索の設定（createRhinoAgent の既定。user の設定はこの上に上書きする）
-pub fn rhino_search_options(
-    potential: f64,
-    holds: RhinoHolds,
-    learned: Option<ExtraEval>,
-) -> SearchOptions {
+pub fn rhino_search_options(potential: f64, learned: Option<ExtraEval>) -> SearchOptions {
     SearchOptions {
-        allow: Some(Arc::new(
-            move |s: &GameState, a: &Action, q: PlayerIndex| allow_action_with(holds, s, a, q),
-        )),
         lethal: false,
         per_first: RHINO_PER_FIRST,
         next_lethal_search: Some(Arc::new(|s: &GameState, q: PlayerIndex| {
@@ -471,45 +265,6 @@ pub fn rhino_search_options(
         extra_eval: rhino_extra_eval(potential, learned),
         ..SearchOptions::default()
     }
-}
-
-/// マリガンで入れ替えるカードの iid
-pub fn mulligan_swap(s: &GameState, p: PlayerIndex) -> Vec<Iid> {
-    let hand = &s.players[p].hand;
-    let mut keep: Vec<Iid> = Vec::new();
-    let backwood = hand.iter().find(|h| tag(h.card) == Tag::Backwood);
-    let early = EARLY
-        .iter()
-        .find_map(|n| hand.iter().find(|h| tag(h.card) == *n));
-    if let Some(b) = backwood {
-        keep.push(b.iid);
-    }
-    if let Some(e) = early {
-        if !keep.contains(&e.iid) {
-            keep.push(e.iid);
-        }
-    }
-    if backwood.is_some() && early.is_some() {
-        for name in EXTRA_KEEP {
-            for h in hand {
-                if keep.contains(&h.iid) || tag(h.card) != name {
-                    continue;
-                }
-                keep.push(h.iid);
-                if name == Tag::Rod {
-                    break;
-                }
-            }
-        }
-    }
-    hand.iter()
-        .filter(|h| !keep.contains(&h.iid))
-        .map(|h| h.iid)
-        .collect()
-}
-
-fn same_set(a: &[Iid], b: &[Iid]) -> bool {
-    a.len() == b.len() && a.iter().all(|x| b.contains(x))
 }
 
 const DIRECT_ONLY: LethalOptions = LethalOptions {
@@ -879,21 +634,20 @@ pub fn deck_class_of(s: &GameState, p: PlayerIndex) -> ClassId {
         .unwrap_or(ClassId::Neutral)
 }
 
-/// リノセウス用 AI（rules が false なら、ルールを使わずリノセウス用のリーサル探索だけを足した比較用の AI）
+/// リノセウス用 AI（rhino_eval が false なら、リノセウスの打点の項を使わずリノセウス用のリーサル探索だけを足した比較用の AI）
 pub struct RhinoAgent {
-    rules: bool,
-    holds: RhinoHolds,
+    rhino_eval: bool,
     search: SearchAgent,
     plain: SearchAgent,
 }
 
 impl RhinoAgent {
     /// 既定の設定のリノセウス用 AI
-    pub fn new(rules: bool) -> RhinoAgent {
+    pub fn new(rhino_eval: bool) -> RhinoAgent {
         let learned = SearchOptions::default().extra_eval;
         RhinoAgent::with_options(
-            rules,
-            rhino_search_options(RHINO_POTENTIAL, ALL_HOLDS, learned.clone()),
+            rhino_eval,
+            rhino_search_options(RHINO_POTENTIAL, learned.clone()),
             SearchOptions {
                 extra_eval: learned,
                 ..SearchOptions::default()
@@ -901,20 +655,17 @@ impl RhinoAgent {
         )
     }
 
-    /// search はエルフの手番の探索の設定、plain はエルフ以外のデッキ・ルールを使わないときの探索の設定
-    pub fn with_options(rules: bool, search: SearchOptions, plain: SearchOptions) -> RhinoAgent {
+    /// search はエルフの探索の設定、plain はエルフ以外のデッキ・打点の項を使わないときの探索の設定
+    pub fn with_options(
+        rhino_eval: bool,
+        search: SearchOptions,
+        plain: SearchOptions,
+    ) -> RhinoAgent {
         RhinoAgent {
-            rules,
-            holds: ALL_HOLDS,
+            rhino_eval,
             search: SearchAgent::new(search),
             plain: SearchAgent::new(plain),
         }
-    }
-
-    /// マリガン・エクストラPP の期限・1 枚目の杖のルールを holds のとおりにする（探索から外すルールは search の allow で決まる）
-    pub fn with_holds(mut self, holds: RhinoHolds) -> RhinoAgent {
-        self.holds = holds;
-        self
     }
 }
 
@@ -932,7 +683,7 @@ impl Agent for RhinoAgent {
         }
         let turn_search: &dyn Fn(&GameState, PlayerIndex) -> Option<Vec<Action>> =
             &search_lethal_for_rhino_turn;
-        if !self.rules {
+        if !self.rhino_eval {
             if !mulligan && legal.len() > 1 && real.active == p {
                 if let Some(l) =
                     find_lethal(real, p, rng, &DEFAULT_LETHAL_OPTIONS, Some(turn_search))
@@ -944,16 +695,8 @@ impl Agent for RhinoAgent {
             }
             return self.plain.choose_action(real, legal, rng);
         }
-        if mulligan && !self.holds.mulligan {
-            return self.search.choose_action(real, legal, rng);
-        }
         if mulligan {
-            let swap = mulligan_swap(real, p);
-            return legal
-                .iter()
-                .find(|a| matches!(a, Action::Mulligan { swap: s, .. } if same_set(s, &swap)))
-                .unwrap_or(first)
-                .clone();
+            return self.search.choose_action(real, legal, rng);
         }
         if legal.len() == 1 {
             return first.clone();
@@ -962,30 +705,10 @@ impl Agent for RhinoAgent {
         if real.active != p {
             return self.search.choose_action(real, legal, rng);
         }
-        // リーサル（ルールより優先。手順の途中の選択も含む）
+        // リーサル（手順の途中の選択も含む）
         if let Some(l) = find_lethal(real, p, rng, &DEFAULT_LETHAL_OPTIONS, Some(turn_search)) {
             if legal.contains(&l) {
                 return l;
-            }
-        }
-        // 自分の選択待ちは探索 AI に任せる
-        if real.pending.is_some() {
-            return self.search.choose_action(real, legal, rng);
-        }
-        let pl = &real.players[p];
-        // 1つ目のエクストラPP が期限のターンに残っていれば、ターン開始時に使う
-        if self.holds.extra_pp_deadline && pl.turn_count == FIRST_EXTRA_PP_DEADLINE {
-            if let Some(a) = legal.iter().find(|a| matches!(a, Action::ExtraPp)) {
-                return a.clone();
-            }
-        }
-        // 1枚目の杖は最優先で置く
-        if self.holds.rod_first && board_count(real, p, Tag::Rod) == 0 {
-            if let Some(a) = legal
-                .iter()
-                .find(|a| played_tag(real, a, p) == Some(Tag::Rod))
-            {
-                return a.clone();
             }
         }
         self.search.choose_action(real, legal, rng)

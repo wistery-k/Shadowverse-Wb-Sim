@@ -1,10 +1,7 @@
 //! リノセウス用 AI（tests/rhino.test.ts）
 
 use super::*;
-use crate::ai::rhino::{
-    allow_action_with, mulligan_swap, next_turn_rhino_bound, rhino_search_options, RhinoAgent,
-    ALL_HOLDS, RHINO_POTENTIAL,
-};
+use crate::ai::rhino::{next_turn_rhino_bound, rhino_search_options, RhinoAgent, RHINO_POTENTIAL};
 use crate::ai::rhino_lethal::{search_rhino_lethal, DEFAULT_RHINO_LETHAL_OPTIONS};
 use crate::ai::search::{SearchAgent, SearchOptions};
 
@@ -20,10 +17,6 @@ fn bishop() -> &'static [CardIdx] {
     deck("アミュレット疾走ビショップ")
 }
 
-fn allow(s: &GameState, a: &Action) -> bool {
-    allow_action_with(ALL_HOLDS, s, a, 0)
-}
-
 /// マリガン後、エルフ（プレイヤー0）の手番の局面
 fn main_phase() -> GameState {
     let mut s = skip_mulligan(new_game(elf(), royal(), 1));
@@ -31,158 +24,7 @@ fn main_phase() -> GameState {
     s
 }
 
-/// マリガン前の局面で、エルフ（プレイヤー0）の手札を names にする
-fn with_hand(names: &[&str]) -> (GameState, Vec<Iid>) {
-    let mut s = new_game(elf(), royal(), 1);
-    s.players[0].hand = hand_cards(&mut s, names);
-    let iids = s.players[0].hand.iter().map(|h| h.iid).collect();
-    (s, iids)
-}
-
-// ---- マリガン ----
-
-#[test]
-fn mulligan_keeps_backwood_and_early_cards() {
-    // バックウッドと序盤のカードがあれば、それと杖1枚・メイ・リリィを残す
-    let (s, iids) = with_hand(&[
-        "薫交の天宮・バックウッド",
-        "聖樹の杖",
-        "純粋なるウォーターフェアリー",
-        "聖樹の杖",
-    ]);
-    assert_eq!(mulligan_swap(&s, 0), vec![iids[3]]);
-}
-
-#[test]
-fn mulligan_keeps_one_early_card_by_priority() {
-    // 片方だけならそれだけ残し、序盤のカードは優先順に1枚まで
-    let (s, iids) = with_hand(&[
-        "妖精の招集",
-        "フェアリーテイマー",
-        "聖樹の杖",
-        "アドベンチャーエルフ・メイ",
-    ]);
-    assert_eq!(mulligan_swap(&s, 0), vec![iids[0], iids[2], iids[3]]);
-}
-
-#[test]
-fn mulligan_swaps_all_without_key_cards() {
-    // どちらも無ければすべて入れ替える
-    let (s, iids) = with_hand(&[
-        "聖樹の杖",
-        "殺戮のリノセウス",
-        "アドベンチャーエルフ・メイ",
-        "虫の知らせ",
-    ]);
-    assert_eq!(mulligan_swap(&s, 0), iids);
-}
-
-#[test]
-fn mulligan_by_rules_in_either_seat() {
-    // 後攻でも、先攻の相手がエルフ以外でも、エルフのマリガンはルールで行う
-    for elf_seat in [0, 1] {
-        for first in [0, 1] {
-            let decks = if elf_seat == 0 {
-                [elf(), royal()]
-            } else {
-                [royal(), elf()]
-            };
-            let mut s = new_game(decks[0], decks[1], 1);
-            s.first = first;
-            s.active = first;
-            s.players[elf_seat].hand = hand_cards(
-                &mut s,
-                &[
-                    "勇壮の堕天使・オリヴィエ",
-                    "ベビーカーバンクル",
-                    "ベビーカーバンクル",
-                    "フェアリーテイマー",
-                ],
-            );
-            let tamer = s.players[elf_seat].hand[3].iid;
-            let mut agent = RhinoAgent::new(true);
-            let mut rng = Rng::new(1);
-            while s.phase == Phase::Mulligan {
-                let a = agent.choose_action(&s, &legal_actions(&s), &mut rng);
-                if let Action::Mulligan { player, swap } = &a {
-                    if *player == elf_seat {
-                        let expected: Vec<Iid> = s.players[elf_seat]
-                            .hand
-                            .iter()
-                            .map(|h| h.iid)
-                            .filter(|&x| x != tamer)
-                            .collect();
-                        assert_eq!(sorted(swap.clone()), sorted(expected));
-                    }
-                }
-                s = apply(&s, &a);
-            }
-        }
-    }
-}
-
-// ---- 禁じる手 ----
-
-#[test]
-fn does_not_act_last_rod_or_rock() {
-    // 場の最後の杖・燐光の岩はアクトしない
-    let mut s = main_phase();
-    let rod = board_card(&mut s, "聖樹の杖");
-    let rod_iid = rod.iid;
-    s.players[0].board = vec![rod];
-    assert!(!allow(&s, &Action::Act(rod_iid)));
-    let rod2 = board_card(&mut s, "聖樹の杖");
-    s.players[0].board.push(rod2);
-    assert!(allow(&s, &Action::Act(rod_iid)));
-    let rock = board_card(&mut s, "燐光の岩");
-    let rock_iid = rock.iid;
-    s.players[0].board = vec![rock];
-    assert!(!allow(&s, &Action::Act(rock_iid)));
-}
-
-#[test]
-fn does_not_choose_last_rod() {
-    // 手札に戻す等の対象に最後の杖を選ばない。杖しか選べないなら、そのカードを打たない
-    let mut s = main_phase();
-    s.players[0].pp = 3;
-    s.players[0].max_pp = 3;
-    let rod = board_card(&mut s, "聖樹の杖");
-    let bugs = hand_card(&mut s, "虫の知らせ");
-    let (rod_iid, bugs_iid) = (rod.iid, bugs.iid);
-    s.players[0].board = vec![rod.clone()];
-    s.players[0].hand = vec![bugs];
-    assert!(!allow(&s, &Action::Play(bugs_iid)));
-    let fairy = board_card(&mut s, "フェアリー");
-    let fairy_iid = fairy.iid;
-    s.players[0].board = vec![rod, fairy];
-    assert!(allow(&s, &Action::Play(bugs_iid)));
-    let after = apply(&s, &Action::Play(bugs_iid));
-    assert!(!allow(&after, &Action::Choose(vec![rod_iid])));
-    assert!(allow(&after, &Action::Choose(vec![fairy_iid])));
-    let mut agent = RhinoAgent::new(true);
-    let a = agent.choose_action(&after, &legal_actions(&after), &mut Rng::new(1));
-    assert_eq!(a, Action::Choose(vec![fairy_iid]));
-}
-
-#[test]
-fn rock_only_against_empty_board_and_no_mystery() {
-    // 燐光の岩は相手の場にフォロワーがいないときだけ置く。杖は2枚目でも置いてよい。森の神秘は使わない
-    let mut s = main_phase();
-    let hand = hand_cards(&mut s, &["聖樹の杖", "燐光の岩", "森の神秘"]);
-    let (rod, rock, mystery) = (hand[0].iid, hand[1].iid, hand[2].iid);
-    s.players[0].hand = hand;
-    assert!(allow(&s, &Action::Play(rod))); // 1枚目
-    let rod_on_board = board_card(&mut s, "聖樹の杖");
-    s.players[0].board = vec![rod_on_board];
-    let knight = board_card(&mut s, "ナイト");
-    s.players[1].board = vec![knight];
-    assert!(allow(&s, &Action::Play(rod)));
-    assert!(!allow(&s, &Action::Play(rock)));
-    s.players[1].board.clear();
-    assert!(allow(&s, &Action::Play(rod)));
-    assert!(allow(&s, &Action::Play(rock)));
-    assert!(!allow(&s, &Action::Play(mystery)));
-}
+// ---- 次のターンの打点の上限 ----
 
 #[test]
 fn next_turn_bound_grows_with_rhinos() {
@@ -199,45 +41,6 @@ fn next_turn_bound_grows_with_rhinos() {
     let more = hand_cards(&mut s, &["殺戮のリノセウス", "森の神秘"]);
     s.players[0].hand.extend(more);
     assert!(next_turn_rhino_bound(&s, 0) > one);
-}
-
-#[test]
-fn holds_single_rhinoceus() {
-    // 手札に1枚しかないリノセウスはプレイしない（2枚以上ならよい）
-    let mut s = main_phase();
-    s.players[0].pp = 5;
-    s.players[0].max_pp = 5;
-    let rhino = hand_card(&mut s, "殺戮のリノセウス");
-    let iid = rhino.iid;
-    s.players[0].hand = vec![rhino];
-    assert!(!allow(&s, &Action::Play(iid)));
-    let r2 = hand_card(&mut s, "殺戮のリノセウス");
-    s.players[0].hand.push(r2);
-    assert!(allow(&s, &Action::Play(iid)));
-}
-
-#[test]
-fn extra_pp_rules() {
-    // エクストラPP: 2つ目は使わない。1つ目は杖を置くためには使わない（バックウッドなら使う）
-    let mut s = main_phase();
-    {
-        let pl = &mut s.players[0];
-        pl.extra_pp_available = true;
-        pl.turn_count = 2;
-        pl.max_pp = 2;
-        pl.pp = 2;
-    }
-    s.players[0].hand = hand_cards(&mut s, &["聖樹の杖"]);
-    assert!(!allow(&s, &Action::ExtraPp));
-    s.players[0].max_pp = 4;
-    s.players[0].pp = 4;
-    s.players[0].hand = hand_cards(&mut s, &["薫交の天宮・バックウッド"]);
-    assert!(allow(&s, &Action::ExtraPp));
-    s.players[0].hand = hand_cards(&mut s, &["殺戮のリノセウス"]);
-    assert!(!allow(&s, &Action::ExtraPp));
-    s.players[0].turn_count = 6;
-    s.players[0].hand = hand_cards(&mut s, &["薫交の天宮・バックウッド"]);
-    assert!(!allow(&s, &Action::ExtraPp));
 }
 
 // ---- リノセウス専用のリーサル探索 ----
@@ -376,25 +179,6 @@ fn state_1678126716(n: usize) -> GameState {
     apply_all(&new_game(bishop(), elf(), 1678126716), &log[..n])
 }
 
-fn hand_names(s: &GameState, p: PlayerIndex) -> Vec<&'static str> {
-    s.players[p].hand.iter().map(|h| name_of(h.card)).collect()
-}
-
-#[test]
-fn turn6_holds_single_rhinoceus_without_lethal() {
-    // 6 ターン目: リーサルでなければ、手札に1枚のリノセウスは出さない
-    let s = state_1678126716(40);
-    let rhinos = |s: &GameState| {
-        hand_names(s, 1)
-            .iter()
-            .filter(|n| **n == "殺戮のリノセウス")
-            .count()
-    };
-    assert_eq!(rhinos(&s), 1);
-    let end = play_active(s, 1, &mut RhinoAgent::new(true), &mut Rng::new(1));
-    assert!(hand_names(&end, 1).contains(&"殺戮のリノセウス"));
-}
-
 /// 7 ターン目（相手の場にフォロワーなし）。フェアリーの後に燐光の岩を出すとコンボ 2 で森の神秘が加わらない。
 /// 以前はビームで、手の順番が違うだけの局面（加わったフェアリーの iid が違う）がまとまらず枠を埋め、岩を 2 手目に出していた。
 /// 確かめたいのは探索の同じ局面の判定なので、手で作った評価だけで打つ（介入データを混ぜた補正では、乱数 8 通り中 5 通りで
@@ -405,7 +189,7 @@ fn turn7_does_not_play_rock_after_fairy() {
     assert_eq!(s.players[1].combo, 1);
     let mut agent = RhinoAgent::with_options(
         true,
-        rhino_search_options(RHINO_POTENTIAL, ALL_HOLDS, None),
+        rhino_search_options(RHINO_POTENTIAL, None),
         SearchOptions {
             extra_eval: None,
             ..SearchOptions::default()
@@ -516,7 +300,7 @@ fn turn7_plays_aria_for_next_lethal() {
             true,
             SearchOptions {
                 next_lethal: 10.0,
-                ..rhino_search_options(RHINO_POTENTIAL, ALL_HOLDS, learned.clone())
+                ..rhino_search_options(RHINO_POTENTIAL, learned.clone())
             },
             SearchOptions {
                 extra_eval: learned,

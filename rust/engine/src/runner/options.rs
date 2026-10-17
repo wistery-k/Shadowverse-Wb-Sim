@@ -4,7 +4,7 @@
 //! （scripts/valueNetOption.ts）。TypeScript 版とともに消した実験用の項目（exhaustive 等）は、既定の値のときだけ受け付ける。
 
 use crate::ai::aidata::{weights_from, AI_DATA_JSON};
-use crate::ai::rhino::{rhino_search_options, RhinoHolds, ALL_HOLDS, RHINO_POTENTIAL};
+use crate::ai::rhino::{rhino_search_options, RHINO_POTENTIAL};
 use crate::ai::search::{ExtraEval, MulliganMode, OpponentSearch, ScoreTurnEnd, SearchOptions};
 use crate::ai::valuenet::ValueNet;
 use crate::json::Json;
@@ -287,43 +287,11 @@ pub fn rhino_compare_options(text: &str) -> Result<(Json, Option<ExtraEval>), St
 pub fn rhino_options(
     raw: &Json,
     model: Option<&ExtraEval>,
-) -> Result<(SearchOptions, SearchOptions, RhinoHolds), String> {
+) -> Result<(SearchOptions, SearchOptions), String> {
     let potential = match raw.get("potential") {
         None => RHINO_POTENTIAL,
         Some(v) => number("potential", v)?,
     };
-    let mut holds: RhinoHolds = ALL_HOLDS;
-    if let Some(h) = raw.get("holds") {
-        let Json::Obj(items) = h else {
-            return Err("\"holds\" はオブジェクト".into());
-        };
-        for (k, v) in items {
-            let b = flag(k, v)?;
-            match k.as_str() {
-                "mystery" => holds.mystery = b,
-                "rhino" => holds.rhino = b,
-                "extraPp" => holds.extra_pp = b,
-                _ => return Err(format!("未知の \"holds\" の項目: \"{k}\"")),
-            }
-        }
-    }
-    if let Some(h) = raw.get("rules") {
-        let Json::Obj(items) = h else {
-            return Err("\"rules\" はオブジェクト".into());
-        };
-        for (k, v) in items {
-            let b = flag(k, v)?;
-            match k.as_str() {
-                "mulligan" => holds.mulligan = b,
-                "extraPpDeadline" => holds.extra_pp_deadline = b,
-                "firstExtraPp" => holds.first_extra_pp = b,
-                "rodFirst" => holds.rod_first = b,
-                "rock" => holds.rock = b,
-                "keepers" => holds.keepers = b,
-                _ => return Err(format!("未知の \"rules\" の項目: \"{k}\"")),
-            }
-        }
-    }
     // extraEval を書かなければ探索 AI の既定の補正（data/value-net.json）
     let learned = match raw.get("extraEval") {
         None => SearchOptions::default().extra_eval,
@@ -339,14 +307,14 @@ pub fn rhino_options(
     let search = search_options(
         raw,
         model,
-        rhino_search_options(potential, holds, learned.clone()),
-        &["potential", "holds", "rules", "extraEval"],
+        rhino_search_options(potential, learned.clone()),
+        &["potential", "extraEval"],
     )?;
     let plain = SearchOptions {
         extra_eval: learned,
         ..SearchOptions::default()
     };
-    Ok((search, plain, holds))
+    Ok((search, plain))
 }
 
 #[cfg(test)]
@@ -377,15 +345,9 @@ mod tests {
             .unwrap()
             .extra_eval
             .is_none());
-        let (raw, _) =
-            rhino_compare_options(r#"{"potential":0,"holds":{"mystery":false},"nextLethal":10}"#)
-                .unwrap();
-        assert_eq!(
-            raw.stringify(),
-            r#"{"potential":0,"holds":{"mystery":false},"nextLethal":10}"#
-        );
-        let (search, plain, holds) = rhino_options(&raw, None).unwrap();
-        assert!(!holds.mystery && holds.rhino && holds.rock);
+        let (raw, _) = rhino_compare_options(r#"{"potential":0,"nextLethal":10}"#).unwrap();
+        assert_eq!(raw.stringify(), r#"{"potential":0,"nextLethal":10}"#);
+        let (search, plain) = rhino_options(&raw, None).unwrap();
         assert_eq!(search.next_lethal, 10.0);
         assert!(!search.lethal && search.extra_eval.is_some() && plain.extra_eval.is_some());
     }

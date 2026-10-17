@@ -29,7 +29,7 @@ export const AGENTS: Readonly<Record<string, { agent: Agent; label: string }>> =
   "search-classic": { agent: wasmAgent("search-classic"), label: "探索（学習した補正なし）" },
   // 強さの物差しの相手（rust/engine/src/runner/yardstick.rs で凍結した search-classic）。人間との比較の相手（既定）
   yardstick: { agent: wasmAgent("yardstick"), label: "物差し（凍結した探索）" },
-  rhino: { agent: wasmAgent("rhino"), label: "リノセウス用ルール＋探索" },
+  rhino: { agent: wasmAgent("rhino"), label: "探索＋リノセウス用の評価・リーサル" },
   "rhino-lethal": { agent: wasmAgent("rhino-lethal"), label: "探索＋リノセウス用リーサル" },
   greedy: { agent: wasmAgent("greedy"), label: "貪欲法" },
   "greedy-base": { agent: wasmAgent("greedy-base"), label: "貪欲法（基準の重み）" },
