@@ -77,6 +77,8 @@ npm run game       # 1試合だけ行い、行動の列を表示する（リプ�
 npm run svwb       # Rust 版の CLI（ゴールデンテスト・計測・自己対戦。rust/README.md）
 ```
 
+各コマンドが受け付ける引数の一覧は [`docs/commands.md`](docs/commands.md) にまとめてあります。
+
 ## 公開
 
 `main` ブランチへの push で GitHub Actions がビルドし GitHub Pages へデプロイします。
