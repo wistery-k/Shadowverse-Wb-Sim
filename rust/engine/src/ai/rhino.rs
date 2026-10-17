@@ -141,7 +141,8 @@ fn forces_keeper_choice(s: &GameState, a: &Action, p: PlayerIndex) -> bool {
     })
 }
 
-/// 温存のルール（リーサルまで出さない・使わない）
+/// リノセウス用 AI のルール。温存のルール（リーサルまで出さない・使わない）3 つと、その他のルール。
+/// false にしたルールは使わない（ルールごとの値打ちを比べるため。設定の JSON の "holds"・"rules"）
 #[derive(Clone, Copy)]
 pub struct RhinoHolds {
     /// 森の神秘
@@ -150,12 +151,30 @@ pub struct RhinoHolds {
     pub rhino: bool,
     /// 2 つ目のエクストラPP
     pub extra_pp: bool,
+    /// マリガン（mulligan_swap）
+    pub mulligan: bool,
+    /// 1 つ目のエクストラPP が期限のターンに残っていれば使う
+    pub extra_pp_deadline: bool,
+    /// 1 つ目のエクストラPP は使う理由があるときだけ使う
+    pub first_extra_pp: bool,
+    /// 1 枚目の杖を最優先で置く
+    pub rod_first: bool,
+    /// 燐光の岩は相手の場にフォロワーがいないときだけ置く
+    pub rock: bool,
+    /// 場に 1 個しかない杖・燐光の岩はアクトしない・手札に戻す等の対象に選ばない
+    pub keepers: bool,
 }
 
 pub const ALL_HOLDS: RhinoHolds = RhinoHolds {
     mystery: true,
     rhino: true,
     extra_pp: true,
+    mulligan: true,
+    extra_pp_deadline: true,
+    first_extra_pp: true,
+    rod_first: true,
+    rock: true,
+    keepers: true,
 };
 
 /// ルールで打ってよい手か（リーサル以外の場面に使う）
@@ -164,7 +183,7 @@ pub fn allow_action_with(holds: RhinoHolds, s: &GameState, a: &Action, p: Player
     match a {
         Action::Choose(targets) => {
             // 最後の杖・燐光の岩は選ばない
-            if s.pending.as_ref().map(|pd| pd.player()) != Some(p) {
+            if !holds.keepers || s.pending.as_ref().map(|pd| pd.player()) != Some(p) {
                 return true;
             }
             let keepers = last_keepers(s, p);
@@ -178,14 +197,15 @@ pub fn allow_action_with(holds: RhinoHolds, s: &GameState, a: &Action, p: Player
             if holds.rhino && name == Some(Tag::Rhino) && hand_count(s, p, Tag::Rhino) < 2 {
                 return false;
             }
-            if forces_keeper_choice(s, a, p) {
+            if holds.keepers && forces_keeper_choice(s, a, p) {
                 return false;
             }
-            if name == Some(Tag::Rock) {
+            if holds.rock && name == Some(Tag::Rock) {
                 return !opp_has_followers(s, p);
             }
             true
         }
+        Action::Act(_) if !holds.keepers => true,
         Action::Act(iid) => {
             let name = pl.board.iter().find(|c| c.iid == *iid).map(|c| tag(c.card));
             // 杖と燐光の岩は、場に1個は残す
@@ -199,7 +219,7 @@ pub fn allow_action_with(holds: RhinoHolds, s: &GameState, a: &Action, p: Player
             if holds.extra_pp && pl.turn_count >= EXTRA_PP_REFRESH_TURN {
                 return false;
             }
-            extra_pp_enables_key_play(s, p)
+            !holds.first_extra_pp || extra_pp_enables_key_play(s, p)
         }
         _ => true,
     }
@@ -862,6 +882,7 @@ pub fn deck_class_of(s: &GameState, p: PlayerIndex) -> ClassId {
 /// リノセウス用 AI（rules が false なら、ルールを使わずリノセウス用のリーサル探索だけを足した比較用の AI）
 pub struct RhinoAgent {
     rules: bool,
+    holds: RhinoHolds,
     search: SearchAgent,
     plain: SearchAgent,
 }
@@ -884,9 +905,16 @@ impl RhinoAgent {
     pub fn with_options(rules: bool, search: SearchOptions, plain: SearchOptions) -> RhinoAgent {
         RhinoAgent {
             rules,
+            holds: ALL_HOLDS,
             search: SearchAgent::new(search),
             plain: SearchAgent::new(plain),
         }
+    }
+
+    /// マリガン・エクストラPP の期限・1 枚目の杖のルールを holds のとおりにする（探索から外すルールは search の allow で決まる）
+    pub fn with_holds(mut self, holds: RhinoHolds) -> RhinoAgent {
+        self.holds = holds;
+        self
     }
 }
 
@@ -916,6 +944,9 @@ impl Agent for RhinoAgent {
             }
             return self.plain.choose_action(real, legal, rng);
         }
+        if mulligan && !self.holds.mulligan {
+            return self.search.choose_action(real, legal, rng);
+        }
         if mulligan {
             let swap = mulligan_swap(real, p);
             return legal
@@ -943,13 +974,13 @@ impl Agent for RhinoAgent {
         }
         let pl = &real.players[p];
         // 1つ目のエクストラPP が期限のターンに残っていれば、ターン開始時に使う
-        if pl.turn_count == FIRST_EXTRA_PP_DEADLINE {
+        if self.holds.extra_pp_deadline && pl.turn_count == FIRST_EXTRA_PP_DEADLINE {
             if let Some(a) = legal.iter().find(|a| matches!(a, Action::ExtraPp)) {
                 return a.clone();
             }
         }
         // 1枚目の杖は最優先で置く
-        if board_count(real, p, Tag::Rod) == 0 {
+        if self.holds.rod_first && board_count(real, p, Tag::Rod) == 0 {
             if let Some(a) = legal
                 .iter()
                 .find(|a| played_tag(real, a, p) == Some(Tag::Rod))

@@ -287,7 +287,7 @@ pub fn rhino_compare_options(text: &str) -> Result<(Json, Option<ExtraEval>), St
 pub fn rhino_options(
     raw: &Json,
     model: Option<&ExtraEval>,
-) -> Result<(SearchOptions, SearchOptions), String> {
+) -> Result<(SearchOptions, SearchOptions, RhinoHolds), String> {
     let potential = match raw.get("potential") {
         None => RHINO_POTENTIAL,
         Some(v) => number("potential", v)?,
@@ -307,6 +307,23 @@ pub fn rhino_options(
             }
         }
     }
+    if let Some(h) = raw.get("rules") {
+        let Json::Obj(items) = h else {
+            return Err("\"rules\" はオブジェクト".into());
+        };
+        for (k, v) in items {
+            let b = flag(k, v)?;
+            match k.as_str() {
+                "mulligan" => holds.mulligan = b,
+                "extraPpDeadline" => holds.extra_pp_deadline = b,
+                "firstExtraPp" => holds.first_extra_pp = b,
+                "rodFirst" => holds.rod_first = b,
+                "rock" => holds.rock = b,
+                "keepers" => holds.keepers = b,
+                _ => return Err(format!("未知の \"rules\" の項目: \"{k}\"")),
+            }
+        }
+    }
     // extraEval を書かなければ探索 AI の既定の補正（data/value-net.json）
     let learned = match raw.get("extraEval") {
         None => SearchOptions::default().extra_eval,
@@ -323,13 +340,13 @@ pub fn rhino_options(
         raw,
         model,
         rhino_search_options(potential, holds, learned.clone()),
-        &["potential", "holds", "extraEval"],
+        &["potential", "holds", "rules", "extraEval"],
     )?;
     let plain = SearchOptions {
         extra_eval: learned,
         ..SearchOptions::default()
     };
-    Ok((search, plain))
+    Ok((search, plain, holds))
 }
 
 #[cfg(test)]
@@ -367,7 +384,8 @@ mod tests {
             raw.stringify(),
             r#"{"potential":0,"holds":{"mystery":false},"nextLethal":10}"#
         );
-        let (search, plain) = rhino_options(&raw, None).unwrap();
+        let (search, plain, holds) = rhino_options(&raw, None).unwrap();
+        assert!(!holds.mystery && holds.rhino && holds.rock);
         assert_eq!(search.next_lethal, 10.0);
         assert!(!search.lethal && search.extra_eval.is_some() && plain.extra_eval.is_some());
     }
