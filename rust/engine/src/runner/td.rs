@@ -1,6 +1,6 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--sampling classic|default] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--sampling classic|default] [--cmp 0] [--rollouts 8] --out d0.jsonl
 //!
 //! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・幅 128、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
 //! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
@@ -10,6 +10,11 @@
 //! k はもとの試合のその局面の添字）。カードを抜くのは打ち方と関係ないので、学習した補正が手札のカードの価値を
 //! 相関で覚える偏り（勝っている局面にあったカードを高く見る等）を打ち消す方向に働くと考えた。docs/ai-notes.md「介入データを TD 学習に混ぜる」
 //!
+//! --cmp k なら、各試合で 1 つの自分のターンの最初（--iv と同じ選び方）から、探索が読んだ点数の高い順に最初の手の違う並びを k 個まで選び、
+//! 並びごとにターン末から最後まで --rollouts 回打った勝ち数を書き出す（"cmp" 付きの行。打ち比べ）。r 回目はどの並びも同じ乱数で
+//! 見えない情報を並べ直して打つので、手札や山札の運の大半が並びどうしで共通になり、並びの差だけが残る。最後まで打つのは相手のターンを
+//! 貪欲法で読む探索 AI（ビームは 1 回・幅 128）。--iv とは一緒に使えない。docs/ai-notes.md「同じ局面からの手の比べ合いを学ぶ」
+//!
 //! 両方の席がモデルの評価で打つ探索 AI の自己対戦（7 デッキの全 49 組を順に回す）。各自分のターンの最初の局面（after）と
 //! ターン末の局面（end）を、入力と出発点の評価の点数 S と一緒に、試合が終わった順に 1 試合 1 行で書き出す。
 //! 書き出したファイルは `npm run td -- train` にそのまま渡せる（init・train・probe・prune は scripts/td-main.ts で行う）。
@@ -18,6 +23,7 @@ use super::options::model_eval;
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
 use crate::ai::aidata::{ai_data, weights_with};
+use crate::ai::determinize::determinize;
 use crate::ai::eval::{evaluate_with, EvalWeights};
 use crate::ai::search::{SearchAgent, SearchOptions};
 use crate::ai::valuenet::{ValueNet, ValuePhase};
@@ -110,6 +116,8 @@ struct Summary {
     explored: usize,
     /// 介入して打った試合の数
     ivs: usize,
+    /// 打ち比べた局面の数
+    groups: usize,
 }
 
 /// 局面 1 つ（{"ph":…,"s":…,"x":[…],"v":[…]}、ランダムに打った局面は "ex":1 も）
@@ -282,7 +290,112 @@ fn record_line(g: u32, names: &[String; 2], r: &Played, iv: Option<String>) -> S
     )
 }
 
-fn play_one(g: u32, decks: &[&'static Deck], m: &Model, eps: f64, iv: f64) -> Summary {
+/// 打ち比べの設定（--cmp・--rollouts）と、最後まで打つ探索 AI
+struct Compare {
+    k: usize,
+    rollouts: usize,
+    roll: Model,
+}
+
+/// state（p の手番）から、見えない情報を seed で並べ直してターンを終え、最後まで打って p が勝ったか
+fn rollout_wins(end: &GameState, p: PlayerIndex, roll: &Model, seed: u32) -> bool {
+    let mut rng = Rng::new(seed);
+    let d = determinize(end, p, &mut rng, false);
+    let mut state = apply_action(&d, &Action::EndTurn);
+    let mut agents = [
+        SearchAgent::new(roll.opts.clone()),
+        SearchAgent::new(roll.opts.clone()),
+    ];
+    let mut agent_rng = Rng::new(seed ^ 0x9e3779b9);
+    let mut n = 0;
+    while state.phase != Phase::Ended {
+        n += 1;
+        assert!(n <= 10001, "打ち比べのアクション数が上限を超えました");
+        let legal = legal_actions(&state);
+        let actor = acting_player(&state);
+        let action = agents[actor].choose_action(&state, &legal, &mut agent_rng);
+        state = apply_action(&state, &action);
+    }
+    state.winner == Some(p)
+}
+
+/// 打ち比べ（--cmp）: 局面 at（p の自分のターンの最初）から、探索の点数の高い順に最初の手の違う並びを k 個まで選び、
+/// 並びごとにターン末から最後まで打った勝ち数。並びが 2 つ未満なら None
+fn compare_plans(
+    at: &GameState,
+    p: PlayerIndex,
+    m: &Model,
+    c: &Compare,
+    seed: u32,
+) -> Option<String> {
+    let agent = SearchAgent::new(m.opts.clone());
+    let mut rng = Rng::new(seed ^ 0x510e527f);
+    // (探索の点数, ターン末の局面, 局面の JSON)
+    let mut cands: Vec<(f64, GameState, String)> = Vec::new();
+    for plan in agent.ranked_plans(at, p, &mut rng) {
+        if cands.len() >= c.k {
+            break;
+        }
+        let end = plan
+            .steps
+            .last()
+            .map(|x| (*x.1).clone())
+            .unwrap_or_else(|| at.clone());
+        if end.phase == Phase::Ended || !legal_actions(&end).contains(&Action::EndTurn) {
+            continue;
+        }
+        let settled = resolve_turn_end(&end);
+        let label = settled.as_ref().unwrap_or(&end);
+        if label.phase == Phase::Ended {
+            continue;
+        }
+        let mut json = String::new();
+        write_sample(&mut json, m, label, p, ValuePhase::End, false);
+        // ターン末が同じ局面になる並び（入力と点数が同じ）は 1 つだけ
+        if cands.iter().any(|x| x.2 == json) {
+            continue;
+        }
+        cands.push((plan.value, end, json));
+    }
+    if cands.len() < 2 {
+        return None;
+    }
+    let mut wins = vec![0usize; cands.len()];
+    for r in 0..c.rollouts {
+        // r 回目はどの並びも同じ乱数
+        let rs = seed ^ 0x9b05688c_u32.wrapping_mul(r as u32 + 1);
+        for (i, (_, end, _)) in cands.iter().enumerate() {
+            if rollout_wins(end, p, &c.roll, rs) {
+                wins[i] += 1;
+            }
+        }
+    }
+    let list: Vec<String> = cands
+        .iter()
+        .zip(&wins)
+        .map(|((v, _, json), w)| {
+            format!(
+                "{{\"val\":{},\"w\":{w},\"sample\":{json}}}",
+                js_num(round_precision(*v, 6))
+            )
+        })
+        .collect();
+    Some(format!(
+        "{{\"p\":{p},\"turn\":{},\"n\":{},\"cands\":[{}]}}",
+        at.players[p].turn_count,
+        c.rollouts,
+        list.join(",")
+    ))
+}
+
+fn play_one(
+    g: u32,
+    decks: &[&'static Deck],
+    m: &Model,
+    eps: f64,
+    iv: f64,
+    cmp: Option<&Compare>,
+) -> Summary {
     let (di, dj) = ((g % 7) as usize, ((g / 7) % 7) as usize);
     let seed = SEED_BASE + g;
     let state = create_game([&decks[di].cards, &decks[dj].cards], seed);
@@ -297,6 +410,8 @@ fn play_one(g: u32, decks: &[&'static Deck], m: &Model, eps: f64, iv: f64) -> Su
             variants,
         }
     });
+    // 打ち比べる局面（--iv と同じ選び方。--iv とは一緒に使わない）
+    let cmp_at = cmp.map(|_| (ivr.int(2), 3 + ivr.int(6) as i32));
     let base = play_out(
         g,
         state,
@@ -305,7 +420,8 @@ fn play_one(g: u32, decks: &[&'static Deck], m: &Model, eps: f64, iv: f64) -> Su
         seed,
         plan.as_ref()
             .filter(|x| x.variants > 0)
-            .map(|x| (x.p, x.turn)),
+            .map(|x| (x.p, x.turn))
+            .or(cmp_at),
     );
     let names = [decks[di].name.clone(), decks[dj].name.clone()];
     let winner = base
@@ -315,6 +431,17 @@ fn play_one(g: u32, decks: &[&'static Deck], m: &Model, eps: f64, iv: f64) -> Su
     let mut line = record_line(g, &names, &base, None);
     let mut samples = base.counts[0] + base.counts[1];
     let mut ivs = 0;
+    let mut groups = 0;
+    if let (Some(c), Some((p, _)), Some((at, _))) = (cmp, cmp_at, base.branch.as_ref()) {
+        if let Some(info) = compare_plans(at, p, m, c, seed) {
+            line.push_str(&format!(
+                "\n{{\"g\":{g},\"decks\":[{},{}],\"cmp\":{info}}}",
+                serde_json::to_string(&names[0]).expect("名前"),
+                serde_json::to_string(&names[1]).expect("名前"),
+            ));
+            groups += 1;
+        }
+    }
     if let (Some(plan), Some((at, k))) = (plan, base.branch.as_ref()) {
         // 抜くカード（同じカードは 1 回だけ）
         let mut cards: Vec<usize> = Vec::new();
@@ -357,6 +484,7 @@ fn play_one(g: u32, decks: &[&'static Deck], m: &Model, eps: f64, iv: f64) -> Su
         samples,
         explored: base.explored,
         ivs,
+        groups,
     }
 }
 
@@ -383,7 +511,30 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
         "default" => false,
         x => return Err(format!("--sampling は classic か default: {x}")),
     };
-    let m = model_options(Arc::new(ValueNet::load(model_path)?), opp_beam, classic)?;
+    let cmp_k = num_arg(args, "cmp", 0.0)?;
+    let rollouts = num_arg(args, "rollouts", 8.0)?;
+    if cmp_k < 0.0
+        || cmp_k.fract() != 0.0
+        || cmp_k == 1.0
+        || rollouts < 1.0
+        || rollouts.fract() != 0.0
+    {
+        return Err("--cmp は 0 か 2 以上の整数、--rollouts は 1 以上の整数".into());
+    }
+    if cmp_k > 0.0 && iv > 0.0 {
+        return Err("--cmp と --iv は一緒に使えません".into());
+    }
+    let net = Arc::new(ValueNet::load(model_path)?);
+    let m = model_options(net.clone(), opp_beam, classic)?;
+    let cmp = if cmp_k > 0.0 {
+        Some(Compare {
+            k: cmp_k as usize,
+            rollouts: rollouts as usize,
+            roll: model_options(net, false, false)?,
+        })
+    } else {
+        None
+    };
     let decks = compare_decks();
     if decks.len() != 7 {
         return Err("自己対戦のデッキは 7 つの想定です".into());
@@ -393,7 +544,7 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     let tasks: Vec<u32> = (0..games as u32).map(|k| start as u32 + k).collect();
     let mut summaries = parallel_map(
         &tasks,
-        |&g, _| play_one(g, &decks, &m, eps, iv),
+        |&g, _| play_one(g, &decks, &m, eps, iv, cmp.as_ref()),
         |done, total, r, _| {
             writeln!(file, "{}", r.line).unwrap_or_else(|e| panic!("{out} に書けません: {e}"));
             if done % 100 == 0 || done == total {
@@ -411,10 +562,11 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     let samples: usize = summaries.iter().map(|r| r.samples).sum();
     let explored: usize = summaries.iter().map(|r| r.explored).sum();
     let ivs: usize = summaries.iter().map(|r| r.ivs).sum();
+    let groups: usize = summaries.iter().map(|r| r.groups).sum();
     let turns: i64 = summaries.iter().map(|r| r.turns as i64).sum();
     let first_wins = summaries.iter().filter(|r| r.winner == 0).count();
     println!(
-        "{out}: {n} 試合、局面 {samples}（ランダムに打った {explored}、介入して打った試合 {ivs}）、平均 {} ターン、先攻の勝率 {}%",
+        "{out}: {n} 試合、局面 {samples}（ランダムに打った {explored}、介入して打った試合 {ivs}、打ち比べた局面 {groups}）、平均 {} ターン、先攻の勝率 {}%",
         fixed(turns as f64 / n as f64, 1),
         fixed((first_wins as f64 / n as f64) * 100.0, 1)
     );
