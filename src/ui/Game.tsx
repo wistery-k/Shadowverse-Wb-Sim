@@ -110,7 +110,7 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
     const next = applyAction(state, action);
     if (auto) autoRef.current.push(actionsRef.current.length);
     actionsRef.current.push(action);
-    setLog((l) => [describeAction(state, action, HUMAN), ...l].slice(0, 200));
+    setLog((l) => [describeAction(state, action, HUMAN, next), ...l].slice(0, 200));
     setState(next);
     if (next.phase === "ended" && !endedRef.current) {
       endedRef.current = true;
@@ -223,7 +223,10 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
     }
   }, [state, fuseHost, picks.join(",")]);
   const candidates = new Set([...(pending?.kind === "choose" ? pending.candidates : []), ...fuseCandidates]);
-  const attackable = myTurn && !mulligan ? attackStatuses(state) : new Map<number, AttackStatus>();
+  // 攻撃の可否は、能力の対象を選んでいるあいだも自分の手番なら出し続ける
+  const attackable = state.active === HUMAN ? attackStatuses(state) : new Map<number, AttackStatus>();
+  // アクトできるアミュレット
+  const actable = new Set(myTurn && !pending && !mulligan ? legal.flatMap((a) => (a.type === "act" ? [a.iid] : [])) : []);
   const readyIds = new Set([...(myTurn && !pending && !mulligan ? legal.map(actionSubject).filter((x) => x !== null) : []), ...fusible]);
 
   // ドラッグでプレイできる手札のカード
@@ -335,11 +338,14 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
             <span class="card-back" key={h.iid} />
           ))}
         </div>
-        <div
-          class={`leader class-${classes[AI]} ${attackTargets.has(OPP_LEADER) ? "targetable" : ""} ${candidates.has(OPP_LEADER) ? "targetable" : ""} ${picks.includes(OPP_LEADER) ? "selected" : ""}`}
-          onClick={() => clickEntity(OPP_LEADER)}
-        >
-          相手リーダー {opp.leaderHp}/{opp.leaderMaxHp}
+        <div class="leader-row">
+          <div
+            class={`leader class-${classes[AI]} ${attackTargets.has(OPP_LEADER) ? "targetable" : ""} ${candidates.has(OPP_LEADER) ? "targetable" : ""} ${picks.includes(OPP_LEADER) ? "selected" : ""}`}
+            onClick={() => clickEntity(OPP_LEADER)}
+          >
+            相手リーダー <LeaderHp hp={opp.leaderHp} max={opp.leaderMaxHp} />
+          </div>
+          <Resources state={state} p={AI} />
         </div>
         <div class="board">
           {opp.board.map((c) => (
@@ -367,18 +373,22 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
               targetable={candidates.has(c.iid)}
               ready={readyIds.has(c.iid)}
               attackable={attackable.get(c.iid) ?? null}
+              actable={actable.has(c.iid)}
               onClick={() => clickEntity(c.iid)}
             />
           ))}
           <BoardSlots count={me.board.length} />
         </div>
-        <div
-          class={`leader class-${classes[HUMAN]} ${candidates.has(MY_LEADER) ? "targetable" : ""} ${picks.includes(MY_LEADER) ? "selected" : ""}`}
-          onClick={() => clickEntity(MY_LEADER)}
-        >
-          あなたのリーダー {me.leaderHp}/{me.leaderMaxHp}
+        <div class="leader-row">
+          <div
+            class={`leader class-${classes[HUMAN]} ${candidates.has(MY_LEADER) ? "targetable" : ""} ${picks.includes(MY_LEADER) ? "selected" : ""}`}
+            onClick={() => clickEntity(MY_LEADER)}
+          >
+            あなたのリーダー <LeaderHp hp={me.leaderHp} max={me.leaderMaxHp} />
+          </div>
+          <Resources state={state} p={HUMAN} extraPpUsable={!!extraPp && myTurn} />
         </div>
-        <PlayerInfo label="あなた" state={state} p={HUMAN} cls={classes[HUMAN]} extraPpUsable={!!extraPp && myTurn} />
+        <PlayerInfo label="あなた" state={state} p={HUMAN} cls={classes[HUMAN]} />
         <div class="hand">
           {me.hand.map((h) => (
             <CardView
@@ -596,20 +606,51 @@ export function EmptySlots({ count }: { count: number }) {
   );
 }
 
+/** リーダーの体力（最大値は控えめに表示する） */
+export function LeaderHp({ hp, max }: { hp: number; max: number }) {
+  return (
+    <span class="leader-hp">
+      {hp}
+      <span class="hp-max">/{max}</span>
+    </span>
+  );
+}
+
+/** PP・エクストラPP・EP・SEP（リーダーの横に並べる） */
+export function Resources({
+  state,
+  p,
+  extraPpUsable = false,
+}: {
+  state: GameState;
+  p: PlayerIndex;
+  /** エクストラPPを今使えるか（強調する） */
+  extraPpUsable?: boolean;
+}) {
+  const pl = state.players[p];
+  return (
+    <div class="resources">
+      <span class="pp">
+        PP {pl.pp}/{pl.maxPp}
+      </span>
+      {pl.extraPpAvailable && <span class={`expp-badge ${extraPpUsable ? "usable" : ""}`}>エクストラPP</span>}
+      <Points kind="ep" left={pl.ep} max={EP} locked={!evolveTurnReached(state, p)} />
+      <Points kind="sep" left={pl.sep} max={SEP} locked={!superEvolveTurnReached(state, p)} />
+    </div>
+  );
+}
+
 export function PlayerInfo({
   label,
   state,
   p,
   cls,
-  extraPpUsable = false,
 }: {
   label: string;
   state: GameState;
   p: PlayerIndex;
   /** プレイヤーのクラス（表示する場合） */
   cls?: ClassId;
-  /** エクストラPPを今使えるか（強調する） */
-  extraPpUsable?: boolean;
 }) {
   const pl = state.players[p];
   const active = state.active === p && state.phase === "main";
@@ -617,12 +658,6 @@ export function PlayerInfo({
     <div class={`player-info ${active ? "active" : ""}`}>
       <strong>{label}</strong>
       {cls && <span class={`class-tag class-${cls}`}>{CLASS_NAMES[cls]}</span>}
-      <span>
-        PP {pl.pp}/{pl.maxPp}
-      </span>
-      {pl.extraPpAvailable && <span class={`expp-badge ${extraPpUsable ? "usable" : ""}`}>エクストラPP</span>}
-      <Points kind="ep" left={pl.ep} max={EP} locked={!evolveTurnReached(state, p)} />
-      <Points kind="sep" left={pl.sep} max={SEP} locked={!superEvolveTurnReached(state, p)} />
       <span>手札 {pl.hand.length}</span>
       <span>山札 {pl.deck.length}</span>
       <span>墓場 {pl.graveyard}</span>

@@ -55,10 +55,11 @@ export function turnLog(initial: GameState, actions: readonly Action[], human: P
     const actor = actingPlayer(s);
     const by = actor === human ? "you" : "opponent";
     const last = out[out.length - 1];
-    const text = describeAction(s, a, human) + (auto.has(i) ? "（自動）" : "");
+    const next = applyAction(s, a);
+    const text = describeAction(s, a, human, next) + (auto.has(i) ? "（自動）" : "");
     if (last && last.turn === s.turn && last.by === by) last.choices.push(text);
     else out.push({ turn: s.turn, by, choices: [text] });
-    s = applyAction(s, a);
+    s = next;
   }
   return out;
 }

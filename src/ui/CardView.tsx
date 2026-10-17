@@ -15,8 +15,12 @@ interface Props {
   targetable?: boolean;
   /** 行動できる */
   ready?: boolean;
-  /** 攻撃の可否（場のフォロワーに、手番のときだけ渡す） */
+  /** 攻撃の可否（場のフォロワーに、手番のときだけ渡す）。色で示す */
   attackable?: AttackStatus | null;
+  /** アクトできる（場のアミュレット等）。黄色で示す */
+  actable?: boolean;
+  /** マリガンで残す・返す（手札のカードに、リプレイのマリガンのときだけ渡す） */
+  mulligan?: MulliganMark | null;
   /** 直前の行動の動き */
   motion?: Motion | null;
   onClick?: () => void;
@@ -27,16 +31,36 @@ interface Props {
   dragOffset?: { x: number; y: number } | null;
 }
 
-const ATTACK_LABELS: Record<AttackStatus, string> = {
-  leader: "リーダー攻撃可",
-  follower: "フォロワーのみ",
-  none: "攻撃不可",
+/** keep・return: マリガンで残す・返す（マリガン前） / kept・drawn: 残した・引いた（マリガン後） */
+export type MulliganMark = "keep" | "return" | "kept" | "drawn";
+
+const MULLIGAN_LABELS: Record<MulliganMark, string> = {
+  keep: "残す",
+  return: "返す",
+  kept: "残した",
+  drawn: "引いた",
 };
 
 /** summon: 場に出た / attack-up・attack-down: その向きへ攻撃した / hit: 攻撃された */
 export type Motion = "summon" | "attack-up" | "attack-down" | "hit";
 
-export function CardView({ cardId, board, hand, pp, selected, targetable, ready, attackable, motion, onClick, onHover, onPointerDown, dragOffset }: Props) {
+export function CardView({
+  cardId,
+  board,
+  hand,
+  pp,
+  selected,
+  targetable,
+  ready,
+  attackable,
+  actable,
+  mulligan,
+  motion,
+  onClick,
+  onHover,
+  onPointerDown,
+  dragOffset,
+}: Props) {
   const card = cardOf(cardId);
   const keywords = board ? [...board.keywords, ...board.tempKeywords] : (hand?.keywords ?? []);
   const classes = [
@@ -48,6 +72,8 @@ export function CardView({ cardId, board, hand, pp, selected, targetable, ready,
     onClick ? "clickable" : "",
     board?.kind === "follower" && keywords.includes("ward") ? "ward" : "",
     attackable ? `attack-${attackable}` : "",
+    actable ? "actable" : "",
+    mulligan ? `mull-${mulligan}` : "",
     motion ? `motion-${motion}` : "",
     onPointerDown ? "draggable" : "",
     dragOffset ? "dragging" : "",
@@ -68,7 +94,7 @@ export function CardView({ cardId, board, hand, pp, selected, targetable, ready,
       onPointerDown={onPointerDown}
       title={card.text}
     >
-      {attackable && <div class={`attack-tag ${attackable}`}>{ATTACK_LABELS[attackable]}</div>}
+      {mulligan && <div class={`card-tag mull-${mulligan}`}>{MULLIGAN_LABELS[mulligan]}</div>}
       <div class="card-top">
         {enhanced !== null ? (
           <span class="cost enhanced" title={`エンハンス（元のコスト ${cost}）`}>

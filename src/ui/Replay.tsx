@@ -6,9 +6,9 @@ import { cardOf, legalActions, opponent, type PlayerIndex } from "../engine";
 import { replayStates } from "../sim/replay";
 import { reproduceCommand } from "../sim/reproduce";
 import { seatDecks, type Entrant, type GameRecord } from "../sim/tournament";
-import { CardDetail, CardView, type Motion } from "./CardView";
+import { CardDetail, CardView, type Motion, type MulliganMark } from "./CardView";
 import { attackStatuses, describeAction, leaderClasses } from "./describe";
-import { BoardSlots, EmptySlots, PlayerInfo } from "./Game";
+import { BoardSlots, EmptySlots, LeaderHp, PlayerInfo, Resources } from "./Game";
 
 interface Props {
   record: GameRecord;
@@ -33,7 +33,7 @@ export function Replay({ record, entrants, onClose }: Props) {
     // ミラーで同じ名前になるときは席で区別する
     return n0 === n1 ? [`${n0}（P1）`, `${n1}（P2）`] : [n0, n1];
   }, [record, entrants]);
-  const lines = useMemo(() => actions.map((a, i) => describeAction(states[i]!, a, names)), [states, names]);
+  const lines = useMemo(() => actions.map((a, i) => describeAction(states[i]!, a, names, states[i + 1])), [states, names]);
   // ターンの区切り: ターン終了の直後の局面
   const turnStarts = useMemo(() => [0, ...actions.flatMap((a, i) => (a.type === "endTurn" ? [i + 1] : []))], [actions]);
 
@@ -83,6 +83,31 @@ export function Replay({ record, entrants, onClose }: Props) {
 
   // 手番のフォロワーの攻撃の可否
   const attackable = useMemo(() => attackStatuses(state), [state]);
+  // 手番のプレイヤーのアクトできるアミュレット
+  const actable = useMemo(
+    () => new Set(state.phase === "main" && !state.pending ? legalActions(state).flatMap((a) => (a.type === "act" ? [a.iid] : [])) : []),
+    [state],
+  );
+
+  // マリガン: 行う前は残す・返すカード、行った後は残した・引いたカードを示す（両者のマリガンが終わった局面まで）
+  const mulliganMarks = useMemo(() => {
+    const marks = new Map<number, MulliganMark>();
+    const at = ([0, 1] as const).map((p) => actions.findIndex((a) => a.type === "mulligan" && a.player === p));
+    if (at.some((i) => i < 0) || step > Math.max(...at) + 1) return marks;
+    for (const p of [0, 1] as const) {
+      const i = at[p]!;
+      const a = actions[i];
+      if (a?.type !== "mulligan") continue;
+      const before = states[i]!.players[p].hand;
+      if (step <= i) {
+        for (const h of before) marks.set(h.iid, a.swap.includes(h.iid) ? "return" : "keep");
+      } else {
+        const kept = new Set(before.map((h) => h.iid));
+        for (const h of states[i + 1]!.players[p].hand) marks.set(h.iid, kept.has(h.iid) ? "kept" : "drawn");
+      }
+    }
+    return marks;
+  }, [states, step]);
 
   // 直前の行動の動き: 場に出たフォロワー・攻撃したフォロワーと攻撃されたもの
   const { motions, leaderHit } = useMemo(() => {
@@ -117,6 +142,7 @@ export function Replay({ record, entrants, onClose }: Props) {
               cardId={c.cardId}
               board={c}
               attackable={attackable.get(c.iid) ?? null}
+              actable={actable.has(c.iid)}
               motion={motion}
               onClick={() => setDetail(c.cardId)}
             />
@@ -126,15 +152,18 @@ export function Replay({ record, entrants, onClose }: Props) {
       </div>
     );
     const leader = (
-      <div key={leaderHit === p ? `leader-${step}` : "leader"} class={`leader class-${classes[p]} ${leaderHit === p ? "motion-hit" : ""}`}>
-        リーダー {pl.leaderHp}/{pl.leaderMaxHp}
+      <div class="leader-row">
+        <div key={leaderHit === p ? `leader-${step}` : "leader"} class={`leader class-${classes[p]} ${leaderHit === p ? "motion-hit" : ""}`}>
+          リーダー <LeaderHp hp={pl.leaderHp} max={pl.leaderMaxHp} />
+        </div>
+        <Resources state={state} p={p} />
       </div>
     );
     const info = <PlayerInfo label={`${names[p]}${state.first === p ? "（先攻）" : "（後攻）"}`} state={state} p={p} cls={classes[p]} />;
     const hand = (
       <div class="hand">
         {pl.hand.map((h) => (
-          <CardView key={h.iid} cardId={h.cardId} hand={h} onClick={() => setDetail(h.cardId)} />
+          <CardView key={h.iid} cardId={h.cardId} hand={h} mulligan={mulliganMarks.get(h.iid) ?? null} onClick={() => setDetail(h.cardId)} />
         ))}
         <EmptySlots count={pl.hand.length} />
       </div>
