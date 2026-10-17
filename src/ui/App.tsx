@@ -4,7 +4,7 @@ import { DECK_CLASSES, type DeckClass } from "../cards/deck";
 import { DEFAULT_DECKS } from "../cards/defaultDecks";
 import { createGame, rngFrom, type Action, type GameState, type PlayerIndex, type Rng } from "../engine";
 import { buildHumanRecord } from "../sim/humanRecord";
-import { compareMatch, OPPONENT_AGENT } from "../sim/humanCompare";
+import { compareMatch, OPPONENTS as COMPARE_OPPONENTS } from "../sim/humanCompare";
 import { randomDeck } from "../sim/decks";
 import { Decks, isPlayable } from "./Decks";
 import { Game } from "./Game";
@@ -92,7 +92,7 @@ export function App() {
 
   function startCompare(m: HumanMatchChoice) {
     setCompareError("");
-    setGame({ state: createGame(compareMatch(m.subject, m.deck, m.g, m.seat)), agent: OPPONENT_AGENT, human: m.seat, compare: m });
+    setGame({ state: createGame(compareMatch(m.subject, m.deck, m.g, m.seat)), agent: COMPARE_OPPONENTS[m.opponent].agent, human: m.seat, compare: m });
   }
 
   // 人間との比較の試合が終わったら記録を保存する

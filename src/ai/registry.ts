@@ -25,8 +25,10 @@ function wasmAgent(name: string): Agent {
 
 export const AGENTS: Readonly<Record<string, { agent: Agent; label: string }>> = {
   search: { agent: wasmAgent("search"), label: "探索" },
-  // 学習した評価の補正（data/value-net.json）と相手のターンのビームサーチを入れる前の探索 AI。人間との比較の相手（src/sim/humanCompare.ts）
+  // 学習した評価の補正（data/value-net.json）と相手のターンのビームサーチを入れる前の探索 AI（rhino-compare の相手）
   "search-classic": { agent: wasmAgent("search-classic"), label: "探索（学習した補正なし）" },
+  // 強さの物差しの相手（rust/engine/src/runner/yardstick.rs で凍結した search-classic）。人間との比較の相手（既定）
+  yardstick: { agent: wasmAgent("yardstick"), label: "物差し（凍結した探索）" },
   rhino: { agent: wasmAgent("rhino"), label: "リノセウス用ルール＋探索" },
   "rhino-lethal": { agent: wasmAgent("rhino-lethal"), label: "探索＋リノセウス用リーサル" },
   greedy: { agent: wasmAgent("greedy"), label: "貪欲法" },

@@ -6,7 +6,7 @@
 
 import { actingPlayer, applyAction, createGame, type Action, type GameState, type PlayerIndex } from "../engine";
 import { describeAction } from "../ui/describe";
-import { compareMatch, isSubjectId, OPPONENT_AGENT, type SubjectId } from "./humanCompare";
+import { compareMatch, DEFAULT_OPPONENT, isOpponentId, isSubjectId, OPPONENTS, type OpponentId, type SubjectId } from "./humanCompare";
 
 export const HUMAN_RECORD_KIND = "human-compare";
 const HUMAN_RECORD_KIND_V1 = "rhino-compare-human";
@@ -35,6 +35,9 @@ export interface HumanGameRecord {
   /** 人間が先攻か */
   first: boolean;
   turns: number;
+  /** 相手の AI の選択肢（src/sim/humanCompare.ts の OPPONENTS）。選べるようにする前の記録はその頃の比較用の相手（物差しかその前身）なので yardstick として読む */
+  opponent: OpponentId;
+  /** 相手の AI（src/ai/registry.ts のキー。選べるようにする前は search-classic、2026-10-14 より前は search） */
   opponentAgent: string;
   /** ビルドのコミット（不明なら空） */
   commit: string;
@@ -69,12 +72,15 @@ export function buildHumanRecord(args: {
   deck: string;
   g: number;
   seat: PlayerIndex;
+  /** 相手の AI（省略すると物差し） */
+  opponent?: OpponentId;
   actions: readonly Action[];
   autoActions?: readonly number[];
   commit: string;
   playedAt: string;
 }): HumanGameRecord {
   const { subject, deck, g, seat, actions } = args;
+  const opponent = args.opponent ?? DEFAULT_OPPONENT;
   const { decks, seed } = compareMatch(subject, deck, g, seat);
   const initial = createGame({ decks, seed });
   let final = initial;
@@ -91,7 +97,8 @@ export function buildHumanRecord(args: {
     won: final.winner === seat,
     first: initial.first === seat,
     turns: final.turn,
-    opponentAgent: OPPONENT_AGENT,
+    opponent,
+    opponentAgent: OPPONENTS[opponent].agent,
     commit: args.commit,
     playedAt: args.playedAt,
     turnLog: turnLog(initial, actions, seat, args.autoActions),
@@ -122,11 +129,12 @@ export function parseHumanRecord(v: unknown): HumanGameRecord | null {
     return null;
   const { elfSeat: _elfSeat, ...rest } = r;
   return {
-    ...(rest as Omit<HumanGameRecord, "kind" | "version" | "subject" | "seat" | "autoActions">),
+    ...(rest as Omit<HumanGameRecord, "kind" | "version" | "subject" | "seat" | "opponent" | "autoActions">),
     kind: HUMAN_RECORD_KIND,
     version: 2,
     subject,
     seat,
+    opponent: isOpponentId(r.opponent) ? r.opponent : "yardstick",
     autoActions: Array.isArray(r.autoActions) ? (r.autoActions as number[]) : [],
   };
 }

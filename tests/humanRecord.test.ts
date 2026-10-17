@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { agentOf } from "../src/ai/registry";
 import { lethalHint, resetAiCaches } from "../src/ai/lethalHint";
-import { applyAction, createGame } from "../src/engine";
+import { applyAction, createGame, legalActions, rngFrom } from "../src/engine";
 import { buildHumanRecord, parseHumanRecord, toJsonLines } from "../src/sim/humanRecord";
 import { playMatch } from "../src/sim/match";
-import { compareMatch, opponentsOf, SUBJECT_IDS, SUBJECTS } from "../src/sim/humanCompare";
+import { compareMatch, OPPONENT_IDS, OPPONENTS, opponentsOf, SUBJECT_IDS, SUBJECTS } from "../src/sim/humanCompare";
 import { PUZZLES, puzzleState } from "./rhinoPuzzles";
 
 const randomAgent = agentOf("random");
@@ -80,6 +80,26 @@ describe("人間との比較の記録", () => {
     const { subject: _s, seat, ...rest } = rec;
     const v1 = { ...rest, kind: "rhino-compare-human", version: 1, elfSeat: seat };
     expect(parseHumanRecord(JSON.parse(JSON.stringify(v1)))).toEqual(rec);
+  });
+
+  it("相手の AI（物差し・最新版）を記録し、選べるようにする前の記録は物差しと打ったものとして読む", () => {
+    const deck = opponentsOf("af")[0]!.name;
+    const m = compareMatch("af", deck, 1, 0);
+    const r = playMatch([randomAgent, randomAgent], { ...m, record: true });
+    const base = { subject: "af" as const, deck, g: 1, seat: 0 as const, actions: r.log!, commit: "", playedAt: "" };
+    const yardstick = buildHumanRecord(base);
+    expect(yardstick.opponent).toBe("yardstick");
+    expect(yardstick.opponentAgent).toBe(OPPONENTS.yardstick.agent);
+    const latest = buildHumanRecord({ ...base, opponent: "latest" });
+    expect(latest.opponent).toBe("latest");
+    expect(latest.opponentAgent).toBe("search");
+    expect(parseHumanRecord(JSON.parse(toJsonLines([latest])))).toEqual(latest);
+    const { opponent: _o, ...old } = yardstick;
+    expect(parseHumanRecord({ ...old, opponentAgent: "search-classic" })).toEqual({ ...yardstick, opponentAgent: "search-classic" });
+    // どちらの相手もエンジン（WASM）で手を選べる
+    const s = createGame(m);
+    const legal = legalActions(s);
+    for (const id of OPPONENT_IDS) expect(legal).toContainEqual(agentOf(OPPONENTS[id].agent).chooseAction(s, legal, rngFrom({ rng: 1 })));
   });
 });
 
