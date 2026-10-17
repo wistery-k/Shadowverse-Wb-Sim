@@ -141,7 +141,19 @@ fn reads_model_json_and_checks_sizes() {
 fn widened_model_with_zero_rows_matches_old_layout() {
     // 場の攻撃力・体力等を足す前の並びのモデルも読め、足した入力の重みを 0 にして広げたモデルと同じ補正になる（npm run td -- extend）
     use crate::ai::valuenet::{SCALARS, ZONES};
-    let old = model(4, |i| ((i * 7919) % 13) as f64 / 20.0 - 0.3, 0.7);
+    // 足す前の並び（入力の場所 10・数値 21）のモデル
+    let base = model(4, |_| 0.0, 0.7);
+    let zones: Vec<String> = ZONES[..10].iter().map(|s| s.to_string()).collect();
+    let scalars: Vec<String> = SCALARS[..21].iter().map(|s| s.to_string()).collect();
+    let n = zones.len() * base.vocab.len() + scalars.len();
+    let old = RawValueNet {
+        w1: (0..n * base.hidden)
+            .map(|i| ((i * 7919) % 13) as f64 / 20.0 - 0.3)
+            .collect(),
+        zones,
+        scalars,
+        ..base
+    };
     assert_eq!(old.zones.len(), 10);
     assert_eq!(old.scalars.len(), 21);
     let v = old.vocab.len();
