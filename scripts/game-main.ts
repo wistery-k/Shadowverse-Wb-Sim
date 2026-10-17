@@ -59,7 +59,7 @@ export async function main(argv: string[]): Promise<number> {
 
   if (!args.quiet) {
     const states = replayStates(decks, seed, actions);
-    for (const [i, a] of actions.entries()) console.log(`${String(i + 1).padStart(4)}. ${describeAction(states[i]!, a, names)}`);
+    for (const [i, a] of actions.entries()) console.log(`${String(i + 1).padStart(4)}. ${describeAction(states[i]!, a, names, states[i + 1])}`);
     console.log("");
   }
   console.log(`勝者: ${names[r.winner]} / 先攻: ${names[r.final.first]} / ${r.turns} ターン / ${actions.length} 手（${elapsed.toFixed(1)}秒）`);

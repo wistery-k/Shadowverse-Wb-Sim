@@ -37,10 +37,10 @@ export const classLabel = (card: Card) => CLASS_NAMES[card.class];
 export type AttackStatus = "leader" | "follower" | "none";
 
 /** 手番のプレイヤーの場のフォロワーごとの攻撃の可否。相手の場（守護・攻撃先の有無）は見ず、フォロワー自身の状態で決める。
- *  行動を選べる局面でなければ空 */
+ *  能力の対象を選んでいるあいだも表示し続ける。メインフェイズでなければ空 */
 export function attackStatuses(state: GameState): Map<number, AttackStatus> {
   const m = new Map<number, AttackStatus>();
-  if (state.phase !== "main" || state.pending) return m;
+  if (state.phase !== "main") return m;
   for (const c of state.players[state.active].board) if (c.kind === "follower") m.set(c.iid, attackReach(state, c));
   return m;
 }
@@ -84,13 +84,13 @@ export function modeLabels(state: GameState): string[] {
   return Array.from({ length: pending.options }, (_, i) => lines[i] ?? `選択肢${i + 1}`);
 }
 
-/** アクションを（実行前の状態で）説明する */
-export function describeAction(state: GameState, action: Action, human: Viewer): string {
+/** アクションを（実行前の状態で）説明する。after（実行後の状態）を渡すと、マリガンで引いたカードも書く */
+export function describeAction(state: GameState, action: Action, human: Viewer, after?: GameState): string {
   const who = playerName(state.pending?.player ?? state.active, human);
   const name = (iid: number) => entityName(state, iid, human);
   switch (action.type) {
     case "mulligan":
-      return `${playerName(action.player, human)}: マリガン（${action.swap.length}枚入れ替え）`;
+      return describeMulligan(state, action, human, after);
     case "play":
       return `${who}: ${name(action.iid)}をプレイ`;
     case "attack":
@@ -112,6 +112,23 @@ export function describeAction(state: GameState, action: Action, human: Viewer):
     case "endTurn":
       return `${who}: ターン終了`;
   }
+}
+
+/** マリガン: 残したカードと返したカード（と引いたカード）。人間の視点では相手の手札は書かない */
+function describeMulligan(state: GameState, action: Extract<Action, { type: "mulligan" }>, human: Viewer, after?: GameState): string {
+  const who = playerName(action.player, human);
+  if (typeof human === "number" && action.player !== human) return `${who}: マリガン（${action.swap.length}枚入れ替え）`;
+  const hand = state.players[action.player].hand;
+  const names = (cards: readonly { cardId: string }[]) => cards.map((c) => cardOf(c.cardId).name).join("、") || "なし";
+  const returned = hand.filter((h) => action.swap.includes(h.iid));
+  const kept = hand.filter((h) => !action.swap.includes(h.iid));
+  let text = `${who}: マリガン（残す: ${names(kept)} / 返す: ${names(returned)}`;
+  if (after && returned.length > 0) {
+    const before = new Set(hand.map((h) => h.iid));
+    const drawn = after.players[action.player].hand.filter((h) => !before.has(h.iid)).slice(0, returned.length);
+    text += ` → 引いた: ${names(drawn)}`;
+  }
+  return `${text}）`;
 }
 
 export function crestName(crestId: string): string {
