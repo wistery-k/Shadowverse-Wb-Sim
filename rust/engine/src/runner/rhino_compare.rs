@@ -85,10 +85,12 @@ struct Given {
     won: Option<bool>,
 }
 
-/// --matches のファイル（JSON Lines。各行に deck・g・seat（古い形式は elfSeat）、あれば subject・won）
+/// --matches のファイル（JSON Lines。各行に deck・g・seat（古い形式は elfSeat）、あれば subject・won・opponent）。
+/// ここで打つ相手は物差しと同じ手を指す search-classic なので、人間が物差し以外（opponent が "yardstick" でない）と打った行は飛ばす
 fn read_matches(file: &str, subject: &str) -> Result<Vec<Given>, String> {
     let text = std::fs::read_to_string(file).map_err(|e| format!("{file} を読めません: {e}"))?;
     let mut out = Vec::new();
+    let mut skipped = 0;
     for (i, line) in text
         .split('\n')
         .filter(|l| !l.trim().is_empty())
@@ -121,6 +123,10 @@ fn read_matches(file: &str, subject: &str) -> Result<Vec<Given>, String> {
                 i + 1
             ));
         }
+        if matches!(v.get("opponent"), Some(o) if !matches!(o, Json::Str(s) if s == "yardstick")) {
+            skipped += 1;
+            continue;
+        }
         let won = match v.get("won") {
             Some(Json::Bool(b)) => Some(*b),
             _ => None,
@@ -131,6 +137,9 @@ fn read_matches(file: &str, subject: &str) -> Result<Vec<Given>, String> {
             seat: *seat as usize,
             won,
         });
+    }
+    if skipped > 0 {
+        eprintln!("{file} のうち物差し以外の AI と打った {skipped} 試合は飛ばします");
     }
     Ok(out)
 }

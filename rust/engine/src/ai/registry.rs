@@ -8,9 +8,10 @@ use super::search::{SearchAgent, SearchOptions};
 use super::{Agent, RandomAgent};
 
 /// AI の名前と表示名（画面の選択肢の順）
-pub const AGENTS: [(&str, &str); 7] = [
+pub const AGENTS: [(&str, &str); 8] = [
     ("search", "探索"),
     ("search-classic", "探索（学習した補正なし）"),
+    ("yardstick", "物差し（凍結した探索）"),
     ("rhino", "リノセウス用ルール＋探索"),
     ("rhino-lethal", "探索＋リノセウス用リーサル"),
     ("greedy", "貪欲法"),
@@ -33,6 +34,10 @@ pub fn create_agent(name: &str) -> Option<Box<dyn Agent>> {
     Some(match name {
         "search" => Box::new(SearchAgent::new(SearchOptions::default())),
         "search-classic" => Box::new(SearchAgent::new(search_classic_options())),
+        // 強さの物差しの相手（runner/yardstick.rs）。既定や重みを変えても動かない。人間との比較の相手にも使う
+        "yardstick" => Box::new(SearchAgent::new(
+            crate::runner::yardstick::reference_options(),
+        )),
         "rhino" => Box::new(RhinoAgent::new(true)),
         "rhino-lethal" => Box::new(RhinoAgent::new(false)),
         "greedy" => Box::new(TunedGreedyAgent::default()),

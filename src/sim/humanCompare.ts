@@ -35,10 +35,21 @@ export const isSubjectId = (v: unknown): v is SubjectId => typeof v === "string"
 
 const EXCLUDED_DECKS = ["ランプドラゴン"];
 /**
- * 相手の AI（src/ai/registry.ts のキー）。今までの人間の対戦記録と比べられるよう、学習した評価の補正を入れる前の探索 AI に固定する
- * （rhino-compare の相手も同じ）
+ * 相手の AI の選択肢。
+ * - yardstick: 強さの物差し（学習した評価の補正を入れる前の探索 AI を凍結したもの。rhino-compare の相手 search-classic と同じ手を指す）。
+ *   今までの人間の対戦記録・AI の結果と比べられる
+ * - latest: 今の既定の探索 AI（最新版）
  */
-export const OPPONENT_AGENT = "search-classic";
+export type OpponentId = "yardstick" | "latest";
+
+export const OPPONENTS: Readonly<Record<OpponentId, { agent: string; label: string }>> = {
+  yardstick: { agent: "yardstick", label: "物差し" },
+  latest: { agent: "search", label: "最新版" },
+};
+export const OPPONENT_IDS = Object.keys(OPPONENTS) as OpponentId[];
+export const DEFAULT_OPPONENT: OpponentId = "yardstick";
+
+export const isOpponentId = (v: unknown): v is OpponentId => typeof v === "string" && v in OPPONENTS;
 
 export function subjectDeck(subject: SubjectId): DefaultDeck {
   const name = SUBJECTS[subject].deck;
