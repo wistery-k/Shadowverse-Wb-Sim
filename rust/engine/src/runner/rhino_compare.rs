@@ -40,7 +40,7 @@ const AMULET_TOKENS: [&str; 2] = ["ホーリーフレイムタイガー", "壮�
 #[derive(Clone)]
 enum AgentConfig {
     Rhino {
-        rules: bool,
+        rhino_eval: bool,
         search: SearchOptions,
         plain: SearchOptions,
     },
@@ -51,11 +51,11 @@ impl AgentConfig {
     fn create(&self) -> Box<dyn Agent> {
         match self {
             AgentConfig::Rhino {
-                rules,
+                rhino_eval,
                 search,
                 plain,
             } => Box::new(RhinoAgent::with_options(
-                *rules,
+                *rhino_eval,
                 search.clone(),
                 plain.clone(),
             )),
@@ -263,9 +263,9 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let agent = match agent_key.as_str() {
         "rhino" | "rhino-lethal" => {
             let (search, plain) = rhino_options(&opts, model.as_ref())?;
-            AgentConfig::Rhino { rules: agent_key == "rhino", search, plain }
+            AgentConfig::Rhino { rhino_eval: agent_key == "rhino", search, plain }
         }
-        "search" => AgentConfig::Search(search_options(&opts, model.as_ref(), SearchOptions::default(), &["potential", "holds"])?),
+        "search" => AgentConfig::Search(search_options(&opts, model.as_ref(), SearchOptions::default(), &["potential"])?),
         "search-classic" => AgentConfig::Search(search_classic_options()),
         _ => return Err(format!("Rust 版で使える --agent は rhino / rhino-lethal / search / search-classic: {agent_key}")),
     };

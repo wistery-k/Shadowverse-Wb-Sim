@@ -12,7 +12,7 @@ pub const AGENTS: [(&str, &str); 8] = [
     ("search", "探索"),
     ("search-classic", "探索（学習した補正なし）"),
     ("yardstick", "物差し（凍結した探索）"),
-    ("rhino", "リノセウス用ルール＋探索"),
+    ("rhino", "探索＋リノセウス用の評価・リーサル"),
     ("rhino-lethal", "探索＋リノセウス用リーサル"),
     ("greedy", "貪欲法"),
     ("greedy-base", "貪欲法（基準の重み）"),

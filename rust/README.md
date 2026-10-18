@@ -68,7 +68,7 @@ npm run yardstick -- --opts '{}' --games 1000 --label 名前 --record    # 固�
 ```
 
 - 設定の JSON は `"valueNet"` に学習した補正のファイル、`"weights"` のオブジェクト・`"default"`・`"holdScale"`、
-  リノセウス用 AI の `"potential"`・`"holds"` 等を受け付ける。TypeScript 版とともに消した実験用の項目（序盤のターンを全探索する
+  リノセウス用 AI の `"potential"` 等を受け付ける。TypeScript 版とともに消した実験用の項目（序盤のターンを全探索する
   `"exhaustive"` 等）はエラーになる（既定の値なら受け付ける）。知らない項目もエラーにする
 - rhino-compare の `--agent` は rhino・rhino-lethal・search・search-classic
 - マリガンの設定 `"mulligan"` は model（既定）・weights・cost・sample（返し方 16 通りごとに引き直しを `"mulliganSamples"` 回（既定 100）試し、評価関数の平均で選ぶ）
