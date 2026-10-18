@@ -259,12 +259,17 @@ pub fn rhino_search_options(potential: f64, learned: Option<ExtraEval>) -> Searc
     SearchOptions {
         lethal: false,
         per_first: RHINO_PER_FIRST,
-        next_lethal_search: Some(Arc::new(|s: &GameState, q: PlayerIndex| {
-            search_lethal_for_rhino(s, q).is_some()
-        })),
+        next_lethal_search: Some(Arc::new(rhino_next_lethal)),
         extra_eval: rhino_extra_eval(potential, learned),
         ..SearchOptions::default()
     }
+}
+
+/// 次のターンの始めの局面で、リノセウスを使って倒しきれるか（手札にリノセウスがあり、上限の式が相手の体力に届くときだけ探す）
+pub fn rhino_next_lethal(s: &GameState, q: PlayerIndex) -> bool {
+    s.players[q].hand.iter().any(|h| tag(h.card) == Tag::Rhino)
+        && rhino_lethal_bound(s, q) >= s.players[opponent(q)].leader_hp
+        && search_lethal_for_rhino(s, q).is_some()
 }
 
 const DIRECT_ONLY: LethalOptions = LethalOptions {
