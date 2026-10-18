@@ -155,3 +155,37 @@ fn lethal_hint_finds_enhanced_kuon_line() {
     let seq = lethal_hint(&s, 0, 1);
     assert!(wins(&s, seq.as_deref(), 0));
 }
+
+#[test]
+fn damage_bound_keeps_enhanced_kuon_lethal() {
+    let s = kuon_enhance_position();
+    // 上限で打ち切っても、エンハンスのクオンの手順は残る
+    let b = crate::ai::damage_bound::damage_bound(&s, 0, false).expect("上限");
+    assert!(b >= 13, "上限 {b}");
+    fresh();
+    let opts = crate::ai::exact_lethal::sure_lethal_options(20_000);
+    let seq = crate::ai::exact_lethal::search_exact_lethal(&s, 0, &opts);
+    assert!(wins(&s, seq.as_deref(), 0));
+}
+
+#[test]
+fn damage_bound_cuts_seven_cost_kuon() {
+    // PP 7 でクオンを出しても（エンハンスできない）、顔に届くのは場の古い形代と超進化で疾走を与えた式神くらい
+    let mut s = kuon_enhance_position();
+    let kuon = s.players[0].hand[1].clone();
+    let old = old_follower(&mut s, "式神・形代");
+    let me = &mut s.players[0];
+    me.hand = vec![kuon];
+    me.board.push(old);
+    me.pp = 7;
+    me.extra_pp_available = false;
+    let b = crate::ai::damage_bound::damage_bound(&s, 0, false).expect("上限");
+    let opts = crate::ai::exact_lethal::ExactLethalOptions {
+        deterministic_only: true,
+        damage_bound: false,
+        ..crate::ai::exact_lethal::DEFAULT_EXACT_LETHAL_OPTIONS
+    };
+    let exact = crate::ai::exact_lethal::exact_max_damage(&s, 0, &opts).expect("全探索");
+    assert!(exact <= b, "全探索 {exact} 上限 {b}");
+    assert!(b < 13, "上限 {b}");
+}

@@ -3,6 +3,7 @@
 //! メモのキーは TypeScript 版の文字列と同じものを同じと見なす（中身の書き方は違ってよい）。
 //! キーの区別の細かさが違うと、メモの当たり方が変わり、見つかる手順や打ち切りの位置が変わる。
 
+use super::damage_bound::damage_bound;
 use super::Rng;
 use crate::data::CardIdx;
 use crate::game::{legal_actions, try_apply_action};
@@ -45,6 +46,8 @@ pub struct ExactLethalOptions {
     pub ignore_exhausted_stats: bool,
     pub leader_only: Vec<Iid>,
     pub no_play: Vec<Iid>,
+    /// 残りで与えうるダメージの上限（damage_bound）が相手の残り体力に届かない局面で打ち切る
+    pub damage_bound: bool,
 }
 
 pub const DEFAULT_EXACT_LETHAL_OPTIONS: ExactLethalOptions = ExactLethalOptions {
@@ -59,6 +62,7 @@ pub const DEFAULT_EXACT_LETHAL_OPTIONS: ExactLethalOptions = ExactLethalOptions 
     ignore_exhausted_stats: false,
     leader_only: Vec::new(),
     no_play: Vec::new(),
+    damage_bound: true,
 };
 
 /// 乱数に依らない手だけで、局面数を絞った全探索（ビームで見つからないリーサルの確かめ用。ターンあたりは上限の 2 倍まで）
@@ -237,11 +241,22 @@ pub fn lethal_key(out: &mut String, s: &GameState, opp: PlayerIndex, ignore_exha
     }
 }
 
-/// 同じターンの間はメモを使い回す（局面のキー → ここから与えられる最大のダメージと、それが打ち切っていない値か）
+/// 探索で得た値の意味
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Bound {
+    /// ここから与えられる最大のダメージ
+    Exact,
+    /// 与えられるダメージ（求める値に届いたので打ち切った。最大はこれ以上）
+    Lower,
+    /// 最大のダメージはこれ以下（上限の見積もりで打ち切ったところがある）
+    Upper,
+}
+
+/// 同じターンの間はメモを使い回す（局面のキー → 値とその意味）
 struct TurnCache {
     turn: i32,
     player: PlayerIndex,
-    memo: HashMap<String, (i32, bool)>,
+    memo: HashMap<String, (i32, Bound)>,
     visited: i64,
 }
 
@@ -299,6 +314,16 @@ pub fn varies_with_random(s: &GameState, a: &Action, next: &GameState, p: Player
     )
 }
 
+/// p が山札からカードを手札に加えたか（引くカードは山札の順番に依るので、乱数に依らない手だけを調べるときは除く。
+/// varies_with_random でもほとんど除かれるが、山札が同じカードばかりのときも除いて、damage_bound と揃える）
+fn drew_from_deck(s: &GameState, next: &GameState, p: PlayerIndex) -> bool {
+    let deck = &s.players[p].deck;
+    next.players[p]
+        .hand
+        .iter()
+        .any(|h| deck.iter().any(|r| r.iid == h.iid))
+}
+
 fn actor_of(s: &GameState) -> PlayerIndex {
     s.pending.as_ref().map_or(s.active, |pd| pd.player())
 }
@@ -310,7 +335,7 @@ struct Dfs<'a> {
     p: PlayerIndex,
     opp: PlayerIndex,
     prefix: String,
-    memo: &'a mut HashMap<String, (i32, bool)>,
+    memo: &'a mut HashMap<String, (i32, Bound)>,
     visited: i64,
     limit: i64,
 }
@@ -372,22 +397,28 @@ impl Dfs<'_> {
         if next.phase == Phase::Ended && next.winner != Some(self.p) {
             return None;
         }
-        if self.opts.deterministic_only && varies_with_random(s, a, &next, self.p) {
+        if self.opts.deterministic_only
+            && (drew_from_deck(s, &next, self.p) || varies_with_random(s, a, &next, self.p))
+        {
             return None;
         }
         let dealt = s.players[self.opp].leader_hp - next.players[self.opp].leader_hp;
         Some((next, dealt))
     }
 
-    /// s から与えられる最大のダメージ（need 以上が見つかればそこで打ち切った値）
+    /// s から与えられる最大のダメージ（need 以上が見つかればそこで打ち切った値。need に届かないときは上限のこともある）
     fn dfs(&mut self, s: &GameState, need: i32, played: i32) -> Result<i32, Abort> {
+        self.dfs_bound(s, need, played).map(|r| r.0)
+    }
+
+    fn dfs_bound(&mut self, s: &GameState, need: i32, played: i32) -> Result<(i32, Bound), Abort> {
         if s.phase != Phase::Main || actor_of(s) != self.p {
-            return Ok(0);
+            return Ok((0, Bound::Exact));
         }
         let remaining = self.remaining_of(played);
         if let Some(m) = self.opts.must_play {
             if remaining > 0 && !is_transient(s) && !(m.feasible)(s, self.p, remaining) {
-                return Ok(0);
+                return Ok((0, Bound::Exact));
             }
         }
         // 選択待ち・解決中の局面はメモしない
@@ -405,9 +436,22 @@ impl Dfs<'_> {
             Some(k)
         };
         if let Some(k) = &key {
-            if let Some(&(damage, exact)) = self.memo.get(k) {
-                if exact || damage >= need {
-                    return Ok(damage);
+            if let Some(&(damage, b)) = self.memo.get(k) {
+                let usable = match b {
+                    Bound::Exact => true,
+                    Bound::Lower => damage >= need,
+                    Bound::Upper => damage < need,
+                };
+                if usable {
+                    return Ok((damage, b));
+                }
+            }
+            if self.opts.damage_bound {
+                if let Some(u) = damage_bound(s, self.p, !self.opts.deterministic_only) {
+                    if u < need {
+                        self.memo.insert(k.clone(), (u, Bound::Upper));
+                        return Ok((u, Bound::Upper));
+                    }
                 }
             }
         }
@@ -416,15 +460,18 @@ impl Dfs<'_> {
             return Err(Abort);
         }
         let mut best = 0;
+        let mut upper = false;
         if let Some(k) = &key {
-            self.memo.insert(k.clone(), (0, false));
+            self.memo.insert(k.clone(), (0, Bound::Lower));
         }
         for a in self.candidates(s, played) {
             let Some((next, dealt)) = self.try_step(s, &a) else {
                 continue;
             };
             let after = self.played_after(s, &a, played);
-            let damage = dealt + self.dfs(&next, need - dealt, after)?;
+            let (d, b) = self.dfs_bound(&next, need - dealt, after)?;
+            upper |= b == Bound::Upper;
+            let damage = dealt + d;
             if damage > best {
                 best = damage;
             }
@@ -432,12 +479,18 @@ impl Dfs<'_> {
                 break;
             }
         }
-        // 打ち切ったなら best は最大値ではない（下限）
-        let exact = best < need;
+        // 打ち切ったなら best は最大値ではない（下限）。上限で打ち切った子があれば best は上限
+        let b = if best >= need {
+            Bound::Lower
+        } else if upper {
+            Bound::Upper
+        } else {
+            Bound::Exact
+        };
         if let Some(k) = key {
-            self.memo.insert(k, (best, exact));
+            self.memo.insert(k, (best, b));
         }
-        Ok(best)
+        Ok((best, b))
     }
 
     fn trace(&mut self, root: &GameState) -> Result<Option<Vec<Action>>, Abort> {
@@ -547,4 +600,30 @@ pub fn search_exact_lethal(
     };
     CACHES.with(|c| c.borrow_mut()[kind] = Some(cache));
     result
+}
+
+/// root から p がこのターンに相手リーダーへ与えられる最大のダメージ（全探索。局面が多すぎれば None。
+/// damage_bound が多めに見積もっているかを確かめる用で、メモは使い回さない）
+pub fn exact_max_damage(
+    root: &GameState,
+    p: PlayerIndex,
+    opts: &ExactLethalOptions,
+) -> Option<i32> {
+    if root.phase != Phase::Main || actor_of(root) != p {
+        return None;
+    }
+    let mut memo = HashMap::new();
+    let mut dfs = Dfs {
+        opts,
+        p,
+        opp: opponent(p),
+        prefix: String::new(),
+        memo: &mut memo,
+        visited: 0,
+        limit: opts.max_states,
+    };
+    match dfs.dfs_bound(root, i32::MAX / 2, 0) {
+        Ok((d, Bound::Exact)) => Some(d),
+        _ => None,
+    }
 }
