@@ -73,6 +73,7 @@ pub fn reference_options() -> SearchOptions {
         extra_eval: None,
         weights: Some(Arc::new(weights)),
         opponent_search: None,
+        own_next: None,
         opp_hand_samples: 1,
         opp_hand_common: false,
         peek_opp_hand: false,
