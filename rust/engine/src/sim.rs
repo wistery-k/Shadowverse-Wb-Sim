@@ -151,3 +151,83 @@ pub fn play_match(
     }
     s
 }
+
+/// 打ち比べ（リプレイの「この局面で別の手を打ったら」）の 1 試合。
+/// 手番のプレイヤーから見えない情報（相手の手札・山札の中身、山札の順番、乱数の状態）を seed で並べ直した局面で first を打ち、
+/// 残りを agents で最後まで対戦させて、終わった局面を返す。
+/// 同じ seed なら first が違っても並べ直し方と AI の乱数は同じ（手の違いだけを比べるため）。first がその局面で打てなければ None
+pub fn branch_playout(
+    start: &GameState,
+    first: &Action,
+    agents: &mut [&mut dyn crate::ai::Agent; 2],
+    seed: u32,
+) -> Option<GameState> {
+    let viewer = crate::game::acting_player(start);
+    let mut rng = crate::ai::Rng::new(seed);
+    let det = crate::ai::determinize::determinize(start, viewer, &mut rng, false);
+    if !crate::game::is_legal(&det, first) {
+        return None;
+    }
+    let mut s = crate::game::apply_legal(&det, first);
+    let mut rng = crate::ai::Rng::new(seed ^ 0x9e3779b9);
+    let mut actions = 0;
+    while s.phase != Phase::Ended {
+        actions += 1;
+        assert!(
+            actions <= 10000,
+            "アクション数が上限 10000 を超えました（打ち比べ、シード {seed}）"
+        );
+        let legal = legal_actions(&s);
+        let actor = crate::game::acting_player(&s);
+        let a = agents[actor].choose_action(&s, &legal, &mut rng);
+        s = apply_action(&s, &a);
+    }
+    Some(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai::RandomAgent;
+
+    /// 両者がマリガンを済ませ、何手か進めた局面
+    fn mid_game() -> GameState {
+        let decks = &data().decks;
+        let mut s = create_game([&decks[0].cards, &decks[1].cards], 7);
+        let mut pick = Chooser::new(3);
+        for _ in 0..30 {
+            let legal = legal_actions(&s);
+            s = apply_action(&s, &legal[pick.pick(legal.len())]);
+            if s.phase == Phase::Ended {
+                break;
+            }
+        }
+        assert_ne!(s.phase, Phase::Ended);
+        s
+    }
+
+    fn playout(s: &GameState, a: &Action, seed: u32) -> Option<(Option<PlayerIndex>, i32)> {
+        let (mut r0, mut r1) = (RandomAgent, RandomAgent);
+        branch_playout(s, a, &mut [&mut r0, &mut r1], seed).map(|e| (e.winner, e.turn))
+    }
+
+    #[test]
+    fn branch_playout_is_deterministic_and_finishes() {
+        let s = mid_game();
+        for a in legal_actions(&s) {
+            let r = playout(&s, &a, 11).expect("打てる手");
+            assert!(r.0.is_some());
+            assert_eq!(playout(&s, &a, 11), Some(r));
+        }
+    }
+
+    #[test]
+    fn branch_playout_rejects_illegal_action() {
+        let s = mid_game();
+        let illegal = Action::Attack {
+            attacker: -12345,
+            target: None,
+        };
+        assert_eq!(playout(&s, &illegal, 1), None);
+    }
+}

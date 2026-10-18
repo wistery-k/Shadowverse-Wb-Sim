@@ -988,6 +988,88 @@ progress {
   background: color-mix(in oklab, var(--accent) 18%, transparent);
 }
 
+.replay .controls {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+.branch-mark {
+  margin-left: 6px;
+  padding: 0 6px;
+  font-size: 11px;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* リプレイの打ち比べ */
+.branch {
+  gap: 6px;
+  font-size: 13px;
+}
+.branch-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.branch-head button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.branch-options {
+  list-style: none;
+  margin: 0;
+  padding: 4px 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.branch-options label {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.branch-tag {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: var(--accent);
+  color: #fff;
+  white-space: nowrap;
+}
+.branch-result {
+  display: grid;
+  gap: 4px;
+}
+.branch-result table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.branch-result th,
+.branch-result td {
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.branch-result td.num {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.branch-result tr.better td:nth-child(3) {
+  color: var(--div-win);
+  font-weight: bold;
+}
+.branch-result tr.worse td:nth-child(3) {
+  color: var(--div-lose);
+  font-weight: bold;
+}
+
 /* リプレイの再現情報 */
 .repro {
   gap: 4px;
