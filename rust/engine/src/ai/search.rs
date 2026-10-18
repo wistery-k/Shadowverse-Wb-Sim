@@ -11,7 +11,9 @@ use super::determinize::determinize;
 use super::eval::{evaluate_with, EvalWeights};
 use super::greedy::choose_greedy;
 use super::keys::{hand_eq_noid, visible_eq, TurnOrderSet};
-use super::lethal::{find_lethal, search_lethal, LethalOptions, DEFAULT_LETHAL_OPTIONS};
+use super::lethal::{
+    find_lethal, search_lethal, LethalOptions, DEFAULT_LETHAL_OPTIONS, GUARDED_LETHAL_OPTIONS,
+};
 use super::mulligan::{model_mulligan_swap, sampled_mulligan, weighted_mulligan_swap};
 use super::valuenet::{value_net_eval, ValuePhase};
 use super::{Agent, Rng};
@@ -116,8 +118,8 @@ impl Default for SearchOptions {
             max_depth: 8,
             rescore_top: 4,
             lethal: true,
-            lethal_ward_blocked: 0.0,
-            lethal_expand_choices: false,
+            lethal_ward_blocked: GUARDED_LETHAL_OPTIONS.ward_blocked,
+            lethal_expand_choices: GUARDED_LETHAL_OPTIONS.expand_choices,
             allow: None,
             dedup: true,
             same_hand_once: true,

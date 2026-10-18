@@ -56,6 +56,14 @@ pub const DEFAULT_LETHAL_OPTIONS: LethalOptions = LethalOptions {
     expand_choices: false,
 };
 
+/// 探索 AI の既定と対戦画面のリーサル表示で使う設定: 守護の奥の打点を数え、選択待ちをその場で展開する
+/// （クオンの超進化で式神に疾走を付ける手順を見つけるため。docs/ai-notes.md「リーサル探索で守護の奥の打点を数える」）
+pub const GUARDED_LETHAL_OPTIONS: LethalOptions = LethalOptions {
+    ward_blocked: 1.0,
+    expand_choices: true,
+    ..DEFAULT_LETHAL_OPTIONS
+};
+
 const WIN: f64 = 1e9;
 
 /// 相手の場に守護がいて、リーダーを攻撃できないフォロワー（進化して出たターンのクオン等）の攻撃力の合計が守護の体力の合計以上のとき、
