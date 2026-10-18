@@ -19,6 +19,7 @@
     "svwb": "node scripts/svwb.mjs",
     "compare": "node scripts/svwb.mjs compare",
     "rhino-compare": "node scripts/svwb.mjs rhino-compare",
+    "deck-compare": "node scripts/svwb.mjs deck-compare",
     "af-compare": "node scripts/svwb.mjs rhino-compare --subject af",
     "spellwitch-compare": "node scripts/svwb.mjs rhino-compare --subject spellwitch",
     "bishop-compare": "node scripts/svwb.mjs rhino-compare --subject bishop",

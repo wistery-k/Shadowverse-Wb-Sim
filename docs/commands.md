@@ -30,6 +30,7 @@
 | `npm run game` | 1 試合だけ打って行動の列を表示する（下） | `scripts/game-main.ts` |
 | `npm run compare` | 探索 AI の設定 A と B の勝率（下） | `rust/engine/src/runner/compare.rs` |
 | `npm run rhino-compare` 等 | デッキ 1 つと他の 6 デッキの勝率（下） | `rust/engine/src/runner/rhino_compare.rs` |
+| `npm run deck-compare` | デッキのカードを入れ替えた案と元のデッキの勝率（下） | `rust/engine/src/runner/deck_compare.rs` |
 | `npm run yardstick` | 固定した相手との勝率（強さの物差し。下） | `rust/engine/src/runner/yardstick.rs` |
 | `npm run svwb` | Rust 版の CLI（下） | `rust/engine/src/main.rs` |
 | `npm run td` | TD 学習のモデルの作成・学習・分析（下） | `scripts/td-main.ts` |
@@ -105,6 +106,28 @@ npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …
 | `--opts JSON` | `{}` | 比べるデッキの AI の設定（`search-classic` では使わない）。下の「探索 AI の設定」に加え、リノセウス用 AI の `"potential"`（数）と `"holds"`（`{"mystery":…, "rhino":…, "extraPp":…}`） |
 | `--out ファイル` | なし | 試合ごとの結果を JSON Lines で書き出す |
 | `--matches ファイル` | なし | 「人間との比較」タブで保存した試合（JSON Lines）と同じ試合だけ打ち、人間の勝敗と並べる |
+
+## deck-compare
+
+```sh
+npm run deck-compare -- --deck <デッキ> [--variant '<変更>']… [--add <カード>[,<カード>…]] [--games 50] [--start 0] [--out 結果.jsonl]
+```
+
+デッキのカードを入れ替えた案を、元のデッキと同じ試合で比べる（デッキの最適化）。元のデッキと各案は、比較用の 7 デッキのうち自分以外と両方の席で打つ。
+AI はどちらの側も今の既定（リノセウスエルフはリノセウス用 AI、他は探索 AI）。
+
+| 引数 | 既定 | 意味 |
+|---|---|---|
+| `--deck` | 必須 | 比べるデッキ（デフォルトデッキの名前かファイル名） |
+| `--variant` | なし | 案。「カード名-枚数」「カード名+枚数」をカンマで並べる（例: `'知恵の輝き-1,最果ての罪・サタン+1'`。カード ID も可）。抜く枚数と足す枚数は同じにする。何回でも書ける |
+| `--add カード` | なし | デッキの各カードについて「そのカードを 1 枚抜いて、このカードを 1 枚足す」案をすべて作る |
+| `--games N` | 50 | 相手デッキ 1 つ・席 1 つあたりの試合数（1 案あたり N × 6 デッキ × 2 席） |
+| `--start S` | 0 | 最初の試合番号（シードは 2000000 + 13 × 試合番号 + 席。案どうしで同じ） |
+| `--out ファイル` | なし | 試合ごとの結果（案・相手・試合番号・席・勝ち）を JSON Lines で書き出す |
+
+- 抜いたカードの位置に足したカードを置くので、同じシードなら山札の並びは入れ替えたカードの所だけが違う。それでも 1 枚の入れ替えで 4 割ほどの試合の勝敗が入れ替わる
+  （AI が自分の山札・相手の手札を並べ直して読むので、引く前から手が変わる）。1 案 2400 試合（`--games 200`）で差の標準誤差は 1.3 ポイントほど
+- 学習した補正は比較用の 7 デッキのカードしか学んでいないので、それ以外のカードは手で作った評価だけで打つ
 
 ## yardstick
 
