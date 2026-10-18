@@ -325,7 +325,7 @@ impl GameState {
 }
 
 /// 山札から条件付きで引くときの条件
-pub type DeckFilter<'a> = &'a dyn Fn(&GameState, CardIdx) -> bool;
+pub type DeckFilter<'a> = &'a dyn Fn(&GameState, &CardRef) -> bool;
 
 // ---- 基本操作 ----
 
@@ -515,6 +515,14 @@ impl GameState {
         Some(kept.remove(i))
     }
 
+    /// p の山札のカード r のコスト（手札から戻って手札での状態を持つなら、変化したコスト）
+    pub fn deck_cost(&self, p: PlayerIndex, r: &CardRef) -> i32 {
+        match self.players[p].deck_kept.iter().find(|h| h.iid == r.iid) {
+            Some(h) => hand_cost(h),
+            None => card(r.card).cost,
+        }
+    }
+
     /// 場に出すカードの実体を作る（手札からなら手札での変化を引き継ぐ）
     pub fn new_board_card(&mut self, c: CardIdx, from: Option<&HandCard>) -> OnBoard {
         let cd = card(c);
@@ -594,7 +602,7 @@ impl GameState {
             i += 1;
             let r = match filter {
                 Some(f) => {
-                    let idx = self.players[p].deck.iter().position(|r| f(self, r.card));
+                    let idx = self.players[p].deck.iter().position(|r| f(self, r));
                     match idx {
                         Some(idx) => self.players[p].deck.remove(idx),
                         None => break,

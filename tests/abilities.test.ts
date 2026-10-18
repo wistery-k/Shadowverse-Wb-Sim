@@ -424,6 +424,21 @@ describe("手札から山札に戻したカード", () => {
     expect(t.players[me].deck.some((c) => c.kept)).toBe(false);
   });
 
+  it("山札のカードのコストは手札で変化したコストで見る（裁決のアナテマ・ロデオ）", () => {
+    const { s, me } = setup();
+    const bird = id("投影の鳥像");
+    const cheap = newHandCard(s, bird);
+    cheap.costMod = -1;
+    const plain = newHandCard(s, bird);
+    s.players[me].deck = [{ iid: plain.iid, cardId: bird }, { iid: cheap.iid, cardId: bird, kept: cheap }, ...s.players[me].deck.slice(0, 5)];
+    toHand(s, me, "キャラバンマンモス");
+    const t = applyAction(s, { type: "play", iid: toHand(s, me, "裁決のアナテマ・ロデオ") });
+    // 元のコスト 4 で、手札で -1 されたものだけが「コスト3以下」に入る
+    expect(board(t, me).filter((c) => c.cardId === bird).map((c) => c.iid)).toEqual([cheap.iid]);
+    expect(t.players[me].deck.some((c) => c.iid === plain.iid)).toBe(true);
+    expect(t.players[me].deck.some((c) => c.kept)).toBe(false);
+  });
+
   it("状態の変わっていないカードは何も持たずに戻る", () => {
     const { s, me } = setup();
     toHand(s, me, "ブレイズデストロイヤー");

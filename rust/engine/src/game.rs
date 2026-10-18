@@ -1039,7 +1039,8 @@ fn apply_fuse(s: &mut GameState, host_iid: Iid, materials: &[Iid]) {
     let mut ctx = Ctx::new(p, host_iid);
     ctx.set_var(
         d.var_fused_cost,
-        used.iter().map(|m| card(m.card).cost).sum(),
+        // 「融合したカードのコスト」は手札で変化したコスト（docs/rules.md の「コスト」と「元のコスト」）
+        used.iter().map(hand_cost).sum(),
     );
     ctx.set_var(d.var_fused_kinds, host.fused_kinds.len() as i32);
     fire_ally_fuse(s, p);
