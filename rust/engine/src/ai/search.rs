@@ -83,6 +83,8 @@ pub struct SearchOptions {
     /// 相手が何もしなければ次のターンに倒しきれる（next_lethal_search で調べる）終局面を、ターン末の点数の高い順に
     /// この数まで、相手のターンを読む候補に足す（passLethal）
     pub pass_lethal: usize,
+    /// passLethal で終局面を選ぶ判定（None なら next_lethal_search）
+    pub pass_lethal_search: Option<NextLethalSearch>,
     pub beam_pp: f64,
     pub extra_eval: Option<ExtraEval>,
     /// 評価関数の重み（None なら探索 AI の既定 SEARCH_WEIGHTS）
@@ -129,6 +131,7 @@ impl Default for SearchOptions {
             next_lethal_range: None,
             next_lethal_search: None,
             pass_lethal: 0,
+            pass_lethal_search: None,
             beam_pp: 0.0,
             extra_eval: Some(Arc::new(value_net_eval)),
             weights: None,
@@ -660,7 +663,11 @@ pub fn plan_turn(
     }
     // 相手が何もしなければ次のターンに倒しきれる終局面を、ターン末の点数の高い順に passLethal 個まで読み足す
     if opts.pass_lethal > 0 {
-        if let Some(f) = &opts.next_lethal_search {
+        if let Some(f) = opts
+            .pass_lethal_search
+            .as_ref()
+            .or(opts.next_lethal_search.as_ref())
+        {
             let mut seen = TurnOrderSet::default();
             for &i in &rescored {
                 seen.add(&terminals[i].state);

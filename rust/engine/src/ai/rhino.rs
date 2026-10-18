@@ -272,6 +272,28 @@ pub fn rhino_next_lethal(s: &GameState, q: PlayerIndex) -> bool {
         && search_lethal_for_rhino(s, q).is_some()
 }
 
+/// 次のターンに、相手の守護のフォロワーに与えられるダメージの見積もり（ユーザーの案）。
+/// フェアリー（突進 1/1。妖精の招集・フェアリーテイマーは 2 枚、燐光の岩は 1 枚と数える）1 枚につき 1、メイ 3、0 コストまで下がりうるベイル 4、
+/// 超進化できるならベビーカーバンクル 5（場にいるか、手札のカーバンクルをリノセウスを戻すのに使わなくてよいとき）
+pub fn ward_clear_damage(s: &GameState, q: PlayerIndex) -> i32 {
+    let v = View::of(s, q);
+    let fairies = v.in_hand(Tag::Fairy)
+        + 2 * (v.in_hand(Tag::FairyCall) + v.in_hand(Tag::Tamer))
+        + v.in_hand(Tag::Rock);
+    let other_bounce =
+        v.board_count(Tag::Rod) > 0 || v.has_in_hand(Tag::Bugs) || v.in_hand(Tag::Rhino) >= 2;
+    let carbuncle = v.can_super()
+        && (v.board_count(Tag::Carbuncle) > 0 || (v.has_in_hand(Tag::Carbuncle) && other_bounce));
+    fairies + 3 * v.in_hand(Tag::May) + 4 * v.zero_cost_bails(2) + 5 * carbuncle as i32
+}
+
+/// passLethal の判定: 次のターンの始めにリノセウスで倒しきれ、守護への見積もりのダメージが ward 以上
+pub fn rhino_pass_lethal(ward: i32) -> super::search::NextLethalSearch {
+    Arc::new(move |s: &GameState, q: PlayerIndex| {
+        ward_clear_damage(s, q) >= ward && rhino_next_lethal(s, q)
+    })
+}
+
 const DIRECT_ONLY: LethalOptions = LethalOptions {
     scorings: &[DIRECT_SCORING],
     ..DEFAULT_LETHAL_OPTIONS
