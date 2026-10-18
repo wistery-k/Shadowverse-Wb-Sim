@@ -9,7 +9,7 @@ use super::aidata::{ai_data, Weights};
 use super::converging::{converging_attacks, dominated_attack, settle_converging_trades_with};
 use super::determinize::determinize;
 use super::eval::{evaluate_with, EvalWeights};
-use super::exact_lethal::{search_exact_lethal, ExactLethalOptions, DEFAULT_EXACT_LETHAL_OPTIONS};
+use super::exact_lethal::{search_exact_lethal, sure_lethal_options};
 use super::greedy::choose_greedy;
 use super::keys::{hand_eq_noid, visible_eq, TurnOrderSet};
 use super::lethal::{
@@ -1176,15 +1176,8 @@ impl Agent for SearchAgent {
             };
             let exact_states = opts.lethal_exact_states;
             let with_exact = |root: &GameState, q: PlayerIndex| {
-                search_lethal(root, q, &lo).or_else(|| {
-                    let eo = ExactLethalOptions {
-                        deterministic_only: true,
-                        max_states: exact_states,
-                        max_states_per_turn: exact_states * 2,
-                        ..DEFAULT_EXACT_LETHAL_OPTIONS
-                    };
-                    search_exact_lethal(root, q, &eo)
-                })
+                search_lethal(root, q, &lo)
+                    .or_else(|| search_exact_lethal(root, q, &sure_lethal_options(exact_states)))
             };
             let search: Option<LethalSearch> = if exact_states > 0 {
                 Some(&with_exact)

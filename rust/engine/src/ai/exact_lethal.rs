@@ -60,6 +60,19 @@ pub const DEFAULT_EXACT_LETHAL_OPTIONS: ExactLethalOptions = ExactLethalOptions 
     no_play: Vec::new(),
 };
 
+/// 乱数に依らない手だけで、局面数を絞った全探索（ビームで見つからないリーサルの確かめ用。ターンあたりは上限の 2 倍まで）
+pub fn sure_lethal_options(max_states: i64) -> ExactLethalOptions {
+    ExactLethalOptions {
+        deterministic_only: true,
+        max_states,
+        max_states_per_turn: max_states * 2,
+        ..DEFAULT_EXACT_LETHAL_OPTIONS
+    }
+}
+
+/// 対戦画面のリーサル表示がビームの後に調べる全探索の局面数の上限
+pub const HINT_EXACT_STATES: i64 = 20_000;
+
 thread_local! {
     /// 付与された能力の中身ごとの番号（TypeScript 版は能力の JSON をキーに入れる）
     static GRANTED_IDS: RefCell<(HashMap<usize, u32>, HashMap<String, u32>)> = RefCell::new((HashMap::new(), HashMap::new()));
