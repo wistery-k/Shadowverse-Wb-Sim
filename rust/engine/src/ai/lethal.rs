@@ -3,8 +3,10 @@
 use super::determinize::determinize;
 use super::keys::{lethal_key_eq, lethal_key_hash, visible_eq, EqSet};
 use super::Rng;
-use crate::data::{STORM, WARD};
-use crate::game::{attack_targets, legal_actions, try_apply_action};
+use crate::data::{AMBUSH, INTIMIDATE, STORM, WARD};
+use crate::game::{
+    attack_targets, can_attack_followers, can_attack_leader, legal_actions, try_apply_action,
+};
 use crate::state::*;
 use std::cell::RefCell;
 
@@ -36,6 +38,13 @@ pub struct LethalOptions {
     pub max_depth: usize,
     pub samples: usize,
     pub scorings: &'static [LethalScoring],
+    /// 相手の守護に止められている、リーダーを攻撃できるフォロワーの打点にかける重み（途中の局面の点数）。
+    /// リーダーを攻撃できないフォロワーで守護を倒しきれるときだけ数える（`ward_blocked_damage`）。
+    /// クオンの超進化で疾走を付けた式神の打点をビームに残すため。0 なら数えない
+    pub ward_blocked: f64,
+    /// 自分の選択待ち（超進化時の対象の選択など）になった局面を、その場で選択肢ごとに展開して同じ深さの子にする。
+    /// 選んだ後の打点（クオンの超進化で式神に付ける疾走など）で点数を付けるため
+    pub expand_choices: bool,
 }
 
 pub const DEFAULT_LETHAL_OPTIONS: LethalOptions = LethalOptions {
@@ -43,9 +52,51 @@ pub const DEFAULT_LETHAL_OPTIONS: LethalOptions = LethalOptions {
     max_depth: 14,
     samples: 3,
     scorings: &[DIRECT_SCORING, SETUP_SCORING],
+    ward_blocked: 0.0,
+    expand_choices: false,
 };
 
 const WIN: f64 = 1e9;
+
+/// 相手の場に守護がいて、リーダーを攻撃できないフォロワー（進化して出たターンのクオン等）の攻撃力の合計が守護の体力の合計以上のとき、
+/// 守護がいなければリーダーを攻撃できるフォロワーの残りの打点（そうでなければ 0）。守護を倒せば顔に入る打点
+fn ward_blocked_damage(s: &GameState, p: PlayerIndex) -> i32 {
+    if s.active != p {
+        return 0;
+    }
+    let opp = &s.players[opponent(p)];
+    let ward_hp: i32 = opp
+        .board
+        .iter()
+        .filter(|c| {
+            c.is_follower
+                && c.has_keyword(WARD)
+                && !c.has_keyword(AMBUSH)
+                && !c.has_keyword(INTIMIDATE)
+        })
+        .map(|c| c.defense)
+        .sum();
+    if ward_hp == 0 {
+        return 0;
+    }
+    let (mut face, mut clear) = (0, 0);
+    for f in &s.players[p].board {
+        if !f.is_follower {
+            continue;
+        }
+        let dmg = f.attack_value() * (f.max_attacks - f.attacks_this_turn);
+        if can_attack_leader(s, f) {
+            face += dmg;
+        } else if can_attack_followers(s, f) {
+            clear += dmg;
+        }
+    }
+    if clear >= ward_hp {
+        face
+    } else {
+        0
+    }
+}
 
 /// このターンにまだ相手リーダーへ与えられる攻撃のダメージ
 fn ready_face_damage(s: &GameState, p: PlayerIndex) -> i32 {
@@ -67,7 +118,7 @@ fn ready_face_damage(s: &GameState, p: PlayerIndex) -> i32 {
     total
 }
 
-pub fn lethal_score(s: &GameState, p: PlayerIndex, w: &LethalScoring) -> f64 {
+pub fn lethal_score(s: &GameState, p: PlayerIndex, w: &LethalScoring, ward_blocked: f64) -> f64 {
     if s.phase == Phase::Ended {
         return if s.winner == Some(p) { WIN } else { -WIN };
     }
@@ -86,7 +137,12 @@ pub fn lethal_score(s: &GameState, p: PlayerIndex, w: &LethalScoring) -> f64 {
     } else {
         0
     };
-    -((opp.leader_hp - ready - storm) as f64) + prep
+    let blocked = if ward_blocked != 0.0 {
+        ward_blocked * ward_blocked_damage(s, p) as f64
+    } else {
+        0.0
+    };
+    -((opp.leader_hp - ready - storm) as f64) + prep + blocked
 }
 
 fn has_storm(h: &HandCard) -> bool {
@@ -213,7 +269,7 @@ fn beam_lethal(
     let mut frontier = vec![Node {
         state: root.clone(),
         seq: Vec::new(),
-        score: lethal_score(root, p, w),
+        score: lethal_score(root, p, w, opts.ward_blocked),
     }];
     let mut depth = 0;
     while depth < opts.max_depth && !frontier.is_empty() {
@@ -228,19 +284,37 @@ fn beam_lethal(
             if node.state.phase == Phase::Ended || actor != p {
                 continue;
             }
+            // (局面, 手順, 続けて選んだ回数)。expand_choices なら、自分の選択待ちはその場で選んで同じ深さの子にする
+            let mut stack: Vec<(GameState, Vec<Action>, u32)> = Vec::new();
             for a in candidates(&node.state, w.setup) {
                 let Some(next) = try_apply_action(&node.state, &a) else {
                     continue;
                 };
                 let mut seq = node.seq.clone();
                 seq.push(a);
+                stack.push((next, seq, 0));
+            }
+            while let Some((next, seq, chained)) = stack.pop() {
                 if next.phase == Phase::Ended {
                     if next.winner == Some(p) {
                         return Some(seq);
                     }
                     continue;
                 }
-                let score = lethal_score(&next, p, w);
+                if opts.expand_choices
+                    && chained < 3
+                    && next.pending.as_ref().map(|pd| pd.player()) == Some(p)
+                {
+                    for a in candidates(&next, w.setup) {
+                        if let Some(n2) = try_apply_action(&next, &a) {
+                            let mut s2 = seq.clone();
+                            s2.push(a);
+                            stack.push((n2, s2, chained + 1));
+                        }
+                    }
+                    continue;
+                }
+                let score = lethal_score(&next, p, w, opts.ward_blocked);
                 children.push(Node {
                     state: next,
                     seq,
