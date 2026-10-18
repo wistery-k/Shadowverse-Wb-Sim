@@ -137,6 +137,8 @@ pub fn search_options(
             "resampleDraws" => o.resample_draws = flag(k, v)?,
             "drawFirst" => o.draw_first = flag(k, v)?,
             "nextLethal" => o.next_lethal = number(k, v)?,
+            "nextLethalRange" => o.next_lethal_range = Some(number(k, v)?),
+            "passLethal" => o.pass_lethal = count(k, v)?,
             "beamPp" => o.beam_pp = number(k, v)?,
             "scoreTurnEnd" => {
                 o.score_turn_end = match v {

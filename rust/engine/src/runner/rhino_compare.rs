@@ -38,6 +38,7 @@ const AMULET_TOKENS: [&str; 2] = ["ホーリーフレイムタイガー", "壮�
 
 /// 比べるデッキの AI の設定
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
 enum AgentConfig {
     Rhino {
         rhino_eval: bool,
