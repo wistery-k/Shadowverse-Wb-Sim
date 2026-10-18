@@ -55,6 +55,8 @@ pub struct OpponentSearch {
 pub struct OwnNextSearch {
     pub beam_width: usize,
     pub max_depth: usize,
+    /// 次のターン末の点数を混ぜる割合（1 なら次のターン末の点数だけ、0.5 なら相手のターンの後の点数と半分ずつ）
+    pub mix: f64,
 }
 
 /// 探索 AI の設定（search.ts の SearchOptions。exhaustive 等の実験用の項目のうち既定で使わないものは省く）
@@ -896,7 +898,12 @@ fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng) -> f64 {
     };
     let mut v = match env.opts.own_next {
         Some(on) if after.phase != Phase::Ended && after.active == p && after.pending.is_none() => {
-            own_next_value(pl, &after, rng, on)
+            let next = own_next_value(pl, &after, rng, on);
+            if on.mix >= 1.0 {
+                next
+            } else {
+                (1.0 - on.mix) * pl.eval_after(&after) + on.mix * next
+            }
         }
         _ => pl.eval_after(&after),
     };

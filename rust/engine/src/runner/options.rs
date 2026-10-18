@@ -217,6 +217,16 @@ pub fn search_options(
                             None => 8,
                             Some(x) => count("ownNext.maxDepth", x)?,
                         },
+                        mix: match v.get("mix") {
+                            None => 1.0,
+                            Some(Json::Num(x)) if (0.0..=1.0).contains(x) => *x,
+                            Some(x) => {
+                                return Err(format!(
+                                    "\"ownNext.mix\" は 0〜1 の数: {}",
+                                    x.stringify()
+                                ))
+                            }
+                        },
                     }),
                     _ => {
                         return Err(format!(
