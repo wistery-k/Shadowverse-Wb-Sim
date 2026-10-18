@@ -8,19 +8,26 @@
 //! - 抜いたカードの位置に足したカードを置く。山札の並べ方は枚数と乱数だけで決まるので、同じシードなら山札の並びは入れ替えたカードの所だけが違う
 //! - 元のデッキと各案は、比較用の 7 デッキのうち自分以外と、両方の席で `--games` 試合ずつ打つ（シードは案どうしで同じ）
 //! - AI はどちらの側も今の既定（リノセウスエルフはリノセウス用 AI、他は探索 AI）
+//! - マリガンの学習したモデルはデッキのカードの並びでデフォルトデッキを引くので、案のデッキでは使えず「コスト 4 以上を返す」だけになる。
+//!   そこで案のデッキも元のデッキのモデルでマリガンする（足したカードはモデルの表に無いので役割なし・係数 0）
 //! - 各案の勝率と、元のデッキとの入れ替わり（案で勝ち・元で負け / 元で勝ち・案で負け）、符号検定の z を出す
 //! - 同じシードでも、1 枚の入れ替えで 4 割ほどの試合の勝敗が入れ替わる（AI が自分の山札・相手の手札を並べ直して読むので、
 //!   入れ替えたカードを引く前から手が変わる）。1 ポイントの差を見分けるには 1 案 1.5 万試合ほど要る
 
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
+use crate::ai::exact_lethal::reset_exact_lethal_cache;
+use crate::ai::mulligan::{
+    default_deck_name_of, model_mulligan_swap_as, mulligan_action, weighted_mulligan_swap_as,
+};
 use crate::ai::rhino::RhinoAgent;
 use crate::ai::search::{SearchAgent, SearchOptions};
-use crate::ai::Agent;
+use crate::ai::{Agent, Rng};
 use crate::data::{data, CardIdx, ClassId, Deck};
+use crate::game::acting_player;
 use crate::json::Json;
 use crate::sim::play_match;
-use crate::state::card;
+use crate::state::{card, Action, GameState};
 use std::time::Instant;
 
 /// シードの基準（compare・rhino-compare・td selfplay の試合と重ならないように大きくする）
@@ -50,6 +57,28 @@ fn default_agent(deck_name: &str) -> Box<dyn Agent> {
         Box::new(RhinoAgent::new(true))
     } else {
         Box::new(SearchAgent::new(SearchOptions::default()))
+    }
+}
+
+/// デッキがデフォルトデッキのどれとも違うとき、マリガンだけデフォルトデッキ deck のモデル（無ければ重み）で行う
+struct MulliganAs {
+    inner: Box<dyn Agent>,
+    deck: &'static str,
+}
+
+impl Agent for MulliganAs {
+    fn choose_action(&mut self, state: &GameState, legal: &[Action], rng: &mut Rng) -> Action {
+        if legal.len() > 1 && matches!(legal[0], Action::Mulligan { .. }) {
+            let p = acting_player(state);
+            if default_deck_name_of(state, p).is_none() {
+                let swap = model_mulligan_swap_as(state, p, self.deck)
+                    .or_else(|| weighted_mulligan_swap_as(state, p, self.deck));
+                if let Some(a) = swap.and_then(|swap| mulligan_action(legal, &swap)) {
+                    return a.clone();
+                }
+            }
+        }
+        self.inner.choose_action(state, legal, rng)
     }
 }
 
@@ -197,16 +226,26 @@ fn find_deck(name: &str) -> Result<&'static Deck, String> {
         })
 }
 
-fn play_one(entries: &[Entry], opponents: &[&'static Deck], subject: &str, t: &Task) -> bool {
+fn play_one(
+    entries: &[Entry],
+    opponents: &[&'static Deck],
+    subject: &'static Deck,
+    t: &Task,
+) -> bool {
     let me = &entries[t.entry].cards;
     let opp = opponents[t.opp];
     let seed = SEED_BASE + t.g * 13 + t.seat as u32;
-    let mut a = default_agent(subject);
+    // 全探索のリーサル探索のメモはスレッドごとなので、前の試合のものを捨てる（試合の結果を並べ方によらず同じにする）
+    reset_exact_lethal_cache();
+    let mut a = MulliganAs {
+        inner: default_agent(&subject.name),
+        deck: &subject.name,
+    };
     let mut o = default_agent(&opp.name);
     let (mut agents, decks): ([&mut dyn Agent; 2], [&[CardIdx]; 2]) = if t.seat == 0 {
-        ([a.as_mut(), o.as_mut()], [&me[..], &opp.cards[..]])
+        ([&mut a, o.as_mut()], [&me[..], &opp.cards[..]])
     } else {
-        ([o.as_mut(), a.as_mut()], [&opp.cards[..], &me[..]])
+        ([o.as_mut(), &mut a], [&opp.cards[..], &me[..]])
     };
     let end = play_match(&mut agents, decks, seed, |_, _| {});
     let winner = end
@@ -307,7 +346,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let step = (tasks.len() / 10).max(1);
     let results = parallel_map(
         &tasks,
-        |t, _| play_one(&entries, &opponents, &deck.name, t),
+        |t, _| play_one(&entries, &opponents, deck, t),
         |done, total, _, _| {
             if done % step == 0 || done == total {
                 eprintln!(
@@ -426,5 +465,36 @@ mod tests {
         .is_err());
         assert!(parse_changes("知恵の輝き").is_err());
         assert!(parse_changes("無いカード-1").is_err());
+    }
+
+    #[test]
+    fn variant_mulligans_with_base_model() {
+        // 案のデッキはデフォルトデッキとして引けないが、元のデッキのモデルでマリガンする
+        let base = witch();
+        let v = apply_changes(
+            &base.cards,
+            &parse_changes("最果ての罪・サタン-1,観察の探偵+1").unwrap(),
+        )
+        .unwrap();
+        let opp = find_deck("AFネメシス").unwrap();
+        for seed in 0..10 {
+            let mut s = crate::game::create_game([&v, &opp.cards], seed);
+            // 先攻からマリガンするので、相手が先攻なら相手は返さずに済ませる
+            if acting_player(&s) != 0 {
+                let keep = crate::game::legal_actions(&s)[0].clone();
+                s = crate::game::apply_action(&s, &keep);
+            }
+            let legal = crate::game::legal_actions(&s);
+            let p = acting_player(&s);
+            assert_eq!(p, 0);
+            assert_eq!(default_deck_name_of(&s, p), None);
+            let expected = model_mulligan_swap_as(&s, p, &base.name).unwrap();
+            let mut agent = MulliganAs {
+                inner: default_agent(&base.name),
+                deck: &base.name,
+            };
+            let a = agent.choose_action(&s, &legal, &mut Rng::new(seed));
+            assert_eq!(Some(&a), mulligan_action(&legal, &expected));
+        }
     }
 }

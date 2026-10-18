@@ -36,9 +36,23 @@ pub fn default_deck_name_of(s: &GameState, p: PlayerIndex) -> Option<&'static st
 
 /// 重みでマリガンする（evoBonus・oneCopy・maxHighCost は既定のまま）。デッキの重みが無ければ None
 pub fn weighted_mulligan_swap(s: &GameState, p: PlayerIndex) -> Option<Vec<Iid>> {
-    let name = default_deck_name_of(s, p)?;
+    weighted_mulligan_swap_as(s, p, default_deck_name_of(s, p)?)
+}
+
+/// デフォルトデッキ name の重みでマリガンする（デッキのカードが違っても name の表を使う）
+pub fn weighted_mulligan_swap_as(s: &GameState, p: PlayerIndex, name: &str) -> Option<Vec<Iid>> {
     let table = ai_data().mulligan_weights.get(name)?;
     Some(weighted_swap(s, p, table))
+}
+
+/// 返すカード swap に当たるマリガンの手
+pub fn mulligan_action<'a>(legal: &'a [Action], swap: &[Iid]) -> Option<&'a Action> {
+    legal.iter().find(|a| match a {
+        Action::Mulligan { swap: x, .. } => {
+            x.len() == swap.len() && x.iter().all(|i| swap.contains(i))
+        }
+        _ => false,
+    })
 }
 
 /// カード → [1 枚目を残す重み, 2 枚目も残す重み] の表でマリガンする（表に無いカードはコスト 4 以上を返す）
@@ -151,13 +165,17 @@ fn predict_keep(
 
 /// 手札の形でマリガンする。デッキの係数か役割が無ければ None
 pub fn model_mulligan_swap(s: &GameState, p: PlayerIndex) -> Option<Vec<Iid>> {
+    model_mulligan_swap_as(s, p, default_deck_name_of(s, p)?)
+}
+
+/// デフォルトデッキ name の係数と役割で手札の形からマリガンする（表に無いカードは役割なし・係数 0）
+pub fn model_mulligan_swap_as(s: &GameState, p: PlayerIndex, name: &str) -> Option<Vec<Iid>> {
     let ad = ai_data();
     assert_eq!(
         ad.model_features.len(),
         2 * ad.roles.len() + 9,
         "マリガンの特徴の数が合いません"
     );
-    let name = default_deck_name_of(s, p)?;
     let deck = ad.mulligan_model.get(name)?;
     let roles = ad.mulligan_roles.get(name)?;
     Some(model_swap(s, p, deck, roles))

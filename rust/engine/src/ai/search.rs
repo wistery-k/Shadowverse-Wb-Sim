@@ -16,7 +16,9 @@ use super::lethal::{
     find_lethal, search_lethal, LethalOptions, LethalSearch, DEFAULT_LETHAL_OPTIONS,
     GUARDED_LETHAL_OPTIONS,
 };
-use super::mulligan::{model_mulligan_swap, sampled_mulligan, weighted_mulligan_swap};
+use super::mulligan::{
+    model_mulligan_swap, mulligan_action, sampled_mulligan, weighted_mulligan_swap,
+};
 use super::valuenet::{value_net_eval, ValuePhase};
 use super::{Agent, Rng};
 use crate::game::{acting_player, legal_actions, resolve_turn_end, try_apply_action};
@@ -1195,16 +1197,8 @@ impl Agent for SearchAgent {
                     None
                 }
             });
-            if let Some(swap) = swap {
-                let found = legal.iter().find(|a| match a {
-                    Action::Mulligan { swap: x, .. } => {
-                        x.len() == swap.len() && x.iter().all(|i| swap.contains(i))
-                    }
-                    _ => false,
-                });
-                if let Some(a) = found {
-                    return a.clone();
-                }
+            if let Some(a) = swap.and_then(|swap| mulligan_action(legal, &swap)) {
+                return a.clone();
             }
             // 重みの無いデッキは貪欲法と同じ（コスト 4 以上を返す）
             return choose_greedy(real, legal, rng, false, &self.default_w, false);
