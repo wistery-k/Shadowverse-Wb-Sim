@@ -25,9 +25,10 @@ pub enum Tag {
     WaterFairy,
     FairyCall,
     May,
+    Fairy,
 }
 
-const TAG_NAMES: [(Tag, &str); 14] = [
+const TAG_NAMES: [(Tag, &str); 15] = [
     (Tag::Rhino, "殺戮のリノセウス"),
     (Tag::Rod, "聖樹の杖"),
     (Tag::Rock, "燐光の岩"),
@@ -42,6 +43,7 @@ const TAG_NAMES: [(Tag, &str); 14] = [
     (Tag::WaterFairy, "純粋なるウォーターフェアリー"),
     (Tag::FairyCall, "妖精の招集"),
     (Tag::May, "アドベンチャーエルフ・メイ"),
+    (Tag::Fairy, "フェアリー"),
 ];
 
 /// カードの名前の種類

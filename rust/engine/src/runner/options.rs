@@ -4,7 +4,7 @@
 //! （scripts/valueNetOption.ts）。TypeScript 版とともに消した実験用の項目（exhaustive 等）は、既定の値のときだけ受け付ける。
 
 use crate::ai::aidata::{weights_from, AI_DATA_JSON};
-use crate::ai::rhino::{rhino_search_options, RHINO_POTENTIAL};
+use crate::ai::rhino::{rhino_pass_lethal, rhino_search_options, RHINO_POTENTIAL};
 use crate::ai::search::{ExtraEval, MulliganMode, OpponentSearch, ScoreTurnEnd, SearchOptions};
 use crate::ai::valuenet::ValueNet;
 use crate::json::Json;
@@ -306,12 +306,16 @@ pub fn rhino_options(
             ))
         }
     };
-    let search = search_options(
+    let mut search = search_options(
         raw,
         model,
         rhino_search_options(potential, learned.clone()),
-        &["potential", "extraEval"],
+        &["potential", "extraEval", "passLethalWard"],
     )?;
+    // passLethal で選ぶ終局面に、守護への見積もりのダメージがこの値以上あることを求める
+    if let Some(v) = raw.get("passLethalWard") {
+        search.pass_lethal_search = Some(rhino_pass_lethal(number("passLethalWard", v)? as i32));
+    }
     let plain = SearchOptions {
         extra_eval: learned,
         ..SearchOptions::default()
