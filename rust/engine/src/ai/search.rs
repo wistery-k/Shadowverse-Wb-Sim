@@ -50,6 +50,13 @@ pub struct OpponentSearch {
     pub extra_eval: bool,
 }
 
+/// 上位の手を読み直すとき、相手のターンの後の自分の次のターンもビームサーチで打ち、そのターン末の点数で評価する（ownNext、実験用）
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OwnNextSearch {
+    pub beam_width: usize,
+    pub max_depth: usize,
+}
+
 /// 探索 AI の設定（search.ts の SearchOptions。exhaustive 等の実験用の項目のうち既定で使わないものは省く）
 #[derive(Clone)]
 pub struct SearchOptions {
@@ -90,6 +97,7 @@ pub struct SearchOptions {
     /// 評価関数の重み（None なら探索 AI の既定 SEARCH_WEIGHTS）
     pub weights: Option<Arc<Weights>>,
     pub opponent_search: Option<OpponentSearch>,
+    pub own_next: Option<OwnNextSearch>,
     pub opp_hand_samples: usize,
     /// oppHandSamples で引き直す相手の手札を、読み直すどの終局面でも同じ並びにする（手どうしの差のぶれを減らす）
     pub opp_hand_common: bool,
@@ -140,6 +148,7 @@ impl Default for SearchOptions {
                 max_depth: 8,
                 extra_eval: false,
             }),
+            own_next: None,
             opp_hand_samples: 12,
             opp_hand_common: true,
             peek_opp_hand: false,
@@ -885,7 +894,12 @@ fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng) -> f64 {
     } else {
         simulate_opponent_turn(start, p, rng, env.policy_w, env.opts.opp_fuse)
     };
-    let mut v = pl.eval_after(&after);
+    let mut v = match env.opts.own_next {
+        Some(on) if after.phase != Phase::Ended && after.active == p && after.pending.is_none() => {
+            own_next_value(pl, &after, rng, on)
+        }
+        _ => pl.eval_after(&after),
+    };
     if env.opts.next_lethal != 0.0
         && after.phase != Phase::Ended
         && after.players[opponent(p)].leader_hp as f64
@@ -898,6 +912,31 @@ fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng) -> f64 {
         v += env.opts.next_lethal;
     }
     v
+}
+
+/// 自分の次のターンの始めの局面 after から、自分のターンをビームサーチで打った最善のターン末の点数（ownNext）
+fn own_next_value(pl: &Planner, after: &GameState, rng: &mut Rng, on: OwnNextSearch) -> f64 {
+    let env = pl.env;
+    let opts = SearchOptions {
+        beam_width: on.beam_width,
+        max_depth: on.max_depth,
+        opponent_search: None,
+        own_next: None,
+        next_lethal: 0.0,
+        pass_lethal: 0,
+        ..env.opts.clone()
+    };
+    let next_env = Env {
+        opts: &opts,
+        w: env.w,
+        policy_w: env.policy_w,
+    };
+    let root = Rc::new(after.clone());
+    plan_turn(&root, pl.p, &next_env, rng, false)
+        .into_iter()
+        .map(|(_, x)| x.value)
+        .fold(None, |m: Option<f64>, v| Some(m.map_or(v, |m| m.max(v))))
+        .unwrap_or_else(|| pl.eval_after(after))
 }
 
 /// 自分のターンを終え、相手のターン（と、その途中の選択）を貪欲法で進め、自分の手番に戻った局面を返す

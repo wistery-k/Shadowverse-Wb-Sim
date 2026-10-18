@@ -5,7 +5,9 @@
 
 use crate::ai::aidata::{weights_from, AI_DATA_JSON};
 use crate::ai::rhino::{rhino_pass_lethal, rhino_search_options, RHINO_POTENTIAL};
-use crate::ai::search::{ExtraEval, MulliganMode, OpponentSearch, ScoreTurnEnd, SearchOptions};
+use crate::ai::search::{
+    ExtraEval, MulliganMode, OpponentSearch, OwnNextSearch, ScoreTurnEnd, SearchOptions,
+};
 use crate::ai::valuenet::ValueNet;
 use crate::json::Json;
 use std::sync::{Arc, OnceLock};
@@ -197,6 +199,28 @@ pub fn search_options(
                     _ => {
                         return Err(format!(
                             "\"opponentSearch\" は null かオブジェクト: {}",
+                            v.stringify()
+                        ))
+                    }
+                }
+            }
+            "ownNext" => {
+                o.own_next = match v {
+                    Json::Null => None,
+                    Json::Obj(_) => Some(OwnNextSearch {
+                        beam_width: count(
+                            "ownNext.beamWidth",
+                            v.get("beamWidth")
+                                .ok_or("\"ownNext\" には beamWidth を書きます")?,
+                        )?,
+                        max_depth: match v.get("maxDepth") {
+                            None => 8,
+                            Some(x) => count("ownNext.maxDepth", x)?,
+                        },
+                    }),
+                    _ => {
+                        return Err(format!(
+                            "\"ownNext\" は null かオブジェクト: {}",
                             v.stringify()
                         ))
                     }
