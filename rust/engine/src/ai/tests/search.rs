@@ -142,3 +142,55 @@ fn uses_extra_pp_on_turn_1() {
     let a = agent.choose_action(&s, &legal_actions(&s), &mut Rng::new(1));
     assert_eq!(a, Action::ExtraPp);
 }
+
+#[test]
+fn resampled_draws_carry_deck_states() {
+    // このターンに引いたカードを並べ直すとき、山札に戻って状態を持っていたカードは状態ごと動き、
+    // 引いてから受けたスペルブーストだけをかけ直す
+    use crate::ai::search::resample_own_draws;
+    let blaze = id("ブレイズデストロイヤー");
+    let s0 = new_game(deck_at(0), deck_at(1), 3);
+    let s0 = apply(&s0, &legal_actions(&s0)[0]);
+    let mut root = apply(&s0, &legal_actions(&s0)[0]);
+    let p = root.active;
+    let iid = root.players[p].deck[0].iid;
+    root.players[p].deck[0].card = blaze;
+    let mut h = root.new_hand_card(blaze, Some(iid));
+    h.boosts = 2;
+    h.cost_mod = -2;
+    root.players[p].deck_kept.push(h);
+    let mut s = root.clone();
+    let drawn = s.draw_cards(p, 1, None, None);
+    assert_eq!(drawn, vec![iid]);
+    crate::effects::fire_spellboost(&mut s, p, iid, 1);
+    crate::effects::run(&mut s);
+    let i = s.players[p].hand.iter().position(|h| h.iid == iid).unwrap();
+    assert_eq!(
+        (s.players[p].hand[i].boosts, s.players[p].hand[i].cost_mod),
+        (3, -3)
+    );
+
+    let (mut kept_in_hand, mut kept_in_deck) = (false, false);
+    let mut rng = Rng::new(11);
+    for _ in 0..40 {
+        let mut t = s.clone();
+        resample_own_draws(&mut t, &root, p, &mut rng);
+        let pl = &t.players[p];
+        let h = &pl.hand[i];
+        assert_eq!(h.iid, iid);
+        let in_deck: Vec<&HandCard> = pl.deck_kept.iter().collect();
+        if h.card == blaze && in_deck.is_empty() {
+            // 状態を持ったブレイズデストロイヤーを引いた並び
+            assert_eq!((h.boosts, h.cost_mod), (3, -3));
+            kept_in_hand = true;
+        } else {
+            assert_eq!(h.boosts, 1);
+            assert_eq!(in_deck.len(), 1);
+            let k = in_deck[0];
+            assert_eq!((k.card, k.boosts, k.cost_mod), (blaze, 2, -2));
+            assert!(pl.deck.iter().any(|r| r.iid == k.iid && r.card == blaze));
+            kept_in_deck = true;
+        }
+    }
+    assert!(kept_in_hand && kept_in_deck);
+}

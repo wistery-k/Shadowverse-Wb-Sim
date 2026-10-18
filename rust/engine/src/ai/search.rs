@@ -675,8 +675,14 @@ pub fn plan_turn(
 }
 
 /// このターンに山札から引いて手札に残っている p のカード（root の山札にあったもの。条件付きで引いたもの・公開されたものは除く）を、
-/// p の山札と合わせて並べ直す（resampleDraws）。受けたスペルブーストは引き直したカードにかけ直す
-fn resample_own_draws(s: &mut GameState, root: &GameState, p: PlayerIndex, rng: &mut Rng) {
+/// p の山札と合わせて並べ直す（resampleDraws）。受けたスペルブーストは引き直したカードにかけ直す。
+/// 山札に戻って手札での状態を持っているカードは、その状態ごと動かす
+pub(crate) fn resample_own_draws(
+    s: &mut GameState,
+    root: &GameState,
+    p: PlayerIndex,
+    rng: &mut Rng,
+) {
     let root_deck = &root.players[p].deck;
     let idx: Vec<usize> = (0..s.players[p].hand.len())
         .filter(|&i| {
@@ -687,25 +693,44 @@ fn resample_own_draws(s: &mut GameState, root: &GameState, p: PlayerIndex, rng: 
     if idx.is_empty() {
         return;
     }
-    let mut pool: Vec<crate::data::CardIdx> = idx
+    let root_kept = |iid: Iid| root.players[p].deck_kept.iter().find(|h| h.iid == iid);
+    // (カード, 山札にあったときの手札での状態)
+    let mut pool: Vec<(crate::data::CardIdx, Option<HandCard>)> = idx
         .iter()
-        .map(|&i| s.players[p].hand[i].card)
-        .chain(s.players[p].deck.iter().map(|c| c.card))
+        .map(|&i| {
+            let h = &s.players[p].hand[i];
+            (h.card, root_kept(h.iid).cloned())
+        })
         .collect();
+    let deck_kept = std::mem::take(&mut s.players[p].deck_kept);
+    for c in &s.players[p].deck {
+        pool.push((c.card, deck_kept.iter().find(|h| h.iid == c.iid).cloned()));
+    }
     rng.shuffle(&mut pool);
+    let mut pool = pool.into_iter();
     let mut boosted: Vec<(Iid, i32)> = Vec::new();
-    for (k, &i) in idx.iter().enumerate() {
+    for &i in &idx {
         let old = &s.players[p].hand[i];
-        let (iid, boosts) = (old.iid, old.boosts);
-        let h = s.new_hand_card(pool[k], Some(iid));
+        let iid = old.iid;
+        // 引いてから受けたスペルブーストの回数
+        let boosts = old.boosts - root_kept(iid).map_or(0, |k| k.boosts);
+        let (card, kept) = pool.next().unwrap();
+        let h = match kept {
+            Some(k) => HandCard { iid, ..k },
+            None => s.new_hand_card(card, Some(iid)),
+        };
         s.players[p].hand[i] = h;
         if boosts > 0 {
             boosted.push((iid, boosts));
         }
     }
-    let n = idx.len();
-    for (j, c) in s.players[p].deck.iter_mut().enumerate() {
-        c.card = pool[n + j];
+    let pl = &mut s.players[p];
+    for c in pl.deck.iter_mut() {
+        let (card, kept) = pool.next().unwrap();
+        c.card = card;
+        if let Some(k) = kept {
+            pl.deck_kept.push(HandCard { iid: c.iid, ..k });
+        }
     }
     for (iid, boosts) in boosted {
         crate::effects::fire_spellboost(s, p, iid, boosts);

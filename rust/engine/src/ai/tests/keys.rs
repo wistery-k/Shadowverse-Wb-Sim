@@ -89,7 +89,14 @@ fn turn_order_key(s: &GameState) -> String {
             let mut pl = pl.clone();
             let deck = arr(field(&pl, "deck"))
                 .iter()
-                .map(|c| field(c, "cardId").clone())
+                .map(|c| match c.get("kept") {
+                    // 山札に戻ったカードの手札での状態も、手札と同じく iid 等を除いて比べる
+                    Some(k) => Json::Arr(vec![
+                        field(c, "cardId").clone(),
+                        sorted_without_ids(&Json::Arr(vec![k.clone()])),
+                    ]),
+                    None => field(c, "cardId").clone(),
+                })
                 .collect();
             pl.set("deck", Json::Arr(deck));
             for k in ["hand", "board", "crests"] {

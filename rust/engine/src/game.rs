@@ -16,6 +16,7 @@ fn new_player(deck: Vec<CardRef>) -> PlayerState {
         extra_pp_available: false,
         turn_count: 0,
         deck,
+        deck_kept: Vec::new(),
         hand: Vec::new(),
         board: Vec::new(),
         crests: Vec::new(),
@@ -112,7 +113,7 @@ fn start_turn(s: &mut GameState, p: PlayerIndex) {
             c.acted_this_turn = false;
         }
     }
-    for h in &mut pl.hand {
+    for h in pl.hand.iter_mut().chain(pl.deck_kept.iter_mut()) {
         h.fused_this_turn = false;
     }
 
@@ -766,10 +767,9 @@ fn apply_mulligan(s: &mut GameState, p: PlayerIndex, swap: &[Iid]) {
         hand.into_iter().partition(|c| swap.contains(&c.iid));
     s.players[p].hand = keep;
     s.draw_cards(p, aside.len() as i32, None, None);
-    s.players[p].deck.extend(aside.iter().map(|c| CardRef {
-        iid: c.iid,
-        card: c.card,
-    }));
+    for c in aside {
+        s.return_to_deck(p, c);
+    }
     let mut deck = std::mem::take(&mut s.players[p].deck);
     s.shuffle(&mut deck);
     s.players[p].deck = deck;
@@ -1039,7 +1039,8 @@ fn apply_fuse(s: &mut GameState, host_iid: Iid, materials: &[Iid]) {
     let mut ctx = Ctx::new(p, host_iid);
     ctx.set_var(
         d.var_fused_cost,
-        used.iter().map(|m| card(m.card).cost).sum(),
+        // 「融合したカードのコスト」は手札で変化したコスト（docs/rules.md の「コスト」と「元のコスト」）
+        used.iter().map(hand_cost).sum(),
     );
     ctx.set_var(d.var_fused_kinds, host.fused_kinds.len() as i32);
     fire_ally_fuse(s, p);

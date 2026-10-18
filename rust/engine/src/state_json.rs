@@ -283,7 +283,13 @@ fn player_json(p: &PlayerState) -> Json {
             Json::Arr(
                 p.deck
                     .iter()
-                    .map(|c| obj(vec![("iid", num(c.iid)), ("cardId", card_id(c.card))]))
+                    .map(|c| {
+                        let mut o = vec![("iid", num(c.iid)), ("cardId", card_id(c.card))];
+                        if let Some(h) = p.deck_kept.iter().find(|h| h.iid == c.iid) {
+                            o.push(("kept", hand_json(h)));
+                        }
+                        obj(o)
+                    })
                     .collect(),
             ),
         ),
@@ -786,6 +792,16 @@ fn board_of(v: &Json) -> R<OnBoard> {
 }
 
 fn player_of(v: &Json) -> R<PlayerState> {
+    let mut deck_kept = Vec::new();
+    for c in array(v, "deck")? {
+        if let Some(k) = c.get("kept").filter(|k| !matches!(k, Json::Null)) {
+            let h = hand_of(k)?;
+            if h.iid != int(c, "iid")? {
+                return Err(format!("山札のカード {} の kept の iid が違います", h.iid));
+            }
+            deck_kept.push(h);
+        }
+    }
     Ok(PlayerState {
         leader_hp: int(v, "leaderHp")?,
         leader_max_hp: int(v, "leaderMaxHp")?,
@@ -804,6 +820,7 @@ fn player_of(v: &Json) -> R<PlayerState> {
                 })
             })
             .collect::<R<_>>()?,
+        deck_kept,
         hand: array(v, "hand")?.iter().map(hand_of).collect::<R<_>>()?,
         board: array(v, "board")?.iter().map(board_of).collect::<R<_>>()?,
         crests: array(v, "crests")?

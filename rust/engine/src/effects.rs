@@ -930,7 +930,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 Some(f) => {
                     let hint = draw_hint(s, &frame.ctx, f);
                     let ctx = &frame.ctx;
-                    let pred = |st: &GameState, c: CardIdx| deck_card_matches(st, ctx, c, f);
+                    let pred = |st: &GameState, r: &CardRef| deck_card_matches(st, ctx, p, r, f);
                     s.draw_cards(p, n, Some(&pred), Some(hint));
                 }
                 None => {
@@ -944,13 +944,13 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 s.players[p]
                     .deck
                     .iter()
-                    .filter(|r| deck_card_matches(s, ctx, r.card, filter))
+                    .filter(|r| deck_card_matches(s, ctx, p, r, filter))
                     .count() as i32
             };
             let hint = draw_hint(s, &frame.ctx, filter);
             let drawn = {
                 let ctx = &frame.ctx;
-                let pred = |st: &GameState, c: CardIdx| deck_card_matches(st, ctx, c, filter);
+                let pred = |st: &GameState, r: &CardRef| deck_card_matches(st, ctx, p, r, filter);
                 s.draw_cards(p, n, Some(&pred), Some(hint))
             };
             if let Some(sl) = slot {
@@ -1026,7 +1026,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
         Effect::SummonFromDeck { filter, kinds } => {
             let mut ks: Vec<CardIdx> = Vec::new();
             for r in &s.players[p].deck {
-                if !ks.contains(&r.card) && deck_card_matches(s, &frame.ctx, r.card, filter) {
+                if !ks.contains(&r.card) && deck_card_matches(s, &frame.ctx, p, r, filter) {
                     ks.push(r.card);
                 }
             }
@@ -1035,12 +1035,15 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 if !s.can_add_to_board(p) {
                     break;
                 }
+                // 同じカードが複数あれば、条件に合うもの（手札でコストが変わったものを含む）を出す
                 let idx = s.players[p]
                     .deck
                     .iter()
-                    .position(|r| r.card == cid)
+                    .position(|r| r.card == cid && deck_card_matches(s, &frame.ctx, p, r, filter))
                     .unwrap();
                 let r = s.players[p].deck.remove(idx);
+                // 場に出したカードには手札で付いた状態を使わない（山札から出すのはアミュレットだけで、場では状態が効かない）
+                s.take_kept(p, r.iid);
                 let h = s.new_hand_card(r.card, Some(r.iid));
                 let c = s.new_board_card(r.card, Some(&h));
                 enter_board(s, p, c);
@@ -1067,10 +1070,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                     continue;
                 };
                 let h = s.players[q].hand.remove(i);
-                s.players[q].deck.push(CardRef {
-                    iid: h.iid,
-                    card: h.card,
-                });
+                s.return_to_deck(q, h);
             }
             if !ids.is_empty() {
                 let mut deck = std::mem::take(&mut s.players[p].deck);
@@ -1303,6 +1303,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             }
             s.shuffle(&mut deck);
             s.players[p].deck = deck;
+            s.players[p].deck_kept.clear();
         }
         Effect::SetLeaderMaxHp { side, value } => {
             let t = &mut s.players[if *side == Side::Me { p } else { opponent(p) }];
@@ -1365,7 +1366,15 @@ fn draw_hint(s: &GameState, ctx: &Ctx, f: &'static CardFilter) -> DrawHint {
     }
 }
 
-fn deck_card_matches(s: &GameState, ctx: &Ctx, cid: CardIdx, f: &CardFilter) -> bool {
+/// p の山札のカード r が f に合うか。コストは手札で変化したコストで見る（「元のコスト」ではない。docs/rules.md）
+fn deck_card_matches(
+    s: &GameState,
+    ctx: &Ctx,
+    p: PlayerIndex,
+    r: &CardRef,
+    f: &CardFilter,
+) -> bool {
+    let cid = r.card;
     let cd = card(cid);
     if let Some(t) = f.ctype {
         if cd.ctype != t {
@@ -1387,13 +1396,14 @@ fn deck_card_matches(s: &GameState, ctx: &Ctx, cid: CardIdx, f: &CardFilter) -> 
             return false;
         }
     }
+    let cost = s.deck_cost(p, r);
     if let Some(m) = f.cost_max {
-        if cd.cost > m {
+        if cost > m {
             return false;
         }
     }
     if let Some(v) = &f.cost_eq {
-        if cd.cost != eval_value(s, ctx, v) {
+        if cost != eval_value(s, ctx, v) {
             return false;
         }
     }

@@ -97,6 +97,8 @@ pub fn determinize(
         r.card = pool[k];
         k += 1;
     }
+    // 山札に戻った相手のカードの状態も、伏せた手札と同じく作り直したものとみなす
+    s.players[o].deck_kept.clear();
     let a = rng.int(1 << 30) as f64;
     let b = rng.int(4) as f64;
     s.rng = (a * 4.0 + b).floor() as u32;

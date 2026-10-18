@@ -387,6 +387,67 @@ describe("リソース・キーワード能力", () => {
   });
 });
 
+describe("手札から山札に戻したカード", () => {
+  const hand = (s: GameState, p: PlayerIndex, iid: number) => s.players[p].hand.find((h) => h.iid === iid);
+
+  it("手札で付いた状態（スペルブーストの回数・コスト変化・X）を維持して引き直す（オーバーディメンション）", () => {
+    const { s, me } = setup();
+    s.players[me].deck = s.players[me].deck.slice(0, 3);
+    const blaze = toHand(s, me, "ブレイズデストロイヤー");
+    const blast = toHand(s, me, "ストームブラスト");
+    Object.assign(hand(s, me, blaze)!, { boosts: 1, costMod: -1 });
+    Object.assign(hand(s, me, blast)!, { boosts: 1, x: 3 });
+    const od = toHand(s, me, "オーバーディメンション");
+    hand(s, me, od)!.costMod = -10;
+    const t = applyAction(s, { type: "play", iid: od });
+    // プレイで 1 回、山札から引き直したあとに 5 回ブーストされる
+    expect(hand(t, me, blaze)).toMatchObject({ boosts: 7, costMod: -7 });
+    expect(hand(t, me, blast)).toMatchObject({ boosts: 7, x: 9 });
+    expect(t.players[me].deck).toEqual([]);
+  });
+
+  it("山札にある間も状態を持ち、引いたときに戻る（グリードケルブ・ルビィ）", () => {
+    const { s, me } = setup();
+    const blaze = toHand(s, me, "ブレイズデストロイヤー");
+    Object.assign(hand(s, me, blaze)!, { boosts: 2, costMod: -2, revealed: true });
+    let t = applyAction(s, { type: "play", iid: toHand(s, me, "グリードケルブ・ルビィ") });
+    if (!hand(t, me, blaze)) {
+      expect(t.players[me].deck.find((c) => c.iid === blaze)?.kept).toMatchObject({ iid: blaze, boosts: 2, costMod: -2, revealed: false });
+      // 状態を持たないカードは kept を持たない
+      expect(t.players[me].deck.filter((c) => c.kept)).toHaveLength(1);
+    }
+    for (let i = 0; i < 40 && !hand(t, me, blaze); i++) {
+      t.players[me].hand = [];
+      t = passTurns(t, 1);
+    }
+    expect(hand(t, me, blaze)).toMatchObject({ boosts: 2, costMod: -2, revealed: false });
+    expect(t.players[me].deck.some((c) => c.kept)).toBe(false);
+  });
+
+  it("山札のカードのコストは手札で変化したコストで見る（裁決のアナテマ・ロデオ）", () => {
+    const { s, me } = setup();
+    const bird = id("投影の鳥像");
+    const cheap = newHandCard(s, bird);
+    cheap.costMod = -1;
+    const plain = newHandCard(s, bird);
+    s.players[me].deck = [{ iid: plain.iid, cardId: bird }, { iid: cheap.iid, cardId: bird, kept: cheap }, ...s.players[me].deck.slice(0, 5)];
+    toHand(s, me, "キャラバンマンモス");
+    const t = applyAction(s, { type: "play", iid: toHand(s, me, "裁決のアナテマ・ロデオ") });
+    // 元のコスト 4 で、手札で -1 されたものだけが「コスト3以下」に入る
+    expect(board(t, me).filter((c) => c.cardId === bird).map((c) => c.iid)).toEqual([cheap.iid]);
+    expect(t.players[me].deck.some((c) => c.iid === plain.iid)).toBe(true);
+    expect(t.players[me].deck.some((c) => c.kept)).toBe(false);
+  });
+
+  it("状態の変わっていないカードは何も持たずに戻る", () => {
+    const { s, me } = setup();
+    toHand(s, me, "ブレイズデストロイヤー");
+    s.players[me].deck = s.players[me].deck.slice(0, 5);
+    const t = applyAction(s, { type: "play", iid: toHand(s, me, "グリードケルブ・ルビィ") });
+    expect(t.players[me].deck.some((c) => c.kept)).toBe(false);
+  });
+});
+
 describe("ターン終了時の処理だけを進める（resolveTurnEnd）", () => {
   it("ターン終了時の能力と一時的な効果の終了だけを行い、相手のターンは始めない", () => {
     const { s, me, opp } = setup();
