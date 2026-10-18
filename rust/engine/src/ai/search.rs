@@ -9,10 +9,12 @@ use super::aidata::{ai_data, Weights};
 use super::converging::{converging_attacks, dominated_attack, settle_converging_trades_with};
 use super::determinize::determinize;
 use super::eval::{evaluate_with, EvalWeights};
+use super::exact_lethal::{search_exact_lethal, ExactLethalOptions, DEFAULT_EXACT_LETHAL_OPTIONS};
 use super::greedy::choose_greedy;
 use super::keys::{hand_eq_noid, visible_eq, TurnOrderSet};
 use super::lethal::{
-    find_lethal, search_lethal, LethalOptions, DEFAULT_LETHAL_OPTIONS, GUARDED_LETHAL_OPTIONS,
+    find_lethal, search_lethal, LethalOptions, LethalSearch, DEFAULT_LETHAL_OPTIONS,
+    GUARDED_LETHAL_OPTIONS,
 };
 use super::mulligan::{model_mulligan_swap, sampled_mulligan, weighted_mulligan_swap};
 use super::valuenet::{value_net_eval, ValuePhase};
@@ -64,6 +66,8 @@ pub struct SearchOptions {
     pub lethal_ward_blocked: f64,
     /// リーサル探索で自分の選択待ちをその場で展開する（`LethalOptions::expand_choices`）
     pub lethal_expand_choices: bool,
+    /// ビームで見つからないとき、乱数に依らない手だけの全探索で調べる局面数の上限（ターンあたりはこの 2 倍。0 なら使わない）
+    pub lethal_exact_states: i64,
     pub allow: Option<Allow>,
     pub dedup: bool,
     pub same_hand_once: bool,
@@ -120,6 +124,7 @@ impl Default for SearchOptions {
             lethal: true,
             lethal_ward_blocked: GUARDED_LETHAL_OPTIONS.ward_blocked,
             lethal_expand_choices: GUARDED_LETHAL_OPTIONS.expand_choices,
+            lethal_exact_states: 0,
             allow: None,
             dedup: true,
             same_hand_once: true,
@@ -1169,7 +1174,24 @@ impl Agent for SearchAgent {
                 expand_choices: opts.lethal_expand_choices,
                 ..DEFAULT_LETHAL_OPTIONS
             };
-            if let Some(l) = find_lethal(real, p, rng, &lo, None) {
+            let exact_states = opts.lethal_exact_states;
+            let with_exact = |root: &GameState, q: PlayerIndex| {
+                search_lethal(root, q, &lo).or_else(|| {
+                    let eo = ExactLethalOptions {
+                        deterministic_only: true,
+                        max_states: exact_states,
+                        max_states_per_turn: exact_states * 2,
+                        ..DEFAULT_EXACT_LETHAL_OPTIONS
+                    };
+                    search_exact_lethal(root, q, &eo)
+                })
+            };
+            let search: Option<LethalSearch> = if exact_states > 0 {
+                Some(&with_exact)
+            } else {
+                None
+            };
+            if let Some(l) = find_lethal(real, p, rng, &lo, search) {
                 if legal.contains(&l) {
                     self.plans[p] = None;
                     return l;
