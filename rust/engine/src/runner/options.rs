@@ -139,6 +139,8 @@ pub fn search_options(
             "resampleDraws" => o.resample_draws = flag(k, v)?,
             "drawFirst" => o.draw_first = flag(k, v)?,
             "nextLethal" => o.next_lethal = number(k, v)?,
+            "lethalWardBlocked" => o.lethal_ward_blocked = number(k, v)?,
+            "lethalExpandChoices" => o.lethal_expand_choices = flag(k, v)?,
             "nextLethalRange" => o.next_lethal_range = Some(number(k, v)?),
             "passLethal" => o.pass_lethal = count(k, v)?,
             "beamPp" => o.beam_pp = number(k, v)?,

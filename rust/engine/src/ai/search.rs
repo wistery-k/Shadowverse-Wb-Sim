@@ -11,7 +11,9 @@ use super::determinize::determinize;
 use super::eval::{evaluate_with, EvalWeights};
 use super::greedy::choose_greedy;
 use super::keys::{hand_eq_noid, visible_eq, TurnOrderSet};
-use super::lethal::{find_lethal, search_lethal, DEFAULT_LETHAL_OPTIONS};
+use super::lethal::{
+    find_lethal, search_lethal, LethalOptions, DEFAULT_LETHAL_OPTIONS, GUARDED_LETHAL_OPTIONS,
+};
 use super::mulligan::{model_mulligan_swap, sampled_mulligan, weighted_mulligan_swap};
 use super::valuenet::{value_net_eval, ValuePhase};
 use super::{Agent, Rng};
@@ -67,6 +69,10 @@ pub struct SearchOptions {
     pub max_depth: usize,
     pub rescore_top: usize,
     pub lethal: bool,
+    /// リーサル探索の途中の点数で、守護に止められている顔への打点にかける重み（`LethalOptions::ward_blocked`）
+    pub lethal_ward_blocked: f64,
+    /// リーサル探索で自分の選択待ちをその場で展開する（`LethalOptions::expand_choices`）
+    pub lethal_expand_choices: bool,
     pub allow: Option<Allow>,
     pub dedup: bool,
     pub same_hand_once: bool,
@@ -122,6 +128,8 @@ impl Default for SearchOptions {
             max_depth: 8,
             rescore_top: 4,
             lethal: true,
+            lethal_ward_blocked: GUARDED_LETHAL_OPTIONS.ward_blocked,
+            lethal_expand_choices: GUARDED_LETHAL_OPTIONS.expand_choices,
             allow: None,
             dedup: true,
             same_hand_once: true,
@@ -1202,7 +1210,12 @@ impl Agent for SearchAgent {
             .unwrap_or(real.active);
 
         if opts.lethal {
-            if let Some(l) = find_lethal(real, p, rng, &DEFAULT_LETHAL_OPTIONS, None) {
+            let lo = LethalOptions {
+                ward_blocked: opts.lethal_ward_blocked,
+                expand_choices: opts.lethal_expand_choices,
+                ..DEFAULT_LETHAL_OPTIONS
+            };
+            if let Some(l) = find_lethal(real, p, rng, &lo, None) {
                 if legal.contains(&l) {
                     self.plans[p] = None;
                     return l;

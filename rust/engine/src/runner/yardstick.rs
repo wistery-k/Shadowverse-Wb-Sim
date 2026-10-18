@@ -46,6 +46,8 @@ pub fn reference_options() -> SearchOptions {
         max_depth: 8,
         rescore_top: 4,
         lethal: true,
+        lethal_ward_blocked: 0.0,
+        lethal_expand_choices: false,
         allow: None,
         dedup: true,
         same_hand_once: true,
