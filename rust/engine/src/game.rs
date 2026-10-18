@@ -341,7 +341,7 @@ fn can_attack_at_all(s: &GameState, f: &OnBoard) -> bool {
     }
 }
 
-fn can_attack_followers(s: &GameState, f: &OnBoard) -> bool {
+pub(crate) fn can_attack_followers(s: &GameState, f: &OnBoard) -> bool {
     if !can_attack_at_all(s, f) {
         return false;
     }
@@ -351,7 +351,7 @@ fn can_attack_followers(s: &GameState, f: &OnBoard) -> bool {
     f.has_keyword(STORM) || f.has_keyword(RUSH) || f.evolve != Evolve::None
 }
 
-fn can_attack_leader(s: &GameState, f: &OnBoard) -> bool {
+pub(crate) fn can_attack_leader(s: &GameState, f: &OnBoard) -> bool {
     if !can_attack_at_all(s, f) {
         return false;
     }
