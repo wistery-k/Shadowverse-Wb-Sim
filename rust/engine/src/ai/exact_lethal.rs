@@ -4,6 +4,7 @@
 //! キーの区別の細かさが違うと、メモの当たり方が変わり、見つかる手順や打ち切りの位置が変わる。
 
 use super::Rng;
+use crate::data::CardIdx;
 use crate::game::{legal_actions, try_apply_action};
 use crate::state::*;
 use std::cell::RefCell;
@@ -104,12 +105,11 @@ fn hand_key(h: &HandCard) -> String {
     let mut k = String::new();
     let _ = write!(
         k,
-        "{}:{}:{}:{}:{}:{:?}:{:x}:{:?}:{}",
+        "{}:{}:{}:{}:{:?}:{:x}:{:?}:{}",
         h.card,
         h.cost_mod,
         h.attack_mod,
         h.defense_mod,
-        h.boosts,
         h.x,
         h.keywords.seq(),
         h.fused_kinds,
@@ -169,14 +169,23 @@ fn board_key(c: &OnBoard, ignore_exhausted_stats: bool) -> String {
     k
 }
 
-/// 相手（opponent）は体力と手札の中身を含めない
+fn sorted_cards(v: &[CardIdx]) -> Vec<CardIdx> {
+    let mut v = v.to_vec();
+    v.sort_unstable();
+    v
+}
+
+/// 相手（opponent）は体力と手札の中身を含めない。
+/// 手札のスペルブーストの回数（boosts）は数えるだけでルールに使わない（効果はコストや X の変化として残る）ので含めない。
+/// 破壊された記録は順番を除いた中身で比べる（記録のスタッツはカードの元のスタッツなので、カードだけでよい）
 fn player_key(out: &mut String, pl: &PlayerState, opponent: bool, ignore_exhausted_stats: bool) {
+    let destroyed: Vec<CardIdx> = pl.destroyed_this_turn.iter().map(|r| r.card).collect();
     if !opponent {
         let _ = write!(out, "{}", pl.leader_hp);
     }
     let _ = write!(
         out,
-        ",{},{},{},{},{},{},{},{},{},{},{},{}[",
+        ",{},{},{},{},{},{},{},{},{},{:?},{:?},{:?}[",
         pl.pp,
         pl.max_pp,
         pl.combo,
@@ -186,9 +195,9 @@ fn player_key(out: &mut String, pl: &PlayerState, opponent: bool, ignore_exhaust
         pl.extra_pp_available as u8,
         pl.deck.len(),
         pl.graveyard,
-        pl.graveyard_followers.len(),
-        pl.destroyed_this_turn.len(),
-        pl.destroyed_amulets.len()
+        sorted_cards(&pl.graveyard_followers),
+        sorted_cards(&destroyed),
+        sorted_cards(&pl.destroyed_amulets)
     );
     for c in &pl.crests {
         let _ = write!(out, "{},{:?},", c.crest, c.countdown);
