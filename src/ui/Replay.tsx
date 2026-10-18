@@ -8,6 +8,7 @@ import { reproduceCommand } from "../sim/reproduce";
 import { seatDecks, type Entrant, type GameRecord } from "../sim/tournament";
 import { CardDetail, CardView, type Motion, type MulliganMark } from "./CardView";
 import { attackStatuses, describeAction, leaderClasses } from "./describe";
+import { BranchCompare, useBranchRuns } from "./BranchCompare";
 import { BoardSlots, EmptySlots, LeaderHp, PlayerInfo, Resources } from "./Game";
 
 interface Props {
@@ -45,6 +46,11 @@ export function Replay({ record, entrants, onClose }: Props) {
   // 下に表示するプレイヤー（表示だけの入れ替え）
   const [bottom, setBottom] = useState<PlayerIndex>(0);
   const go = (s: number) => setStep(Math.max(0, Math.min(last, s)));
+  const branch = useBranchRuns();
+  const matchAgents = useMemo((): [string, string] => {
+    const [p0, p1] = record.aIsPlayer0 ? [record.a, record.b] : [record.b, record.a];
+    return [entrants[p0]!.agent, entrants[p1]!.agent];
+  }, [record, entrants]);
 
   useEffect(() => {
     if (!playing) return;
@@ -255,6 +261,21 @@ export function Replay({ record, entrants, onClose }: Props) {
             </div>
             {step < last && <div class="muted">次: {lines[step]}</div>}
           </div>
+          {step < last && (
+            <BranchCompare
+              state={state}
+              step={step}
+              actual={actions[step]!}
+              names={names}
+              matchAgents={matchAgents}
+              seed={record.seed}
+              branch={branch}
+              onJump={(s) => {
+                setPlaying(false);
+                go(s);
+              }}
+            />
+          )}
         </section>
         <aside class="info">
           {detail ? <CardDetail card={cardOf(detail)} /> : <div class="muted">カードをクリックすると詳細を表示します</div>}
@@ -262,6 +283,20 @@ export function Replay({ record, entrants, onClose }: Props) {
             {lines.map((line, i) => (
               <li key={i} class={i === step - 1 ? "current" : i >= step ? "muted" : ""} onClick={() => go(i + 1)}>
                 {line}
+                {branch.runs.has(i) && (
+                  <button
+                    type="button"
+                    class="branch-mark"
+                    title="この手の前の局面の打ち比べを見る"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPlaying(false);
+                      go(i);
+                    }}
+                  >
+                    打ち比べ
+                  </button>
+                )}
               </li>
             ))}
           </ol>
