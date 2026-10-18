@@ -286,7 +286,8 @@ fn beam_lethal(
             }
             // (局面, 手順, 続けて選んだ回数)。expand_choices なら、自分の選択待ちはその場で選んで同じ深さの子にする
             let mut stack: Vec<(GameState, Vec<Action>, u32)> = Vec::new();
-            for a in candidates(&node.state, w.setup) {
+            // 候補の順に子を並べる（点数が同じ子の順番を変えないため、逆順に積んで取り出す）
+            for a in candidates(&node.state, w.setup).into_iter().rev() {
                 let Some(next) = try_apply_action(&node.state, &a) else {
                     continue;
                 };
@@ -305,7 +306,7 @@ fn beam_lethal(
                     && chained < 3
                     && next.pending.as_ref().map(|pd| pd.player()) == Some(p)
                 {
-                    for a in candidates(&next, w.setup) {
+                    for a in candidates(&next, w.setup).into_iter().rev() {
                         if let Some(n2) = try_apply_action(&next, &a) {
                             let mut s2 = seq.clone();
                             s2.push(a);
