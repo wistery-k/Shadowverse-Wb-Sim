@@ -19,6 +19,7 @@ use super::lethal::{
 use super::mulligan::{
     model_mulligan_swap, mulligan_action, sampled_mulligan, weighted_mulligan_swap,
 };
+use super::think::{Thought, ThoughtCandidate};
 use super::valuenet::{value_net_eval, ValuePhase};
 use super::{Agent, Rng};
 use crate::game::{acting_player, legal_actions, resolve_turn_end, try_apply_action};
@@ -205,6 +206,24 @@ pub struct Plan {
     pub steps: Vec<(Action, Rc<GameState>)>,
 }
 
+/// 点数の内訳（「AI の考え」の表示用）。total は探索が使った点数、eval は手で作った評価関数、extra は評価に足す項（学習した補正など）。
+/// total と eval + extra の差は、残り PP の罰・後攻 5 ターン目のエクストラPP・次のターンのリーサルの加点など
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+pub struct ScoreParts {
+    pub total: f64,
+    pub eval: f64,
+    pub extra: f64,
+}
+
+/// plan_turn の途中の点数（「AI の考え」の表示用。SearchAgent::think）
+#[derive(Default)]
+pub struct PlanTrace {
+    /// 最初の手ごとの、ターン末の点数が最も高い並び（plan.value はターン末の点数）と、その点数の内訳
+    pub turn_end: Vec<(Plan, ScoreParts)>,
+    /// 相手のターンを読み直した点数の内訳（読み直した最初の手だけ。plan_turn が返す並びのもの。eval・extra は読み直しの平均）
+    pub reads: Vec<(Action, ScoreParts)>,
+}
+
 /// 探索で使う重み（評価関数の重みと、相手の手番の貪欲法の重み）
 pub struct Env<'a> {
     pub opts: &'a SearchOptions,
@@ -324,6 +343,24 @@ impl<'a> Planner<'a> {
             Some(f) => v + f(s, self.p, ValuePhase::After),
             None => v,
         }
+    }
+
+    /// 局面 s の手で作った評価と、評価に足す項（phase の）
+    fn parts(&self, s: &GameState, phase: ValuePhase) -> (f64, f64) {
+        let extra = match &self.opts().extra_eval {
+            Some(f) => f(s, self.p, phase),
+            None => 0.0,
+        };
+        (evaluate_with(s, self.p, self.env.w), extra)
+    }
+
+    /// ターン末の点数（end_score）の内訳
+    fn end_parts(&self, s: &GameState, total: f64) -> ScoreParts {
+        let settled = self.settle(s);
+        let base = settled.as_ref().unwrap_or(s);
+        let resolved = resolve_turn_end(base);
+        let (eval, extra) = self.parts(resolved.as_ref().unwrap_or(base), ValuePhase::End);
+        ScoreParts { total, eval, extra }
     }
 
     fn leftover(&self, s: &GameState) -> f64 {
@@ -562,6 +599,18 @@ pub fn plan_turn(
     rng: &mut Rng,
     rescore: bool,
 ) -> Vec<(Action, Plan)> {
+    plan_turn_traced(root, p, env, rng, rescore, None)
+}
+
+/// plan_turn と同じ。trace があれば、途中の点数とその内訳を書き込む（乱数の使い方も結果も plan_turn と同じ）
+pub fn plan_turn_traced(
+    root: &Rc<GameState>,
+    p: PlayerIndex,
+    env: &Env,
+    rng: &mut Rng,
+    rescore: bool,
+    mut trace: Option<&mut PlanTrace>,
+) -> Vec<(Action, Plan)> {
     let opts = env.opts;
     let mut pl = Planner {
         env,
@@ -586,6 +635,18 @@ pub fn plan_turn(
                     e.1 = i;
                 }
             }
+        }
+    }
+    if let Some(tr) = trace.as_deref_mut() {
+        for (_, i) in &best_by_first {
+            let t = &terminals[*i];
+            let plan = Plan {
+                action: t.first.clone(),
+                value: t.value,
+                steps: pl.steps_of(t.path),
+            };
+            let parts = pl.end_parts(&t.state, t.value);
+            tr.turn_end.push((plan, parts));
         }
     }
     if !rescore {
@@ -638,13 +699,32 @@ pub fn plan_turn(
     };
     let mut result: Vec<(Action, Plan)> = Vec::new();
     let mut rescored: Vec<usize> = Vec::new();
-    let rescore_node = |i: usize, rng: &mut Rng, result: &mut Vec<(Action, Plan)>| {
+    let tracing = trace.is_some();
+    let mut reads: Vec<(Action, ScoreParts)> = Vec::new();
+    let rescore_node = |i: usize,
+                        rng: &mut Rng,
+                        result: &mut Vec<(Action, Plan)>,
+                        reads: &mut Vec<(Action, ScoreParts)>| {
         let node = &terminals[i];
-        let value = if node.state.phase == Phase::Ended {
-            pl.eval_state(&node.state)
+        // 読み直した局面の手で作った評価と評価に足す項の合計（trace のときだけ求める）
+        let mut parts = (0.0, 0.0);
+        let mut add = |after: &GameState| {
+            if tracing {
+                let (e, x) = pl.parts(after, ValuePhase::After);
+                parts.0 += e;
+                parts.1 += x;
+            }
+        };
+        let (value, n) = if node.state.phase == Phase::Ended {
+            if tracing {
+                parts = pl.parts(&node.state, ValuePhase::End);
+            }
+            (pl.eval_state(&node.state), 1)
         } else if opts.opp_hand_samples <= 1 {
             let settled = pl.settle(&node.state);
-            read_once(&pl, settled.as_ref().unwrap_or(&node.state), rng) - pl.leftover(&node.state)
+            let (v, after) = read_once(&pl, settled.as_ref().unwrap_or(&node.state), rng);
+            add(&after);
+            (v - pl.leftover(&node.state), 1)
         } else {
             let settled = pl.settle(&node.state);
             let base = settled.as_ref().unwrap_or(&node.state);
@@ -656,15 +736,22 @@ pub fn plan_turn(
                     if opts.resample_draws {
                         resample_own_draws(&mut d, root, p, &mut r);
                     }
-                    sum += read_once(&pl, &d, &mut r);
+                    let (v, after) = read_once(&pl, &d, &mut r);
+                    sum += v;
+                    add(&after);
                 }
             } else {
                 for _ in 0..opts.opp_hand_samples {
                     let d = determinize(base, p, rng, opts.peek_opp_hand);
-                    sum += read_once(&pl, &d, rng);
+                    let (v, after) = read_once(&pl, &d, rng);
+                    sum += v;
+                    add(&after);
                 }
             }
-            sum / opts.opp_hand_samples as f64 - pl.leftover(&node.state)
+            (
+                sum / opts.opp_hand_samples as f64 - pl.leftover(&node.state),
+                opts.opp_hand_samples,
+            )
         };
         let replace = match result.iter().find(|(k, _)| *k == node.first) {
             None => true,
@@ -680,11 +767,22 @@ pub fn plan_turn(
                 Some(e) => e.1 = plan,
                 None => result.push((node.first.clone(), plan)),
             }
+            if tracing {
+                let sp = ScoreParts {
+                    total: value,
+                    eval: parts.0 / n as f64,
+                    extra: parts.1 / n as f64,
+                };
+                match reads.iter_mut().find(|(k, _)| *k == node.first) {
+                    Some(e) => e.1 = sp,
+                    None => reads.push((node.first.clone(), sp)),
+                }
+            }
         }
     };
     for best in ranked {
         for i in candidates_of(best) {
-            rescore_node(i, rng, &mut result);
+            rescore_node(i, rng, &mut result, &mut reads);
             rescored.push(i);
         }
     }
@@ -720,7 +818,7 @@ pub fn plan_turn(
                 if !pass_turn(base, p).is_some_and(|next| f(&next, p)) {
                     continue;
                 }
-                rescore_node(i, rng, &mut result);
+                rescore_node(i, rng, &mut result, &mut reads);
                 rescored.push(i);
                 added.push(t.first.clone());
                 n += 1;
@@ -743,9 +841,12 @@ pub fn plan_turn(
             if rescored.contains(&i) || !seen.add(&terminals[i].state) {
                 continue;
             }
-            rescore_node(i, rng, &mut result);
+            rescore_node(i, rng, &mut result, &mut reads);
             n += 1;
         }
+    }
+    if let Some(tr) = trace {
+        tr.reads = reads;
     }
     result
 }
@@ -904,7 +1005,8 @@ pub fn pass_turn(s: &GameState, p: PlayerIndex) -> Option<GameState> {
     (cur.phase != Phase::Ended).then_some(cur)
 }
 
-fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng) -> f64 {
+/// start から相手のターンを読んだ点数と、読んだ後の局面
+fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng) -> (f64, GameState) {
     let env = pl.env;
     let p = pl.p;
     let after = if env.opts.opponent_search.is_some() {
@@ -934,7 +1036,7 @@ fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng) -> f64 {
     {
         v += env.opts.next_lethal;
     }
-    v
+    (v, after)
 }
 
 /// 自分の次のターンの始めの局面 after から、自分のターンをビームサーチで打った最善のターン末の点数（ownNext）
@@ -1128,6 +1230,186 @@ impl SearchAgent {
 }
 
 impl SearchAgent {
+    /// このターンに勝てる並びの最初の手（lethal のとき。見つからない・実際の局面で打てなければ None）
+    pub(crate) fn lethal_action(
+        &self,
+        real: &GameState,
+        legal: &[Action],
+        p: PlayerIndex,
+        rng: &mut Rng,
+    ) -> Option<Action> {
+        let opts = &self.opts;
+        if !opts.lethal {
+            return None;
+        }
+        let lo = LethalOptions {
+            ward_blocked: opts.lethal_ward_blocked,
+            expand_choices: opts.lethal_expand_choices,
+            ..DEFAULT_LETHAL_OPTIONS
+        };
+        let exact_states = opts.lethal_exact_states;
+        let with_exact = |root: &GameState, q: PlayerIndex| {
+            search_lethal(root, q, &lo)
+                .or_else(|| search_exact_lethal(root, q, &sure_lethal_options(exact_states)))
+        };
+        let search: Option<LethalSearch> = if exact_states > 0 {
+            Some(&with_exact)
+        } else {
+            None
+        };
+        find_lethal(real, p, rng, &lo, search).filter(|l| legal.contains(l))
+    }
+
+    /// choose_action と同じ乱数の使い方で手を選び、比べた手と点数の内訳を返す（前に選んだ並びは使わず、考え直す）。
+    /// lethal が Some なら、リーサルを先に調べたものとして扱う（デッキ専用の AI が自分で調べたとき）
+    pub fn think_with(
+        &self,
+        real: &GameState,
+        legal: &[Action],
+        rng: &mut Rng,
+        lethal: Option<Option<Action>>,
+    ) -> Option<Thought> {
+        let first = legal.first()?;
+        if legal.len() == 1 || matches!(first, Action::Mulligan { .. }) {
+            return None;
+        }
+        let opts = &self.opts;
+        let p = acting_player(real);
+        let lethal = match lethal {
+            Some(l) => l,
+            None => self.lethal_action(real, legal, p, rng),
+        };
+        let env = Env {
+            opts,
+            w: &self.w,
+            policy_w: &self.policy_w,
+        };
+        /// 最初の手ごとの読み直しの集計（choose_action の Total と同じ）
+        #[derive(Default)]
+        struct Acc {
+            sum: f64,
+            count: usize,
+            eval: f64,
+            extra: f64,
+            best: f64,
+        }
+        let mut roots: Vec<GameState> = Vec::new();
+        let mut candidates: Vec<ThoughtCandidate> = Vec::new();
+        let mut accs: Vec<Acc> = Vec::new();
+        // 読み直した手の、choose_action の totals と同じ順（決定化ごとに plan_turn が返した順で、初めて出たところ）
+        let mut totals: Vec<usize> = Vec::new();
+        for sample in 0..opts.samples {
+            let det = Rc::new(determinize(real, p, rng, opts.peek_opp_hand));
+            let mut trace = PlanTrace::default();
+            let plans = plan_turn_traced(&det, p, &env, rng, true, Some(&mut trace));
+            roots.push((*det).clone());
+            for (plan, turn_end) in &trace.turn_end {
+                if candidates.iter().any(|c| c.action == plan.action) {
+                    continue;
+                }
+                candidates.push(ThoughtCandidate {
+                    action: plan.action.clone(),
+                    sample,
+                    steps: plan.steps.iter().map(|(a, _)| a.clone()).collect(),
+                    turn_end: *turn_end,
+                    read: None,
+                    read_count: 0,
+                    value: None,
+                    legal: legal.contains(&plan.action),
+                });
+                accs.push(Acc::default());
+            }
+            for (k, read_plan) in &plans {
+                let Some(i) = candidates.iter().position(|c| c.action == *k) else {
+                    continue;
+                };
+                let parts = trace
+                    .reads
+                    .iter()
+                    .find(|(x, _)| x == k)
+                    .map(|(_, sp)| *sp)
+                    .unwrap_or_default();
+                let acc = &mut accs[i];
+                let c = &mut candidates[i];
+                // 並びは、読み直した点数が最も高かった決定化のもの（choose_action と同じ）
+                if acc.count == 0 || read_plan.value > acc.best {
+                    acc.best = read_plan.value;
+                    c.sample = sample;
+                    c.steps = read_plan.steps.iter().map(|(a, _)| a.clone()).collect();
+                    if let Some((_, te)) = trace.turn_end.iter().find(|(x, _)| x.action == *k) {
+                        c.turn_end = *te;
+                    }
+                }
+                acc.sum += read_plan.value;
+                acc.eval += parts.eval;
+                acc.extra += parts.extra;
+                acc.count += 1;
+                if !totals.contains(&i) {
+                    totals.push(i);
+                }
+            }
+        }
+        for (c, acc) in candidates.iter_mut().zip(&accs) {
+            if acc.count > 0 {
+                let n = acc.count as f64;
+                c.read = Some(ScoreParts {
+                    total: acc.sum / n,
+                    eval: acc.eval / n,
+                    extra: acc.extra / n,
+                });
+                c.read_count = acc.count;
+                c.value = Some(acc.sum / n - (opts.samples - acc.count) as f64 * 0.5);
+            }
+        }
+        // 選ぶ手（choose_action と同じ: 実際の局面で打てる手のうち、選ぶときの値が最も高いもの。同じ値なら totals で先のもの）
+        let mut best: Option<usize> = None;
+        let mut best_value = f64::NEG_INFINITY;
+        for &i in &totals {
+            let c = &candidates[i];
+            if !c.legal {
+                continue;
+            }
+            let value = c.value.unwrap_or(f64::NEG_INFINITY);
+            if value > best_value {
+                best_value = value;
+                best = Some(i);
+            }
+        }
+        let chosen = match (&lethal, best) {
+            (Some(l), _) => l.clone(),
+            (None, Some(i)) => candidates[i].action.clone(),
+            (None, None) => {
+                let permitted: Vec<Action> = match &opts.allow {
+                    Some(f) => legal
+                        .iter()
+                        .filter(|a| matches!(a, Action::EndTurn) || f(real, a, p))
+                        .cloned()
+                        .collect(),
+                    None => legal.to_vec(),
+                };
+                let choices = if permitted.is_empty() {
+                    legal
+                } else {
+                    &permitted
+                };
+                choose_greedy(real, choices, rng, false, &self.default_w, false)
+            }
+        };
+        candidates.sort_by(|x, y| match (x.value, y.value) {
+            (Some(a), Some(b)) => by_value_desc(a, b),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => by_value_desc(x.turn_end.total, y.turn_end.total),
+        });
+        Some(Thought {
+            player: p,
+            lethal,
+            roots,
+            candidates,
+            chosen,
+        })
+    }
+
     /// 局面 root で p が打てる並びを、最初の手ごとに 1 つずつ、相手のターンを読み直した点数の高い順に返す
     /// （読み直すのは点数の高い rescore_top 個の最初の手だけ）。root を決定化せずにそのまま読む。
     /// TD 学習の打ち比べ（runner/td.rs の --cmp）が、同じ局面から打ち比べる手の候補に使う
@@ -1162,6 +1444,10 @@ fn agreed_length(plans: &[Plan]) -> usize {
 }
 
 impl Agent for SearchAgent {
+    fn think(&mut self, real: &GameState, legal: &[Action], rng: &mut Rng) -> Option<Thought> {
+        self.think_with(real, legal, rng, None)
+    }
+
     fn choose_action(&mut self, real: &GameState, legal: &[Action], rng: &mut Rng) -> Action {
         let first = &legal[0];
         if legal.len() == 1 {
@@ -1209,28 +1495,9 @@ impl Agent for SearchAgent {
             .map(|pd| pd.player())
             .unwrap_or(real.active);
 
-        if opts.lethal {
-            let lo = LethalOptions {
-                ward_blocked: opts.lethal_ward_blocked,
-                expand_choices: opts.lethal_expand_choices,
-                ..DEFAULT_LETHAL_OPTIONS
-            };
-            let exact_states = opts.lethal_exact_states;
-            let with_exact = |root: &GameState, q: PlayerIndex| {
-                search_lethal(root, q, &lo)
-                    .or_else(|| search_exact_lethal(root, q, &sure_lethal_options(exact_states)))
-            };
-            let search: Option<LethalSearch> = if exact_states > 0 {
-                Some(&with_exact)
-            } else {
-                None
-            };
-            if let Some(l) = find_lethal(real, p, rng, &lo, search) {
-                if legal.contains(&l) {
-                    self.plans[p] = None;
-                    return l;
-                }
-            }
+        if let Some(l) = self.lethal_action(real, legal, p, rng) {
+            self.plans[p] = None;
+            return l;
         }
 
         // 前に選んだ並びの途中で、局面が予想どおりなら続ける

@@ -18,6 +18,7 @@ pub mod registry;
 pub mod rhino;
 pub mod rhino_lethal;
 pub mod search;
+pub mod think;
 pub mod valuenet;
 
 #[cfg(test)]
@@ -55,6 +56,17 @@ impl Rng {
 /// AI の共通インターフェース（src/ai/types.ts の Agent）
 pub trait Agent {
     fn choose_action(&mut self, state: &GameState, legal: &[Action], rng: &mut Rng) -> Action;
+
+    /// この局面での考え（比べた手と点数の内訳。think.rs）。choose_action と同じ乱数の使い方で同じ手を選ぶ。
+    /// 考えを示せない AI・局面（マリガン、打てる手が 1 つ）は None
+    fn think(
+        &mut self,
+        _state: &GameState,
+        _legal: &[Action],
+        _rng: &mut Rng,
+    ) -> Option<think::Thought> {
+        None
+    }
 }
 
 /// 合法手から一様ランダムに選ぶ

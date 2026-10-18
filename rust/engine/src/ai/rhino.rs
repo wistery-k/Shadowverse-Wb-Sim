@@ -16,6 +16,7 @@ use super::lethal::{
 };
 use super::rhino_lethal::{search_rhino_lethal, tag, Tag, DEFAULT_RHINO_LETHAL_OPTIONS};
 use super::search::{ExtraEval, SearchAgent, SearchOptions};
+use super::think::Thought;
 use super::valuenet::ValuePhase;
 use super::{Agent, Rng};
 use crate::data::{ClassId, AMBUSH, INTIMIDATE, STORM, WARD};
@@ -697,6 +698,37 @@ impl RhinoAgent {
 }
 
 impl Agent for RhinoAgent {
+    /// choose_action と同じ流れで、探索の部分の考えを返す（リノセウス用のリーサル探索で見つけたリーサルも入れる）
+    fn think(&mut self, real: &GameState, legal: &[Action], rng: &mut Rng) -> Option<Thought> {
+        let first = legal.first()?;
+        if legal.len() == 1 || matches!(first, Action::Mulligan { .. }) {
+            return None;
+        }
+        let p = acting_player(real);
+        if deck_class_of(real, p) != ClassId::Elf {
+            return self.plain.think(real, legal, rng);
+        }
+        let turn_search: &dyn Fn(&GameState, PlayerIndex) -> Option<Vec<Action>> =
+            &search_lethal_for_rhino_turn;
+        if !self.rhino_eval {
+            if real.active == p {
+                if let Some(l) =
+                    find_lethal(real, p, rng, &DEFAULT_LETHAL_OPTIONS, Some(turn_search))
+                        .filter(|l| legal.contains(l))
+                {
+                    return self.plain.think_with(real, legal, rng, Some(Some(l)));
+                }
+            }
+            return self.plain.think(real, legal, rng);
+        }
+        if real.active != p {
+            return self.search.think(real, legal, rng);
+        }
+        let l = find_lethal(real, p, rng, &DEFAULT_LETHAL_OPTIONS, Some(turn_search))
+            .filter(|l| legal.contains(l));
+        self.search.think_with(real, legal, rng, Some(l))
+    }
+
     fn choose_action(&mut self, real: &GameState, legal: &[Action], rng: &mut Rng) -> Action {
         let first = &legal[0];
         let mulligan = matches!(first, Action::Mulligan { .. });

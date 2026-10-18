@@ -18,6 +18,7 @@ mod mulligan;
 mod rhino;
 mod rhino_puzzles;
 mod search;
+mod think;
 mod valuenet;
 
 use super::aidata::ai_data;

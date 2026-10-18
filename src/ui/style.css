@@ -1043,6 +1043,18 @@ progress {
   color: #fff;
   white-space: nowrap;
 }
+.branch-tag.actual {
+  background: var(--muted);
+}
+.thought-steps {
+  font-size: 12px;
+}
+.thought tr.chosen td {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.thought tr.thought-sep td {
+  padding-top: 8px;
+}
 .branch-result {
   display: grid;
   gap: 4px;

@@ -11,6 +11,8 @@ use svwb_engine::ai::exact_lethal::reset_exact_lethal_cache;
 use svwb_engine::ai::lethal::reset_lethal;
 use svwb_engine::ai::lethal_hint::lethal_hint;
 use svwb_engine::ai::registry::create_agent;
+use svwb_engine::ai::search::ScoreParts;
+use svwb_engine::ai::think::Thought;
 use svwb_engine::ai::{Agent, Rng};
 use svwb_engine::data::{data, CardIdx};
 use svwb_engine::game::{attack_reach, attack_targets, fusion_candidates};
@@ -154,6 +156,47 @@ fn deck(v: &Json) -> R<Vec<CardIdx>> {
             v => Err(Fail::Error(format!("カードIDは文字列: {}", v.stringify()))),
         })
         .collect()
+}
+
+fn parts_json(p: &ScoreParts) -> Json {
+    Json::Obj(vec![
+        ("total".into(), Json::Num(p.total)),
+        ("eval".into(), Json::Num(p.eval)),
+        ("extra".into(), Json::Num(p.extra)),
+    ])
+}
+
+fn thought_json(t: &Thought) -> Json {
+    let opt = |x: Option<Json>| x.unwrap_or(Json::Null);
+    Json::Obj(vec![
+        ("player".into(), Json::Num(t.player as f64)),
+        ("lethal".into(), opt(t.lethal.as_ref().map(action_to_json))),
+        (
+            "roots".into(),
+            Json::Arr(t.roots.iter().map(state_to_json).collect()),
+        ),
+        (
+            "candidates".into(),
+            Json::Arr(
+                t.candidates
+                    .iter()
+                    .map(|c| {
+                        Json::Obj(vec![
+                            ("action".into(), action_to_json(&c.action)),
+                            ("sample".into(), Json::Num(c.sample as f64)),
+                            ("steps".into(), actions_json(&c.steps)),
+                            ("turnEnd".into(), parts_json(&c.turn_end)),
+                            ("read".into(), opt(c.read.as_ref().map(parts_json))),
+                            ("readCount".into(), Json::Num(c.read_count as f64)),
+                            ("value".into(), opt(c.value.map(Json::Num))),
+                            ("legal".into(), Json::Bool(c.legal)),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ),
+        ("chosen".into(), action_to_json(&t.chosen)),
+    ])
 }
 
 fn dispatch(req: &Json) -> R<Json> {
@@ -311,6 +354,24 @@ fn dispatch(req: &Json) -> R<Json> {
                     ),
                     ("turns".into(), Json::Num(end.turn as f64)),
                 ]),
+                None => Json::Null,
+            }
+        }
+        "agentThink" => {
+            // リプレイの「AI の考え」（svwb_engine::ai::think）。AI はその場で作り、前の局面で決めた並び・リーサルの手順を使わずに考え直す
+            let name = match field(req, "agent")? {
+                Json::Str(n) => n.as_str(),
+                _ => return Err(Fail::Error("agent は AI の名前".into())),
+            };
+            let mut agent =
+                create_agent(name).ok_or_else(|| Fail::Error(format!("未知の AI: {name}")))?;
+            let s = state(req)?;
+            let legal = legal_actions(&s);
+            reset_exact_lethal_cache();
+            reset_lethal();
+            let mut rng = Rng::new(uint(req, "rng")?);
+            match agent.think(&s, &legal, &mut rng) {
+                Some(t) => thought_json(&t),
                 None => Json::Null,
             }
         }

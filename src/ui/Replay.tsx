@@ -8,6 +8,7 @@ import { reproduceCommand } from "../sim/reproduce";
 import { seatDecks, type Entrant, type GameRecord } from "../sim/tournament";
 import { CardDetail, CardView, type Motion, type MulliganMark } from "./CardView";
 import { attackStatuses, describeAction, leaderClasses } from "./describe";
+import { AiThought, useThoughts } from "./AiThought";
 import { BranchCompare, useBranchRuns } from "./BranchCompare";
 import { BoardSlots, EmptySlots, LeaderHp, PlayerInfo, Resources } from "./Game";
 
@@ -47,6 +48,7 @@ export function Replay({ record, entrants, onClose }: Props) {
   const [bottom, setBottom] = useState<PlayerIndex>(0);
   const go = (s: number) => setStep(Math.max(0, Math.min(last, s)));
   const branch = useBranchRuns();
+  const thoughts = useThoughts();
   const matchAgents = useMemo((): [string, string] => {
     const [p0, p1] = record.aIsPlayer0 ? [record.a, record.b] : [record.b, record.a];
     return [entrants[p0]!.agent, entrants[p1]!.agent];
@@ -261,6 +263,17 @@ export function Replay({ record, entrants, onClose }: Props) {
             </div>
             {step < last && <div class="muted">次: {lines[step]}</div>}
           </div>
+          {step < last && (
+            <AiThought
+              state={state}
+              step={step}
+              actual={actions[step]!}
+              names={names}
+              matchAgents={matchAgents}
+              seed={record.seed}
+              thoughts={thoughts}
+            />
+          )}
           {step < last && (
             <BranchCompare
               state={state}
