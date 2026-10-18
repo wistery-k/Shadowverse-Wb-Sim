@@ -134,7 +134,8 @@ impl Default for SearchOptions {
             lethal: true,
             lethal_ward_blocked: GUARDED_LETHAL_OPTIONS.ward_blocked,
             lethal_expand_choices: GUARDED_LETHAL_OPTIONS.expand_choices,
-            lethal_exact_states: 0,
+            // リーサル探索のビームで見つからないとき全探索する（与えうるダメージの上限で打ち切るので速い。docs/ai-notes.md「リーサル探索: ビームで見つからないとき全探索で調べる」）
+            lethal_exact_states: 20_000,
             allow: None,
             dedup: true,
             same_hand_once: true,
