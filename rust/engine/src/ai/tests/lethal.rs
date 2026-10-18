@@ -1,7 +1,10 @@
 //! リーサルの探索（tests/ai.test.ts の「リーサルの探索」）
 
 use super::*;
-use crate::ai::lethal::{find_lethal, search_lethal, DEFAULT_LETHAL_OPTIONS};
+use crate::ai::lethal::{
+    find_lethal, search_lethal, DEFAULT_LETHAL_OPTIONS, GUARDED_LETHAL_OPTIONS,
+};
+use crate::ai::lethal_hint::lethal_hint;
 use crate::ai::rhino::RhinoAgent;
 use crate::ai::search::{SearchAgent, SearchOptions};
 
@@ -96,4 +99,93 @@ fn search_agent_does_not_miss_lethal() {
         s = apply(&s, &a);
     }
     assert_eq!(s.winner, Some(me));
+}
+
+/// 人間の対戦記録（スペルウィッチ 2 回目）と同じ配りの AI どうしの試合（AFネメシス g1 の 18 ターン目）を元にした局面。
+/// 鬼呼びの術で出した式神・暴鬼でシルヴィアに当てて（破壊された式神が 1 体増える）、エクストラ PP でエンハンス 10 のクオンを出し、
+/// 超進化で 13/13 の式神・貴人に疾走を付けて顔に 13 点
+fn kuon_enhance_position() -> GameState {
+    let s = new_game(class_deck(ClassId::Witch), class_deck(ClassId::Nemesis), 1);
+    let mut s = skip_mulligan(s);
+    s.active = 0;
+    // スペルブーストで 0 コストになった鬼呼びの術
+    let mut call = hand_card(&mut s, "鬼呼びの術");
+    call.boosts = 16;
+    call.cost_mod = -7;
+    let kuon = hand_card(&mut s, "五行の果て・クオン");
+    let others = hand_cards(
+        &mut s,
+        &[
+            "マナリアフレンズ・アン＆グレア",
+            "マナリアフレンズ・アン＆グレア",
+            "熾天使の福音",
+            "最果ての罪・サタン",
+            "マナリアの学徒・ウィリアム",
+            "知恵の輝き",
+        ],
+    );
+    let cauldron = board_card(&mut s, "魔女の錬金釜");
+    let mut silvia = old_follower(&mut s, "箱庭の断罪者・シルヴィア");
+    silvia.attack = 8;
+    silvia.defense = 8;
+    silvia.max_defense = 8;
+    silvia.evolve = Evolve::SuperEvolved;
+    let me = &mut s.players[0];
+    me.hand = vec![call, kuon];
+    me.hand.extend(others);
+    me.board = vec![cauldron];
+    me.pp = 9;
+    me.max_pp = 9;
+    me.turn_count = 9;
+    me.extra_pp_available = true;
+    me.ep = 0;
+    me.sep = 1;
+    s.players[1].board = vec![silvia];
+    s.players[1].leader_hp = 13;
+    s.players[1].turn_count = 9;
+    s.turn = 18;
+    s
+}
+
+#[test]
+fn lethal_hint_finds_enhanced_kuon_line() {
+    let s = kuon_enhance_position();
+    // ビームの途中の点数では貴人の大きさが見えず見つからないが、全探索で見つける
+    assert!(search_lethal(&s, 0, &GUARDED_LETHAL_OPTIONS).is_none());
+    let seq = lethal_hint(&s, 0, 1);
+    assert!(wins(&s, seq.as_deref(), 0));
+}
+
+#[test]
+fn damage_bound_keeps_enhanced_kuon_lethal() {
+    let s = kuon_enhance_position();
+    // 上限で打ち切っても、エンハンスのクオンの手順は残る
+    let b = crate::ai::damage_bound::damage_bound(&s, 0, false).expect("上限");
+    assert!(b >= 13, "上限 {b}");
+    fresh();
+    let opts = crate::ai::exact_lethal::sure_lethal_options(20_000);
+    let seq = crate::ai::exact_lethal::search_exact_lethal(&s, 0, &opts);
+    assert!(wins(&s, seq.as_deref(), 0));
+}
+
+#[test]
+fn damage_bound_cuts_seven_cost_kuon() {
+    // PP 7 でクオンを出しても（エンハンスできない）、顔に届くのは場の古い形代と超進化で疾走を与えた式神くらい
+    let mut s = kuon_enhance_position();
+    let kuon = s.players[0].hand[1].clone();
+    let old = old_follower(&mut s, "式神・形代");
+    let me = &mut s.players[0];
+    me.hand = vec![kuon];
+    me.board.push(old);
+    me.pp = 7;
+    me.extra_pp_available = false;
+    let b = crate::ai::damage_bound::damage_bound(&s, 0, false).expect("上限");
+    let opts = crate::ai::exact_lethal::ExactLethalOptions {
+        deterministic_only: true,
+        damage_bound: false,
+        ..crate::ai::exact_lethal::DEFAULT_EXACT_LETHAL_OPTIONS
+    };
+    let exact = crate::ai::exact_lethal::exact_max_damage(&s, 0, &opts).expect("全探索");
+    assert!(exact <= b, "全探索 {exact} 上限 {b}");
+    assert!(b < 13, "上限 {b}");
 }

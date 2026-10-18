@@ -27,6 +27,7 @@ pub fn search_classic_options() -> SearchOptions {
         // 人間との比較・rhino-compare の相手が変わらないよう、リーサル探索は前のまま
         lethal_ward_blocked: 0.0,
         lethal_expand_choices: false,
+        lethal_exact_states: 0,
         ..SearchOptions::default()
     }
     .with_classic_sampling()

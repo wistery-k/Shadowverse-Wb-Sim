@@ -5,6 +5,7 @@
 
 pub mod aidata;
 pub mod converging;
+pub mod damage_bound;
 pub mod determinize;
 pub mod eval;
 pub mod exact_lethal;

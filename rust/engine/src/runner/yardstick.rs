@@ -48,6 +48,7 @@ pub fn reference_options() -> SearchOptions {
         lethal: true,
         lethal_ward_blocked: 0.0,
         lethal_expand_choices: false,
+        lethal_exact_states: 0,
         allow: None,
         dedup: true,
         same_hand_once: true,

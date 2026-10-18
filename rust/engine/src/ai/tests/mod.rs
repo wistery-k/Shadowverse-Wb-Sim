@@ -7,6 +7,7 @@
 
 mod beam;
 mod converging;
+mod damage_bound;
 mod determinize;
 mod dominance;
 mod doomed;
