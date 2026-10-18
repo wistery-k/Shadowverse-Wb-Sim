@@ -130,6 +130,9 @@ pub struct PlayerState {
     pub extra_pp_available: bool,
     pub turn_count: i32,
     pub deck: Vec<CardRef>,
+    /// 手札から山札に戻ったカードの、手札で付いた状態（スペルブーストの回数・コスト変化等）。
+    /// 山札のカードと iid で対応し、引いたときにこの状態のまま手札に戻る。状態の変わっていないカードは持たない
+    pub deck_kept: Vec<HandCard>,
     pub hand: Vec<HandCard>,
     pub board: Vec<OnBoard>,
     pub crests: Vec<CrestInstance>,
@@ -362,6 +365,18 @@ pub fn crest_abilities_of(idx: CrestIdx) -> &'static [Ability] {
         .unwrap_or(&[])
 }
 
+/// 手札のカードに、作り直したときと違う状態（公開・条件付きドローの印を除く）が付いているか
+pub fn hand_state_changed(h: &HandCard) -> bool {
+    h.cost_mod != 0
+        || h.attack_mod != 0
+        || h.defense_mod != 0
+        || h.boosts != 0
+        || h.x != abilities_of(h.card).initial_x
+        || h.keywords != Kw::EMPTY
+        || !h.fused_kinds.is_empty()
+        || h.fused_this_turn
+}
+
 pub fn hand_cost(h: &HandCard) -> i32 {
     (card(h.card).cost + h.cost_mod).max(0)
 }
@@ -480,6 +495,26 @@ impl GameState {
         }
     }
 
+    /// 手札のカードを p の山札の末尾に戻す（並べ替えは呼ぶ側）。手札で付いた状態は維持する（公開・条件付きドローの印は情報なので消す）
+    pub fn return_to_deck(&mut self, p: PlayerIndex, mut h: HandCard) {
+        self.players[p].deck.push(CardRef {
+            iid: h.iid,
+            card: h.card,
+        });
+        h.revealed = false;
+        h.drawn_by = None;
+        if hand_state_changed(&h) {
+            self.players[p].deck_kept.push(h);
+        }
+    }
+
+    /// p の山札のカード iid の、手札で付いた状態を取り出す（山札から離れるときに呼ぶ）
+    pub fn take_kept(&mut self, p: PlayerIndex, iid: Iid) -> Option<HandCard> {
+        let kept = &mut self.players[p].deck_kept;
+        let i = kept.iter().position(|h| h.iid == iid)?;
+        Some(kept.remove(i))
+    }
+
     /// 場に出すカードの実体を作る（手札からなら手札での変化を引き継ぐ）
     pub fn new_board_card(&mut self, c: CardIdx, from: Option<&HandCard>) -> OnBoard {
         let cd = card(c);
@@ -573,7 +608,10 @@ impl GameState {
                     self.players[p].deck.remove(0)
                 }
             };
-            let mut c = self.new_hand_card(r.card, Some(r.iid));
+            let mut c = match self.take_kept(p, r.iid) {
+                Some(k) => k,
+                None => self.new_hand_card(r.card, Some(r.iid)),
+            };
             if hint.is_some() {
                 c.drawn_by = hint;
             }

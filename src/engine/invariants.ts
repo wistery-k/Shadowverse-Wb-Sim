@@ -24,6 +24,9 @@ export function invariantViolations(state: GameState): string[] {
         v.push(`${where}: 【土の印】アミュレットが複数`);
       }
     }
+    for (const c of pl.deck) {
+      if (c.kept && (c.kept.iid !== c.iid || c.kept.cardId !== c.cardId)) v.push(`${where}: 山札のカード ${c.iid} の手札での状態が別のカードのもの`);
+    }
     for (const c of [...pl.deck, ...pl.hand, ...pl.board]) {
       if (iids.has(c.iid)) v.push(`${where}: iid ${c.iid} が重複`);
       iids.add(c.iid);

@@ -26,6 +26,15 @@ export interface CardRef {
   cardId: string;
 }
 
+/** 山札のカード。手札から戻ったカードは手札で付いた状態を持つ */
+export interface DeckCard extends CardRef {
+  /**
+   * 手札から山札に戻ったときの手札での状態（スペルブーストの回数・コスト変化等）。引いたときにこの状態のまま手札に戻る。
+   * 状態の変わっていないカードは持たない。revealed・drawnBy は常に false・null
+   */
+  kept?: HandCard;
+}
+
 /** 手札のカード。手札にある間に受けた変化を持つ。 */
 export interface HandCard extends CardRef {
   costMod: number;
@@ -132,7 +141,7 @@ export interface PlayerState {
   extraPpAvailable: boolean;
   /** 自分のターンが何回目か（未開始は0） */
   turnCount: number;
-  deck: CardRef[];
+  deck: DeckCard[];
   hand: HandCard[];
   board: OnBoard[];
   crests: CrestInstance[];

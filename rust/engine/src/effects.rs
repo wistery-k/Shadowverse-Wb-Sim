@@ -1041,6 +1041,8 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                     .position(|r| r.card == cid)
                     .unwrap();
                 let r = s.players[p].deck.remove(idx);
+                // 山札から直接場に出すときは手札で付いた状態を使わない（⚠️ 未確認。docs/rules.md）
+                s.take_kept(p, r.iid);
                 let h = s.new_hand_card(r.card, Some(r.iid));
                 let c = s.new_board_card(r.card, Some(&h));
                 enter_board(s, p, c);
@@ -1067,10 +1069,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                     continue;
                 };
                 let h = s.players[q].hand.remove(i);
-                s.players[q].deck.push(CardRef {
-                    iid: h.iid,
-                    card: h.card,
-                });
+                s.return_to_deck(q, h);
             }
             if !ids.is_empty() {
                 let mut deck = std::mem::take(&mut s.players[p].deck);
@@ -1303,6 +1302,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             }
             s.shuffle(&mut deck);
             s.players[p].deck = deck;
+            s.players[p].deck_kept.clear();
         }
         Effect::SetLeaderMaxHp { side, value } => {
             let t = &mut s.players[if *side == Side::Me { p } else { opponent(p) }];

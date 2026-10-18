@@ -197,6 +197,10 @@ fn player_rest_eq(a: &PlayerState, b: &PlayerState) -> bool {
 fn player_eq(a: &PlayerState, b: &PlayerState) -> bool {
     player_rest_eq(a, b)
         && a.deck == b.deck
+        && a.deck_kept.len() == b.deck_kept.len()
+        && a.deck_kept
+            .iter()
+            .all(|x| kept_of(b, x.iid).is_some_and(|y| hand_eq(x, y)))
         && list_eq(&a.hand, &b.hand, hand_eq)
         && list_eq(&a.board, &b.board, board_eq)
         && list_eq(&a.crests, &b.crests, crest_eq)
@@ -229,9 +233,27 @@ fn mid_ability(s: &GameState) -> bool {
     !s.stack.is_empty() || !s.queue.is_empty() || s.pending.is_some() || s.attack.is_some()
 }
 
+fn kept_of(p: &PlayerState, iid: Iid) -> Option<&HandCard> {
+    if p.deck_kept.is_empty() {
+        return None;
+    }
+    p.deck_kept.iter().find(|h| h.iid == iid)
+}
+
+fn kept_eq_noid(a: Option<&HandCard>, b: Option<&HandCard>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(x), Some(y)) => hand_eq_noid(x, y),
+        _ => false,
+    }
+}
+
 fn same_player_for_turn_order(a: &PlayerState, b: &PlayerState) -> bool {
     a.deck.len() == b.deck.len()
-        && a.deck.iter().zip(&b.deck).all(|(x, y)| x.card == y.card)
+        && a.deck
+            .iter()
+            .zip(&b.deck)
+            .all(|(x, y)| x.card == y.card && kept_eq_noid(kept_of(a, x.iid), kept_of(b, y.iid)))
         && same_cards(&a.hand, &b.hand, hand_eq_noid)
         && same_cards(&a.board, &b.board, board_eq_noid)
         && same_cards(&a.crests, &b.crests, crest_eq_noid)

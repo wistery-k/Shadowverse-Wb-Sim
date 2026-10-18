@@ -136,7 +136,14 @@ fn player_canon(p: &PlayerState) -> String {
         head,
         format!(
             "D{}",
-            join(&p.deck, |r| format!("{}:{}", r.iid, cid(r.card)), ",")
+            join(
+                &p.deck,
+                |r| match p.deck_kept.iter().find(|h| h.iid == r.iid) {
+                    Some(h) => format!("{}:{}={}", r.iid, cid(r.card), hand_canon(h)),
+                    None => format!("{}:{}", r.iid, cid(r.card)),
+                },
+                ","
+            )
         ),
         format!("H{}", join(&p.hand, hand_canon, ",")),
         format!("B{}", join(&p.board, board_canon, ",")),

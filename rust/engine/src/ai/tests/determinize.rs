@@ -113,3 +113,35 @@ fn keeps_revealed_cards_and_respects_draw_conditions() {
         assert_eq!(cards, opp_hand);
     }
 }
+
+/// 山札に戻ったカードの手札での状態を、山札の iid の i 枚目に付ける
+fn keep_state(s: &mut GameState, p: PlayerIndex, i: usize, boosts: i32) -> Iid {
+    let r = s.players[p].deck[i];
+    let mut h = s.new_hand_card(r.card, Some(r.iid));
+    h.boosts = boosts;
+    s.players[p].deck_kept.push(h);
+    r.iid
+}
+
+#[test]
+fn keeps_own_deck_states_and_drops_hidden_ones() {
+    // 自分の山札に戻ったカードの状態はそのカードに付けたまま並べ直す。相手の山札のものは伏せた手札と同じく作り直す
+    let mut s = after_mulligan();
+    let viewer = s.active;
+    let opp = opponent(viewer);
+    let mine = keep_state(&mut s, viewer, 3, 2);
+    let card = s.players[viewer].deck[3].card;
+    keep_state(&mut s, opp, 0, 4);
+    let mut rng = Rng::new(7);
+    for _ in 0..10 {
+        let d = determinize(&s, viewer, &mut rng, false);
+        let kept = &d.players[viewer].deck_kept;
+        assert_eq!(kept.len(), 1);
+        assert_eq!((kept[0].iid, kept[0].card, kept[0].boosts), (mine, card, 2));
+        assert!(d.players[viewer]
+            .deck
+            .iter()
+            .any(|r| r.iid == mine && r.card == card));
+        assert!(d.players[opp].deck_kept.is_empty());
+    }
+}
