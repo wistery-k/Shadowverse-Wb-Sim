@@ -77,7 +77,12 @@ pub struct SearchOptions {
     pub plan_candidates: usize,
     pub per_first: usize,
     pub next_lethal: f64,
+    /// next_lethal を足す相手の体力の上限（None なら評価の重みの lethal_range）
+    pub next_lethal_range: Option<f64>,
     pub next_lethal_search: Option<NextLethalSearch>,
+    /// 相手が何もしなければ次のターンに倒しきれる（next_lethal_search で調べる）終局面を、ターン末の点数の高い順に
+    /// この数まで、相手のターンを読む候補に足す（passLethal）
+    pub pass_lethal: usize,
     pub beam_pp: f64,
     pub extra_eval: Option<ExtraEval>,
     /// 評価関数の重み（None なら探索 AI の既定 SEARCH_WEIGHTS）
@@ -121,7 +126,9 @@ impl Default for SearchOptions {
             plan_candidates: 1,
             per_first: 0,
             next_lethal: 0.0,
+            next_lethal_range: None,
             next_lethal_search: None,
+            pass_lethal: 0,
             beam_pp: 0.0,
             extra_eval: Some(Arc::new(value_net_eval)),
             weights: None,
@@ -651,6 +658,41 @@ pub fn plan_turn(
             rescored.push(i);
         }
     }
+    // 相手が何もしなければ次のターンに倒しきれる終局面を、ターン末の点数の高い順に passLethal 個まで読み足す
+    if opts.pass_lethal > 0 {
+        if let Some(f) = &opts.next_lethal_search {
+            let mut seen = TurnOrderSet::default();
+            for &i in &rescored {
+                seen.add(&terminals[i].state);
+            }
+            let mut order: Vec<usize> = (0..terminals.len()).collect();
+            order.sort_by(|&x, &y| by_value_desc(terminals[x].value, terminals[y].value));
+            let mut added: Vec<Action> = Vec::new();
+            let mut n = 0;
+            for i in order {
+                if n >= opts.pass_lethal {
+                    break;
+                }
+                let t = &terminals[i];
+                if t.state.phase == Phase::Ended
+                    || rescored.contains(&i)
+                    || added.contains(&t.first)
+                    || !seen.add(&t.state)
+                {
+                    continue;
+                }
+                let settled = pl.settle(&t.state);
+                let base = settled.as_ref().unwrap_or(&t.state);
+                if !pass_turn(base, p).is_some_and(|next| f(&next, p)) {
+                    continue;
+                }
+                rescore_node(i, rng, &mut result);
+                rescored.push(i);
+                added.push(t.first.clone());
+                n += 1;
+            }
+        }
+    }
     // 読み直した手がどれも相手のターンで負けるなら、ターン末の点数の高い順に、異なる終局面を dangerRescore 個まで読み足す
     if opts.danger_rescore > 0 && result.iter().all(|(_, x)| x.value <= DANGER) {
         let mut seen = TurnOrderSet::default();
@@ -809,6 +851,25 @@ fn replay(root: &Rc<GameState>, order: &[&Action]) -> Option<Vec<(Action, Rc<Gam
     Some(out)
 }
 
+/// p のターンを終え、相手が何もせずにターンを終えて、p の次のターンが始まった局面（途中の選択は最初の選択肢）
+pub fn pass_turn(s: &GameState, p: PlayerIndex) -> Option<GameState> {
+    let mut cur = try_apply_action(s, &Action::EndTurn)?;
+    let mut guard = 0;
+    while cur.phase != Phase::Ended && (cur.active != p || cur.pending.is_some()) {
+        guard += 1;
+        if guard > 40 {
+            return None;
+        }
+        let a = if cur.pending.is_some() {
+            legal_actions(&cur).into_iter().next()?
+        } else {
+            Action::EndTurn
+        };
+        cur = try_apply_action(&cur, &a)?;
+    }
+    (cur.phase != Phase::Ended).then_some(cur)
+}
+
 fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng) -> f64 {
     let env = pl.env;
     let p = pl.p;
@@ -820,7 +881,8 @@ fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng) -> f64 {
     let mut v = pl.eval_after(&after);
     if env.opts.next_lethal != 0.0
         && after.phase != Phase::Ended
-        && after.players[opponent(p)].leader_hp as f64 <= env.w.w.lethal_range
+        && after.players[opponent(p)].leader_hp as f64
+            <= env.opts.next_lethal_range.unwrap_or(env.w.w.lethal_range)
         && match &env.opts.next_lethal_search {
             Some(f) => f(&after, p),
             None => search_lethal(&after, p, &DEFAULT_LETHAL_OPTIONS).is_some(),
