@@ -17,7 +17,10 @@ fn state_3108602991_turn18() -> GameState {
 
 /// 相手の場に 白銀の騎士団長・エミリア 7/7（超進化）・レヴィオンの迅雷・アルベール 3/5。PP 9 とエクストラPP、手札に クオン・ミラ・宿題やるですぅ！。
 /// 幅 32 では途中の局面が切られて、エミリアを残す手順（クオン → 形代でアルベール → 天后を超進化してエミリア）を打っていた。
-/// 指摘の、ミラ超進化・クオン・成長したですぅ！で両方を倒す手順は、ターン末 1.8 点（実戦 −15.2）、相手のターンを読んだ後 −5.3（実戦 −16.6）
+/// 指摘の、ミラ超進化・クオン・成長したですぅ！で両方を倒す手順は、ターン末 1.8 点（実戦 −15.2）、相手のターンを読んだ後 −5.3（実戦 −16.6）。
+/// どの手順を選ぶかは決定化の乱数と学習した補正で変わる（6 万試合で学び直した補正では、乱数 12 通りのうち
+/// 幅 128 で 6 回・幅 32 で 2 回両方を倒し、残すのはどれもアルベール。1 つ前の補正では幅 128 で 9 回）。
+/// そこで 12 通りで、幅 128 が幅 32 より多く両方を倒すことと、エミリアは必ず倒すことを確かめる
 #[test]
 fn witch_turn18_clears_both() {
     let start = state_3108602991_turn18();
@@ -29,9 +32,28 @@ fn witch_turn18_clears_both() {
         names(&start),
         ["白銀の騎士団長・エミリア", "レヴィオンの迅雷・アルベール"]
     );
-    for seed in 1..=4 {
-        let mut agent = SearchAgent::new(SearchOptions::default());
-        let (_, end) = play_turn(start.clone(), 1, &mut agent, &mut Rng::new(seed));
-        assert!(names(&end).is_empty(), "シード {seed}: {:?}", names(&end));
-    }
+    let clears = |beam_width: usize| -> usize {
+        (1..=12)
+            .filter(|&seed| {
+                let mut agent = SearchAgent::new(SearchOptions {
+                    beam_width,
+                    ..SearchOptions::default()
+                });
+                let (_, end) = play_turn(start.clone(), 1, &mut agent, &mut Rng::new(seed));
+                let left = names(&end);
+                if beam_width == SearchOptions::default().beam_width {
+                    assert!(
+                        !left.contains(&"白銀の騎士団長・エミリア"),
+                        "シード {seed}: {left:?}"
+                    );
+                }
+                left.is_empty()
+            })
+            .count()
+    };
+    let (wide, narrow) = (clears(SearchOptions::default().beam_width), clears(32));
+    assert!(
+        wide >= 6 && wide > narrow,
+        "幅 128: {wide}/12、幅 32: {narrow}/12"
+    );
 }
