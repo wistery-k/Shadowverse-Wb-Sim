@@ -40,7 +40,8 @@
 //     モデルが見ている価値（その局面の勝つ確率の予測の差）を比べる（docs/ai-notes.md「介入データを TD 学習に混ぜる」）
 //   npm run td -- prune --model m4.json --data d0.jsonl,d1.jsonl,... --out data/value-net.json
 //     学習データに一度も現れなかった入力（デフォルトデッキに無いカードなど）の重みを 0 にする。学ばれずに初期値の乱数のまま残っているので、
-//     そのカードを使う自作デッキで補正がでたらめに動かないようにする（ファイルも小さくなる）
+//     そのカードを使う自作デッキで補正がでたらめに動かないようにする（ファイルも小さくなる）。
+//     場のカードのネットワークを持つモデルなら、場に現れなかったカード・付与された能力の行も 0 にする（そのカードは数値の入力だけで見る）
 //   npm run td -- probe --model m1.json --data d0.jsonl [--per 2000]
 //     学んだ補正が何を見ているか: デッキごとのターン末の局面で、入力を 1 つ増やしたときの補正 (c + L) / a の変化（評価の点数の単位）の平均。
 //     PP 最大値・EP・SEP を 1 増やす、手札・場にカードを 1 枚足す（変化の大きい順）
@@ -1162,20 +1163,46 @@ function prune(args: Args): number {
   const files = need(args, "data").split(",");
   const out = need(args, "out");
   const used = new Set<number>();
+  // 場のカードのネットワーク: 場に現れたカードと付与された能力
+  const onBoard = new Set<string>(), grants = new Set<string>();
   for (const file of files) {
     for (const line of readFileSync(file, "utf8").split("\n")) {
       if (!line.trim()) continue;
       const r = parseLine(line);
       if (isCmp(r)) continue;
-      for (const seq of r.samples) for (const x of seq) for (const i of x.x) used.add(i);
+      for (const seq of r.samples) {
+        for (const x of seq) {
+          for (const i of x.x) used.add(i);
+          if (!model.board) continue;
+          if (!x.b) throw new Error("場のカードのネットワークを持つモデルですが、データに場のカード（\"b\"）がありません");
+          for (const c of x.b.flat()) {
+            onBoard.add(c.c);
+            for (const g of c.g ?? []) grants.add(JSON.stringify(g));
+          }
+        }
+      }
     }
   }
   const H = model.hidden;
   const n = baseInputSize(model);
   // 場のカードのネットワークの出力の重み（入力の末尾）は残す
   const w1 = model.w1.map((w, k) => (used.has(Math.floor(k / H)) || Math.floor(k / H) >= n ? w : 0));
-  writeFileSync(out, JSON.stringify({ ...model, w1 }));
   console.log(`${out}: 入力 ${n} のうち、データに現れた ${used.size} 個の重みを残し、${n - used.size} 個を 0 にしました`);
+  if (!model.board) {
+    writeFileSync(out, JSON.stringify({ ...model, w1 }));
+    return 0;
+  }
+  // 場のカードのネットワークの最初の層: 場に現れなかったカード・付与された能力の行を 0 にする（数値の入力の行は残す）
+  const b = model.board;
+  const V = model.vocab.length;
+  const keep = [...model.vocab.map((c) => onBoard.has(c)), ...b.grants.map((g) => grants.has(g))];
+  const l0 = b.layers[0]!;
+  const m0 = l0.b.length;
+  const w0 = l0.w.map((w, k) => (Math.floor(k / m0) >= keep.length || keep[Math.floor(k / m0)] ? w : 0));
+  const layers = [{ ...l0, w: w0 }, ...b.layers.slice(1)];
+  writeFileSync(out, JSON.stringify({ ...model, w1, board: { ...b, layers } }));
+  const kept = (from: number, to: number) => keep.slice(from, to).filter((x) => x).length;
+  console.log(`場のカードのネットワーク: 場に現れたカード ${kept(0, V)}/${V}・付与された能力 ${kept(V, keep.length)}/${b.grants.length} の重みを残しました`);
   return 0;
 }
 
