@@ -22,7 +22,7 @@
 //! ターン末の局面（end）を、入力と出発点の評価の点数 S と一緒に、試合が終わった順に 1 試合 1 行で書き出す。
 //! 書き出したファイルは `npm run td -- train` にそのまま渡せる（init・train・probe・prune は scripts/td-main.ts で行う）。
 //!
-//! 各局面には、場のカードの属性も書く（"b": [[自分の場], [相手の場]]。カード ID、攻撃力・体力・体力の上限、元の値、進化、キーワード、
+//! 各局面には、場のカードの属性も書く（"b": [[自分の場], [相手の場]]。カード ID、攻撃力・体力・体力の上限、進化、キーワード、
 //! 付与された能力、アミュレットのカウントダウン等。形は scripts/td-main.ts の BoardCard）。学習の入力に直す前の値なので、
 //! 入力の形を変えても自己対戦を作り直さずに学び直せる。--board 0 なら書かない（試合と他の項目は同じ。学習はまだ "b" を使わない）。
 //! docs/ai-notes.md「自己対戦に場のカードの属性も書き出す」
@@ -199,14 +199,12 @@ fn write_board_card(out: &mut String, c: &OnBoard) {
         serde_json::to_string(&cd.id).expect("ID")
     ));
     if c.is_follower {
-        // 元の攻撃力・体力はカードに書かれた値（進化の +2/+2・超進化の +3/+3 はバフ。docs/rules.md「進化・超進化」）
+        // 元の攻撃力・体力（カードに書かれた値。進化の分もバフの扱い。docs/rules.md「進化・超進化」）はカード ID から分かるので書かない
         out.push_str(&format!(
-            ",\"a\":{},\"d\":{},\"md\":{},\"ba\":{},\"bd\":{}",
+            ",\"a\":{},\"d\":{},\"md\":{}",
             c.attack_value(),
             c.defense,
-            c.max_defense,
-            cd.attack,
-            cd.defense
+            c.max_defense
         ));
         match c.evolve {
             Evolve::None => {}
@@ -788,8 +786,8 @@ mod tests {
 
         let g: serde_json::Value = serde_json::from_str(&ability_json_text(granted)).unwrap();
         let mine = serde_json::json!([
-            {"c": "10123120", "a": 6, "d": 4, "md": 5, "ba": 2, "bd": 1, "e": 1, "k": ["ambush"], "g": [g]},
-            {"c": "10123120", "a": 2, "d": 1, "md": 1, "ba": 2, "bd": 1}
+            {"c": "10123120", "a": 6, "d": 4, "md": 5, "e": 1, "k": ["ambush"], "g": [g]},
+            {"c": "10123120", "a": 2, "d": 1, "md": 1}
         ]);
         let theirs = serde_json::json!([{"c": "10011210", "cd": 2}]);
         assert_eq!(board_json(&s, 0), serde_json::json!([mine, theirs]));
