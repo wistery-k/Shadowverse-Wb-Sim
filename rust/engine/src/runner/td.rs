@@ -39,10 +39,7 @@ use crate::ai::{Agent, Rng};
 use crate::data::{data, CardIdx, Deck};
 use crate::game::{acting_player, apply_action, create_game, legal_actions, resolve_turn_end};
 use crate::jsnum::{js_num, round_precision};
-use crate::state::{
-    next_random, opponent, Action, Evolve, GameState, OnBoard, Phase, PlayerIndex, EVOLVE_BONUS,
-    SUPER_EVOLVE_BONUS,
-};
+use crate::state::{next_random, opponent, Action, Evolve, GameState, OnBoard, Phase, PlayerIndex};
 use crate::state_json::ability_json_text;
 use std::io::Write;
 use std::sync::Arc;
@@ -202,19 +199,14 @@ fn write_board_card(out: &mut String, c: &OnBoard) {
         serde_json::to_string(&cd.id).expect("ID")
     ));
     if c.is_follower {
-        // 元の値は、カードの攻撃力・体力に進化の分を足したもの（バフもダメージも無いときの値）
-        let bonus = match c.evolve {
-            Evolve::None => 0,
-            Evolve::Evolved => EVOLVE_BONUS,
-            Evolve::SuperEvolved => SUPER_EVOLVE_BONUS,
-        };
+        // 元の攻撃力・体力はカードに書かれた値（進化の +2/+2・超進化の +3/+3 はバフ。docs/rules.md「進化・超進化」）
         out.push_str(&format!(
             ",\"a\":{},\"d\":{},\"md\":{},\"ba\":{},\"bd\":{}",
             c.attack_value(),
             c.defense,
             c.max_defense,
-            cd.attack + bonus,
-            cd.defense + bonus
+            cd.attack,
+            cd.defense
         ));
         match c.evolve {
             Evolve::None => {}
@@ -754,6 +746,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::data::AMBUSH;
+    use crate::state::EVOLVE_BONUS;
 
     fn card_named(name: &str) -> CardIdx {
         data()
@@ -795,7 +788,7 @@ mod tests {
 
         let g: serde_json::Value = serde_json::from_str(&ability_json_text(granted)).unwrap();
         let mine = serde_json::json!([
-            {"c": "10123120", "a": 6, "d": 4, "md": 5, "ba": 4, "bd": 3, "e": 1, "k": ["ambush"], "g": [g]},
+            {"c": "10123120", "a": 6, "d": 4, "md": 5, "ba": 2, "bd": 1, "e": 1, "k": ["ambush"], "g": [g]},
             {"c": "10123120", "a": 2, "d": 1, "md": 1, "ba": 2, "bd": 1}
         ]);
         let theirs = serde_json::json!([{"c": "10011210", "cd": 2}]);
