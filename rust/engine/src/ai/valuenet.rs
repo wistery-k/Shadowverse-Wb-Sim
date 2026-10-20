@@ -68,13 +68,11 @@ pub const SCALARS: [&str; 33] = [
 /// 場のカード 1 枚ごとの数値の入力（場のカードのネットワーク。valueNet.ts の BOARD_FEATURES。モデルはこの並びの部分列を持つ）。
 /// 値は自己対戦の書き出しの "b"（td.rs の write_board_card）から valueNet.ts の boardCardInput で作るものと同じ。
 /// 9 つのキーワードは KEYWORD_NAMES の順
-pub const BOARD_FEATURES: [&str; 22] = [
+pub const BOARD_FEATURES: [&str; 19] = [
     "follower",
     "atk",
     "def",
     "damage",
-    "atkBuff",
-    "defBuff",
     "evolved",
     "superEvolved",
     "ward",
@@ -88,12 +86,11 @@ pub const BOARD_FEATURES: [&str; 22] = [
     "aura",
     "extraAttacks",
     "cannotAttack",
-    "x",
     "countdown",
     "sigils",
 ];
 /// BOARD_FEATURES の最初のキーワード（ward）の位置
-const BOARD_KEYWORD0: usize = 8;
+const BOARD_KEYWORD0: usize = 6;
 
 /// names が all の部分列（順番を保つ）なら、all の各項目のモデルでの添字（無ければ None）
 fn subsequence_slots<const N: usize>(
@@ -203,7 +200,6 @@ impl BoardNet {
                 out.push((v + g, 1.0));
             }
         }
-        let cd = &data().cards[c.card as usize];
         let mut f = [0.0f64; BOARD_FEATURES.len()];
         let b = |x: bool| if x { 1.0 } else { 0.0 };
         if c.is_follower {
@@ -212,16 +208,13 @@ impl BoardNet {
             f[1] = atk as f64 / 5.0;
             f[2] = c.defense as f64 / 5.0;
             f[3] = (c.max_defense - c.defense) as f64 / 5.0;
-            f[4] = (atk - cd.attack) as f64 / 5.0;
-            f[5] = (c.max_defense - cd.defense) as f64 / 5.0;
-            f[6] = b(c.evolve == Evolve::Evolved);
-            f[7] = b(c.evolve == Evolve::SuperEvolved);
-            f[17] = (c.max_attacks - 1) as f64;
-            f[18] = b(c.cannot_attack_until.is_some());
-            f[19] = c.x.unwrap_or(0) as f64 / 5.0;
+            f[4] = b(c.evolve == Evolve::Evolved);
+            f[5] = b(c.evolve == Evolve::SuperEvolved);
+            f[15] = (c.max_attacks - 1) as f64;
+            f[16] = b(c.cannot_attack_until.is_some());
         } else {
-            f[20] = c.countdown.unwrap_or(0) as f64 / 3.0;
-            f[21] = c.sigils.unwrap_or(0) as f64 / 3.0;
+            f[17] = c.countdown.unwrap_or(0) as f64 / 3.0;
+            f[18] = c.sigils.unwrap_or(0) as f64 / 3.0;
         }
         for (i, slot) in f[BOARD_KEYWORD0..BOARD_KEYWORD0 + KEYWORD_NAMES.len()]
             .iter_mut()

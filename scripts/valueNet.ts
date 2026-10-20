@@ -82,8 +82,6 @@ export const BOARD_FEATURES = [
   "atk",
   "def",
   "damage",
-  "atkBuff",
-  "defBuff",
   "evolved",
   "superEvolved",
   "ward",
@@ -97,14 +95,14 @@ export const BOARD_FEATURES = [
   "aura",
   "extraAttacks",
   "cannotAttack",
-  "x",
   "countdown",
   "sigils",
 ] as const;
 
 /**
  * 場のカード 1 枚（svwb td selfplay が局面の "b" に書く。rust/engine/src/runner/td.rs の write_board_card。学習の入力に直す前の値）。
- * 書いていない項目は既定の値（無い・0・1 等）。元の攻撃力・体力（カードに書かれた値。進化の +2/+2 もバフの扱い）はカード ID から引く
+ * 書いていない項目は既定の値（無い・0・1 等）。元の攻撃力・体力（カードに書かれた値。進化の +2/+2 もバフの扱い）はカード ID から分かるので書かない。
+ * x は書くが、場のカードのネットワークの入力にはしない（場のカードの X を後で使うカードがプールに無い）
  */
 export interface BoardCard {
   /** カード ID */
@@ -386,9 +384,6 @@ export function boardGrantKeys(): string[] {
   return keys;
 }
 
-/** カード ID → カードに書かれた攻撃力・体力（フォロワー以外は 0。エンジンと同じ） */
-const PRINTED = new Map(ALL_CARDS.map((c): [string, [number, number]] => [c.id, c.type === "follower" ? [c.attack, c.defense] : [0, 0]]));
-
 /** 場のカード 1 枚の入力（疎。rust/engine/src/ai/valuenet.rs の BoardNet::card_input と同じ並びと値） */
 export function boardCardInput(b: CompiledBoard, c: BoardCard): SparseInput {
   const idx: number[] = [], val: number[] = [];
@@ -406,22 +401,18 @@ export function boardCardInput(b: CompiledBoard, c: BoardCard): SparseInput {
   }
   const f = new Array<number>(BOARD_FEATURES.length).fill(0);
   if (c.a !== undefined) {
-    const [pa, pd] = PRINTED.get(c.c) ?? [0, 0];
     const d = c.d ?? 0, md = c.md ?? 0;
     f[0] = 1;
     f[1] = c.a / 5;
     f[2] = d / 5;
     f[3] = (md - d) / 5;
-    f[4] = (c.a - pa) / 5;
-    f[5] = (md - pd) / 5;
-    f[6] = c.e === 1 ? 1 : 0;
-    f[7] = c.e === 2 ? 1 : 0;
-    f[17] = (c.ma ?? 1) - 1;
-    f[18] = c.na ? 1 : 0;
-    f[19] = (c.x ?? 0) / 5;
+    f[4] = c.e === 1 ? 1 : 0;
+    f[5] = c.e === 2 ? 1 : 0;
+    f[15] = (c.ma ?? 1) - 1;
+    f[16] = c.na ? 1 : 0;
   } else {
-    f[20] = (c.cd ?? 0) / 3;
-    f[21] = (c.sg ?? 0) / 3;
+    f[17] = (c.cd ?? 0) / 3;
+    f[18] = (c.sg ?? 0) / 3;
   }
   for (const name of c.k ?? []) {
     const j = (BOARD_FEATURES as readonly string[]).indexOf(name);
