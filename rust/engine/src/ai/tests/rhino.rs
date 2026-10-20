@@ -254,21 +254,23 @@ fn bishop_turn6_extra_pp_olivier() {
 }
 
 /// エルフの 7 ターン目。推奨はフェアリー → ベビーカーバンクル（フェアリーを戻す）→ リリィ（コンボ 3 でタイガーを体力 1）→ リリィ進化でタイガー → 舞い踊る妖精 → リリィでサレファ。
-/// 以前は選択も 1 手分の深さを使い（推奨は 10 手）、コンボを稼ぐ途中の点数が低いため幅 8 のビームで切られていた
+/// 以前は選択も 1 手分の深さを使い（推奨は 10 手）、コンボを稼ぐ途中の点数が低いため幅 8 のビームで切られていた。
+/// 補正 o60p はこの局面で相手の場を残す並びも選ぶ（30 シード中 20。そこから最後まで打ってもほぼ勝つ。docs/ai-notes.md「3 回目: …」）ので、
+/// 確かめるのはビームがこの並びを切らないこと（シード 1〜5 のどれかで選ぶ）
 #[test]
 fn elf_turn7_lily_with_combo() {
-    let (moves, end) = turn_moves(state_954874822(47), 0, &mut RhinoAgent::new(true), 2);
-    // このターンに勝てばよい（合流する相打ちの扱い（settleTrades）を入れてから、このターンのリーサルを見つけるようになった）
-    if end.phase == Phase::Ended {
-        assert_eq!(end.winner, Some(0));
-        return;
-    }
-    let lily = moves
-        .iter()
-        .find(|m| m.played == Some("ピュアクリスタリア・リリィ"))
-        .expect("リリィ");
-    assert!(lily.combo >= 2);
-    assert_eq!(followers(&end, 1), 0);
+    let found = (1..=5).any(|seed| {
+        let (moves, end) = turn_moves(state_954874822(47), 0, &mut RhinoAgent::new(true), seed);
+        // このターンに勝てばよい（合流する相打ちの扱い（settleTrades）を入れてから、このターンのリーサルを見つけるようになった）
+        if end.phase == Phase::Ended {
+            return end.winner == Some(0);
+        }
+        moves
+            .iter()
+            .any(|m| m.played == Some("ピュアクリスタリア・リリィ") && m.combo >= 2)
+            && followers(&end, 1) == 0
+    });
+    assert!(found);
 }
 
 /// seed 2275116772（リノセウスエルフ vs アミュレット疾走ビショップ、エルフ先攻）。
