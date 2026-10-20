@@ -123,6 +123,11 @@ fn ability_json(a: &'static Ability) -> Json {
         .expect("能力のデータに無い能力")
 }
 
+/// 能力の JSON の文字列（DSL の形。src/engine/dsl.ts）。自己対戦の書き出しで、場のカードに付与された能力を書くのに使う
+pub fn ability_json_text(a: &'static Ability) -> String {
+    ability_json(a).stringify()
+}
+
 fn effect_from(v: &Json) -> Result<&'static Effect, String> {
     dsl_index()
         .effect_by_key
