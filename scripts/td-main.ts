@@ -305,8 +305,43 @@ interface IvPair {
 /** 消したカードの持ち主から見た向き */
 const ivSign = (q: IvPair): number => (q.zone === "oppBoard" ? -1 : 1);
 
+type Typed = Int32Array | Float32Array | Float64Array | Uint8Array;
+
+/**
+ * 末尾に足していける型付き配列。学習データを JS の配列に積むと、3 万試合（局面 270 万・入力 9000 万）で
+ * 7GB ほど使うので、はじめから型付き配列に積む（入る値は Int32Array.from 等で変換していたときと同じ）
+ */
+class Grow<T extends Typed> {
+  buf: T;
+  length = 0;
+  constructor(private readonly make: (n: number) => T) {
+    this.buf = make(1024);
+  }
+  push(x: number): void {
+    if (this.length === this.buf.length) {
+      const b = this.make(this.buf.length * 2);
+      b.set(this.buf);
+      this.buf = b;
+    }
+    this.buf[this.length++] = x;
+  }
+  /** ちょうどの長さに切り詰めた配列 */
+  done(): T {
+    const b = this.make(this.length);
+    b.set(this.buf.subarray(0, this.length));
+    return b;
+  }
+}
+
+const i32 = (n: number): Int32Array => new Int32Array(n);
+const f32 = (n: number): Float32Array => new Float32Array(n);
+const f64 = (n: number): Float64Array => new Float64Array(n);
+const u8 = (n: number): Uint8Array => new Uint8Array(n);
+
 function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: number) => boolean): Dataset {
-  const off: number[] = [0], idx: number[] = [], val: number[] = [], s: number[] = [], next: number[] = [], outcome: number[] = [], explored: number[] = [], hold: number[] = [], phase: number[] = [], weight: number[] = [];
+  const off = new Grow(i32), idx = new Grow(i32), val = new Grow(f32), s = new Grow(f64), next = new Grow(i32), outcome = new Grow(f64);
+  const explored = new Grow(u8), hold = new Grow(u8), phase = new Grow(u8), weight = new Grow(f64);
+  off.push(0);
   const pairs: IvPair[] = [];
   for (const file of files) {
     // もとの試合の各プレイヤーの最初の局面の添字（介入の対を作る）。介入の試合はもとの試合のすぐ後の行にある
@@ -347,16 +382,16 @@ function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: num
     }
   }
   return {
-    off: Int32Array.from(off),
-    idx: Int32Array.from(idx),
-    val: Float32Array.from(val),
-    s: Float64Array.from(s),
-    next: Int32Array.from(next),
-    outcome: Float64Array.from(outcome),
-    explored: Uint8Array.from(explored),
-    holdout: Uint8Array.from(hold),
-    phase: Uint8Array.from(phase),
-    weight: Float64Array.from(weight),
+    off: off.done(),
+    idx: idx.done(),
+    val: val.done(),
+    s: s.done(),
+    next: next.done(),
+    outcome: outcome.done(),
+    explored: explored.done(),
+    holdout: hold.done(),
+    phase: phase.done(),
+    weight: weight.done(),
     pairs,
   };
 }
