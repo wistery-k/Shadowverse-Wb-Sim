@@ -152,7 +152,7 @@ npm run svwb -- rhino-compare …                         # npm run rhino-compar
 npm run svwb -- yardstick …                             # npm run yardstick と同じ
 npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mulligan":"sample"}'] [--b '{}']
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
-                [--sampling classic|default] [--iv 0] [--ivZone hand|board|both] [--cmp 0] [--rollouts 8]
+                [--sampling classic|default] [--iv 0] [--ivZone hand|board|both] [--cmp 0] [--rollouts 8] [--board 1]
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI

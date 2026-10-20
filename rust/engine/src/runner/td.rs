@@ -1,6 +1,6 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both] [--sampling classic|default] [--cmp 0] [--rollouts 8] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both] [--sampling classic|default] [--cmp 0] [--rollouts 8] [--board 1] --out d0.jsonl
 //!
 //! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・幅 128、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
 //! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
@@ -21,6 +21,11 @@
 //! 両方の席がモデルの評価で打つ探索 AI の自己対戦（7 デッキの全 49 組を順に回す）。各自分のターンの最初の局面（after）と
 //! ターン末の局面（end）を、入力と出発点の評価の点数 S と一緒に、試合が終わった順に 1 試合 1 行で書き出す。
 //! 書き出したファイルは `npm run td -- train` にそのまま渡せる（init・train・probe・prune は scripts/td-main.ts で行う）。
+//!
+//! 各局面には、場のカードの属性も書く（"b": [[自分の場], [相手の場]]。カード ID、攻撃力・体力・体力の上限、元の値、進化、キーワード、
+//! 付与された能力、アミュレットのカウントダウン等。形は scripts/td-main.ts の BoardCard）。学習の入力に直す前の値なので、
+//! 入力の形を変えても自己対戦を作り直さずに学び直せる。--board 0 なら書かない（試合と他の項目は同じ。学習はまだ "b" を使わない）。
+//! docs/ai-notes.md「自己対戦に場のカードの属性も書き出す」
 
 use super::options::model_eval;
 use super::parallel::parallel_map;
@@ -34,7 +39,11 @@ use crate::ai::{Agent, Rng};
 use crate::data::{data, CardIdx, Deck};
 use crate::game::{acting_player, apply_action, create_game, legal_actions, resolve_turn_end};
 use crate::jsnum::{js_num, round_precision};
-use crate::state::{next_random, Action, GameState, Phase, PlayerIndex};
+use crate::state::{
+    next_random, opponent, Action, Evolve, GameState, OnBoard, Phase, PlayerIndex, EVOLVE_BONUS,
+    SUPER_EVOLVE_BONUS,
+};
+use crate::state_json::ability_json_text;
 use std::io::Write;
 use std::sync::Arc;
 use std::time::Instant;
@@ -77,6 +86,8 @@ struct Model {
     net: Arc<ValueNet>,
     opts: SearchOptions,
     w: EvalWeights,
+    /// 局面に場のカードの属性も書く（--board）
+    board: bool,
 }
 
 fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Model, String> {
@@ -106,6 +117,7 @@ fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Mo
         net,
         opts,
         w: EvalWeights::new(weights),
+        board: false,
     })
 }
 
@@ -123,7 +135,7 @@ struct Summary {
     groups: usize,
 }
 
-/// 局面 1 つ（{"ph":…,"s":…,"x":[…],"v":[…]}、ランダムに打った局面は "ex":1 も）
+/// 局面 1 つ（{"ph":…,"s":…,"x":[…],"v":[…]}、ランダムに打った局面は "ex":1、board なら場のカードの属性 "b" も）
 fn write_sample(
     out: &mut String,
     m: &Model,
@@ -131,6 +143,7 @@ fn write_sample(
     p: PlayerIndex,
     phase: ValuePhase,
     explored: bool,
+    board: bool,
 ) {
     let x = m.net.encode(s, p, phase);
     out.push_str(&format!(
@@ -154,6 +167,87 @@ fn write_sample(
     out.push(']');
     if explored {
         out.push_str(",\"ex\":1");
+    }
+    if board {
+        write_board(out, s, p);
+    }
+    out.push('}');
+}
+
+/// 場のカードの属性（,"b":[[p の場],[相手の場]]、場の並び順）。学習の入力に直す前の値なので、入力の形を変えても
+/// 自己対戦を作り直さずに学び直せる。形は scripts/td-main.ts の BoardCard
+fn write_board(out: &mut String, s: &GameState, p: PlayerIndex) {
+    out.push_str(",\"b\":[");
+    for (k, side) in [p, opponent(p)].into_iter().enumerate() {
+        if k > 0 {
+            out.push(',');
+        }
+        out.push('[');
+        for (i, c) in s.players[side].board.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            write_board_card(out, c);
+        }
+        out.push(']');
+    }
+    out.push(']');
+}
+
+/// 場のカード 1 枚。既定の値の項目は書かない
+fn write_board_card(out: &mut String, c: &OnBoard) {
+    let cd = &data().cards[c.card as usize];
+    out.push_str(&format!(
+        "{{\"c\":{}",
+        serde_json::to_string(&cd.id).expect("ID")
+    ));
+    if c.is_follower {
+        // 元の値は、カードの攻撃力・体力に進化の分を足したもの（バフもダメージも無いときの値）
+        let bonus = match c.evolve {
+            Evolve::None => 0,
+            Evolve::Evolved => EVOLVE_BONUS,
+            Evolve::SuperEvolved => SUPER_EVOLVE_BONUS,
+        };
+        out.push_str(&format!(
+            ",\"a\":{},\"d\":{},\"md\":{},\"ba\":{},\"bd\":{}",
+            c.attack_value(),
+            c.defense,
+            c.max_defense,
+            cd.attack + bonus,
+            cd.defense + bonus
+        ));
+        match c.evolve {
+            Evolve::None => {}
+            Evolve::Evolved => out.push_str(",\"e\":1"),
+            Evolve::SuperEvolved => out.push_str(",\"e\":2"),
+        }
+        if c.max_attacks != 1 {
+            out.push_str(&format!(",\"ma\":{}", c.max_attacks));
+        }
+        if c.cannot_attack_until.is_some() {
+            out.push_str(",\"na\":1");
+        }
+        if let Some(x) = c.x {
+            out.push_str(&format!(",\"x\":{x}"));
+        }
+    } else {
+        if let Some(n) = c.countdown {
+            out.push_str(&format!(",\"cd\":{n}"));
+        }
+        if let Some(n) = c.sigils {
+            out.push_str(&format!(",\"sg\":{n}"));
+        }
+    }
+    let kw = c.keywords.with(c.temp_keywords);
+    if !kw.is_empty() {
+        out.push_str(&format!(
+            ",\"k\":{}",
+            serde_json::to_string(&kw.names()).expect("キーワード")
+        ));
+    }
+    if !c.granted.is_empty() {
+        let g: Vec<String> = c.granted.iter().map(|a| ability_json_text(a)).collect();
+        out.push_str(&format!(",\"g\":[{}]", g.join(",")));
     }
     out.push('}');
 }
@@ -227,7 +321,7 @@ fn play_out(
                 samples[actor].push(',');
             }
             counts[actor] += 1;
-            write_sample(&mut samples[actor], m, s, actor, phase, ex);
+            write_sample(&mut samples[actor], m, s, actor, phase, ex, m.board);
         };
         // 自分のターンの最初の局面（相手のターンを読んだ後に探索が評価する局面と同じ）
         if state.phase == Phase::Main
@@ -341,8 +435,8 @@ fn compare_plans(
 ) -> Option<String> {
     let agent = SearchAgent::new(m.opts.clone());
     let mut rng = Rng::new(seed ^ 0x510e527f);
-    // (探索の点数, ターン末の局面, 局面の JSON)
-    let mut cands: Vec<(f64, GameState, String)> = Vec::new();
+    // (探索の点数, ターン末の局面, 局面の JSON（場のカードの属性なし。同じ局面かの判定に使う）, 書き出す局面の JSON)
+    let mut cands: Vec<(f64, GameState, String, String)> = Vec::new();
     for plan in agent.ranked_plans(at, p, &mut rng) {
         if cands.len() >= c.k {
             break;
@@ -361,12 +455,19 @@ fn compare_plans(
             continue;
         }
         let mut json = String::new();
-        write_sample(&mut json, m, label, p, ValuePhase::End, false);
-        // ターン末が同じ局面になる並び（入力と点数が同じ）は 1 つだけ
+        write_sample(&mut json, m, label, p, ValuePhase::End, false, false);
+        // ターン末が同じ局面になる並び（入力と点数が同じ）は 1 つだけ（--board でも選ぶ並びは変えない）
         if cands.iter().any(|x| x.2 == json) {
             continue;
         }
-        cands.push((plan.value, end, json));
+        let full = if m.board {
+            let mut full = String::new();
+            write_sample(&mut full, m, label, p, ValuePhase::End, false, true);
+            full
+        } else {
+            json.clone()
+        };
+        cands.push((plan.value, end, json, full));
     }
     if cands.len() < 2 {
         return None;
@@ -375,7 +476,7 @@ fn compare_plans(
     for r in 0..c.rollouts {
         // r 回目はどの並びも同じ乱数
         let rs = seed ^ 0x9b05688c_u32.wrapping_mul(r as u32 + 1);
-        for (i, (_, end, _)) in cands.iter().enumerate() {
+        for (i, (_, end, _, _)) in cands.iter().enumerate() {
             if rollout_wins(end, p, &c.roll, rs) {
                 wins[i] += 1;
             }
@@ -384,7 +485,7 @@ fn compare_plans(
     let list: Vec<String> = cands
         .iter()
         .zip(&wins)
-        .map(|((v, _, json), w)| {
+        .map(|((v, _, _, json), w)| {
             format!(
                 "{{\"val\":{},\"w\":{w},\"sample\":{json}}}",
                 js_num(round_precision(*v, 6))
@@ -573,8 +674,14 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     if cmp_k > 0.0 && iv > 0.0 {
         return Err("--cmp と --iv は一緒に使えません".into());
     }
+    let board = match arg(args, "board").unwrap_or("1") {
+        "1" => true,
+        "0" => false,
+        x => return Err(format!("--board は 1 か 0: {x}")),
+    };
     let net = Arc::new(ValueNet::load(model_path)?);
-    let m = model_options(net.clone(), opp_beam, classic)?;
+    let mut m = model_options(net.clone(), opp_beam, classic)?;
+    m.board = board;
     let cmp = if cmp_k > 0.0 {
         Some(Compare {
             k: cmp_k as usize,
@@ -640,5 +747,60 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         _ => {
             Err("svwb td selfplay ...（init・train・probe・prune は npm run td -- で行う）".into())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::AMBUSH;
+
+    fn card_named(name: &str) -> CardIdx {
+        data()
+            .cards
+            .iter()
+            .position(|c| c.name == name)
+            .unwrap_or_else(|| panic!("{name} がありません")) as CardIdx
+    }
+
+    fn board_json(s: &GameState, p: PlayerIndex) -> serde_json::Value {
+        let mut out = String::from("{\"z\":0");
+        write_board(&mut out, s, p);
+        out.push('}');
+        serde_json::from_str::<serde_json::Value>(&out).expect("JSON")["b"].clone()
+    }
+
+    #[test]
+    fn board_attributes() {
+        let decks = compare_decks();
+        let mut s = create_game([&decks[0].cards, &decks[1].cards], 1);
+        s.players[0].board.clear();
+        s.players[1].board.clear();
+        // エンハンスした形のワルツを進化させて、1 ダメージ受けた（2/1 → 4/3 潜伏 → 進化 6/5 → 6/4）
+        let waltz = card_named("サイレントスナイパー・ワルツ");
+        let mut w = s.new_board_card(waltz, None);
+        w.attack += 2 + EVOLVE_BONUS;
+        w.defense += 2 + EVOLVE_BONUS - 1;
+        w.max_defense += 2 + EVOLVE_BONUS;
+        w.keywords = w.keywords.with(AMBUSH);
+        w.evolve = Evolve::Evolved;
+        let granted = &data().abilities[waltz as usize].abilities[0];
+        w.granted.push(granted);
+        s.players[0].board.push(w);
+        let plain = s.new_board_card(waltz, None);
+        s.players[0].board.push(plain);
+        let garden = card_named("繚乱の庭");
+        let a = s.new_board_card(garden, None);
+        s.players[1].board.push(a);
+
+        let g: serde_json::Value = serde_json::from_str(&ability_json_text(granted)).unwrap();
+        let mine = serde_json::json!([
+            {"c": "10123120", "a": 6, "d": 4, "md": 5, "ba": 4, "bd": 3, "e": 1, "k": ["ambush"], "g": [g]},
+            {"c": "10123120", "a": 2, "d": 1, "md": 1, "ba": 2, "bd": 1}
+        ]);
+        let theirs = serde_json::json!([{"c": "10011210", "cd": 2}]);
+        assert_eq!(board_json(&s, 0), serde_json::json!([mine, theirs]));
+        // 相手から見ると並びが入れ替わる
+        assert_eq!(board_json(&s, 1), serde_json::json!([theirs, mine]));
     }
 }
