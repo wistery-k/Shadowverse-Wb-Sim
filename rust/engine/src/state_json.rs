@@ -128,6 +128,16 @@ pub fn ability_json_text(a: &'static Ability) -> String {
     ability_json(a).stringify()
 }
 
+/// カード・クレストの能力のデータにあるすべての能力の、アドレスと JSON の文字列（ability_json_text と同じ）。
+/// 学習した補正が、場のカードに付与された能力を JSON の文字列で見分けるのに使う
+pub fn ability_json_texts() -> Vec<(usize, String)> {
+    dsl_index()
+        .ability_json
+        .iter()
+        .map(|(&a, v)| (a, v.stringify()))
+        .collect()
+}
+
 fn effect_from(v: &Json) -> Result<&'static Effect, String> {
     dsl_index()
         .effect_by_key

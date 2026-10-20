@@ -17,7 +17,15 @@
 //     両方の席がモデルの評価で打つ探索 AI の自己対戦（7 デッキの全 49 組を順に回す）。
 //     各自分のターンの最初の局面（after）とターン末の局面（end）を、入力と S と一緒に JSON Lines で書き出す。
 //     --eps の確率で、自分のターンの最初の手をランダムに打つ（探索。その局面は学習に使わず、1 つ前の局面の目標もそこで切る）
-//     各局面には場のカードの属性 "b"（BoardCard）も書く（--board 0 なら書かない）。学習はまだ使わない
+//     各局面には場のカードの属性 "b"（BoardCard）も書く（--board 0 なら書かない）。場のカードのネットワークを持つモデル（board）の学習が使う。
+//     --check 1 なら補正の値 "z" も書く（下の check 用）
+//   npm run td -- board --model m.json --out b0.json [--layers 32,16] [--seed 1]
+//     場のカードのネットワークを足す（docs/ai-notes.md「場のフォロワーごとのネットワーク」）。場のカード 1 枚ずつ（カード・付与された能力・
+//     攻撃力等の数値。valueNet.ts の boardCardInput）を同じ層（--layers。各層の後に ReLU）に通し、最後の層の値を自分の場・相手の場ごとに足して、
+//     最初の隠れ層の入力の末尾に入れる。出力の意味は決めず、勝敗から一緒に学ぶ。足した入力の重みは 0 なので、補正は元のモデルと同じ。
+//     このモデルの学習には "b" のある自己対戦（td selfplay の既定）が要る
+//   npm run td -- check --model m.json --data d.jsonl
+//     td selfplay --check 1 で書いた "z"（探索の補正）と、このファイルの計算で "x"・"b" から出した補正を比べる（"x" は 4 桁に丸めてあるので少しずれる）
 //   npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001] [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--v1Only 0] [--best 0]
 //     --best 1 なら、確かめ用の局面の勝敗の交差エントロピーが一番小さかったエポック（学習前も含む）の重みを書き出す（途中で止めるのと同じ）。
 //     --cmpWeight w（既定 0）なら、td selfplay --cmp の打ち比べ（同じ局面からの並びごとに最後まで打った勝率）も学ぶ:
@@ -42,6 +50,13 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { ALL_CARDS, ALL_CRESTS } from "../src/cards";
 import { nextRandom, type PlayerIndex } from "../src/engine";
 import {
+  baseInputSize,
+  BOARD_FEATURES,
+  boardCardForward,
+  boardGrantKeys,
+  boardCardInput,
+  boardInputSize,
+  boardOut,
   compileValueNet,
   defaultVocab,
   forwardRest,
@@ -50,6 +65,8 @@ import {
   newActs,
   inputSize,
   loadValueNet,
+  type BoardCard,
+  type CompiledBoard,
   VALUE_SCALARS,
   VALUE_SCALARS_V1,
   VALUE_ZONES,
@@ -72,12 +89,14 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === "init") return init(args);
   if (cmd === "extend") return extend(args);
   if (cmd === "widen") return widen(args);
+  if (cmd === "board") return board(args);
+  if (cmd === "check") return check(args);
   if (cmd === "selfplay") throw new Error("自己対戦は Rust 版で行う: rust/target/release/svwb td selfplay ...（cd rust && cargo build --release で作る）");
   if (cmd === "train") return train(args);
   if (cmd === "probe") return probe(args);
   if (cmd === "prune") return prune(args);
   if (cmd === "ivcheck") return ivcheck(args);
-  throw new Error("npm run td -- init|extend|selfplay|train|probe|prune|ivcheck ...（scripts/td-main.ts の先頭の説明を参照）");
+  throw new Error("npm run td -- init|extend|widen|board|selfplay|train|check|probe|prune|ivcheck ...（scripts/td-main.ts の先頭の説明を参照）");
 }
 
 type Args = Map<string, string>;
@@ -186,8 +205,10 @@ function extend(args: Args): number {
   }
   const w1: number[] = [];
   for (const k of from) for (let j = 0; j < H; j++) w1.push(k < 0 ? 0 : model.w1[k * H + j]!);
+  // 場のカードのネットワークの出力の重み（入力の末尾）はそのまま
+  w1.push(...model.w1.slice(baseInputSize(model) * H));
   writeFileSync(out, JSON.stringify({ ...model, zones, scalars, w1 }));
-  console.log(`${out}: 入力 ${model.w1.length / H} → ${from.length}（足した ${from.filter((k) => k < 0).length} 個の重みは 0）`);
+  console.log(`${out}: 入力 ${baseInputSize(model)} → ${from.length}（足した ${from.filter((k) => k < 0).length} 個の重みは 0）`);
   return 0;
 }
 
@@ -227,6 +248,36 @@ function widen(args: Args): number {
   return 0;
 }
 
+// ---- board ----
+
+/**
+ * 場のカードのネットワークを足す（docs/ai-notes.md「場のフォロワーごとのネットワーク」）。層は乱数で始め、
+ * 出力を受ける最初の層の重み（入力の末尾 2K 個）は 0 にするので、補正は元のモデルと同じ
+ */
+function board(args: Args): number {
+  const model = loadValueNet(need(args, "model"));
+  compileValueNet(model);
+  if (model.board) throw new Error("このモデルには場のカードのネットワークがもうあります");
+  const out = need(args, "out");
+  const sizes = (args.get("layers") ?? "32,16").split(",").map(Number);
+  if (!sizes.every((k) => Number.isInteger(k) && k > 0)) throw new Error(`--layers は正の整数をコンマで並べる: ${args.get("layers")}`);
+  const holder = { rng: numArg(args, "seed", 1) >>> 0 };
+  const grants = boardGrantKeys();
+  const features = [...BOARD_FEATURES];
+  const nIn = model.vocab.length + grants.length + features.length;
+  // 最初の層は 1 枚あたり 5 個ほどの入力（カード 1 つと数値）を受けるので、その数で He の初期化
+  const layers = sizes.map((m, k) => {
+    const prev = k === 0 ? nIn : sizes[k - 1]!;
+    const sd = Math.sqrt(2 / (k === 0 ? 5 : prev));
+    return { w: Array.from({ length: prev * m }, () => round(gaussian(holder) * sd, 6)), b: Array.from({ length: m }, () => 0.1) };
+  });
+  const K = sizes[sizes.length - 1]!;
+  const w1 = [...model.w1, ...Array.from({ length: 2 * K * model.hidden }, () => 0)];
+  writeFileSync(out, JSON.stringify({ ...model, w1, board: { features, grants, layers } }));
+  console.log(`${out}: 場のカードのネットワーク（入力 ${nIn}: カード ${model.vocab.length}・付与された能力 ${grants.length}・数値 ${features.length}、層 ${sizes.join("・")}）を足しました（補正は元のモデルと同じ）`);
+  return 0;
+}
+
 // ---- 自己対戦のデータ（svwb td selfplay が書き出す） ----
 
 /** 自己対戦で記録する局面 1 つ */
@@ -239,36 +290,13 @@ interface Sample {
   v: number[];
   /** この局面からランダムに打った（学習に使わない） */
   ex?: 1;
-  /** 場のカードの属性（[自分の場, 相手の場]、場の並び順）。td selfplay --board 0 なら無い。学習はまだ使わない */
+  /**
+   * 場のカードの属性（[自分の場, 相手の場]、場の並び順。形は scripts/valueNet.ts の BoardCard）。td selfplay --board 0 なら無い。
+   * 場のカードのネットワーク（npm run td -- board）を持つモデルの学習で使う
+   */
   b?: [BoardCard[], BoardCard[]];
-}
-
-/**
- * 場のカード 1 枚（学習の入力に直す前の値）。書いていない項目は既定の値（無い・0・1 等）。
- * 元の攻撃力・体力（カードに書かれた値。進化の +2/+2 もバフの扱い）はカード ID から ALL_CARDS で引く
- */
-interface BoardCard {
-  /** カード ID */
-  c: string;
-  /** フォロワーだけ: 攻撃力（ターン中だけの増減も込み）・体力・体力の上限 */
-  a?: number;
-  d?: number;
-  md?: number;
-  /** 1: 進化した、2: 超進化した（無ければ進化していない） */
-  e?: 1 | 2;
-  /** 1 ターンに攻撃できる回数（無ければ 1） */
-  ma?: number;
-  /** 攻撃できない効果を受けている */
-  na?: 1;
-  /** カードが覚えている X の値 */
-  x?: number;
-  /** アミュレットだけ: カウントダウン、土の印の数 */
-  cd?: number;
-  sg?: number;
-  /** キーワード（ターン中だけのものも込み、付いた順） */
-  k?: string[];
-  /** 付与された能力（src/engine/dsl.ts の Ability の JSON） */
-  g?: unknown[];
+  /** 自己対戦のモデルの補正（評価の点数の単位。td selfplay --check 1 のときだけ。npm run td -- check で使う） */
+  z?: number;
 }
 
 interface GameRecord {
@@ -319,6 +347,8 @@ interface Dataset {
   weight: Float64Array;
   /** 介入の対（もとの局面と、カードを抜いた局面） */
   pairs: IvPair[];
+  /** 場のカード（場のカードのネットワークを持つモデルのときだけ） */
+  board?: BoardRows;
 }
 
 type IvZone = "hand" | "board" | "oppBoard";
@@ -336,7 +366,7 @@ interface IvPair {
 /** 消したカードの持ち主から見た向き */
 const ivSign = (q: IvPair): number => (q.zone === "oppBoard" ? -1 : 1);
 
-type Typed = Int32Array | Float32Array | Float64Array | Uint8Array;
+type Typed = Int32Array | Float32Array | Float64Array | Uint8Array | Uint16Array;
 
 /**
  * 末尾に足していける型付き配列。学習データを JS の配列に積むと、3 万試合（局面 270 万・入力 9000 万）で
@@ -368,9 +398,56 @@ const i32 = (n: number): Int32Array => new Int32Array(n);
 const f32 = (n: number): Float32Array => new Float32Array(n);
 const f64 = (n: number): Float64Array => new Float64Array(n);
 const u8 = (n: number): Uint8Array => new Uint8Array(n);
+const u16 = (n: number): Uint16Array => new Uint16Array(n);
 
-function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: number) => boolean): Dataset {
+/**
+ * 局面ごとの場のカードの入力（場のカードのネットワーク用）。局面 i のカードは cOff[i]〜cOff[i+1]、
+ * カード k の側は cSide[k]（0: 自分、1: 相手）、入力（疎）は fIdx・fVal の fOff[k]〜fOff[k+1]
+ */
+interface BoardRows {
+  cOff: Int32Array;
+  cSide: Uint8Array;
+  fOff: Int32Array;
+  fIdx: Uint16Array;
+  fVal: Float32Array;
+}
+
+/** 局面の場のカードを読んで BoardRows に積む */
+class BoardGrow {
+  private readonly cOff = new Grow(i32);
+  private readonly cSide = new Grow(u8);
+  private readonly fOff = new Grow(i32);
+  private readonly fIdx = new Grow(u16);
+  private readonly fVal = new Grow(f32);
+  constructor(private readonly b: CompiledBoard) {
+    if (b.nVocab + b.nGrants + BOARD_FEATURES.length > 65535) throw new Error("場のカードのネットワークの入力が多すぎます");
+    this.cOff.push(0);
+    this.fOff.push(0);
+  }
+  /** 局面 1 つの場のカード */
+  add(board: [BoardCard[], BoardCard[]] | undefined): void {
+    if (!board) throw new Error('場のカードのネットワークを学ぶには、局面の場のカード（"b"。svwb td selfplay の既定）が要ります');
+    board.forEach((cards, side) => {
+      for (const c of cards) {
+        const x = boardCardInput(this.b, c);
+        for (let j = 0; j < x.idx.length; j++) {
+          this.fIdx.push(x.idx[j]!);
+          this.fVal.push(x.val[j]!);
+        }
+        this.fOff.push(this.fIdx.length);
+        this.cSide.push(side);
+      }
+    });
+    this.cOff.push(this.cSide.length);
+  }
+  done(): BoardRows {
+    return { cOff: this.cOff.done(), cSide: this.cSide.done(), fOff: this.fOff.done(), fIdx: this.fIdx.done(), fVal: this.fVal.done() };
+  }
+}
+
+function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: number) => boolean, board?: CompiledBoard): Dataset {
   const off = new Grow(i32), idx = new Grow(i32), val = new Grow(f32), s = new Grow(f64), next = new Grow(i32), outcome = new Grow(f64);
+  const cards = board ? new BoardGrow(board) : null;
   const explored = new Grow(u8), hold = new Grow(u8), phase = new Grow(u8), weight = new Grow(f64);
   off.push(0);
   const pairs: IvPair[] = [];
@@ -401,6 +478,7 @@ function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: num
             val.push(x.v[j]!);
           }
           off.push(idx.length);
+          cards?.add(x.b);
           s.push(x.s);
           next.push(k + 1 < seq.length ? i + 1 : -1);
           outcome.push(r.winner === p ? 1 : 0);
@@ -424,6 +502,7 @@ function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: num
     phase: phase.done(),
     weight: weight.done(),
     pairs,
+    ...(cards ? { board: cards.done() } : {}),
   };
 }
 
@@ -441,10 +520,12 @@ interface CmpData {
   /** 局面 g の並びは goff[g]〜goff[g+1] */
   goff: Int32Array;
   holdout: Uint8Array;
+  board?: BoardRows;
 }
 
-function loadGroups(files: string[], holdout: number): CmpData {
+function loadGroups(files: string[], holdout: number, board?: CompiledBoard): CmpData {
   const off: number[] = [0], idx: number[] = [], val: number[] = [], s: number[] = [], win: number[] = [], search: number[] = [], goff: number[] = [0], hold: number[] = [];
+  const cards = board ? new BoardGrow(board) : null;
   for (const file of files) {
     for (const line of readFileSync(file, "utf8").split("\n")) {
       if (!line.trim()) continue;
@@ -456,6 +537,7 @@ function loadGroups(files: string[], holdout: number): CmpData {
           val.push(c.sample.v[j]!);
         }
         off.push(idx.length);
+        cards?.add(c.sample.b);
         s.push(c.sample.s);
         win.push(c.w / r.cmp.n);
         search.push(c.val);
@@ -474,6 +556,7 @@ function loadGroups(files: string[], holdout: number): CmpData {
     search: Float64Array.from(search),
     goff: Int32Array.from(goff),
     holdout: Uint8Array.from(hold),
+    ...(cards ? { board: cards.done() } : {}),
   };
 }
 
@@ -511,15 +594,24 @@ function cmpReport(c: CmpData, v: Float64Array): string {
 
 const sigmoid = (z: number): number => 1 / (1 + Math.exp(-z));
 
-/** 局面ごとの疎な入力 */
+/** 局面ごとの疎な入力（場のカードのネットワークを持つモデルなら、場のカードも） */
 interface SparseRows {
   off: Int32Array;
   idx: Int32Array;
   val: Float32Array;
+  board?: BoardRows;
 }
 
-/** 局面 i の NN の出力（acts に各隠れ層の値（ReLU の後）を書く。forwardValueNet と同じ計算） */
-function forwardAt(net: CompiledValueNet, d: SparseRows, i: number, acts: Float64Array[]): number {
+/** 場のカードのネットワークの計算の値（局面 1 つ分。cards[k] は局面の k 枚目のカードの各層の値（ReLU の後）、sums は側ごとに足した値） */
+interface BoardActs {
+  cards: Float64Array[][];
+  sums: Float64Array;
+}
+
+const newBoardActs = (m: ValueNetModel): BoardActs => ({ cards: [], sums: new Float64Array(2 * boardOut(m)) });
+
+/** 局面 i の NN の出力（acts に各隠れ層の値（ReLU の後）を、ba に場のカードのネットワークの値を書く。forwardValueNet と同じ計算） */
+function forwardAt(net: CompiledValueNet, d: SparseRows, i: number, acts: Float64Array[], ba: BoardActs): number {
   const H = net.model.hidden;
   const hidden = acts[0]!;
   hidden.set(net.b1);
@@ -527,14 +619,36 @@ function forwardAt(net: CompiledValueNet, d: SparseRows, i: number, acts: Float6
     const row = d.idx[q]! * H, x = d.val[q]!;
     for (let j = 0; j < H; j++) hidden[j]! += x * net.w1[row + j]!;
   }
+  const b = net.board;
+  if (b) {
+    const rows = d.board;
+    if (!rows) throw new Error("場のカードのネットワークを持つモデルですが、データに場のカードがありません");
+    const sums = ba.sums, K = b.out;
+    sums.fill(0);
+    const c0 = rows.cOff[i]!, c1 = rows.cOff[i + 1]!;
+    for (let k = c0; k < c1; k++) {
+      while (ba.cards.length <= k - c0) ba.cards.push(b.layers.map((l) => new Float64Array(l.b.length)));
+      const a = ba.cards[k - c0]!;
+      boardCardForward(b, rows.fIdx, rows.fVal, rows.fOff[k]!, rows.fOff[k + 1]!, a);
+      const out = a[a.length - 1]!, o = rows.cSide[k]! * K;
+      for (let j = 0; j < K; j++) sums[o + j]! += out[j]!;
+    }
+    const base = baseInputSize(net.model);
+    for (let t = 0; t < sums.length; t++) {
+      const x = sums[t]!;
+      if (x === 0) continue;
+      const row = (base + t) * H;
+      for (let j = 0; j < H; j++) hidden[j]! += x * net.w1[row + j]!;
+    }
+  }
   return forwardRest(net, net.model.b2, acts);
 }
 
 /** 全局面の勝つ確率の予測 */
 function predictAll(net: CompiledValueNet, d: SparseRows & { s: Float64Array }): Float64Array {
-  const h = newActs(net.model);
+  const h = newActs(net.model), ba = newBoardActs(net.model);
   const v = new Float64Array(d.s.length);
-  for (let i = 0; i < v.length; i++) v[i] = sigmoid(net.model.a * d.s[i]! + net.model.c + forwardAt(net, d, i, h));
+  for (let i = 0; i < v.length; i++) v[i] = sigmoid(net.model.a * d.s[i]! + net.model.c + forwardAt(net, d, i, h, ba));
   return v;
 }
 
@@ -650,11 +764,12 @@ function train(args: Args): number {
         return (VALUE_SCALARS_V1 as readonly string[]).includes(model.scalars[i - model.zones.length * V]!);
       }
     : undefined;
-  const d = loadData(files, holdout, ivWeight, keep);
+  const compiled0 = compileValueNet(model);
+  const d = loadData(files, holdout, ivWeight, keep, compiled0.board);
   const n = d.s.length;
   console.log(`${files.join(", ")}: 局面 ${n}（確かめ用 ${d.holdout.reduce((x, y) => x + y, 0)}、ランダムに打った ${d.explored.reduce((x, y) => x + y, 0)}）、読み込み ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
-  const cmp = cmpWeight > 0 ? loadGroups(files, holdout) : null;
+  const cmp = cmpWeight > 0 ? loadGroups(files, holdout, compiled0.board) : null;
   if (cmp) console.log(`打ち比べ ${cmp.goff.length - 1} 局面・${cmp.s.length} 並び（確かめ用 ${cmp.holdout.reduce((x, y) => x + y, 0)} 局面）`);
   const H = model.hidden;
   const sizes = layerSizes(model);
@@ -668,7 +783,18 @@ function train(args: Args): number {
     layerOff.push({ w: o, b: o + sizes[k - 1]! * sizes[k]! });
     o += (sizes[k - 1]! + 1) * sizes[k]!;
   }
-  const oW2 = o, oB2 = oW2 + sizes[L - 1]!, oC = oB2 + 1, oA = oC + 1, size = oA + 1;
+  const oW2 = o, oB2 = oW2 + sizes[L - 1]!, oC = oB2 + 1, oA = oC + 1;
+  // 場のカードのネットワークの層（[w | b]…）は a の後ろ
+  const bSizes = (model.board?.layers ?? []).map((l) => l.b.length);
+  const bIn = boardInputSize(model);
+  const boardOff: { w: number; b: number }[] = [];
+  o = oA + 1;
+  bSizes.forEach((m, k) => {
+    const prev = k === 0 ? bIn : bSizes[k - 1]!;
+    boardOff.push({ w: o, b: o + prev * m });
+    o += (prev + 1) * m;
+  });
+  const size = o;
   const params = new Float64Array(size);
   params.set(model.w1, 0);
   params.set(model.b1, oB1);
@@ -680,28 +806,90 @@ function train(args: Args): number {
   params[oB2] = model.b2;
   params[oC] = model.c;
   params[oA] = model.a;
+  (model.board?.layers ?? []).forEach((l, k) => {
+    params.set(l.w, boardOff[k]!.w);
+    params.set(l.b, boardOff[k]!.b);
+  });
   // 減衰させる重み（w1・足した層の w・w2。バイアスと c・a は減衰させない）
   const decayed = new Uint8Array(size);
   decayed.fill(1, 0, oB1);
   for (let k = 1; k < L; k++) decayed.fill(1, layerOff[k - 1]!.w, layerOff[k - 1]!.b);
   decayed.fill(1, oW2, oB2);
+  for (const lo of boardOff) decayed.fill(1, lo.w, lo.b);
   const grad = new Float64Array(size), m1 = new Float64Array(size), m2 = new Float64Array(size);
   const beta1 = 0.9, beta2 = 0.999;
   let step = 0;
 
   // 推論用の CompiledValueNet は params と配列を共有する（学習中の値で予測する）
+  const boardLayers = boardOff.map((lo, k) => ({ w: params.subarray(lo.w, lo.b), b: params.subarray(lo.b, lo.b + bSizes[k]!) }));
   const current = (): CompiledValueNet => {
     const mdl: ValueNetModel = { ...model, b2: params[oB2]!, c: params[oC]!, a: params[oA]! };
     const layers = layerOff.map((lo, k) => ({ w: params.subarray(lo.w, lo.b), b: params.subarray(lo.b, lo.b + sizes[k + 1]!) }));
-    return { model: mdl, index: new Map(), w1: params.subarray(0, oB1), b1: params.subarray(oB1, oB1 + H), layers, w2: params.subarray(oW2, oB2) };
+    return {
+      model: mdl,
+      index: new Map(),
+      w1: params.subarray(0, oB1),
+      b1: params.subarray(oB1, oB1 + H),
+      layers,
+      w2: params.subarray(oW2, oB2),
+      ...(compiled0.board ? { board: { ...compiled0.board, layers: boardLayers } } : {}),
+    };
   };
 
   const trainIdx = Array.from({ length: n }, (_, i) => i).filter((i) => !d.holdout[i] && !d.explored[i]);
   const trainGroups = cmp ? Array.from({ length: cmp.goff.length - 1 }, (_, g) => g).filter((g) => !cmp.holdout[g]) : [];
-  const acts = newActs(model), dacts = newActs(model);
+  const acts = newActs(model), dacts = newActs(model), bacts = newBoardActs(model);
+  const nBase = baseInputSize(model), K = boardOut(model);
+  const dSums = new Float64Array(2 * K), dBoard = bSizes.map((m) => new Float64Array(m));
 
-  /** 出力 z の勾配 dz の局面（入力は rows の i 番目、各隠れ層の値は a）の勾配を grad に足す */
-  const backward = (dz: number, s: number, a: Float64Array[], rows: SparseRows, i: number): void => {
+  /** 場のカードのネットワークの勾配を grad に足す（dh は最初の隠れ層の ReLU の前の値の勾配、ba は forwardAt が書いた値） */
+  const backwardBoard = (dh: Float64Array, rows: SparseRows, i: number, ba: BoardActs): void => {
+    const br = rows.board!;
+    // 補正の最初の層の入力の末尾（2K 個）
+    for (let t = 0; t < 2 * K; t++) {
+      const x = ba.sums[t]!, row = (nBase + t) * H;
+      let back = 0;
+      for (let j = 0; j < H; j++) {
+        if (x !== 0) grad[row + j]! += dh[j]! * x;
+        back += params[row + j]! * dh[j]!;
+      }
+      dSums[t] = back;
+    }
+    const LB = bSizes.length, c0 = br.cOff[i]!;
+    for (let k = c0; k < br.cOff[i + 1]!; k++) {
+      const a = ba.cards[k - c0]!, o = br.cSide[k]! * K;
+      const last = a[LB - 1]!, dLast = dBoard[LB - 1]!;
+      for (let j = 0; j < K; j++) dLast[j] = last[j]! > 0 ? dSums[o + j]! : 0;
+      for (let l = LB - 1; l >= 1; l--) {
+        const lo = boardOff[l]!, m = bSizes[l]!;
+        const hin = a[l - 1]!, dout = dBoard[l]!, din = dBoard[l - 1]!;
+        for (let j = 0; j < m; j++) grad[lo.b + j]! += dout[j]!;
+        for (let r = 0; r < hin.length; r++) {
+          const x = hin[r]!;
+          if (x <= 0) {
+            din[r] = 0;
+            continue;
+          }
+          const row = lo.w + r * m;
+          let back = 0;
+          for (let j = 0; j < m; j++) {
+            grad[row + j]! += x * dout[j]!;
+            back += params[row + j]! * dout[j]!;
+          }
+          din[r] = back;
+        }
+      }
+      const lo = boardOff[0]!, m0 = bSizes[0]!, d0 = dBoard[0]!;
+      for (let j = 0; j < m0; j++) grad[lo.b + j]! += d0[j]!;
+      for (let q = br.fOff[k]!; q < br.fOff[k + 1]!; q++) {
+        const row = lo.w + br.fIdx[q]! * m0, x = br.fVal[q]!;
+        for (let j = 0; j < m0; j++) grad[row + j]! += d0[j]! * x;
+      }
+    }
+  };
+
+  /** 出力 z の勾配 dz の局面（入力は rows の i 番目、各隠れ層の値は a、場のカードのネットワークの値は ba）の勾配を grad に足す */
+  const backward = (dz: number, s: number, a: Float64Array[], rows: SparseRows, i: number, ba: BoardActs): void => {
     grad[oC]! += dz;
     if (fitA) grad[oA]! += dz * s;
     grad[oB2]! += dz;
@@ -736,19 +924,23 @@ function train(args: Args): number {
       const row = rows.idx[q]! * H, x = rows.val[q]!;
       for (let j = 0; j < H; j++) grad[row + j]! += dh[j]! * x;
     }
+    if (K > 0) backwardBoard(dh, rows, i, ba);
   };
 
   /** 打ち比べの局面 groups の勾配を grad に足し、損失（二乗誤差 × cmpWeight の和）を返す */
-  const candActs: Float64Array[][] = [];
+  const candActs: Float64Array[][] = [], candBoard: BoardActs[] = [];
   const cmpStep = (net: CompiledValueNet, c: CmpData, groups: number[]): number => {
     let loss = 0;
     for (const g of groups) {
       const a = c.goff[g]!, b = c.goff[g + 1]!, k = b - a;
-      while (candActs.length < k) candActs.push(newActs(model));
+      while (candActs.length < k) {
+        candActs.push(newActs(model));
+        candBoard.push(newBoardActs(model));
+      }
       const p: number[] = [];
       let mp = 0, mw = 0;
       for (let t = 0; t < k; t++) {
-        const pr = sigmoid(net.model.a * c.s[a + t]! + net.model.c + forwardAt(net, c, a + t, candActs[t]!));
+        const pr = sigmoid(net.model.a * c.s[a + t]! + net.model.c + forwardAt(net, c, a + t, candActs[t]!, candBoard[t]!));
         p.push(pr);
         mp += pr;
         mw += c.win[a + t]!;
@@ -760,7 +952,7 @@ function train(args: Args): number {
         loss += cmpWeight * e * e;
         // ずれの和は 0 なので、平均を引く分の勾配は消える
         const dz = (cmpWeight * 2 * e * p[t]! * (1 - p[t]!)) / groups.length;
-        backward(dz, c.s[a + t]!, candActs[t]!, c, a + t);
+        backward(dz, c.s[a + t]!, candActs[t]!, c, a + t, candBoard[t]!);
       }
     }
     return loss;
@@ -804,11 +996,11 @@ function train(args: Args): number {
         const end = Math.min(trainIdx.length, b0 + batch);
         for (let k = b0; k < end; k++) {
           const i = trainIdx[k]!;
-          const z = forwardAt(net, d, i, acts);
+          const z = forwardAt(net, d, i, acts, bacts);
           const p = sigmoid(net.model.a * d.s[i]! + net.model.c + z);
           lossSum += bce(p, targets[i]!);
           const dz = (d.weight[i]! * (p - targets[i]!)) / (end - b0);
-          backward(dz, d.s[i]!, acts, d, i);
+          backward(dz, d.s[i]!, acts, d, i, bacts);
         }
       }
       // Adam（重みは減衰させる）
@@ -836,9 +1028,9 @@ function train(args: Args): number {
   }
   // 補正の大きさ（評価の点数の単位）
   const net = current();
-  const hBuf = newActs(model);
+  const hBuf = newActs(model), bBuf = newBoardActs(model);
   let absSum = 0;
-  for (let i = 0; i < n; i++) absSum += Math.abs((net.model.c + forwardAt(net, d, i, hBuf)) / net.model.a);
+  for (let i = 0; i < n; i++) absSum += Math.abs((net.model.c + forwardAt(net, d, i, hBuf, bBuf)) / net.model.a);
   console.log(`補正 (c + L) / a の絶対値の平均 ${(absSum / n).toFixed(2)} 点、${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
   const outModel: ValueNetModel = {
@@ -850,9 +1042,47 @@ function train(args: Args): number {
     b2: round(params[oB2]!, 6),
     c: round(params[oC]!, 6),
     a: round(params[oA]!, 6),
+    ...(model.board ? { board: { ...model.board, layers: boardLayers.map((l) => ({ w: Array.from(l.w, (x) => round(x, 6)), b: Array.from(l.b, (x) => round(x, 6)) })) } } : {}),
   };
   writeFileSync(out, JSON.stringify(outModel));
   console.log(`${out} に書き出しました`);
+  return 0;
+}
+
+// ---- check ----
+
+/**
+ * 学習側の補正の計算が探索（Rust）と同じかを確かめる: svwb td selfplay --check 1 で書き出した各局面の "z"（自己対戦のモデルの補正）と、
+ * 同じモデルでこのファイルの計算（"x" と "b" から）で出した補正を比べる。"x" の値は 4 桁に丸めて書かれているので、少しはずれる
+ */
+function check(args: Args): number {
+  const model = loadValueNet(need(args, "model"));
+  const net = compileValueNet(model);
+  let n = 0, maxDiff = 0, sumDiff = 0, sumBoard = 0, withCards = 0;
+  const one = (x: Sample): void => {
+    if (x.z === undefined) return;
+    const z = (model.c + forwardValueNet(net, { idx: x.x, val: x.v }, undefined, x.b)) / model.a;
+    const diff = Math.abs(z - x.z);
+    n++;
+    maxDiff = Math.max(maxDiff, diff);
+    sumDiff += diff;
+    if (net.board && x.b) {
+      // 場のカードのネットワークの寄与（場のカードを空にしたときとの差）
+      sumBoard += Math.abs(z - (model.c + forwardValueNet(net, { idx: x.x, val: x.v }, undefined, [[], []])) / model.a);
+      if (x.b[0].length + x.b[1].length > 0) withCards++;
+    }
+  };
+  for (const file of need(args, "data").split(",")) {
+    for (const line of readFileSync(file, "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      const r = parseLine(line);
+      if (isCmp(r)) r.cmp.cands.forEach((c) => one(c.sample));
+      else r.samples.forEach((seq) => seq.forEach(one));
+    }
+  }
+  if (n === 0) throw new Error('"z" のある局面がありません（svwb td selfplay --check 1 で書き出す）');
+  console.log(`局面 ${n}: 探索の補正とのずれ 最大 ${maxDiff.toExponential(2)} 点・平均 ${(sumDiff / n).toExponential(2)} 点`);
+  if (net.board) console.log(`場のカードのネットワークの寄与の絶対値の平均 ${(sumBoard / n).toFixed(3)} 点（場にカードがある局面 ${withCards}）`);
   return 0;
 }
 
@@ -868,7 +1098,9 @@ function probe(args: Args): number {
   const scalar = (name: (typeof VALUE_SCALARS)[number]) => base + model.scalars.indexOf(name);
   const nameOf = new Map([...ALL_CARDS.map((c): [string, string] => [c.id, c.name]), ...ALL_CRESTS.map((c): [string, string] => [`crest:${c.id}`, c.name])]);
   // デッキごとのターン末の局面
-  const byDeck = new Map<string, SparseInput[]>();
+  // 局面の入力と、場のカード（場のカードのネットワークを持つモデル用。カードを足す・減らす入力の変化は場のカードのネットワークには入らない）
+  type ProbeInput = SparseInput & { b?: [BoardCard[], BoardCard[]] };
+  const byDeck = new Map<string, ProbeInput[]>();
   for (const file of need(args, "data").split(",")) {
     for (const line of readFileSync(file, "utf8").split("\n")) {
       if (!line.trim()) continue;
@@ -876,21 +1108,21 @@ function probe(args: Args): number {
       if (isCmp(r)) continue;
       r.samples.forEach((seq, p) => {
         const list = byDeck.get(r.decks[p]!) ?? [];
-        for (const x of seq) if (x.ph === 0 && list.length < per) list.push({ idx: x.x, val: x.v });
+        for (const x of seq) if (x.ph === 0 && list.length < per) list.push({ idx: x.x, val: x.v, ...(x.b ? { b: x.b } : {}) });
         byDeck.set(r.decks[p]!, list);
       });
     }
   }
-  const points = (x: SparseInput) => (model.c + forwardValueNet(net, x)) / model.a;
-  const bump = (x: SparseInput, i: number, d: number): SparseInput => {
+  const points = (x: ProbeInput) => (model.c + forwardValueNet(net, x, undefined, x.b)) / model.a;
+  const bump = (x: ProbeInput, i: number, d: number): ProbeInput => {
     const k = x.idx.indexOf(i);
-    if (k < 0) return { idx: [...x.idx, i], val: [...x.val, d] };
+    if (k < 0) return { ...x, idx: [...x.idx, i], val: [...x.val, d] };
     const val = [...x.val];
     val[k] = val[k]! + d;
-    return { idx: x.idx, val };
+    return { ...x, idx: x.idx, val };
   };
   /** 局面の一覧で、添字 i を d 増やしたときの点数の変化の平均（has を渡すと、その添字が既に正の局面だけ） */
-  const effect = (list: SparseInput[], i: number, d: number, has = false): [number, number] => {
+  const effect = (list: ProbeInput[], i: number, d: number, has = false): [number, number] => {
     let sum = 0, n = 0;
     for (const x of list) {
       if (has && !(x.val[x.idx.indexOf(i)]! > 0)) continue;
@@ -939,8 +1171,9 @@ function prune(args: Args): number {
     }
   }
   const H = model.hidden;
-  const n = inputSize(model);
-  const w1 = model.w1.map((w, k) => (used.has(Math.floor(k / H)) ? w : 0));
+  const n = baseInputSize(model);
+  // 場のカードのネットワークの出力の重み（入力の末尾）は残す
+  const w1 = model.w1.map((w, k) => (used.has(Math.floor(k / H)) || Math.floor(k / H) >= n ? w : 0));
   writeFileSync(out, JSON.stringify({ ...model, w1 }));
   console.log(`${out}: 入力 ${n} のうち、データに現れた ${used.size} 個の重みを残し、${n - used.size} 個を 0 にしました`);
   return 0;
@@ -950,8 +1183,9 @@ function prune(args: Args): number {
 
 function ivcheck(args: Args): number {
   const model = loadValueNet(need(args, "model"));
-  const d = loadData(need(args, "data").split(","), numArg(args, "holdout", 0));
-  const v = predictAll(compileValueNet(model), d);
+  const net = compileValueNet(model);
+  const d = loadData(need(args, "data").split(","), numArg(args, "holdout", 0), 1, undefined, net.board);
+  const v = predictAll(net, d);
   const holdoutOnly = numArg(args, "holdout", 0) > 0;
   console.log(ivSummary(d, v, holdoutOnly) ?? "介入の試合がありません");
   const nameOf = new Map(ALL_CARDS.map((c): [string, string] => [c.id, c.name]));

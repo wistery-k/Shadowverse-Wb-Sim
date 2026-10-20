@@ -91,6 +91,20 @@ pub struct RawValueNet {
     pub c: f64,
     #[serde(rename = "baseWeights")]
     pub base_weights: serde_json::Map<String, serde_json::Value>,
+    /// 場のカードのネットワーク（valueNet.ts の board。無ければ使わない）
+    #[serde(default)]
+    pub board: Option<RawValueNetBoard>,
+}
+
+/// 場のカードのネットワーク（valueNet.ts の ValueNetBoard）
+#[derive(Deserialize, Clone)]
+pub struct RawValueNetBoard {
+    /// 数値の入力（valuenet.rs の BOARD_FEATURES の部分列）
+    pub features: Vec<String>,
+    /// 付与された能力（DSL の Ability の JSON の文字列）
+    pub grants: Vec<String>,
+    /// 層（最初の層の入力は vocab のカード・grants・features の順）
+    pub layers: Vec<RawValueNetLayer>,
 }
 
 /// 足した隠れ層（w は前の層 × この層。前の層の値ごとに b.len() 個ずつ並べる）
