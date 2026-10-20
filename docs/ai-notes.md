@@ -2705,3 +2705,4 @@ AI の改善で試したことと結果。同じ実験を繰り返さないた�
 - モデル・ログは共有フォルダの `notes/td-more-data/main/`（回したスクリプトは `notes/td-more-data/main.sh`・`confirm.sh`・`rhino.sh`）、
   自己対戦のデータは `notes/td-more-data/data/`（n0〜n9、gzip で 106MB）
 - **採用（ユーザー判断）:** w30p を `data/value-net.json` にした（探索 AI とリノセウス用 AI の既定の補正）。補正が変わって手が変わったので、ゴールデン（ai-search・ai-rhino・ai-rhino-lethal）を保存し直した。他のテストはそのまま通った
+  - 既定にした後の物差し 2: 1463/2000 = 73.2%（`docs/yardstick.md`。前の既定 71.4%）
