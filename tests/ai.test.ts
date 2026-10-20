@@ -8,7 +8,21 @@ import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { rngFrom } from "../src/engine";
 import { randomDeck } from "../src/sim/decks";
 import { playMatch } from "../src/sim/match";
-import { compileValueNet, defaultVocab, forwardValueNet, inputSize, layerSizes, parseValueNetModel, VALUE_SCALARS, VALUE_ZONES, type ValueNetModel } from "../scripts/valueNet";
+import {
+  BOARD_FEATURES,
+  type BoardCard,
+  boardCardInput,
+  boardGrantKeys,
+  compileValueNet,
+  defaultVocab,
+  forwardValueNet,
+  inputSize,
+  layerSizes,
+  parseValueNetModel,
+  VALUE_SCALARS,
+  VALUE_ZONES,
+  type ValueNetModel,
+} from "../scripts/valueNet";
 
 const CLASSES = ["elf", "royal", "witch", "dragon", "nightmare", "bishop", "nemesis"] as const;
 
@@ -122,5 +136,50 @@ describe("TD 学習の評価の補正のモデル（scripts/valueNet.ts）", () 
     expect(forwardValueNet(compileValueNet(two), x)).toBe(z1);
     expect(() => compileValueNet({ ...m, layers: [{ w: [0, 0, 0, 0, 0, 0], b: [0, 0] }] })).toThrow();
     expect(() => parseValueNetModel({ ...m, layers: [{ w: ["x"], b: [] }] })).toThrow();
+  });
+
+  it("場のカードのネットワーク（board）: 出力を受ける重みが 0 なら無いモデルと同じで、付与された能力を見分ける", () => {
+    // rust/engine/src/ai/tests/valuenet.rs の board_network と同じ能力の文字列
+    const dollLastWords = '{"trigger":{"on":"lastWords"},"effects":[{"op":"damage","target":{"kind":"leader","side":"opponent"},"amount":2}]}';
+    const grants = boardGrantKeys();
+    expect(grants).toContain(dollLastWords);
+    const m = model(3, (i) => ((i * 31) % 11) / 10 - 0.5, 0.7);
+    const v = m.vocab.length;
+    const nIn = v + grants.length + BOARD_FEATURES.length;
+    const w0 = Array.from({ length: nIn * 3 }, (_, i) => ((i * 7) % 5) / 10 - 0.1);
+    const g = grants.indexOf(dollLastWords);
+    w0.splice((v + g) * 3, 3, 0.5, 0.4, 0.3);
+    const board = {
+      features: [...BOARD_FEATURES],
+      grants,
+      layers: [
+        { w: w0, b: [0.05, 0.05, 0.05] },
+        { w: [0.3, -0.2, 0.5, 0.1, 0.4, 0.2], b: [0, 0.1] },
+      ],
+    };
+    const withRows = (row: (j: number) => number): ValueNetModel => ({ ...m, w1: [...m.w1, ...Array.from({ length: 2 * 2 * m.hidden }, (_, j) => row(j))], board });
+    const zero = parseValueNetModel(JSON.parse(JSON.stringify(withRows(() => 0))) as unknown);
+    const net = withRows((j) => Math.sin(j * 0.37));
+    expect(inputSize(net)).toBe(inputSize(m) + 4);
+    // 自分の場に進化したフォロワー（vocab の 0 番のカード）、相手の場に vocab の 1 番のカード
+    const card: BoardCard = { c: m.vocab[0]!, a: 3, d: 2, md: 4, e: 1, k: ["ward"] };
+    const boards: [BoardCard[], BoardCard[]] = [[card], [{ c: m.vocab[1]! }]];
+    const x = { idx: [5, 300], val: [1, 0.5] };
+    const plain = forwardValueNet(compileValueNet(m), x);
+    expect(forwardValueNet(compileValueNet(zero), x, undefined, boards)).toBe(plain);
+    const z = forwardValueNet(compileValueNet(net), x, undefined, boards);
+    expect(z).not.toBe(plain);
+    expect(() => forwardValueNet(compileValueNet(net), x)).toThrow();
+    // 付与された能力の入力（カード・能力・数値の順）
+    const compiled = compileValueNet(net).board!;
+    const granted = { ...card, g: [JSON.parse(dollLastWords) as unknown] };
+    const input = boardCardInput(compiled, granted);
+    expect(input.idx.slice(0, 2)).toEqual([0, v + g]);
+    expect(boardCardInput(compiled, card).idx).not.toContain(v + g);
+    expect(forwardValueNet(compileValueNet(net), x, undefined, [[granted], boards[1]])).not.toBe(z);
+    // 大きさ違い・features の並び違い
+    expect(() => compileValueNet({ ...net, w1: net.w1.slice(1) })).toThrow();
+    expect(() => compileValueNet({ ...net, board: { ...board, layers: [{ w: w0.slice(1), b: [0, 0, 0] }, board.layers[1]!] } })).toThrow();
+    expect(() => compileValueNet({ ...net, board: { ...board, features: [...BOARD_FEATURES].reverse() } })).toThrow();
   });
 });

@@ -152,7 +152,7 @@ npm run svwb -- rhino-compare …                         # npm run rhino-compar
 npm run svwb -- yardstick …                             # npm run yardstick と同じ
 npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mulligan":"sample"}'] [--b '{}']
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
-                [--sampling classic|default] [--iv 0] [--ivZone hand|board|both] [--cmp 0] [--rollouts 8] [--board 1]
+                [--sampling classic|default] [--iv 0] [--ivZone hand|board|both] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI
@@ -164,6 +164,8 @@ npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 
 npm run td -- init --out m0.json [--hidden 32] [--seed 1] [--a 0.08] [--base stripped|current] [--inputs v2|v1]
 npm run td -- extend --model data/value-net.json --out m0.json
 npm run td -- widen --model m.json --hidden 256,32 --out w0.json [--seed 1]
+npm run td -- board --model m.json --out b0.json [--layers 32,16] [--seed 1]
+npm run td -- check --model m.json --data d.jsonl
 npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001]
                 [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--v1Only 0] [--best 0] [--cmpWeight 0] [--cmpBatch 16]
 npm run td -- ivcheck --model m1.json --data d0.jsonl[,d1.jsonl] [--holdout 0]

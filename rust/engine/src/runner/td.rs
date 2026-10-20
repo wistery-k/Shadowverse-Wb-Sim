@@ -1,6 +1,6 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both] [--sampling classic|default] [--cmp 0] [--rollouts 8] [--board 1] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both] [--sampling classic|default] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] --out d0.jsonl
 //!
 //! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・幅 128、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
 //! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
@@ -23,9 +23,12 @@
 //! 書き出したファイルは `npm run td -- train` にそのまま渡せる（init・train・probe・prune は scripts/td-main.ts で行う）。
 //!
 //! 各局面には、場のカードの属性も書く（"b": [[自分の場], [相手の場]]。カード ID、攻撃力・体力・体力の上限、進化、キーワード、
-//! 付与された能力、アミュレットのカウントダウン等。形は scripts/td-main.ts の BoardCard）。学習の入力に直す前の値なので、
-//! 入力の形を変えても自己対戦を作り直さずに学び直せる。--board 0 なら書かない（試合と他の項目は同じ。学習はまだ "b" を使わない）。
+//! 付与された能力、アミュレットのカウントダウン等。形は scripts/valueNet.ts の BoardCard）。学習の入力に直す前の値なので、
+//! 入力の形を変えても自己対戦を作り直さずに学び直せる。--board 0 なら書かない（試合と他の項目は同じ）。
 //! docs/ai-notes.md「自己対戦に場のカードの属性も書き出す」
+//!
+//! --check 1 なら、各局面にモデルの補正の値（評価の点数の単位）も書く（"z"）。`npm run td -- check` で、学習側（scripts/valueNet.ts）が
+//! "x" と "b" から出す補正が探索の補正と同じかを確かめる（場のカードのネットワークを変えたとき用）。
 
 use super::options::model_eval;
 use super::parallel::parallel_map;
@@ -85,6 +88,8 @@ struct Model {
     w: EvalWeights,
     /// 局面に場のカードの属性も書く（--board）
     board: bool,
+    /// 局面にモデルの補正の値も書く（--check。学習側の計算が探索と同じかを npm run td -- check で確かめる）
+    check: bool,
 }
 
 fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Model, String> {
@@ -115,6 +120,7 @@ fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Mo
         opts,
         w: EvalWeights::new(weights),
         board: false,
+        check: false,
     })
 }
 
@@ -168,11 +174,17 @@ fn write_sample(
     if board {
         write_board(out, s, p);
     }
+    if m.check {
+        out.push_str(&format!(
+            ",\"z\":{}",
+            js_num(round_precision(m.net.eval(s, p, phase), 12))
+        ));
+    }
     out.push('}');
 }
 
 /// 場のカードの属性（,"b":[[p の場],[相手の場]]、場の並び順）。学習の入力に直す前の値なので、入力の形を変えても
-/// 自己対戦を作り直さずに学び直せる。形は scripts/td-main.ts の BoardCard
+/// 自己対戦を作り直さずに学び直せる。形は scripts/valueNet.ts の BoardCard
 fn write_board(out: &mut String, s: &GameState, p: PlayerIndex) {
     out.push_str(",\"b\":[");
     for (k, side) in [p, opponent(p)].into_iter().enumerate() {
@@ -672,6 +684,11 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     let net = Arc::new(ValueNet::load(model_path)?);
     let mut m = model_options(net.clone(), opp_beam, classic)?;
     m.board = board;
+    m.check = match arg(args, "check").unwrap_or("0") {
+        "0" => false,
+        "1" => true,
+        x => return Err(format!("--check は 0 か 1: {x}")),
+    };
     let cmp = if cmp_k > 0.0 {
         Some(Compare {
             k: cmp_k as usize,

@@ -33,6 +33,7 @@ fn model(hidden: usize, fill: impl Fn(usize) -> f64, w2: f64) -> RawValueNet {
         a: 0.08,
         c: 0.0,
         base_weights: serde_json::Map::new(),
+        board: None,
     }
 }
 
@@ -257,4 +258,143 @@ fn stacked_layers() {
         read.eval(&s, 1, ValuePhase::After),
         b.eval(&s, 1, ValuePhase::After)
     );
+}
+
+/// 狂気の創造者・リーアムが人形に付与する能力（ラストワード: 相手のリーダーに 2 ダメージ）の JSON。
+/// TypeScript 側の boardGrantKeys（tests/ai.test.ts）も同じ文字列を作る
+const DOLL_LAST_WORDS: &str = r#"{"trigger":{"on":"lastWords"},"effects":[{"op":"damage","target":{"kind":"leader","side":"opponent"},"amount":2}]}"#;
+
+/// 局面の players[q].board[i] に能力（JSON）を付与した局面
+fn with_granted(s: &GameState, q: usize, i: usize, ability: &str) -> GameState {
+    let mut j = state_to_json(s);
+    let mut players = j.take("players").expect("players");
+    let Json::Arr(ps) = &mut players else {
+        panic!("players")
+    };
+    let mut board = ps[q].take("board").expect("board");
+    let Json::Arr(cards) = &mut board else {
+        panic!("board")
+    };
+    let mut granted = cards[i].take("granted").expect("granted");
+    let Json::Arr(list) = &mut granted else {
+        panic!("granted")
+    };
+    list.push(Json::parse(ability).expect("能力の JSON"));
+    cards[i].set("granted", granted);
+    ps[q].set("board", board);
+    j.set("players", players);
+    crate::state_json::state_from_json(&j).expect("局面")
+}
+
+#[test]
+fn board_network() {
+    // 場のカードのネットワーク（npm run td -- board）: 出力を受ける最初の層の重み（入力の末尾 2K 個）が 0 なら、
+    // 無いモデルと同じ補正。付与された能力を grants の文字列で見分ける。大きさが合わなければ止める
+    use crate::ai::aidata::RawValueNetBoard;
+    use crate::ai::valuenet::BOARD_FEATURES;
+    let base = model(4, |i| ((i * 31) % 11) as f64 / 10.0 - 0.5, 0.7);
+    let (v, h) = (base.vocab.len(), base.hidden);
+    let n_in = v + 1 + BOARD_FEATURES.len();
+    let mut w0: Vec<f64> = (0..n_in * 3)
+        .map(|i| ((i * 7) % 5) as f64 / 10.0 - 0.1)
+        .collect();
+    // 付与された能力（grants の 0 番）の行
+    w0[v * 3..v * 3 + 3].copy_from_slice(&[0.5, 0.4, 0.3]);
+    let board = RawValueNetBoard {
+        features: BOARD_FEATURES.iter().map(|s| s.to_string()).collect(),
+        grants: vec![DOLL_LAST_WORDS.into()],
+        layers: vec![
+            RawValueNetLayer {
+                w: w0.clone(),
+                b: vec![0.05; 3],
+            },
+            RawValueNetLayer {
+                w: vec![0.3, -0.2, 0.5, 0.1, 0.4, 0.2],
+                b: vec![0.0, 0.1],
+            },
+        ],
+    };
+    let k = 2;
+    let with_board = |board: &RawValueNetBoard, row: &dyn Fn(usize) -> f64| RawValueNet {
+        w1: base
+            .w1
+            .iter()
+            .copied()
+            .chain((0..2 * k * h).map(row))
+            .collect(),
+        board: Some(board.clone()),
+        ..base.clone()
+    };
+    let rows = |j: usize| (j as f64 * 0.37).sin();
+    let s = mid_game();
+    assert!(s.players.iter().all(|p| !p.board.is_empty()));
+    let plain = ValueNet::new(base.clone()).expect("モデル");
+    let zero = ValueNet::new(with_board(&board, &|_| 0.0)).expect("モデル");
+    let net = ValueNet::new(with_board(&board, &rows)).expect("モデル");
+    for p in 0..2 {
+        for phase in [ValuePhase::End, ValuePhase::After] {
+            assert_eq!(zero.eval(&s, p, phase), plain.eval(&s, p, phase));
+            assert_ne!(net.eval(&s, p, phase), plain.eval(&s, p, phase));
+            // 書き出す入力（encode）は場のカードのネットワークの出力を含まない
+            assert_eq!(net.encode(&s, p, phase), plain.encode(&s, p, phase));
+        }
+    }
+    // 付与された能力: Rust 版の能力の JSON の文字列にあり、その行の重みの分だけ補正が変わる
+    assert!(ability_json_texts_has(DOLL_LAST_WORDS));
+    let (q, i) = (0..2)
+        .find_map(|q| {
+            s.players[q]
+                .board
+                .iter()
+                .position(|c| c.is_follower)
+                .map(|i| (q, i))
+        })
+        .expect("場のフォロワー");
+    let t = with_granted(&s, q, i, DOLL_LAST_WORDS);
+    assert_eq!(t.players[q].board[i].granted.len(), 1);
+    let mut no_row = board.clone();
+    no_row.layers[0].w[v * 3..v * 3 + 3].copy_from_slice(&[0.0; 3]);
+    let no_row = ValueNet::new(with_board(&no_row, &rows)).expect("モデル");
+    for p in 0..2 {
+        assert_ne!(
+            net.eval(&t, p, ValuePhase::End),
+            net.eval(&s, p, ValuePhase::End)
+        );
+        assert_eq!(
+            no_row.eval(&t, p, ValuePhase::End),
+            no_row.eval(&s, p, ValuePhase::End)
+        );
+    }
+    // 大きさ違い（w1 の末尾が足りない・層の重みが足りない）・features の並び違い・JSON の board を読む
+    let mut short = with_board(&board, &rows);
+    short.w1.pop();
+    assert!(ValueNet::new(short).is_err());
+    let mut bad = board.clone();
+    bad.layers[0].w.pop();
+    assert!(ValueNet::new(with_board(&bad, &rows)).is_err());
+    let mut reversed = board.clone();
+    reversed.features.reverse();
+    assert!(ValueNet::new(with_board(&reversed, &rows)).is_err());
+    let m = with_board(&board, &rows);
+    let layers = |ls: &[RawValueNetLayer]| {
+        ls.iter()
+            .map(|l| serde_json::json!({"w": l.w, "b": l.b}))
+            .collect::<Vec<_>>()
+    };
+    let json = serde_json::json!({
+        "kind": m.kind, "version": m.version, "vocab": m.vocab, "zones": m.zones, "scalars": m.scalars,
+        "hidden": m.hidden, "w1": m.w1, "b1": m.b1, "w2": m.w2, "b2": m.b2, "a": m.a, "c": m.c, "baseWeights": {},
+        "board": {"features": board.features, "grants": board.grants, "layers": layers(&board.layers)}
+    });
+    let read = ValueNet::new(serde_json::from_value(json).expect("モデルの JSON")).expect("モデル");
+    assert_eq!(
+        read.eval(&t, 1, ValuePhase::After),
+        net.eval(&t, 1, ValuePhase::After)
+    );
+}
+
+fn ability_json_texts_has(text: &str) -> bool {
+    crate::state_json::ability_json_texts()
+        .iter()
+        .any(|(_, t)| t == text)
 }

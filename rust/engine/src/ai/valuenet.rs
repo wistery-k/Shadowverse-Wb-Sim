@@ -1,9 +1,11 @@
 //! 学習した評価の補正（src/ai/valueNet.ts の encodeState・forwardValueNet・valueNetExtraEval）。
 
-use super::aidata::{ai_data, RawValueNet};
-use crate::data::{data, AMBUSH, BANE, BARRIER, WARD};
+use super::aidata::{ai_data, RawValueNet, RawValueNetBoard};
+use crate::data::{data, Ability, Kw, AMBUSH, BANE, BARRIER, KEYWORD_NAMES, WARD};
 use crate::state::*;
+use crate::state_json::ability_json_texts;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 /// カード・クレストごとの入力の種類。モデルはこの並びの部分列を持つ（足す前のモデルも読める）。
@@ -63,6 +65,33 @@ pub const SCALARS: [&str; 33] = [
     "oppAmbush",
 ];
 
+/// 場のカード 1 枚ごとの数値の入力（場のカードのネットワーク。valueNet.ts の BOARD_FEATURES。モデルはこの並びの部分列を持つ）。
+/// 値は自己対戦の書き出しの "b"（td.rs の write_board_card）から valueNet.ts の boardCardInput で作るものと同じ。
+/// 9 つのキーワードは KEYWORD_NAMES の順
+pub const BOARD_FEATURES: [&str; 19] = [
+    "follower",
+    "atk",
+    "def",
+    "damage",
+    "evolved",
+    "superEvolved",
+    "ward",
+    "storm",
+    "rush",
+    "bane",
+    "drain",
+    "ambush",
+    "intimidate",
+    "barrier",
+    "aura",
+    "extraAttacks",
+    "cannotAttack",
+    "countdown",
+    "sigils",
+];
+/// BOARD_FEATURES の最初のキーワード（ward）の位置
+const BOARD_KEYWORD0: usize = 6;
+
 /// names が all の部分列（順番を保つ）なら、all の各項目のモデルでの添字（無ければ None）
 fn subsequence_slots<const N: usize>(
     names: &[String],
@@ -111,6 +140,154 @@ pub struct ValueNet {
     c: f64,
     /// 出発点の評価の重み（SEARCH_WEIGHTS のうち変える項目）
     pub base_weights: serde_json::Map<String, serde_json::Value>,
+    /// 補正の最初の層の入力のうち、局面から作る入力（encode）の数。場のカードのネットワークの出力はこの後ろに入る
+    n_base: usize,
+    board: Option<BoardNet>,
+}
+
+/// 場のカードのネットワーク（valueNet.ts の CompiledBoard）。場のカード 1 枚ずつを同じ層に通し、最後の層の値（ReLU の後）を
+/// 自分の場・相手の場ごとに足して、補正の最初の層の入力の末尾（自分の K 個、相手の K 個）に入れる
+struct BoardNet {
+    /// BOARD_FEATURES の各項目の、モデルの features での添字
+    feature_slot: [Option<usize>; BOARD_FEATURES.len()],
+    /// 能力のアドレス → grants での添字
+    grant_slot: HashMap<usize, usize>,
+    n_grants: usize,
+    /// 層（重み・バイアス）。最初の層の入力は vocab のカード・grants・features の順
+    layers: Vec<(Vec<f64>, Vec<f64>)>,
+    /// 最後の層の大きさ
+    out: usize,
+}
+
+impl BoardNet {
+    fn new(raw: RawValueNetBoard, vocab_len: usize) -> Result<BoardNet, String> {
+        let Some(feature_slot) = subsequence_slots(&raw.features, &BOARD_FEATURES) else {
+            return Err("ValueNetModel の board.features の並びが今のコードと違います".into());
+        };
+        let mut last = vocab_len + raw.grants.len() + raw.features.len();
+        let mut ok = !raw.layers.is_empty();
+        for l in &raw.layers {
+            ok &= !l.b.is_empty() && l.w.len() == last * l.b.len();
+            last = l.b.len();
+        }
+        if !ok {
+            return Err("ValueNetModel の board の重みの大きさが合いません".into());
+        }
+        let mut grant_slot = HashMap::new();
+        for (a, text) in ability_json_texts() {
+            if let Some(k) = raw.grants.iter().position(|g| *g == text) {
+                grant_slot.insert(a, k);
+            }
+        }
+        Ok(BoardNet {
+            feature_slot,
+            grant_slot,
+            n_grants: raw.grants.len(),
+            layers: raw.layers.into_iter().map(|l| (l.w, l.b)).collect(),
+            out: last,
+        })
+    }
+
+    /// 場のカード 1 枚の入力（疎。valueNet.ts の boardCardInput）
+    fn card_input(&self, net: &ValueNet, c: &OnBoard, out: &mut Vec<(usize, f64)>) {
+        out.clear();
+        let v = net.vocab_len;
+        if let Some(k) = net.vocab_card[c.card as usize] {
+            out.push((k, 1.0));
+        }
+        for &a in &c.granted {
+            if let Some(&g) = self.grant_slot.get(&(a as *const Ability as usize)) {
+                out.push((v + g, 1.0));
+            }
+        }
+        let mut f = [0.0f64; BOARD_FEATURES.len()];
+        let b = |x: bool| if x { 1.0 } else { 0.0 };
+        if c.is_follower {
+            let atk = c.attack_value();
+            f[0] = 1.0;
+            f[1] = atk as f64 / 5.0;
+            f[2] = c.defense as f64 / 5.0;
+            f[3] = (c.max_defense - c.defense) as f64 / 5.0;
+            f[4] = b(c.evolve == Evolve::Evolved);
+            f[5] = b(c.evolve == Evolve::SuperEvolved);
+            f[15] = (c.max_attacks - 1) as f64;
+            f[16] = b(c.cannot_attack_until.is_some());
+        } else {
+            f[17] = c.countdown.unwrap_or(0) as f64 / 3.0;
+            f[18] = c.sigils.unwrap_or(0) as f64 / 3.0;
+        }
+        for (i, slot) in f[BOARD_KEYWORD0..BOARD_KEYWORD0 + KEYWORD_NAMES.len()]
+            .iter_mut()
+            .enumerate()
+        {
+            *slot = b(c.has_keyword(Kw::one(i as u16)));
+        }
+        let base = v + self.n_grants;
+        for (j, &x) in f.iter().enumerate() {
+            if let Some(k) = self.feature_slot[j] {
+                if x != 0.0 {
+                    out.push((base + k, x));
+                }
+            }
+        }
+    }
+
+    /// 自分（p）と相手の場のカードを層に通して足した値（sums[0..K] が自分、sums[K..2K] が相手）
+    fn sums(&self, net: &ValueNet, s: &GameState, p: PlayerIndex, buf: &mut BoardBuf) {
+        let k = self.out;
+        buf.sums.clear();
+        buf.sums.resize(2 * k, 0.0);
+        for (side, pl) in [p, opponent(p)].into_iter().enumerate() {
+            for c in &s.players[pl].board {
+                self.card_input(net, c, &mut buf.input);
+                let (w0, b0) = &self.layers[0];
+                let m = b0.len();
+                buf.h.clear();
+                buf.h.extend_from_slice(b0);
+                for &(i, x) in &buf.input {
+                    for (hj, &r) in buf.h.iter_mut().zip(&w0[i * m..i * m + m]) {
+                        *hj += x * r;
+                    }
+                }
+                relu(&mut buf.h);
+                for (w, b) in &self.layers[1..] {
+                    let m = b.len();
+                    buf.h2.clear();
+                    buf.h2.extend_from_slice(b);
+                    for (i, &x) in buf.h.iter().enumerate() {
+                        if x == 0.0 {
+                            continue;
+                        }
+                        for (oj, &r) in buf.h2.iter_mut().zip(&w[i * m..i * m + m]) {
+                            *oj += x * r;
+                        }
+                    }
+                    relu(&mut buf.h2);
+                    std::mem::swap(&mut buf.h, &mut buf.h2);
+                }
+                for (t, &x) in buf.sums[side * k..side * k + k].iter_mut().zip(&buf.h) {
+                    *t += x;
+                }
+            }
+        }
+    }
+}
+
+fn relu(h: &mut [f64]) {
+    for x in h.iter_mut() {
+        if *x < 0.0 {
+            *x = 0.0;
+        }
+    }
+}
+
+/// 場のカードのネットワークの計算に使う場所
+#[derive(Default)]
+struct BoardBuf {
+    input: Vec<(usize, f64)>,
+    h: Vec<f64>,
+    h2: Vec<f64>,
+    sums: Vec<f64>,
 }
 
 impl ValueNet {
@@ -125,7 +302,12 @@ impl ValueNet {
         ) else {
             return Err("ValueNetModel の入力の並びが今のコードと違います".into());
         };
-        let n = raw.zones.len() * raw.vocab.len() + raw.scalars.len();
+        let n_base = raw.zones.len() * raw.vocab.len() + raw.scalars.len();
+        let board = match raw.board {
+            Some(b) => Some(BoardNet::new(b, raw.vocab.len())?),
+            None => None,
+        };
+        let n = n_base + board.as_ref().map_or(0, |b| 2 * b.out);
         let mut last = raw.hidden;
         let mut layers_ok = true;
         for l in &raw.layers {
@@ -168,6 +350,8 @@ impl ValueNet {
             a: raw.a,
             c: raw.c,
             base_weights: raw.base_weights,
+            n_base,
+            board,
         })
     }
 
@@ -185,7 +369,8 @@ impl ValueNet {
         self.w2.iter().all(|&x| x == 0.0) && self.b2 == 0.0 && self.c == 0.0
     }
 
-    /// 入力（encodeState。添字と値を、最初に現れた順に）
+    /// 入力（encodeState。添字と値を、最初に現れた順に）。場のカードのネットワークの出力（入力の末尾）は含まない
+    /// （自己対戦の書き出しの "x"。学習が "b" から作る）
     pub fn encode(&self, s: &GameState, p: PlayerIndex, phase: ValuePhase) -> Vec<(usize, f64)> {
         let mut acc = Acc(Vec::new());
         encode(self, s, p, phase, &mut acc);
@@ -209,6 +394,22 @@ impl ValueNet {
                 for (hj, &r) in h.iter_mut().zip(row) {
                     *hj += x * r;
                 }
+            }
+            // 場のカードのネットワークの出力（入力の末尾）
+            if let Some(board) = &self.board {
+                BOARD_BUF.with(|bb| {
+                    let bb = &mut *bb.borrow_mut();
+                    board.sums(self, s, p, bb);
+                    for (t, &x) in bb.sums.iter().enumerate() {
+                        if x == 0.0 {
+                            continue;
+                        }
+                        let i = self.n_base + t;
+                        for (hj, &r) in h.iter_mut().zip(&self.w1[i * hn..i * hn + hn]) {
+                            *hj += x * r;
+                        }
+                    }
+                });
             }
             for hj in h.iter_mut() {
                 if *hj < 0.0 {
@@ -388,6 +589,7 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
 
 thread_local! {
     static BUF: RefCell<(Acc, Vec<f64>, Vec<f64>)> = const { RefCell::new((Acc(Vec::new()), Vec::new(), Vec::new())) };
+    static BOARD_BUF: RefCell<BoardBuf> = RefCell::new(BoardBuf::default());
 }
 
 /// 探索の extraEval（既定の補正。評価の点数の単位）
