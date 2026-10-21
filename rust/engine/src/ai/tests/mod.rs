@@ -16,6 +16,7 @@ mod keys;
 mod lethal;
 mod mulligan;
 mod rhino;
+mod rhino_bound;
 mod rhino_puzzles;
 mod search;
 mod think;
