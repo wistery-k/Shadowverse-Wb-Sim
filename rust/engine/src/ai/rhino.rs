@@ -545,16 +545,29 @@ pub fn rhino_bounds(s: &GameState, p: PlayerIndex) -> Vec<(i32, i32)> {
     bounds
 }
 
+/// 超進化したベビーカーバンクルの PP 3 回復で増やせる PP（場にいれば 3。手札なら出すコストを引いた分で、今の PP で出せるときだけ）
+fn carbuncle_refund(v: &View) -> i32 {
+    if !v.can_super() {
+        return 0;
+    }
+    if v.board_count(Tag::Carbuncle) > 0 {
+        return 3;
+    }
+    v.hand
+        .iter()
+        .filter(|h| tag(h.card) == Tag::Carbuncle)
+        .map(|h| (card(h.card).cost + h.cost_mod).max(0))
+        .filter(|&cost| cost <= v.total_pp())
+        .map(|cost| 3 - cost)
+        .max()
+        .unwrap_or(0)
+        .max(0)
+}
+
 /// あと remaining 回リノセウスを出せるかもしれないか
 pub fn can_still_play_rhinos(s: &GameState, p: PlayerIndex, remaining: i32) -> bool {
     let v = View::of(s, p);
-    let refund =
-        if v.can_super() && (v.has_in_hand(Tag::Carbuncle) || v.board_count(Tag::Carbuncle) > 0) {
-            3
-        } else {
-            0
-        };
-    if v.total_pp() + refund < 3 * remaining {
+    if v.total_pp() + carbuncle_refund(&v) < 3 * remaining {
         return false;
     }
     let rhinos = v.in_hand(Tag::Rhino);
