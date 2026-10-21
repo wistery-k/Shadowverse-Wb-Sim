@@ -48,7 +48,11 @@ pub struct ExactLethalOptions {
     pub no_play: Vec<Iid>,
     /// 残りで与えうるダメージの上限（damage_bound）が相手の残り体力に届かない局面で打ち切る
     pub damage_bound: bool,
+    /// damage_bound のほかに使う上限（デッキ専用の見積もり。見積もれなければ None）。damage_bound が true のときだけ使い、両方あれば小さいほう
+    pub extra_bound: Option<BoundFn>,
 }
+
+pub type BoundFn = fn(&GameState, PlayerIndex) -> Option<i32>;
 
 pub const DEFAULT_EXACT_LETHAL_OPTIONS: ExactLethalOptions = ExactLethalOptions {
     order: None,
@@ -63,6 +67,7 @@ pub const DEFAULT_EXACT_LETHAL_OPTIONS: ExactLethalOptions = ExactLethalOptions 
     leader_only: Vec::new(),
     no_play: Vec::new(),
     damage_bound: true,
+    extra_bound: None,
 };
 
 /// 乱数に依らない手だけで、局面数を絞った全探索（ビームで見つからないリーサルの確かめ用。ターンあたりは上限の 2 倍まで）
@@ -447,7 +452,13 @@ impl Dfs<'_> {
                 }
             }
             if self.opts.damage_bound {
-                if let Some(u) = damage_bound(s, self.p, !self.opts.deterministic_only) {
+                let generic = damage_bound(s, self.p, !self.opts.deterministic_only);
+                let extra = self.opts.extra_bound.and_then(|f| f(s, self.p));
+                let bound = match (generic, extra) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (a, b) => a.or(b),
+                };
+                if let Some(u) = bound {
                     if u < need {
                         self.memo.insert(k.clone(), (u, Bound::Upper));
                         return Ok((u, Bound::Upper));

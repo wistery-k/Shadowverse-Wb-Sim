@@ -396,3 +396,15 @@ fn turn8_lethal_with_carbuncle_refund() {
     let end = play_active(s, 0, &mut RhinoAgent::new(true), &mut Rng::new(1));
     assert_eq!(end.winner, Some(0));
 }
+
+/// 同じ局面で相手の体力を 17 にしたもの（ユーザーの指摘）。森の神秘 → フェアリー 3 枚 → カーバンクルでフェアリーを戻す →
+/// フェアリー 2 体を相手のフォロワーに当てる → ベイル → カーバンクルを超進化（PP 3 回復）→ リノセウス → 聖樹の杖で戻す → リノセウス で 17 点。
+/// 汎用の上限では打ち切れない局面が多く、10 万局面ほど調べないと見つからなかった。リノセウスエルフ専用の上限（rhino_turn_damage_bound）で 6 万局面以内に見つかる
+#[test]
+fn turn8_lethal_17_with_rhino_bound() {
+    let mut s = start_3897936013();
+    s.players[1].leader_hp = 17;
+    fresh();
+    let seq = search_lethal_for_rhino_turn(&s, 0);
+    assert!(wins(&s, seq.as_deref(), 0));
+}
