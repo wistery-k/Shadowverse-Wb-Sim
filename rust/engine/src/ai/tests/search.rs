@@ -95,8 +95,14 @@ fn sep_turn(s: GameState, learned: bool) -> Vec<Action> {
 
 #[test]
 fn geno_does_not_super_evolve_when_not_needed() {
-    // ジェノ（7/6、2 回攻撃）で激震のゴリアテ（4/5）と異端の侍を倒せる
-    let actions = sep_turn(geno_turn(true, &["激震のゴリアテ", "異端の侍"]), true);
+    // ジェノ（7/6、2 回攻撃）で激震のゴリアテ（4/5）と異端の侍を倒せる。
+    // 手札にはこのターンに出せない最果ての罪・サタン（10 コスト）も持たせる。手札がジェノだけだと、ジェノを出すと手札が 0 枚になり、
+    // 学習した補正はこの作りものの局面でそれを大きく嫌って（相手の手札は 9 枚）、乱数によってはジェノを出さずにターンを終える
+    // （qlp で 24 通り中 3 回、p60p で 2 回。サタンを 1 枚持たせると、どの補正でも 24 回とも 2 回攻撃して超進化しない）
+    let mut s = geno_turn(true, &["激震のゴリアテ", "異端の侍"]);
+    let filler = hand_card(&mut s, "最果ての罪・サタン");
+    s.players[0].hand.push(filler);
+    let actions = sep_turn(s, true);
     let attacks = actions
         .iter()
         .filter(|a| matches!(a, Action::Attack { .. }))
