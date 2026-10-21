@@ -1,7 +1,7 @@
 //! リノセウスエルフ用の AI（もとは src/ai/rhino.ts）。
 //!
 //! リノセウス専用のリーサル探索で倒しきれれば最優先で打ち、それ以外は探索 AI に任せる。
-//! エルフの探索には、次のターンのリノセウスの打点の項（potential）を評価に足し、相手のターンの読みでは相手の評価にも学習した補正を足す。
+//! エルフの探索には、次のターンのリノセウスの打点の項（potential）を評価に足す。
 //! 以前はユーザーが作ったルール（マリガン・温存・1 枚目の杖・燐光の岩・最後の杖と岩を残す 等）も重ねていたが、
 //! 学習した補正を入れた後はルールを外したほうが強かったので消した（docs/ai-notes.md「リノセウス用 AI のルールを消す」）。
 //! エルフ以外のデッキでは探索 AI と同じ。
@@ -15,7 +15,7 @@ use super::lethal::{
     find_lethal, search_lethal, LethalOptions, DEFAULT_LETHAL_OPTIONS, DIRECT_SCORING,
 };
 use super::rhino_lethal::{search_rhino_lethal, tag, Tag, DEFAULT_RHINO_LETHAL_OPTIONS};
-use super::search::{ExtraEval, OpponentSearch, SearchAgent, SearchOptions};
+use super::search::{ExtraEval, SearchAgent, SearchOptions};
 use super::think::Thought;
 use super::valuenet::ValuePhase;
 use super::{Agent, Rng};
@@ -262,14 +262,8 @@ pub fn rhino_search_options(potential: f64, learned: Option<ExtraEval>) -> Searc
         per_first: RHINO_PER_FIRST,
         next_lethal_search: Some(Arc::new(rhino_next_lethal)),
         extra_eval: rhino_extra_eval(potential, learned.clone()),
-        // 相手のターンの読みでは、相手の評価にも学習した補正を足す（手で作った評価だけだと、相手がリノセウスを残して顔を殴る甘い読みになる。
-        // docs/ai-notes.md「棋譜の指摘: バックウッドかフェアリーか」）。足すのはエルフ用の打点の項を除いた補正だけ
-        opponent_search: SearchOptions::default()
-            .opponent_search
-            .map(|o| OpponentSearch {
-                extra_eval: learned.is_some(),
-                ..o
-            }),
+        // 相手のターンの読みで相手の評価にも補正を足すとき（opponentSearch.extraEval。既定では使わない）は、
+        // エルフ用の打点の項を除いた補正だけにする（docs/ai-notes.md「棋譜の指摘: バックウッドかフェアリーか」）
         opp_extra_eval: learned,
         ..SearchOptions::default()
     }
