@@ -168,8 +168,10 @@ impl Default for SearchOptions {
             extra_eval: Some(Arc::new(value_net_eval)),
             opp_extra_eval: None,
             weights: None,
+            // 相手のターンを読むビームの幅は 4 から 16 に（6400 試合で 51.9%、物差しは 78.0% → 79.8%。
+            // docs/ai-notes.md「相手のターンを読むビームの幅を 16 に」）
             opponent_search: Some(OpponentSearch {
-                beam_width: 4,
+                beam_width: 16,
                 max_depth: 8,
                 extra_eval: false,
             }),
