@@ -83,6 +83,7 @@ pub fn reference_options() -> SearchOptions {
         reuse_agree: false,
         resample_draws: false,
         draw_first: false,
+        record_reads: false,
     }
 }
 

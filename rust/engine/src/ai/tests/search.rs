@@ -200,3 +200,37 @@ fn resampled_draws_carry_deck_states() {
     }
     assert!(kept_in_hand && kept_in_deck);
 }
+
+#[test]
+fn record_reads_does_not_change_moves() {
+    // 想像の局面を残しても（TD 学習の自己対戦の --imagined）打つ手は同じ。残すのは、選んだ並びを相手のターンまで読んだ後の
+    // 自分のターンの最初の局面（相手の手札の引き直しごとに 1 つ）
+    let mut plain = SearchAgent::new(SearchOptions::default());
+    let mut rec = SearchAgent::new(SearchOptions {
+        record_reads: true,
+        ..SearchOptions::default()
+    });
+    fresh();
+    let mut state = new_game(deck_at(0), deck_at(1), 11);
+    let (mut r1, mut r2) = (Rng::new(5), Rng::new(5));
+    let mut seen = 0;
+    while state.phase != Phase::Ended && state.turn <= 8 {
+        let legal = legal_actions(&state);
+        let p = acting_player(&state);
+        let a = plain.choose_action(&state, &legal, &mut r1);
+        let b = rec.choose_action(&state, &legal, &mut r2);
+        assert_eq!(a, b);
+        assert!(plain.take_reads(p).is_empty());
+        let reads = rec.take_reads(p);
+        assert!(reads.len() <= SearchOptions::default().opp_hand_samples);
+        for r in &reads {
+            assert!(
+                r.phase == Phase::Ended
+                    || (r.active == p && r.pending.is_none() && r.turn > state.turn)
+            );
+        }
+        seen += reads.len();
+        state = apply(&state, &a);
+    }
+    assert!(seen > 0);
+}

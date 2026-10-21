@@ -36,7 +36,10 @@ export const VALUE_ZONES = [
   "oppBoardDef",
 ] as const;
 
-/** 数値の入力（おおよそ 0〜1 に収まるように割る。VALUE_ZONES と同じく、モデルはこの並びの部分列を持つ）。"first" より後ろは場のフォロワーの合計とキーワードを持つ数 */
+/**
+ * 数値の入力（おおよそ 0〜1 に収まるように割る。VALUE_ZONES と同じく、モデルはこの並びの部分列を持つ）。"first" より後ろは場のフォロワーの合計とキーワードを持つ数。
+ * 最後の "imagined" は、探索が相手のターンを読んだ後の想像の局面か（自己対戦の "ph": 2。docs/ai-notes.md「読みの中の相手のずれを学習で直す・資源の介入」）
+ */
 export const VALUE_SCALARS = [
   "myHp",
   "oppHp",
@@ -71,6 +74,7 @@ export const VALUE_SCALARS = [
   "oppBarrier",
   "myAmbush",
   "oppAmbush",
+  "imagined",
 ] as const;
 
 /**

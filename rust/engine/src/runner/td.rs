@@ -1,6 +1,6 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both] [--sampling classic|default] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both] [--ivRes 0] [--imagined 0] [--sampling classic|default] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] --out d0.jsonl
 //!
 //! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・幅 128、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
 //! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
@@ -12,6 +12,16 @@
 //! --ivZone board なら、手札の代わりに場のカード（自分と相手の場のフォロワー・アミュレット）を 1 枚消す（"zone": "board" か "oppBoard" が付く）。
 //! both なら手札と場のカードを合わせた中から選ぶ。
 //! 場にいる間に働く能力の価値を、相関ではなく消した結果から学ばせる。docs/ai-notes.md「場のカードを消す介入を混ぜる」
+//! --ivRes r なら、同じ局面から、資源（自分か相手の EP・SEP・リーダーの体力・PP 最大値のどれか 1 つ）を ±1 した局面も r 個（小数なら平均 r 個。
+//! --iv とは別に数える）作り、最後まで打った試合も書き出す（"iv": {"p", "k", "res", "d", "zone": "res" か "oppRes"} 付きの行）。
+//! 値はルールの範囲（EP・SEP は 0〜2、体力は 1〜上限、PP 最大値は 1〜10）に収まるものだけ。自分の PP 最大値を変えたときは今の PP も同じだけ変える。
+//! 資源の価値を、相関（不利な側ほど SEP を使う等）ではなく変えた結果から学ばせる。--iv の試合は --ivRes があっても同じ。
+//! docs/ai-notes.md「読みの中の相手のずれを学習で直す・資源の介入」
+//!
+//! --imagined k なら、各ターン末の局面の後に、そのターンに選んだ並びを探索が相手のターンまで読んだ想像の局面（自分の次のターンの最初。
+//! 相手の手札の引き直しごとに 1 つ）から k 個を選んで書き出す（"ph": 2）。学習はその目標を、同じターンのターン末の局面と同じ
+//! （本物の次の自分のターンの最初の局面からの λ 収益）にする。モデルには "imagined" の入力が要る（npm run td -- extend で足す）。
+//! 打つ手は変わらない（同じ試合になる）。docs/ai-notes.md「読みの中の相手のずれを学習で直す・資源の介入」
 //!
 //! --cmp k なら、各試合で 1 つの自分のターンの最初（--iv と同じ選び方）から、探索が読んだ点数の高い順に最初の手の違う並びを k 個まで選び、
 //! 並びごとにターン末から最後まで --rollouts 回打った勝ち数を書き出す（"cmp" 付きの行。打ち比べ）。r 回目はどの並びも同じ乱数で
@@ -42,7 +52,9 @@ use crate::ai::{Agent, Rng};
 use crate::data::{data, CardIdx, Deck};
 use crate::game::{acting_player, apply_action, create_game, legal_actions, resolve_turn_end};
 use crate::jsnum::{js_num, round_precision};
-use crate::state::{next_random, opponent, Action, Evolve, GameState, OnBoard, Phase, PlayerIndex};
+use crate::state::{
+    next_random, opponent, Action, Evolve, GameState, OnBoard, Phase, PlayerIndex, EP, MAX_PP, SEP,
+};
 use crate::state_json::ability_json_text;
 use std::io::Write;
 use std::sync::Arc;
@@ -90,6 +102,8 @@ struct Model {
     board: bool,
     /// 局面にモデルの補正の値も書く（--check。学習側の計算が探索と同じかを npm run td -- check で確かめる）
     check: bool,
+    /// ターン末の後に書く想像の局面の数（--imagined）
+    imagined: usize,
 }
 
 fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Model, String> {
@@ -121,6 +135,7 @@ fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Mo
         w: EvalWeights::new(weights),
         board: false,
         check: false,
+        imagined: 0,
     })
 }
 
@@ -132,13 +147,16 @@ struct Summary {
     turns: i32,
     samples: usize,
     explored: usize,
-    /// 介入して打った試合の数
+    /// 介入して打った試合の数（資源の介入を含む）
     ivs: usize,
+    /// そのうち資源の介入の試合
+    res_ivs: usize,
     /// 打ち比べた局面の数
     groups: usize,
 }
 
-/// 局面 1 つ（{"ph":…,"s":…,"x":[…],"v":[…]}、ランダムに打った局面は "ex":1、board なら場のカードの属性 "b" も）
+/// 局面 1 つ（{"ph":…,"s":…,"x":[…],"v":[…]}、ランダムに打った局面は "ex":1、board なら場のカードの属性 "b" も）。
+/// ph は 0: ターン末、1: 自分のターンの最初、2: 探索が相手のターンを読んだ後の想像の局面（--imagined）
 fn write_sample(
     out: &mut String,
     m: &Model,
@@ -151,7 +169,11 @@ fn write_sample(
     let x = m.net.encode(s, p, phase);
     out.push_str(&format!(
         "{{\"ph\":{},\"s\":{},\"x\":[",
-        if phase == ValuePhase::End { 0 } else { 1 },
+        match phase {
+            ValuePhase::End => 0,
+            ValuePhase::After => 1,
+            ValuePhase::Imagined => 2,
+        },
         js_num(round_precision(evaluate_with(s, p, &m.w), 6))
     ));
     for (i, (k, _)) in x.iter().enumerate() {
@@ -261,6 +283,8 @@ struct Intervention {
     turn: i32,
     /// 1 つの局面から作る、抜くカードの違う局面の数
     variants: usize,
+    /// 資源を ±1 した局面の数（--ivRes）
+    res_variants: usize,
 }
 
 /// 介入で消すカードの場所（--ivZone）
@@ -270,6 +294,67 @@ enum IvZone {
     Board,
     /// 手札と場のカードから選ぶ
     Both,
+}
+
+/// 介入で ±1 する資源（--ivRes）
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Res {
+    Ep,
+    Sep,
+    Hp,
+    MaxPp,
+}
+
+impl Res {
+    const ALL: [Res; 4] = [Res::Ep, Res::Sep, Res::Hp, Res::MaxPp];
+
+    fn name(self) -> &'static str {
+        match self {
+            Res::Ep => "ep",
+            Res::Sep => "sep",
+            Res::Hp => "hp",
+            Res::MaxPp => "maxPp",
+        }
+    }
+}
+
+/// 局面 at（p の自分のターンの最初）で、ルールの範囲に収まる資源の ±1（側, 資源, 増減）
+fn res_candidates(at: &GameState, p: PlayerIndex) -> Vec<(PlayerIndex, Res, i32)> {
+    let mut out = Vec::new();
+    for side in [p, opponent(p)] {
+        let pl = &at.players[side];
+        for r in Res::ALL {
+            let (cur, lo, hi) = match r {
+                Res::Ep => (pl.ep, 0, EP),
+                Res::Sep => (pl.sep, 0, SEP),
+                Res::Hp => (pl.leader_hp, 1, pl.leader_max_hp),
+                Res::MaxPp => (pl.max_pp, 1, MAX_PP),
+            };
+            for d in [1, -1] {
+                if (lo..=hi).contains(&(cur + d)) {
+                    out.push((side, r, d));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// 資源を d だけ変える。手番のプレイヤーの PP 最大値なら今の PP も同じだけ変える（ターンの最初は PP 最大値まで回復しているので）
+fn apply_res(s: &mut GameState, side: PlayerIndex, r: Res, d: i32) {
+    let active = s.active == side;
+    let pl = &mut s.players[side];
+    match r {
+        Res::Ep => pl.ep += d,
+        Res::Sep => pl.sep += d,
+        Res::Hp => pl.leader_hp += d,
+        Res::MaxPp => {
+            pl.max_pp += d;
+            if active {
+                pl.pp = (pl.pp + d).max(0);
+            }
+        }
+    }
 }
 
 /// 局面から最後まで打った結果
@@ -292,6 +377,7 @@ fn play_out(
     branch_at: Option<(PlayerIndex, i32)>,
 ) -> Played {
     let mut agent_rng = Rng::new(seed ^ 0x9e3779b9);
+    let mut img_rng = Rng::new(seed ^ 0x3c6ef372);
     let mut explore = seed ^ 0x2545f491;
     let mut next_float = || {
         let (v, next) = next_random(explore);
@@ -332,6 +418,8 @@ fn play_out(
             && seen[actor] != state.players[actor].turn_count
         {
             seen[actor] = state.players[actor].turn_count;
+            // 前のターンの読み（相手のターン中の選択で読んだもの等）は使わない
+            agents[actor].take_reads(actor);
             if branch_at == Some((actor, state.players[actor].turn_count))
                 && state.stack.is_empty()
                 && state.queue.is_empty()
@@ -367,6 +455,16 @@ fn play_out(
             let end = end.as_ref().unwrap_or(&state);
             if end.phase != Phase::Ended {
                 push(&mut samples, &mut counts, end, ValuePhase::End, false);
+                // そのターンに選んだ並びの想像の局面から m.imagined 個（試合の乱数とは別の乱数で選ぶ）
+                let mut reads: Vec<_> = agents[actor]
+                    .take_reads(actor)
+                    .into_iter()
+                    .filter(|x| x.phase != Phase::Ended)
+                    .collect();
+                for _ in 0..m.imagined.min(reads.len()) {
+                    let x = reads.swap_remove(img_rng.int(reads.len()));
+                    push(&mut samples, &mut counts, &x, ValuePhase::Imagined, false);
+                }
             }
         }
         state = apply_action(&state, &action);
@@ -502,6 +600,12 @@ fn compare_plans(
     ))
 }
 
+/// 平均 x 個（小数部分は乱数で切り上げる）
+fn count_of(x: f64, rng: &mut Rng) -> usize {
+    x.floor() as usize + usize::from(rng.int(1000) < ((x.fract()) * 1000.0) as usize)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn play_one(
     g: u32,
     decks: &[&'static Deck],
@@ -509,6 +613,7 @@ fn play_one(
     eps: f64,
     iv: f64,
     zone: IvZone,
+    iv_res: f64,
     cmp: Option<&Compare>,
 ) -> Summary {
     let (di, dj) = ((g % 7) as usize, ((g / 7) % 7) as usize);
@@ -516,13 +621,19 @@ fn play_one(
     let state = create_game([&decks[di].cards, &decks[dj].cards], seed);
     // 介入する試合・プレイヤー・ターン（自己対戦の乱数とは別の乱数で決める。--iv 0 なら今までと同じ試合）
     let mut ivr = Rng::new(seed ^ 0x6a09e667);
-    let plan = (iv > 0.0).then(|| {
-        let variants =
-            iv.floor() as usize + usize::from(ivr.int(1000) < ((iv.fract()) * 1000.0) as usize);
+    // 資源の介入の数と選び方は別の乱数で決める（--ivRes があっても --iv の試合は同じ）
+    let mut res_rng = Rng::new(seed ^ 0xbb67ae85);
+    let plan = (iv > 0.0 || iv_res > 0.0).then(|| {
+        let variants = count_of(iv, &mut ivr);
         Intervention {
             p: ivr.int(2),
             turn: 3 + ivr.int(6) as i32,
             variants,
+            res_variants: if iv_res > 0.0 {
+                count_of(iv_res, &mut res_rng)
+            } else {
+                0
+            },
         }
     });
     // 打ち比べる局面（--iv と同じ選び方。--iv とは一緒に使わない）
@@ -534,7 +645,7 @@ fn play_one(
         eps,
         seed,
         plan.as_ref()
-            .filter(|x| x.variants > 0)
+            .filter(|x| x.variants + x.res_variants > 0)
             .map(|x| (x.p, x.turn))
             .or(cmp_at),
     );
@@ -546,6 +657,7 @@ fn play_one(
     let mut line = record_line(g, &names, &base, None);
     let mut samples = base.counts[0] + base.counts[1];
     let mut ivs = 0;
+    let mut res_ivs = 0;
     let mut groups = 0;
     if let (Some(c), Some((p, _)), Some((at, _))) = (cmp, cmp_at, base.branch.as_ref()) {
         if at.players[p].hand.is_empty() {
@@ -621,6 +733,32 @@ fn play_one(
             samples += r.counts[0] + r.counts[1];
             ivs += 1;
         }
+        // 資源を ±1 した局面（--ivRes）
+        let mut res = res_candidates(at, plan.p);
+        for v in 0..plan.res_variants.min(res.len()) {
+            let (side, kind, d) = res.swap_remove(res_rng.int(res.len()));
+            let mut s = at.clone();
+            apply_res(&mut s, side, kind, d);
+            let r = play_out(
+                g,
+                s,
+                m,
+                eps,
+                seed ^ (0xc2b2ae35_u32.wrapping_mul(v as u32 + 1)),
+                None,
+            );
+            let info = format!(
+                "{{\"p\":{},\"k\":{k},\"res\":\"{}\",\"d\":{d},\"zone\":\"{}\"}}",
+                plan.p,
+                kind.name(),
+                if side == plan.p { "res" } else { "oppRes" }
+            );
+            line.push('\n');
+            line.push_str(&record_line(g, &names, &r, Some(info)));
+            samples += r.counts[0] + r.counts[1];
+            ivs += 1;
+            res_ivs += 1;
+        }
     }
     Summary {
         line,
@@ -630,6 +768,7 @@ fn play_one(
         samples,
         explored: base.explored,
         ivs,
+        res_ivs,
         groups,
     }
 }
@@ -643,6 +782,14 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     let iv = num_arg(args, "iv", 0.0)?;
     if iv < 0.0 {
         return Err("--iv は 0 以上".into());
+    }
+    let iv_res = num_arg(args, "ivRes", 0.0)?;
+    if iv_res < 0.0 {
+        return Err("--ivRes は 0 以上".into());
+    }
+    let imagined = num_arg(args, "imagined", 0.0)?;
+    if imagined < 0.0 || imagined.fract() != 0.0 {
+        return Err("--imagined は 0 以上の整数".into());
     }
     let zone = match arg(args, "ivZone").unwrap_or("hand") {
         "hand" => IvZone::Hand,
@@ -673,8 +820,8 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     {
         return Err("--cmp は 0 か 2 以上の整数、--rollouts は 1 以上の整数".into());
     }
-    if cmp_k > 0.0 && iv > 0.0 {
-        return Err("--cmp と --iv は一緒に使えません".into());
+    if cmp_k > 0.0 && (iv > 0.0 || iv_res > 0.0) {
+        return Err("--cmp と --iv・--ivRes は一緒に使えません".into());
     }
     let board = match arg(args, "board").unwrap_or("1") {
         "1" => true,
@@ -682,8 +829,15 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
         x => return Err(format!("--board は 1 か 0: {x}")),
     };
     let net = Arc::new(ValueNet::load(model_path)?);
+    if imagined > 0.0 && !net.has_scalar("imagined") {
+        return Err(format!(
+            "--imagined には \"imagined\" の入力のあるモデルが要ります（npm run td -- extend --model {model_path} --out <新しいモデル> で足す。補正は同じ）"
+        ));
+    }
     let mut m = model_options(net.clone(), opp_beam, classic)?;
     m.board = board;
+    m.imagined = imagined as usize;
+    m.opts.record_reads = m.imagined > 0;
     m.check = match arg(args, "check").unwrap_or("0") {
         "0" => false,
         "1" => true,
@@ -707,7 +861,7 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     let tasks: Vec<u32> = (0..games as u32).map(|k| start as u32 + k).collect();
     let mut summaries = parallel_map(
         &tasks,
-        |&g, _| play_one(g, &decks, &m, eps, iv, zone, cmp.as_ref()),
+        |&g, _| play_one(g, &decks, &m, eps, iv, zone, iv_res, cmp.as_ref()),
         |done, total, r, _| {
             writeln!(file, "{}", r.line).unwrap_or_else(|e| panic!("{out} に書けません: {e}"));
             if done % 100 == 0 || done == total {
@@ -725,11 +879,12 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     let samples: usize = summaries.iter().map(|r| r.samples).sum();
     let explored: usize = summaries.iter().map(|r| r.explored).sum();
     let ivs: usize = summaries.iter().map(|r| r.ivs).sum();
+    let res_ivs: usize = summaries.iter().map(|r| r.res_ivs).sum();
     let groups: usize = summaries.iter().map(|r| r.groups).sum();
     let turns: i64 = summaries.iter().map(|r| r.turns as i64).sum();
     let first_wins = summaries.iter().filter(|r| r.winner == 0).count();
     println!(
-        "{out}: {n} 試合、局面 {samples}（ランダムに打った {explored}、介入して打った試合 {ivs}、打ち比べた局面 {groups}）、平均 {} ターン、先攻の勝率 {}%",
+        "{out}: {n} 試合、局面 {samples}（ランダムに打った {explored}、介入して打った試合 {ivs}（うち資源 {res_ivs}）、打ち比べた局面 {groups}）、平均 {} ターン、先攻の勝率 {}%",
         fixed(turns as f64 / n as f64, 1),
         fixed((first_wins as f64 / n as f64) * 100.0, 1)
     );
@@ -776,6 +931,125 @@ mod tests {
         write_board(&mut out, s, p);
         out.push('}');
         serde_json::from_str::<serde_json::Value>(&out).expect("JSON")["b"].clone()
+    }
+
+    /// 今の既定の補正に "imagined" の入力（重み 0）を足したモデルで、速い読み方（classic・相手は貪欲法）の自己対戦の設定
+    fn imagined_model(imagined: usize) -> Model {
+        let mut raw = ai_data().value_net.clone();
+        assert!(raw.board.is_none());
+        raw.scalars.push("imagined".into());
+        // 場のカードのネットワークの無いモデルなので、最後の数値の入力の行は w1 の末尾
+        raw.w1.extend(std::iter::repeat_n(0.0, raw.hidden));
+        let mut m = model_options(Arc::new(ValueNet::new(raw).expect("モデル")), false, true)
+            .expect("設定");
+        m.board = true;
+        m.imagined = imagined;
+        m.opts.record_reads = imagined > 0;
+        m
+    }
+
+    /// 1 行ずつ JSON にし、想像の局面（"ph": 2）を除いたもの
+    fn without_imagined(text: &str) -> Vec<serde_json::Value> {
+        text.lines()
+            .map(|l| {
+                let mut v: serde_json::Value = serde_json::from_str(l).expect("JSON");
+                if let Some(samples) = v["samples"].as_array_mut() {
+                    for seq in samples {
+                        seq.as_array_mut()
+                            .expect("局面の列")
+                            .retain(|x| x["ph"] != 2);
+                    }
+                }
+                v
+            })
+            .collect()
+    }
+
+    #[test]
+    fn imagined_samples_follow_turn_ends_without_changing_games() {
+        // --imagined を付けても試合は同じ。想像の局面はターン末の局面の直後に、1 つのターン末につき 2 つまで
+        let decks = compare_decks();
+        for g in [3u32, 10] {
+            let plain = play_one(
+                g,
+                &decks,
+                &imagined_model(0),
+                0.1,
+                0.0,
+                IvZone::Hand,
+                0.0,
+                None,
+            );
+            let with = play_one(
+                g,
+                &decks,
+                &imagined_model(2),
+                0.1,
+                0.0,
+                IvZone::Hand,
+                0.0,
+                None,
+            );
+            assert_eq!(without_imagined(&plain.line), without_imagined(&with.line));
+            assert!(with.samples > plain.samples);
+            let v: serde_json::Value = serde_json::from_str(&with.line).expect("JSON");
+            for seq in v["samples"].as_array().expect("局面") {
+                let ph: Vec<i64> = seq
+                    .as_array()
+                    .expect("局面の列")
+                    .iter()
+                    .map(|x| x["ph"].as_i64().expect("ph"))
+                    .collect();
+                let mut run = 0;
+                for (k, &x) in ph.iter().enumerate() {
+                    if x == 2 {
+                        run += 1;
+                        assert!(run <= 2 && k >= run && ph[k - run] == 0, "{ph:?}");
+                    } else {
+                        run = 0;
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn resource_interventions() {
+        // 資源の ±1 はルールの範囲に収まるものだけ。--ivRes を足しても --iv の試合は同じ
+        let decks = compare_decks();
+        let s = create_game([&decks[0].cards, &decks[1].cards], 1);
+        let c = res_candidates(&s, 0);
+        // 始めは体力・EP・SEP が上限なので減らすだけ、PP 最大値 0 は増やすだけ
+        assert!(
+            c.iter().all(|&(_, r, d)| (r == Res::MaxPp) == (d == 1)),
+            "{c:?}"
+        );
+        let mut t = s.clone();
+        t.active = 0;
+        t.players[0].max_pp = 5;
+        t.players[0].pp = 5;
+        apply_res(&mut t, 0, Res::MaxPp, -1);
+        assert_eq!((t.players[0].max_pp, t.players[0].pp), (4, 4));
+        apply_res(&mut t, 1, Res::MaxPp, 1);
+        assert_eq!(
+            (t.players[1].max_pp, t.players[1].pp),
+            (s.players[1].max_pp + 1, s.players[1].pp)
+        );
+
+        let m = imagined_model(0);
+        let g = 4;
+        let base = play_one(g, &decks, &m, 0.1, 2.0, IvZone::Both, 0.0, None);
+        let more = play_one(g, &decks, &m, 0.1, 2.0, IvZone::Both, 1.0, None);
+        let (a, b): (Vec<&str>, Vec<&str>) =
+            (base.line.lines().collect(), more.line.lines().collect());
+        assert_eq!(more.res_ivs, 1);
+        assert_eq!(b.len(), a.len() + 1);
+        assert_eq!(&b[..a.len()], &a[..]);
+        let iv: serde_json::Value = serde_json::from_str(b[a.len()]).expect("JSON");
+        let iv = &iv["iv"];
+        assert!(iv["zone"] == "res" || iv["zone"] == "oppRes", "{iv}");
+        assert!(iv["d"] == 1 || iv["d"] == -1);
+        assert!(["ep", "sep", "hp", "maxPp"].contains(&iv["res"].as_str().expect("res")));
     }
 
     #[test]

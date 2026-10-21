@@ -34,7 +34,12 @@
 //     λ 収益（G_t = (1-λ) V_{t+1} + λ G_{t+1}、最後は勝敗）を目標に、L と c（--fitA 1 なら a も）を交差エントロピーで学ぶ。
 //     a を学ぶと、出発点の評価が勝敗をあまり当てないとき a が小さくなり、探索では補正 (c + L) / a の重みが増える。
 //     V は今のモデルの予測で、エポックごとに計算し直す。試合の --holdout の割合は学習に使わず、予測の確かめに使う。
-//     td selfplay --iv で書き出した介入の試合（手札から 1 枚抜いた局面か、--ivZone board で場のカードを 1 枚消した局面から打った試合）の局面は --ivWeight の重みで学ぶ（0 なら読まない）
+//     td selfplay --iv で書き出した介入の試合（手札から 1 枚抜いた局面か、--ivZone board で場のカードを 1 枚消した局面から打った試合）の局面は --ivWeight の重みで学ぶ（0 なら読まない）。
+//     --ivRes 0 なら、資源を ±1 した介入の試合（td selfplay --ivRes）を読まない（既定 1 は読む）。
+//     td selfplay --imagined で書き出した想像の局面（"ph": 2。探索が相手のターンを読んだ後の局面）は、目標を同じターンのターン末の局面と同じ
+//     （本物の次の自分のターンの最初の局面からの λ 収益）にして、--imaginedWeight の重み（既定 1。0 なら読まない）で学ぶ。
+//     確かめ用の交差エントロピー（--best の判定も）は今までどおり end・after の局面だけで測り、想像の局面は別に出す。
+//     docs/ai-notes.md「読みの中の相手のずれを学習で直す・資源の介入」
 //   npm run td -- ivcheck --model m1.json --data d0.jsonl[,d1.jsonl] [--holdout 0]
 //     介入の試合で、抜いたカードごとに「測った価値」（もとの試合の勝敗 − 抜いた試合の勝敗の平均）と、
 //     モデルが見ている価値（その局面の勝つ確率の予測の差）を比べる（docs/ai-notes.md「介入データを TD 学習に混ぜる」）
@@ -283,8 +288,8 @@ function board(args: Args): number {
 
 /** 自己対戦で記録する局面 1 つ */
 interface Sample {
-  /** 0: ターン末（end）、1: 自分のターンの最初（after） */
-  ph: 0 | 1;
+  /** 0: ターン末（end）、1: 自分のターンの最初（after）、2: 探索が相手のターンを読んだ後の想像の局面（td selfplay --imagined。直前のターン末の局面のもの） */
+  ph: 0 | 1 | 2;
   /** 出発点の評価の点数 S */
   s: number;
   x: number[];
@@ -305,8 +310,11 @@ interface GameRecord {
   decks: [string, string];
   winner: PlayerIndex;
   turns: number;
-  /** 介入の試合: もとの試合 g のプレイヤー p の k 番目の局面から、カード card を 1 枚消して打った。zone が無ければ p の手札、board は p の場、oppBoard は相手の場 */
-  iv?: { p: PlayerIndex; k: number; card: string; zone?: IvZone };
+  /**
+   * 介入の試合: もとの試合 g のプレイヤー p の k 番目の局面から、カード card を 1 枚消して打った。zone が無ければ p の手札、board は p の場、oppBoard は相手の場。
+   * zone が res・oppRes なら、card の代わりに p・相手の資源 res（ep・sep・hp・maxPp）を d（±1）だけ変えて打った（td selfplay --ivRes）
+   */
+  iv?: { p: PlayerIndex; k: number; card?: string; zone?: IvZone; res?: string; d?: number };
   samples: [Sample[], Sample[]];
 }
 
@@ -344,7 +352,9 @@ interface Dataset {
   explored: Uint8Array;
   holdout: Uint8Array;
   phase: Uint8Array;
-  /** 局面の学習の重み（介入の試合の局面は --ivWeight） */
+  /** 想像の局面（ph 2）なら、目標を同じにする局面（直前のターン末の局面）の添字。ほかは -1 */
+  anchor: Int32Array;
+  /** 局面の学習の重み（介入の試合の局面は --ivWeight、想像の局面は --imaginedWeight を掛ける） */
   weight: Float64Array;
   /** 介入の対（もとの局面と、カードを抜いた局面） */
   pairs: IvPair[];
@@ -352,20 +362,28 @@ interface Dataset {
   board?: BoardRows;
 }
 
-type IvZone = "hand" | "board" | "oppBoard";
+type IvZone = "hand" | "board" | "oppBoard" | "res" | "oppRes";
 
-/** 介入の対。測った価値・予測の差は、消したカードの持ち主から見た値（相手の場のカードなら符号を逆にする） */
+const isResZone = (z: IvZone): boolean => z === "res" || z === "oppRes";
+
+/**
+ * 介入の対。測った価値・予測の差は、消したカードの持ち主から見た値（相手の場のカードなら符号を逆にする）。
+ * 資源の介入なら、資源の持ち主から見た 1 増やす価値（減らした介入は符号を逆にする）
+ */
 interface IvPair {
   base: number;
   variant: number;
+  /** 消したカードの ID（資源の介入なら資源の名前） */
   card: string;
-  /** カードの持ち主のデッキ */
+  /** カード・資源の持ち主のデッキ */
   deck: string;
   zone: IvZone;
+  /** 資源の増減（カードの介入は 0） */
+  d: number;
 }
 
-/** 消したカードの持ち主から見た向き */
-const ivSign = (q: IvPair): number => (q.zone === "oppBoard" ? -1 : 1);
+/** 持ち主から見た向き（カードは「あった価値」、資源は「1 増やした価値」） */
+const ivSign = (q: IvPair): number => (q.zone === "oppBoard" || q.zone === "oppRes" ? -1 : 1) * (isResZone(q.zone) ? -q.d : 1);
 
 type Typed = Int32Array | Float32Array | Float64Array | Uint8Array | Uint16Array;
 
@@ -446,33 +464,43 @@ class BoardGrow {
   }
 }
 
-function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: number) => boolean, board?: CompiledBoard): Dataset {
+/** loadData の読み方（train の --imaginedWeight・--ivRes） */
+interface LoadOptions {
+  /** 想像の局面（ph 2）の重み（0 なら読まない。既定 1） */
+  imaginedWeight?: number;
+  /** 資源の介入の試合を読む（既定 true） */
+  ivRes?: boolean;
+}
+
+function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: number) => boolean, board?: CompiledBoard, opts: LoadOptions = {}): Dataset {
+  const imaginedWeight = opts.imaginedWeight ?? 1;
   const off = new Grow(i32), idx = new Grow(i32), val = new Grow(f32), s = new Grow(f64), next = new Grow(i32), outcome = new Grow(f64);
   const cards = board ? new BoardGrow(board) : null;
-  const explored = new Grow(u8), hold = new Grow(u8), phase = new Grow(u8), weight = new Grow(f64);
+  const explored = new Grow(u8), hold = new Grow(u8), phase = new Grow(u8), weight = new Grow(f64), anchor = new Grow(i32);
   off.push(0);
   const pairs: IvPair[] = [];
   for (const file of files) {
-    // もとの試合の各プレイヤーの最初の局面の添字（介入の対を作る）。介入の試合はもとの試合のすぐ後の行にある
-    const firstOf = new Map<number, [number, number]>();
+    // もとの試合の各プレイヤーの局面の、試合の中の位置 → 添字（介入の対を作る）。介入の試合はもとの試合のすぐ後の行にある
+    const posOf = new Map<number, [number[], number[]]>();
     for (const line of readFileSync(file, "utf8").split("\n")) {
       if (!line.trim()) continue;
       const r = parseLine(line);
       if (isCmp(r)) continue;
       if (r.iv && ivWeight === 0) continue;
-      if (r.iv) {
-        const first = firstOf.get(r.g);
-        const zone = r.iv.zone ?? "hand";
-        const owner = zone === "oppBoard" ? 1 - r.iv.p : r.iv.p;
-        if (first && r.samples[r.iv.p].length > 0) pairs.push({ base: first[r.iv.p] + r.iv.k, variant: s.length + (r.iv.p === 1 ? r.samples[0].length : 0), card: r.iv.card, deck: r.decks[owner]!, zone });
-      } else {
-        firstOf.set(r.g, [s.length, s.length + r.samples[0].length]);
-      }
+      if (r.iv && isResZone(r.iv.zone ?? "hand") && opts.ivRes === false) continue;
       // 試合番号で決める（ファイルを足しても同じ試合は同じ側）
       const isHold = ((Math.imul(r.g, 2654435761) >>> 0) % 1000) / 1000 < holdout ? 1 : 0;
+      const pos: [number[], number[]] = [[], []];
       r.samples.forEach((seq, p) => {
-        seq.forEach((x, k) => {
+        // 同じプレイヤーの 1 つ前の（想像の局面でない）局面
+        let prev = -1;
+        for (const x of seq) {
+          if (x.ph === 2 && (imaginedWeight === 0 || prev < 0)) {
+            pos[p]!.push(-1);
+            continue;
+          }
           const i = s.length;
+          pos[p]!.push(i);
           for (let j = 0; j < x.x.length; j++) {
             if (keep && !keep(x.x[j]!)) continue;
             idx.push(x.x[j]!);
@@ -481,14 +509,34 @@ function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: num
           off.push(idx.length);
           cards?.add(x.b);
           s.push(x.s);
-          next.push(k + 1 < seq.length ? i + 1 : -1);
+          next.push(-1);
           outcome.push(r.winner === p ? 1 : 0);
           explored.push(x.ex ? 1 : 0);
           hold.push(isHold);
           phase.push(x.ph);
-          weight.push(r.iv ? ivWeight : 1);
-        });
+          const w = r.iv ? ivWeight : 1;
+          if (x.ph === 2) {
+            anchor.push(prev);
+            weight.push(w * imaginedWeight);
+          } else {
+            anchor.push(-1);
+            weight.push(w);
+            if (prev >= 0) next.buf[prev] = i;
+            prev = i;
+          }
+        }
       });
+      if (r.iv) {
+        const base = posOf.get(r.g)?.[r.iv.p][r.iv.k];
+        const variant = pos[r.iv.p][0];
+        const zone = r.iv.zone ?? "hand";
+        const owner = zone === "oppBoard" || zone === "oppRes" ? 1 - r.iv.p : r.iv.p;
+        if (base !== undefined && base >= 0 && variant !== undefined && variant >= 0) {
+          pairs.push({ base, variant, card: r.iv.card ?? r.iv.res ?? "", deck: r.decks[owner]!, zone, d: r.iv.d ?? 0 });
+        }
+      } else {
+        posOf.set(r.g, pos);
+      }
     }
   }
   return {
@@ -501,6 +549,7 @@ function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: num
     explored: explored.done(),
     holdout: hold.done(),
     phase: phase.done(),
+    anchor: anchor.done(),
     weight: weight.done(),
     pairs,
     ...(cards ? { board: cards.done() } : {}),
@@ -653,15 +702,20 @@ function predictAll(net: CompiledValueNet, d: SparseRows & { s: Float64Array }):
   return v;
 }
 
-/** λ 収益（局面 i の目標）。次の局面がランダムに打った局面なら、その局面の予測で切る */
+/** λ 収益（局面 i の目標）。次の局面がランダムに打った局面なら、その局面の予測で切る。想像の局面は、直前のターン末の局面と同じ目標 */
 function lambdaReturns(d: Dataset, v: Float64Array, lambda: number): Float64Array {
   const g = new Float64Array(v.length);
   // 各列の局面は添字の順に並んでいるので、後ろから計算すれば次の局面の目標は計算済み
   for (let i = v.length - 1; i >= 0; i--) {
+    if (d.anchor[i]! >= 0) continue;
     const j = d.next[i]!;
     if (j < 0) g[i] = d.outcome[i]!;
     else if (d.explored[j]) g[i] = v[j]!;
     else g[i] = (1 - lambda) * v[j]! + lambda * g[j]!;
+  }
+  for (let i = 0; i < v.length; i++) {
+    const a = d.anchor[i]!;
+    if (a >= 0) g[i] = g[a]!;
   }
   return g;
 }
@@ -685,32 +739,38 @@ function auc(pred: number[], y: number[]): number {
   return pos === 0 || neg === 0 ? 0.5 : (rankSum - (pos * (pos + 1)) / 2) / (pos * neg);
 }
 
-/** 確かめ用の局面（holdout。ランダムに打った局面を除く）の、勝敗に対する交差エントロピー */
+/** 確かめ用の局面（holdout。ランダムに打った局面と想像の局面を除く）の、勝敗に対する交差エントロピー */
 function holdoutLoss(d: Dataset, v: Float64Array): number {
   let sum = 0, n = 0;
   for (let i = 0; i < v.length; i++) {
-    if (!d.holdout[i] || d.explored[i]) continue;
+    if (!d.holdout[i] || d.explored[i] || d.anchor[i]! >= 0) continue;
     sum += bce(v[i]!, d.outcome[i]!);
     n++;
   }
   return sum / Math.max(1, n);
 }
 
-/** 確かめ用の局面（holdout）での、勝敗に対する交差エントロピーと AUC（全体・ターン末・ターンの最初） */
+/**
+ * 確かめ用の局面（holdout）での、勝敗に対する交差エントロピーと AUC（全体・ターン末・ターンの最初。全体に想像の局面は入れない）。
+ * 想像の局面があれば、それも別に出す（予測の平均 − 目標の平均は、読みの中の局面をどれだけ楽観しているか）
+ */
 function report(label: string, d: Dataset, v: Float64Array, targets: Float64Array): void {
   const parts: string[] = [];
-  for (const [name, ph] of [["全体", -1], ["end", 0], ["after", 1]] as const) {
+  for (const [name, ph] of [["全体", -1], ["end", 0], ["after", 1], ["imagined", 2]] as const) {
     const pred: number[] = [], y: number[] = [];
-    let td = 0;
+    let td = 0, bias = 0;
     for (let i = 0; i < v.length; i++) {
-      if (!d.holdout[i] || d.explored[i] || (ph >= 0 && d.phase[i] !== ph)) continue;
+      if (!d.holdout[i] || d.explored[i] || (ph >= 0 ? d.phase[i] !== ph : d.phase[i] === 2)) continue;
       pred.push(v[i]!);
       y.push(d.outcome[i]!);
       td += bce(v[i]!, targets[i]!);
+      bias += v[i]! - targets[i]!;
     }
     const n = pred.length;
+    if (ph === 2 && n === 0) continue;
     const ll = pred.reduce((x, p, k) => x + bce(p, y[k]!), 0) / Math.max(1, n);
-    parts.push(`${name}(${n}) 勝敗の交差エントロピー ${ll.toFixed(4)} AUC ${auc(pred, y).toFixed(3)} TD ${(td / Math.max(1, n)).toFixed(4)}`);
+    const extra = ph === 2 ? ` 予測の平均 − 目標の平均 ${(bias / Math.max(1, n) >= 0 ? "+" : "") + ((bias / Math.max(1, n)) * 100).toFixed(1)}%` : "";
+    parts.push(`${name}(${n}) 勝敗の交差エントロピー ${ll.toFixed(4)} AUC ${auc(pred, y).toFixed(3)} TD ${(td / Math.max(1, n)).toFixed(4)}${extra}`);
   }
   const iv = ivSummary(d, v, true);
   if (iv) parts.push(iv);
@@ -718,22 +778,32 @@ function report(label: string, d: Dataset, v: Float64Array, targets: Float64Arra
 }
 
 /** 介入の対の、測った価値（勝敗の差の平均）とモデルが見ている価値（予測の差の平均） */
-const IV_ZONE_NAME: Record<IvZone, string> = { hand: "", board: "自分の場", oppBoard: "相手の場" };
+const IV_ZONE_NAME: Record<IvZone, string> = { hand: "", board: "自分の場", oppBoard: "相手の場", res: "自分の", oppRes: "相手の" };
+/** 資源の介入の資源の名前（td selfplay --ivRes の res） */
+const RES_NAME: Record<string, string> = { ep: "EP", sep: "SEP", hp: "体力", maxPp: "PP 最大値" };
+
+/** 介入の対をまとめる名前（カードは場所ごと、資源は持ち主と資源ごと） */
+const ivGroup = (q: IvPair): string => (isResZone(q.zone) ? `${IV_ZONE_NAME[q.zone]}${RES_NAME[q.card] ?? q.card}（1 あたり）` : IV_ZONE_NAME[q.zone]);
 
 function ivSummary(d: Dataset, v: Float64Array, holdoutOnly: boolean): string | null {
-  const parts: string[] = [];
-  for (const zone of ["hand", "board", "oppBoard"] as const) {
-    let n = 0, measured = 0, predicted = 0;
-    for (const q of d.pairs) {
-      if (q.zone !== zone || (holdoutOnly && !d.holdout[q.base])) continue;
-      n++;
-      measured += ivSign(q) * (d.outcome[q.base]! - d.outcome[q.variant]!);
-      predicted += ivSign(q) * (v[q.base]! - v[q.variant]!);
-    }
-    if (n === 0) continue;
-    const pct = (x: number) => `${x >= 0 ? "+" : ""}${((x / n) * 100).toFixed(1)}%`;
-    parts.push(`介入${IV_ZONE_NAME[zone]}(${n}) 測った価値 ${pct(measured)} 予測の差 ${pct(predicted)}`);
+  // 手札・自分の場・相手の場・資源（自分・相手、EP・SEP・体力・PP 最大値）の順
+  const order = (q: IvPair): number => ["hand", "board", "oppBoard", "res", "oppRes"].indexOf(q.zone) * 10 + (isResZone(q.zone) ? Object.keys(RES_NAME).indexOf(q.card) + 1 : 0);
+  const groups = new Map<string, { o: number; n: number; measured: number; predicted: number }>();
+  for (const q of d.pairs) {
+    if (holdoutOnly && !d.holdout[q.base]) continue;
+    const key = ivGroup(q);
+    const c = groups.get(key) ?? { o: order(q), n: 0, measured: 0, predicted: 0 };
+    c.n++;
+    c.measured += ivSign(q) * (d.outcome[q.base]! - d.outcome[q.variant]!);
+    c.predicted += ivSign(q) * (v[q.base]! - v[q.variant]!);
+    groups.set(key, c);
   }
+  const parts = [...groups]
+    .sort((x, y) => x[1].o - y[1].o)
+    .map(([key, c]) => {
+      const pct = (x: number) => `${x >= 0 ? "+" : ""}${((x / c.n) * 100).toFixed(1)}%`;
+      return `介入${key}(${c.n}) 測った価値 ${pct(c.measured)} 予測の差 ${pct(c.predicted)}`;
+    });
   return parts.length > 0 ? parts.join(" / ") : null;
 }
 
@@ -750,6 +820,8 @@ function train(args: Args): number {
   const fitA = numArg(args, "fitA", 1) !== 0;
   const holder = { rng: numArg(args, "seed", 1) >>> 0 };
   const ivWeight = numArg(args, "ivWeight", 1);
+  const imaginedWeight = numArg(args, "imaginedWeight", 1);
+  const ivRes = numArg(args, "ivRes", 1) !== 0;
   const keepBest = numArg(args, "best", 0) !== 0;
   const cmpWeight = numArg(args, "cmpWeight", 0);
   const cmpBatch = numArg(args, "cmpBatch", 16);
@@ -766,9 +838,12 @@ function train(args: Args): number {
       }
     : undefined;
   const compiled0 = compileValueNet(model);
-  const d = loadData(files, holdout, ivWeight, keep, compiled0.board);
+  const d = loadData(files, holdout, ivWeight, keep, compiled0.board, { imaginedWeight, ivRes });
   const n = d.s.length;
-  console.log(`${files.join(", ")}: 局面 ${n}（確かめ用 ${d.holdout.reduce((x, y) => x + y, 0)}、ランダムに打った ${d.explored.reduce((x, y) => x + y, 0)}）、読み込み ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  const nImagined = d.anchor.reduce((x, a) => x + (a >= 0 ? 1 : 0), 0);
+  console.log(
+    `${files.join(", ")}: 局面 ${n}（確かめ用 ${d.holdout.reduce((x, y) => x + y, 0)}、ランダムに打った ${d.explored.reduce((x, y) => x + y, 0)}、想像の局面 ${nImagined}、介入の対 ${d.pairs.length}（うち資源 ${d.pairs.filter((q) => isResZone(q.zone)).length}））、読み込み ${((Date.now() - t0) / 1000).toFixed(1)}s`,
+  );
 
   const cmp = cmpWeight > 0 ? loadGroups(files, holdout, compiled0.board) : null;
   if (cmp) console.log(`打ち比べ ${cmp.goff.length - 1} 局面・${cmp.s.length} 並び（確かめ用 ${cmp.holdout.reduce((x, y) => x + y, 0)} 局面）`);
@@ -1223,7 +1298,7 @@ function ivcheck(args: Args): number {
     if (holdoutOnly && !d.holdout[q.base]) continue;
     const m = ivSign(q) * (d.outcome[q.base]! - d.outcome[q.variant]!);
     const p = ivSign(q) * (v[q.base]! - v[q.variant]!);
-    const key = `${q.deck}\t${nameOf.get(q.card) ?? q.card}${q.zone === "hand" ? "" : `（場）`}`;
+    const key = isResZone(q.zone) ? `${q.deck}\t${ivGroup(q)}` : `${q.deck}\t${nameOf.get(q.card) ?? q.card}${q.zone === "hand" ? "" : `（場）`}`;
     const c = by.get(key) ?? { n: 0, m: 0, m2: 0, p: 0 };
     c.n++;
     c.m += m;
