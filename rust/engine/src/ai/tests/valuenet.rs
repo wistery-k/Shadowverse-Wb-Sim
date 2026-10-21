@@ -401,3 +401,38 @@ fn ability_json_texts_has(text: &str) -> bool {
         .iter()
         .any(|(_, t)| t == text)
 }
+
+#[test]
+fn imagined_input() {
+    // 想像の局面（探索が相手のターンを読んだ後）は、"imagined" の無いモデルでは After と同じ。
+    // 足したモデルでは "imagined" の重みの分だけ変わり、重みが 0 なら同じ（npm run td -- extend）
+    let old = model(4, |i| ((i * 13) % 7) as f64 / 10.0 - 0.3, 0.5);
+    assert!(!old.scalars.iter().any(|x| x == "imagined"));
+    let with_row = |row: f64| {
+        let mut m = old.clone();
+        m.scalars.push("imagined".into());
+        // 場のカードのネットワークの無いモデルなので、最後の数値の入力の行は w1 の末尾
+        m.w1.extend((0..m.hidden).map(|j| row * (j as f64 + 1.0)));
+        ValueNet::new(m).expect("モデル")
+    };
+    let (zero, learned) = (with_row(0.0), with_row(0.2));
+    let old = ValueNet::new(old).expect("モデル");
+    assert!(!old.has_scalar("imagined"));
+    assert!(zero.has_scalar("imagined") && learned.has_scalar("imagined"));
+    let s = mid_game();
+    for p in 0..2 {
+        let after = old.eval(&s, p, ValuePhase::After);
+        assert_eq!(old.eval(&s, p, ValuePhase::Imagined), after);
+        assert_eq!(
+            old.encode(&s, p, ValuePhase::Imagined),
+            old.encode(&s, p, ValuePhase::After)
+        );
+        assert_eq!(zero.eval(&s, p, ValuePhase::Imagined), after);
+        assert_eq!(
+            zero.encode(&s, p, ValuePhase::Imagined).len(),
+            zero.encode(&s, p, ValuePhase::After).len() + 1
+        );
+        assert_eq!(learned.eval(&s, p, ValuePhase::After), after);
+        assert_ne!(learned.eval(&s, p, ValuePhase::Imagined), after);
+    }
+}

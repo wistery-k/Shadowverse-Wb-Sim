@@ -129,6 +129,8 @@ pub struct SearchOptions {
     pub resample_draws: bool,
     /// 選んだ並びの途中でカードを引く手を、先に打っても並びの残りが打てて点数が下がらなければ先に打つ（引いたカードを見てから残りを決める）
     pub draw_first: bool,
+    /// 選んだ並びの、相手のターンを読んだ後の想像の局面を残す（SearchAgent::take_reads。TD 学習の自己対戦の --imagined 用。打つ手は変わらない）
+    pub record_reads: bool,
 }
 
 impl Default for SearchOptions {
@@ -184,6 +186,7 @@ impl Default for SearchOptions {
             reuse_agree: false,
             resample_draws: false,
             draw_first: false,
+            record_reads: false,
         }
     }
 }
@@ -212,6 +215,8 @@ pub struct Plan {
     pub action: Action,
     pub value: f64,
     pub steps: Vec<(Action, Rc<GameState>)>,
+    /// 相手のターンを読んだ後の想像の局面（record_reads のときだけ。読み直した並びの、引き直しごとに 1 つ）
+    pub reads: Vec<Rc<GameState>>,
 }
 
 /// 点数の内訳（「AI の考え」の表示用）。total は探索が使った点数、eval は手で作った評価関数、extra は評価に足す項（学習した補正など）。
@@ -355,10 +360,11 @@ impl<'a> Planner<'a> {
         }
     }
 
+    /// 相手のターンを読んだ後の局面（想像の局面）の点数
     fn eval_after(&self, s: &GameState) -> f64 {
         let v = evaluate_with(s, self.p, self.env.w);
         match &self.opts().extra_eval {
-            Some(f) => v + f(s, self.p, ValuePhase::After),
+            Some(f) => v + f(s, self.p, ValuePhase::Imagined),
             None => v,
         }
     }
@@ -703,6 +709,7 @@ pub fn plan_turn_traced(
                 action: t.first.clone(),
                 value: t.value,
                 steps: pl.steps_of(t.path),
+                reads: Vec::new(),
             };
             let parts = pl.end_parts(&t.state, t.value);
             tr.turn_end.push((plan, parts));
@@ -717,6 +724,7 @@ pub fn plan_turn_traced(
                     action: t.first.clone(),
                     value: t.value,
                     steps: pl.steps_of(t.path),
+                    reads: Vec::new(),
                 };
                 (k, plan)
             })
@@ -767,11 +775,16 @@ pub fn plan_turn_traced(
         let node = &terminals[i];
         // 読み直した局面の手で作った評価と評価に足す項の合計（trace のときだけ求める）
         let mut parts = (0.0, 0.0);
-        let mut add = |after: &GameState| {
+        // 読み直した局面（record_reads のときだけ残す）
+        let mut afters: Vec<Rc<GameState>> = Vec::new();
+        let mut add = |after: GameState| {
             if tracing {
-                let (e, x) = pl.parts(after, ValuePhase::After);
+                let (e, x) = pl.parts(&after, ValuePhase::Imagined);
                 parts.0 += e;
                 parts.1 += x;
+            }
+            if opts.record_reads {
+                afters.push(Rc::new(after));
             }
         };
         let (value, n) = if node.state.phase == Phase::Ended {
@@ -782,7 +795,7 @@ pub fn plan_turn_traced(
         } else if opts.opp_hand_samples <= 1 {
             let settled = pl.settle(&node.state);
             let (v, after) = read_once(&pl, settled.as_ref().unwrap_or(&node.state), rng);
-            add(&after);
+            add(after);
             (v - pl.leftover(&node.state), 1)
         } else {
             let settled = pl.settle(&node.state);
@@ -797,14 +810,14 @@ pub fn plan_turn_traced(
                     }
                     let (v, after) = read_once(&pl, &d, &mut r);
                     sum += v;
-                    add(&after);
+                    add(after);
                 }
             } else {
                 for _ in 0..opts.opp_hand_samples {
                     let d = determinize(base, p, rng, opts.peek_opp_hand);
                     let (v, after) = read_once(&pl, &d, rng);
                     sum += v;
-                    add(&after);
+                    add(after);
                 }
             }
             (
@@ -821,6 +834,7 @@ pub fn plan_turn_traced(
                 action: node.first.clone(),
                 value,
                 steps: pl.steps_of(node.path),
+                reads: afters,
             };
             match result.iter_mut().find(|(k, _)| *k == node.first) {
                 Some(e) => e.1 = plan,
@@ -1258,6 +1272,8 @@ pub struct SearchAgent {
     policy_w: EvalWeights,
     default_w: EvalWeights,
     plans: [Option<PlanState>; 2],
+    /// 最後に選んだ並びの想像の局面（record_reads のとき）
+    reads: [Vec<Rc<GameState>>; 2],
 }
 
 impl SearchAgent {
@@ -1277,7 +1293,13 @@ impl SearchAgent {
             policy_w: EvalWeights::new(pw),
             default_w: EvalWeights::new(ad.default_weights.clone()),
             plans: [None, None],
+            reads: [Vec::new(), Vec::new()],
         }
+    }
+
+    /// p が最後に選んだ並びの、相手のターンを読んだ後の想像の局面（record_reads のとき）を取り出す。取り出すと空になる
+    pub fn take_reads(&mut self, p: PlayerIndex) -> Vec<Rc<GameState>> {
+        std::mem::take(&mut self.reads[p])
     }
 }
 
@@ -1549,6 +1571,7 @@ impl Agent for SearchAgent {
 
         if let Some(l) = self.lethal_action(real, legal, p, rng) {
             self.plans[p] = None;
+            self.reads[p].clear();
             return l;
         }
 
@@ -1630,8 +1653,12 @@ impl Agent for SearchAgent {
             if opts.reuse_plan && steps.len() > 1 {
                 self.plans[p] = Some(PlanState { steps, index: 1 });
             }
+            if opts.record_reads {
+                self.reads[p] = best.plan.reads.clone();
+            }
             return action;
         }
+        self.reads[p].clear();
         let permitted: Vec<Action> = match &opts.allow {
             Some(f) => legal
                 .iter()

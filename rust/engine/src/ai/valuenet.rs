@@ -28,8 +28,9 @@ pub const ZONES: [&str; 14] = [
     "oppBoardDef",
 ];
 /// 数値の入力（ZONES と同じく、モデルはこの並びの部分列を持つ）。
-/// "after" より後ろは場のフォロワーの合計とキーワードを持つ数（同上）
-pub const SCALARS: [&str; 33] = [
+/// "after" より後ろは場のフォロワーの合計とキーワードを持つ数（同上）。
+/// 最後の "imagined" は、探索が相手のターンを読んだ後の想像の局面か（ValuePhase::Imagined。docs/ai-notes.md「読みの中の相手のずれを学習で直す」）
+pub const SCALARS: [&str; 34] = [
     "myHp",
     "oppHp",
     "myMaxPp",
@@ -63,6 +64,7 @@ pub const SCALARS: [&str; 33] = [
     "oppBarrier",
     "myAmbush",
     "oppAmbush",
+    "imagined",
 ];
 
 /// 場のカード 1 枚ごとの数値の入力（場のカードのネットワーク。valueNet.ts の BOARD_FEATURES。モデルはこの並びの部分列を持つ）。
@@ -112,11 +114,16 @@ fn subsequence_slots<const N: usize>(
     Some(slots)
 }
 
-/// 評価する局面の種類（end: 自分のターン末、after: 相手のターンを読んだ後）
+/// 評価する局面の種類
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ValuePhase {
+    /// 自分のターン末
     End,
+    /// 自分のターンの最初（自己対戦で相手が実際に打った後）
     After,
+    /// 探索が相手のターンを読んだ後の、自分のターンの最初の想像の局面。入力は After に "imagined" を足したもの
+    /// （"imagined" の無いモデルでは After と同じ）
+    Imagined,
 }
 
 /// 学習した評価の補正のモデル（valueNet.ts の CompiledValueNet）
@@ -364,6 +371,14 @@ impl ValueNet {
         ValueNet::new(raw)
     }
 
+    /// 数値の入力 name（SCALARS の 1 つ）を持つか
+    pub fn has_scalar(&self, name: &str) -> bool {
+        SCALARS
+            .iter()
+            .position(|x| *x == name)
+            .is_some_and(|j| self.scalar_slot[j].is_some())
+    }
+
     /// 補正が 0 のモデル（出力の重み・バイアスがすべて 0）
     pub fn is_zero(&self) -> bool {
         self.w2.iter().all(|&x| x == 0.0) && self.b2 == 0.0 && self.c == 0.0
@@ -563,7 +578,7 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
         opp.deck.len() as f64 / 40.0,
         me.graveyard.min(30) as f64 / 20.0,
         opp.graveyard.min(30) as f64 / 20.0,
-        b(phase == ValuePhase::After),
+        b(phase != ValuePhase::End),
         b(s.first == p),
         m[0] / 4.0,
         m[1] / 4.0,
@@ -577,6 +592,7 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
         o[4] / 2.0,
         m[5] / 2.0,
         o[5] / 2.0,
+        b(phase == ValuePhase::Imagined),
     ];
     for (j, &x) in scalars.iter().enumerate() {
         if let Some(k) = net.scalar_slot[j] {
