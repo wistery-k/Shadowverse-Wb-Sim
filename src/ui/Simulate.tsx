@@ -1,4 +1,4 @@
-// AI 同士の自動対戦（総当たり）と勝率の集計。複数の Web Worker で並列に実行する。
+// AI 同士の自動対戦（総当たり）と勝率の集計。複数の Web Worker で並列に実行する（試合を 1 つずつ配る。src/sim/pool.ts）。
 
 import { useEffect, useRef, useState } from "preact/hooks";
 import { AGENTS } from "../ai/registry";
@@ -6,7 +6,8 @@ import { CLASS_NAMES } from "../cards";
 import type { PlayerIndex } from "../engine";
 import type { Deck } from "../cards/deck";
 import { DEFAULT_DECKS } from "../cards/defaultDecks";
-import { planGames, summarize, type Entrant, type GameRecord, type TournamentSummary } from "../sim/tournament";
+import { runPool } from "../sim/pool";
+import { planGames, summarize, type Entrant, type GameRecord, type GameSpec, type TournamentSummary } from "../sim/tournament";
 import type { WorkerRequest, WorkerResponse } from "../sim/worker";
 import { isPlayable } from "./Decks";
 import { Replay } from "./Replay";
@@ -114,23 +115,19 @@ export function Simulate({ saved }: Props) {
     const startedAt = Date.now();
     setRun({ entrants, total: specs.length, records: [], startedAt, finishedAt: null });
 
-    const count = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 1, specs.length));
-    let finished = 0;
-    for (let w = 0; w < count; w++) {
-      const worker = new Worker(new URL("../sim/worker.ts", import.meta.url), { type: "module" });
-      worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
-        const msg = e.data;
-        if (msg.type === "record") {
-          setRun((r) => (r ? { ...r, records: [...r.records, msg.record] } : r));
-        } else if (++finished === count) {
-          setRun((r) => (r ? { ...r, finishedAt: Date.now() } : r));
-          stop();
-        }
-      };
-      const request: WorkerRequest = { entrants, specs: specs.filter((_, i) => i % count === w), record: true };
-      worker.postMessage(request);
-      workers.current.push(worker);
-    }
+    workers.current = runPool<GameSpec, WorkerResponse>({
+      create: () => new Worker(new URL("../sim/worker.ts", import.meta.url), { type: "module" }),
+      jobs: specs,
+      request: (spec): WorkerRequest => ({ entrants, specs: [spec], record: true }),
+      isDone: (msg) => msg.type === "done",
+      onMessage: (msg) => {
+        if (msg.type === "record") setRun((r) => (r ? { ...r, records: [...r.records, msg.record] } : r));
+      },
+      onFinish: () => {
+        setRun((r) => (r ? { ...r, finishedAt: Date.now() } : r));
+        stop();
+      },
+    });
   }
 
   const running = run !== null && run.finishedAt === null;
