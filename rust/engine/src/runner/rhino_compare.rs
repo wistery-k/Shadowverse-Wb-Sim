@@ -2,8 +2,9 @@
 //!
 //!   svwb rhino-compare [--subject rhino|af|spellwitch|bishop|dragon|nightmare|royal] [--games 50] [--start 0]
 //!                      [--agent rhino|rhino-lethal|search|search-classic] [--opts '<設定JSON>'] [--out 結果.jsonl] [--matches 試合.jsonl]
+//!                      [--opp search-classic|search]
 //!
-//! 比べるデッキ vs 他の 6 デッキ（相手は学習した補正を入れる前の探索 AI）を、両方の席で同じシードで打つ
+//! 比べるデッキ vs 他の 6 デッキ（相手は学習した補正を入れる前の探索 AI。--opp search なら今の既定の探索 AI）を、両方の席で同じシードで打つ
 //! （試合の決め方は src/sim/humanCompare.ts）。序盤のターンを全探索する "exhaustive" は TypeScript 版とともに消した。
 
 use super::options::{rhino_compare_options, rhino_options, search_options};
@@ -163,11 +164,12 @@ fn play_one(
     opp: &'static Deck,
     t: &Task,
     agent: &AgentConfig,
+    opp_options: &SearchOptions,
 ) -> Outcome {
     let (subject_id, _, _, seed_base) = *subject;
     let seed = seed_base + t.g * 13 + t.seat as u32;
     let mut a = agent.create();
-    let mut o = SearchAgent::new(search_classic_options());
+    let mut o = SearchAgent::new(opp_options.clone());
     let decks = if t.seat == 0 {
         [&me.cards[..], &opp.cards[..]]
     } else {
@@ -233,6 +235,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut subject = SUBJECTS[0];
     let mut matches: Option<String> = None;
     let mut opts_text: Option<String> = None;
+    let mut opp_key = "search-classic".to_string();
     let mut it = argv.iter();
     while let Some(key) = it.next() {
         let v = it.next().ok_or_else(|| format!("{key} の値がありません"))?;
@@ -255,6 +258,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                 })?
             }
             "--opts" => opts_text = Some(v.clone()),
+            "--opp" => opp_key = v.clone(),
             _ => return Err(format!("不明な引数: {key}")),
         }
     }
@@ -269,6 +273,12 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         "search" => AgentConfig::Search(search_options(&opts, model.as_ref(), SearchOptions::default(), &["potential"])?),
         "search-classic" => AgentConfig::Search(search_classic_options()),
         _ => return Err(format!("Rust 版で使える --agent は rhino / rhino-lethal / search / search-classic: {agent_key}")),
+    };
+    // 相手の AI（既定は人間の記録と比べられるよう search-classic）
+    let opp_options = match opp_key.as_str() {
+        "search-classic" => search_classic_options(),
+        "search" => SearchOptions::default(),
+        _ => return Err(format!("--opp は search-classic / search: {opp_key}")),
     };
     let me: &'static Deck = data()
         .decks
@@ -318,7 +328,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                 .iter()
                 .find(|o| o.name == t.deck)
                 .expect("相手デッキ");
-            play_one(&subject, me, opp, t, &agent)
+            play_one(&subject, me, opp, t, &agent, &opp_options)
         },
         |_, _, _, _| {},
     );
@@ -329,9 +339,14 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     }
     let wins = results.iter().filter(|r| r.won).count();
     println!(
-        "{} agent {agent_key} opts {}: {wins}/{n} = {}%  {}s/試合",
+        "{} agent {agent_key} opts {}{}: {wins}/{n} = {}%  {}s/試合",
         subject.1,
         opts.stringify(),
+        if opp_key == "search-classic" {
+            String::new()
+        } else {
+            format!(" opp {opp_key}")
+        },
         fixed((wins as f64 / n as f64) * 100.0, 1),
         fixed(seconds_since(t0) / n.max(1) as f64, 2)
     );
