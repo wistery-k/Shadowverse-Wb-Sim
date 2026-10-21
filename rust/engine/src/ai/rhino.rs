@@ -261,7 +261,9 @@ pub fn rhino_search_options(potential: f64, learned: Option<ExtraEval>) -> Searc
         lethal: false,
         per_first: RHINO_PER_FIRST,
         next_lethal_search: Some(Arc::new(rhino_next_lethal)),
-        extra_eval: rhino_extra_eval(potential, learned),
+        extra_eval: rhino_extra_eval(potential, learned.clone()),
+        // 相手のターンの読みで相手の評価に補正を足すとき（opponentSearch.extraEval）は、エルフ用の打点の項を除いた補正だけにする
+        opp_extra_eval: learned,
         ..SearchOptions::default()
     }
 }

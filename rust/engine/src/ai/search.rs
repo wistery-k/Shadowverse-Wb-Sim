@@ -109,6 +109,9 @@ pub struct SearchOptions {
     pub pass_lethal_search: Option<NextLethalSearch>,
     pub beam_pp: f64,
     pub extra_eval: Option<ExtraEval>,
+    /// 相手のターンを読むビームの評価に足す項（opponentSearch.extraEval のとき。None なら extra_eval と同じ）。
+    /// リノセウス用 AI は、エルフ用の打点の項を除いた学習した補正だけを渡す
+    pub opp_extra_eval: Option<ExtraEval>,
     /// 評価関数の重み（None なら探索 AI の既定 SEARCH_WEIGHTS）
     pub weights: Option<Arc<Weights>>,
     pub opponent_search: Option<OpponentSearch>,
@@ -161,6 +164,7 @@ impl Default for SearchOptions {
             pass_lethal_search: None,
             beam_pp: 0.0,
             extra_eval: Some(Arc::new(value_net_eval)),
+            opp_extra_eval: None,
             weights: None,
             opponent_search: Some(OpponentSearch {
                 beam_width: 4,
@@ -1115,7 +1119,9 @@ pub fn simulate_opponent_turn_by_search(
     let opp_opts = SearchOptions {
         allow: None,
         extra_eval: if os.is_some_and(|o| o.extra_eval) {
-            opts.extra_eval.clone()
+            opts.opp_extra_eval
+                .clone()
+                .or_else(|| opts.extra_eval.clone())
         } else {
             None
         },

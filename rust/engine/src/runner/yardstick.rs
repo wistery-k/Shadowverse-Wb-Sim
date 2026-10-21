@@ -71,6 +71,7 @@ pub fn reference_options() -> SearchOptions {
         pass_lethal_search: None,
         beam_pp: 0.0,
         extra_eval: None,
+        opp_extra_eval: None,
         weights: Some(Arc::new(weights)),
         opponent_search: None,
         own_next: None,
