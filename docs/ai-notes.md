@@ -2906,4 +2906,6 @@ AI の改善で試したことと結果。同じ実験を繰り返さないた�
 - モデル・ログ・自己対戦のデータ（c0〜c19）・回したスクリプト（`main.sh`・`selfplay.sh`・`train.sh`・`eval.sh` 等）は、ユーザーの PC の `/home/wk/td-more-data4/` に置いた（コミットしていない）。
   sha256: p60p `e175b9d379b2a494ba841f61f58c96074fd6f0f678637ceaacb0c3711b2829af`、pb60p `d6845b942c0050eb8c0b98931bdcd4ddeac0093f6da508b5193b3d0c96c06a66`、
   p120p `0069e36480ab70cf83507d588d6957b6eb29bddc652d24dfd0aef0d0530b1bc9`、pb120p `e76e4f43d0908e9e6dfe8cdcea119375bfd0f8e00e4f60024aebb324fc308590`
-- **採用（ユーザー判断）:** A60（p60p）を `data/value-net.json` にする（探索 AI とリノセウス用 AI の既定の補正。大きさは o60p と同じ）
+- **採用（ユーザー判断）:** A60（p60p）を `data/value-net.json` にした（探索 AI とリノセウス用 AI の既定の補正。大きさは o60p と同じ）。ファイルはユーザーが PC から添付し、PC の元のファイルと sha256 が一致することを確かめた。
+  B60 は今の AI との差が A60 と同じで直接打たせても互角だが、物差し 2 で低く、探索も遅いので採らなかった。
+  補正が変わって手が変わったので、ゴールデン（ai-search・ai-rhino・ai-rhino-lethal）を保存し直した。他のテストはそのまま通った
