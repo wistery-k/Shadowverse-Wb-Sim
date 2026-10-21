@@ -418,11 +418,12 @@ fn rhino_forced(s: &GameState, p: PlayerIndex, legal: &[Action]) -> Option<Actio
 /// 全探索のリーサル探索の設定
 pub fn rhino_exact() -> ExactLethalOptions {
     ExactLethalOptions {
-        max_states: 30_000,
-        max_states_per_turn: 60_000,
+        max_states: 60_000,
+        max_states_per_turn: 120_000,
         ignore_exhausted_stats: true,
         order: Some(rhino_order),
         forced: Some(rhino_forced),
+        extra_bound: Some(rhino_turn_damage_bound),
         ..DEFAULT_EXACT_LETHAL_OPTIONS
     }
 }
@@ -545,16 +546,226 @@ pub fn rhino_bounds(s: &GameState, p: PlayerIndex) -> Vec<(i32, i32)> {
     bounds
 }
 
-/// あと remaining 回リノセウスを出せるかもしれないか
-pub fn can_still_play_rhinos(s: &GameState, p: PlayerIndex, remaining: i32) -> bool {
+/// 超進化したベビーカーバンクルの PP 3 回復で増やせる PP（場にいれば 3。手札なら出すコストを引いた分で、今の PP で出せるときだけ）
+fn carbuncle_refund(v: &View) -> i32 {
+    if !v.can_super() {
+        return 0;
+    }
+    if v.board_count(Tag::Carbuncle) > 0 {
+        return 3;
+    }
+    v.hand
+        .iter()
+        .filter(|h| tag(h.card) == Tag::Carbuncle)
+        .map(|h| (card(h.card).cost + h.cost_mod).max(0))
+        .filter(|&cost| cost <= v.total_pp())
+        .map(|cost| 3 - cost)
+        .max()
+        .unwrap_or(0)
+        .max(0)
+}
+
+/// 相手の能力が、自分のターンのうちに相手自身のリーダーにダメージを与えうるか（見積もれないものも含める。depth は召喚・変身したカードをたどる深さ）
+fn effects_may_hit_own_leader(effs: &[crate::data::Effect], depth: u32) -> bool {
+    use crate::data::{Effect, Side, Target};
+    fn hits(t: &Target, slots: &[(crate::data::SlotId, &Target)]) -> bool {
+        match t {
+            Target::Leader { side } => *side != Side::Opponent,
+            Target::This | Target::Board { .. } | Target::Hand { .. } => false,
+            Target::Slot { slot } => slots
+                .iter()
+                .rev()
+                .find(|e| e.0 == *slot)
+                .is_none_or(|e| hits(e.1, slots)),
+            Target::Union { of } => of.iter().any(|x| hits(x, slots)),
+            Target::MaxAttack { of } => hits(of, slots),
+            Target::Event => true,
+        }
+    }
+    fn card_risky(c: crate::data::CardIdx, depth: u32) -> bool {
+        depth == 0
+            || crate::state::abilities_of(c)
+                .abilities
+                .iter()
+                .any(|a| effects_may_hit_own_leader(&a.effects, depth - 1))
+    }
+    fn walk<'a>(
+        effs: &'a [Effect],
+        slots: &mut Vec<(crate::data::SlotId, &'a Target)>,
+        depth: u32,
+    ) -> bool {
+        for e in effs {
+            let risky = match e {
+                Effect::Choose { slot, from, .. } | Effect::Random { slot, from, .. } => {
+                    slots.push((*slot, from));
+                    false
+                }
+                Effect::Damage { target, .. }
+                | Effect::Distribute { target, .. }
+                | Effect::SetDefense { target, .. } => hits(target, slots),
+                Effect::SetLeaderMaxHp { side, .. } | Effect::Crest { side, .. } => {
+                    *side != Side::Opponent
+                }
+                Effect::Summon { card_id, .. } | Effect::Transform { card_id, .. } => {
+                    card_risky(*card_id, depth)
+                }
+                Effect::SummonCopy { .. }
+                | Effect::Reanimate { .. }
+                | Effect::SummonFromDeck { .. }
+                | Effect::SummonDestroyedAmulet => true,
+                Effect::Grant { abilities, .. } => abilities
+                    .iter()
+                    .flatten()
+                    .any(|a| walk(&a.effects, &mut slots.clone(), depth)),
+                Effect::Mode { options } => {
+                    options.iter().any(|o| walk(o, &mut slots.clone(), depth))
+                }
+                Effect::If {
+                    then, otherwise, ..
+                } => {
+                    walk(then, &mut slots.clone(), depth)
+                        || otherwise
+                            .as_ref()
+                            .is_some_and(|o| walk(o, &mut slots.clone(), depth))
+                }
+                Effect::Repeat { effects, .. } => walk(effects, slots, depth),
+                Effect::EarthRite { then, .. } | Effect::Necromancy { then, .. } => {
+                    walk(then, slots, depth)
+                }
+                _ => false,
+            };
+            if risky {
+                return true;
+            }
+        }
+        false
+    }
+    walk(effs, &mut Vec::new(), depth)
+}
+
+/// 相手の場・クレストに、自分のターンのうちに相手自身のリーダーにダメージを与えうる能力があるか
+fn opponent_may_hurt_itself(s: &GameState, p: PlayerIndex) -> bool {
+    let opp = &s.players[opponent(p)];
+    opp.board
+        .iter()
+        .flat_map(|c| c.abilities())
+        .chain(opp.crests.iter().flat_map(|c| crest_abilities_of(c.crest)))
+        .any(|a| effects_may_hit_own_leader(&a.effects, 3))
+}
+
+/// このターンの残りで、リノセウスエルフのカードだけで相手リーダーに与えうるダメージの上限（全探索の途中の局面で打ち切りに使う）。
+/// 手札・場が下のカードだけで、自分にクレスト・付与された能力が無く、相手に自分を傷つける能力が無いときだけ見積もる（それ以外は None）。
+/// - これから出すリノセウスを j 回（PP（カーバンクルの回復を含む）÷ 3、手札のリノセウス ＋ 戻す手段の数まで）とし、
+///   リノセウス以外のカードはすべて 1 体目より前に出すとみなす。出せる枚数は 残りの PP（1 コスト以上のカードは 1 PP につき 1 枚。燐光の岩は森の神秘を含めて 2 PP で 2 枚）
+///   ＋ 0 コストのカード ＋ 手札のベイル（0 コストまで下がりうる）＋ 戻して 0 コストで出し直しうるベイル ＋ 回復に数えたカーバンクル
+/// - i 体目の打点は コンボ ＋ その枚数 ＋ i。燐光の岩（手札・場、戻して出し直す分）1 枚につき +1、進化 +2・超進化 +3（カーバンクルの回復に使えば、そのカーバンクルがリーダーを攻撃できるときだけ）、
+///   リーダーを攻撃できる場のフォロワーの攻撃力、超進化したフォロワーの残りの攻撃 1 回につきぶっとばし +1
+pub fn rhino_turn_damage_bound(s: &GameState, p: PlayerIndex) -> Option<i32> {
+    if s.phase != Phase::Main || s.active != p || s.pending.is_some() {
+        return None;
+    }
+    let pl = &s.players[p];
     let v = View::of(s, p);
-    let refund =
-        if v.can_super() && (v.has_in_hand(Tag::Carbuncle) || v.board_count(Tag::Carbuncle) > 0) {
+    let evolvable = v.can_evolve() || v.can_super();
+    let known = |c: crate::data::CardIdx| match tag(c) {
+        Tag::Other | Tag::Backwood | Tag::Olivier => false,
+        Tag::Lily => !evolvable,
+        _ => true,
+    };
+    if !pl.crests.is_empty()
+        || !pl.hand.iter().all(|h| known(h.card))
+        || !pl
+            .board
+            .iter()
+            .all(|c| known(c.card) && c.granted.is_empty())
+        || opponent_may_hurt_itself(s, p)
+    {
+        return None;
+    }
+    let pp = v.total_pp();
+    let rhinos_in_hand = v.in_hand(Tag::Rhino);
+    let rhinos = rhinos_in_hand + v.board_count(Tag::Rhino);
+    let bounces = v.board_count(Tag::Rod)
+        + v.in_hand(Tag::Rod)
+        + v.in_hand(Tag::Carbuncle)
+        + v.board_count(Tag::Carbuncle)
+        + v.in_hand(Tag::Bugs);
+    let zero = pl
+        .hand
+        .iter()
+        .filter(|h| tag(h.card) == Tag::Bail || card(h.card).cost + h.cost_mod <= 0)
+        .count() as i32;
+    let rocks = v.in_hand(Tag::Rock) + v.board_count(Tag::Rock);
+    let smash_now: i32 = pl
+        .board
+        .iter()
+        .filter(|c| c.is_follower && c.evolve == Evolve::SuperEvolved)
+        .map(|c| (c.max_attacks - c.attacks_this_turn).max(0))
+        .sum();
+    let fixed = v.board_attack() + smash_now;
+    let refund = carbuncle_refund(&v);
+    let followers = pl.board.iter().filter(|c| c.is_follower).count() as i32;
+    // 手札・場のベイルの元のコスト（手札に戻すと元のコストからやり直しになる）
+    let bails: Vec<i32> = pl
+        .hand
+        .iter()
+        .map(|h| h.card)
+        .chain(pl.board.iter().map(|c| c.card))
+        .filter(|&c| tag(c) == Tag::Bail)
+        .map(|c| card(c).cost)
+        .collect();
+    // (使える PP, 回復に数えたカーバンクルの分の枚数, 進化の打点, 新しく超進化したフォロワーのぶっとばし)
+    let mut variants = vec![(
+        pp,
+        0,
+        if v.can_super() {
+            3
+        } else if v.can_evolve() {
+            2
+        } else {
+            0
+        },
+        v.can_super() as i32,
+    )];
+    if refund > 0 {
+        let prepaid = (v.board_count(Tag::Carbuncle) == 0) as i32;
+        // 場のカーバンクルがリーダーを攻撃できるなら、超進化の +3 はそのまま打点になる
+        let evo = if v.leader_attackers().any(|c| tag(c.card) == Tag::Carbuncle) {
             3
         } else {
             0
         };
-    if v.total_pp() + refund < 3 * remaining {
+        variants.push((pp + refund, prepaid, evo, 1));
+    }
+    let mut best = 0;
+    for (t, prepaid, evo, smash_new) in variants {
+        let max_j = if rhinos == 0 {
+            0
+        } else {
+            (t / 3).min(rhinos_in_hand + bounces).max(0)
+        };
+        // ベイルを手札に戻して、このターンに場を離れうるフォロワーの数（今の場 ＋ 出せる枚数）が元のコスト以上なら、もう一度 0 コストで出しうる
+        let replay_bails = (bails
+            .iter()
+            .filter(|&&cost| followers + t + zero + prepaid >= cost)
+            .count() as i32)
+            .min(bounces);
+        for j in 0..=max_j {
+            let free = (t - 3 * j).max(0);
+            let n = free + zero + replay_bails + prepaid;
+            let rhino = j * (pl.combo + n) + j * (j + 1) / 2;
+            let spare_bounces = (bounces - (j - rhinos_in_hand).max(0)).max(0);
+            let rock_acts = rocks + spare_bounces.min(free / 2);
+            best = best.max(rhino + rock_acts + evo + smash_new + fixed);
+        }
+    }
+    Some(best)
+}
+
+/// あと remaining 回リノセウスを出せるかもしれないか
+pub fn can_still_play_rhinos(s: &GameState, p: PlayerIndex, remaining: i32) -> bool {
+    let v = View::of(s, p);
+    if v.total_pp() + carbuncle_refund(&v) < 3 * remaining {
         return false;
     }
     let rhinos = v.in_hand(Tag::Rhino);

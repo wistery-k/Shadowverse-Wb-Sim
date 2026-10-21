@@ -1,7 +1,10 @@
 //! リノセウス用 AI（tests/rhino.test.ts）
 
 use super::*;
-use crate::ai::rhino::{next_turn_rhino_bound, rhino_search_options, RhinoAgent, RHINO_POTENTIAL};
+use crate::ai::rhino::{
+    can_still_play_rhinos, next_turn_rhino_bound, rhino_search_options,
+    search_lethal_for_rhino_turn, RhinoAgent, RHINO_POTENTIAL,
+};
 use crate::ai::rhino_lethal::{search_rhino_lethal, DEFAULT_RHINO_LETHAL_OPTIONS};
 use crate::ai::search::{SearchAgent, SearchOptions};
 
@@ -144,6 +147,37 @@ fn rhino_lethal_needs_rhinoceus_in_hand() {
     let mut s = main_phase();
     s.players[0].hand = hand_cards(&mut s, &["フェアリー"]);
     assert!(search_rhino_lethal(&s, 0, &DEFAULT_RHINO_LETHAL_OPTIONS).is_none());
+}
+
+#[test]
+fn rhino_count_check_pays_for_carbuncle() {
+    // 手札のベビーカーバンクルの超進化（PP 3 回復）は、出す 2 PP を払えるときだけ、その差の 1 PP として数える
+    let mut s = main_phase();
+    let carbuncle = hand_card(&mut s, "ベビーカーバンクル");
+    let rhino = board_card(&mut s, "殺戮のリノセウス");
+    {
+        let me = &mut s.players[0];
+        me.hand = vec![carbuncle];
+        me.board = vec![rhino];
+        me.max_pp = 8;
+        me.turn_count = 8;
+        me.ep = 0;
+        me.sep = 1;
+        me.extra_pp_available = false;
+    }
+    for (pp, ok) in [(0, false), (1, false), (2, true)] {
+        s.players[0].pp = pp;
+        assert_eq!(can_still_play_rhinos(&s, 0, 1), ok, "PP {pp}");
+    }
+    // 場にいれば 3 PP 回復をそのまま数える（戻すのは杖）
+    let rod = board_card(&mut s, "聖樹の杖");
+    let on_board = board_card(&mut s, "ベビーカーバンクル");
+    let me = &mut s.players[0];
+    me.hand.clear();
+    me.board.push(rod);
+    me.board.push(on_board);
+    me.pp = 0;
+    assert!(can_still_play_rhinos(&s, 0, 1));
 }
 
 // ---- 手数の多いターン・ユーザーが指摘した試合 ----
@@ -325,4 +359,52 @@ fn turn7_plays_rock_with_combo() {
             assert!(combo >= 2);
         }
     }
+}
+
+/// ユーザーの指摘（リノセウスエルフ vs アマリアロイヤル、seed 3897936013、両方ともリノセウス用 AI、エルフ後攻）。
+/// エルフの 8 ターン目の開始までの行動（main の 778589e の AI の手）
+fn start_3897936013() -> GameState {
+    let log = actions(
+        r#"[{"type":"mulligan","player":1,"swap":[66,62,79]},{"type":"mulligan","player":0,"swap":[38]},{"type":"endTurn"},{"type":"play","iid":11},{"type":"endTurn"},{"type":"play","iid":43},{"type":"endTurn"},{"type":"play","iid":8},{"type":"play","iid":10},{"type":"extraPp"},{"type":"play","iid":1},{"type":"attack","attacker":11,"target":"leader"},{"type":"endTurn"},{"type":"play","iid":42},{"type":"attack","attacker":83,"target":1},{"type":"endTurn"},{"type":"play","iid":15},{"type":"play","iid":81},{"type":"attack","attacker":11,"target":"leader"},{"type":"attack","attacker":10,"target":"leader"},{"type":"endTurn"},{"type":"play","iid":61},{"type":"attack","attacker":42,"target":15},{"type":"endTurn"},{"type":"play","iid":12},{"type":"attack","attacker":11,"target":61},{"type":"evolve","iid":12},{"type":"play","iid":82},{"type":"play","iid":84},{"type":"attack","attacker":10,"target":"leader"},{"type":"attack","attacker":12,"target":61},{"type":"play","iid":85},{"type":"attack","attacker":81,"target":"leader"},{"type":"endTurn"},{"type":"play","iid":62},{"type":"attack","attacker":42,"target":81},{"type":"evolve","iid":88},{"type":"attack","attacker":88,"target":10},{"type":"endTurn"},{"type":"play","iid":34},{"type":"attack","attacker":82,"target":88},{"type":"evolve","iid":34},{"type":"attack","attacker":84,"target":91},{"type":"attack","attacker":34,"target":90},{"type":"attack","attacker":85,"target":"leader"},{"type":"endTurn"},{"type":"play","iid":69},{"type":"play","iid":56},{"type":"choose","targets":[34]},{"type":"evolve","iid":56},{"type":"attack","attacker":56,"target":85},{"type":"endTurn"},{"type":"play","iid":86},{"type":"play","iid":30},{"type":"play","iid":26},{"type":"choose","targets":[69]},{"type":"attack","attacker":86,"target":69},{"type":"extraPp"},{"type":"play","iid":5},{"type":"choose","targets":[26]},{"type":"endTurn"},{"type":"play","iid":71},{"type":"play","iid":51},{"type":"superEvolve","iid":71},{"type":"choose","targets":[94]},{"type":"endTurn"},{"type":"play","iid":87},{"type":"play","iid":19},{"type":"choose","targets":[87]},{"type":"play","iid":93},{"type":"choose","targets":[71]},{"type":"superEvolve","iid":93},{"type":"choose","targets":[71]},{"type":"play","iid":21},{"type":"attack","attacker":93,"target":94},{"type":"endTurn"},{"type":"play","iid":47},{"type":"play","iid":60},{"type":"superEvolve","iid":60},{"type":"attack","attacker":60,"target":93},{"type":"attack","attacker":98,"target":19},{"type":"play","iid":50},{"type":"attack","attacker":51,"target":"leader"},{"type":"endTurn"}]"#,
+    );
+    apply_all(
+        &new_game(
+            deck("リノセウスエルフ"),
+            deck("アマリアロイヤル"),
+            3897936013,
+        ),
+        &log,
+    )
+}
+
+/// 8 ターン目（PP 8・SEP 1、相手は体力 15 で守護なし）。森の神秘 → フェアリー 3 枚を相手のフォロワーに当ててベイルを 0 コストに →
+/// ベイル → リノセウス 6 点 → カーバンクルで戻して超進化（PP 3 回復）→ リノセウス 8 点 → 燐光の岩のアクト 1 点などで 15 点ちょうど。
+/// 全探索の「あと何回リノセウスを出せるか」の判定が、手札のカーバンクルの PP 3 回復を出す 2 PP を引かずに数えていたため、
+/// リノセウスを 1 体出して PP 0 になった後の、もう出せない局面を調べ続けて 3 万局面で打ち切っていた
+#[test]
+fn turn8_lethal_with_carbuncle_refund() {
+    let s = start_3897936013();
+    assert_eq!(
+        (s.active, s.players[0].pp, s.players[1].leader_hp),
+        (0, 8, 15)
+    );
+    fresh();
+    let seq = search_lethal_for_rhino_turn(&s, 0);
+    assert!(wins(&s, seq.as_deref(), 0));
+    // 実際に打っても、このターンに倒しきる
+    fresh();
+    let end = play_active(s, 0, &mut RhinoAgent::new(true), &mut Rng::new(1));
+    assert_eq!(end.winner, Some(0));
+}
+
+/// 同じ局面で相手の体力を 17 にしたもの（ユーザーの指摘）。森の神秘 → フェアリー 3 枚 → カーバンクルでフェアリーを戻す →
+/// フェアリー 2 体を相手のフォロワーに当てる → ベイル → カーバンクルを超進化（PP 3 回復）→ リノセウス → 聖樹の杖で戻す → リノセウス で 17 点。
+/// 汎用の上限では打ち切れない局面が多く、10 万局面ほど調べないと見つからなかった。リノセウスエルフ専用の上限（rhino_turn_damage_bound）で 6 万局面以内に見つかる
+#[test]
+fn turn8_lethal_17_with_rhino_bound() {
+    let mut s = start_3897936013();
+    s.players[1].leader_hp = 17;
+    fresh();
+    let seq = search_lethal_for_rhino_turn(&s, 0);
+    assert!(wins(&s, seq.as_deref(), 0));
 }
