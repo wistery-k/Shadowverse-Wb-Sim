@@ -22,7 +22,9 @@ use super::mulligan::{
 use super::think::{Thought, ThoughtCandidate};
 use super::valuenet::{value_net_eval, ValuePhase};
 use super::{Agent, Rng};
-use crate::game::{acting_player, apply_legal, legal_actions, resolve_turn_end, try_apply_action};
+use crate::game::{
+    acting_player, apply_legal, is_legal, legal_actions, resolve_turn_end, try_apply_action,
+};
 use crate::state::*;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -424,66 +426,65 @@ impl<'a> Planner<'a> {
         }
     }
 
-    /// 手 a を打った局面と、そこまでの並び。chain なら、続く自分の選択とエクストラPP の後の手まで進めた局面すべて
+    /// 手 a を打った局面と、そこまでの並びを out に足す。chain なら、続く自分の選択とエクストラPP の後の手まで進めた局面すべて
     fn advance(
         &mut self,
         s: &Rc<GameState>,
         a: &Action,
         prev: Option<usize>,
         depth: u32,
-    ) -> Vec<(Rc<GameState>, usize)> {
-        let Some(next) = try_apply_action(s, a) else {
-            return Vec::new();
-        };
-        let next = Rc::new(next);
+        out: &mut Vec<(Rc<GameState>, usize)>,
+    ) {
+        // a は s の合法手（expand・legal_actions の手）なので、打てるかは確かめ直さない
+        debug_assert!(is_legal(s, a), "合法手でない: {a:?}");
+        let next = Rc::new(apply_legal(s, a));
         let path = self.push_step(a.clone(), prev);
         let opts = self.opts();
         if !opts.chain || depth >= 8 || next.phase == Phase::Ended {
-            return vec![(next, path)];
+            out.push((next, path));
+            return;
         }
         let p = self.p;
         if next.pending.as_ref().is_some_and(|pd| pd.player() == p) {
-            let mut out = Vec::new();
+            let start = out.len();
             for c in legal_actions(&next) {
                 if self.allowed(&next, &c) {
-                    out.extend(self.advance(&next, &c, Some(path), depth + 1));
+                    self.advance(&next, &c, Some(path), depth + 1, out);
                 }
             }
-            return if out.is_empty() {
-                vec![(next, path)]
-            } else {
-                out
-            };
+            if out.len() == start {
+                out.push((next, path));
+            }
+            return;
         }
         if opts.chain_fuse
             && matches!(a, Action::Fuse { .. })
             && next.pending.is_none()
             && next.active == p
         {
-            let mut out = vec![(next.clone(), path)];
+            out.push((next.clone(), path));
             for c in self.expand(&next) {
                 if matches!(c, Action::EndTurn | Action::Fuse { .. }) || !self.allowed(&next, &c) {
                     continue;
                 }
-                out.extend(self.advance(&next, &c, Some(path), depth + 1));
+                self.advance(&next, &c, Some(path), depth + 1, out);
             }
-            return out;
+            return;
         }
         if matches!(a, Action::ExtraPp) && next.pending.is_none() && next.active == p {
-            let mut out = Vec::new();
+            let start = out.len();
             for c in self.expand(&next) {
                 if matches!(c, Action::EndTurn | Action::ExtraPp) || !self.allowed(&next, &c) {
                     continue;
                 }
-                out.extend(self.advance(&next, &c, Some(path), depth + 1));
+                self.advance(&next, &c, Some(path), depth + 1, out);
             }
-            return if out.is_empty() {
-                vec![(next, path)]
-            } else {
-                out
-            };
+            if out.len() == start {
+                out.push((next, path));
+            }
+            return;
         }
-        vec![(next, path)]
+        out.push((next, path));
     }
 
     /// 評価の高い順に、同じ局面を除いて width 個まで選ぶ（children は評価の降順）
@@ -522,6 +523,7 @@ impl<'a> Planner<'a> {
         let opts = self.opts();
         let mut terminals: Vec<Node> = Vec::new();
         let mut frontier: Vec<Node> = Vec::new();
+        let mut next: Vec<(Rc<GameState>, usize)> = Vec::new();
         // 深さ 1: すべての手を展開する（最初の手の候補を落とさない）
         for a in self.expand(root) {
             if !self.allowed(root, &a) {
@@ -541,7 +543,9 @@ impl<'a> Planner<'a> {
                 });
                 continue;
             }
-            for (st, path) in self.advance(root, &a, None, 0) {
+            next.clear();
+            self.advance(root, &a, None, 0, &mut next);
+            for (st, path) in next.drain(..) {
                 let value = self.score(&st);
                 frontier.push(Node {
                     state: st,
@@ -574,7 +578,9 @@ impl<'a> Planner<'a> {
                     if matches!(a, Action::EndTurn) || !self.allowed(&st, &a) {
                         continue;
                     }
-                    for (ns, np) in self.advance(&st, &a, Some(path), 0) {
+                    next.clear();
+                    self.advance(&st, &a, Some(path), 0, &mut next);
+                    for (ns, np) in next.drain(..) {
                         let value = self.score(&ns);
                         children.push(Node {
                             state: ns,

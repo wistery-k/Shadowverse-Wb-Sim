@@ -304,8 +304,34 @@ pub fn eval_cond(s: &GameState, ctx: &Ctx, c: &Condition) -> bool {
 
 // ---- 誘発 ----
 
-pub fn push_frame(s: &mut GameState, effects: Vec<FEff>, ctx: Ctx) {
+// 探索では局面を複製してから手を打つので、複製した局面の空の解決スタック・誘発待ちに毎回領域を
+// 確保しないよう、解決し終えて空になったものの領域を取っておいて使い回す（中身は変わらない）
+thread_local! {
+    static SPARE: std::cell::RefCell<(Vec<Frame>, std::collections::VecDeque<Queued>)> =
+        Default::default();
+}
+
+/// 解決し終えて空になった解決スタック・誘発待ちの領域を、次に使うまで取っておく
+fn keep_spare(s: &mut GameState) {
+    if s.stack.capacity() == 0 && s.queue.capacity() == 0 {
+        return;
+    }
+    SPARE.with(|b| {
+        let b = &mut *b.borrow_mut();
+        if s.stack.is_empty() && b.0.capacity() == 0 {
+            std::mem::swap(&mut s.stack, &mut b.0);
+        }
+        if s.queue.is_empty() && b.1.capacity() == 0 {
+            std::mem::swap(&mut s.queue, &mut b.1);
+        }
+    });
+}
+
+pub fn push_frame(s: &mut GameState, effects: Effects, ctx: Ctx) {
     if !effects.is_empty() {
+        if s.stack.capacity() == 0 {
+            SPARE.with(|b| std::mem::swap(&mut s.stack, &mut b.borrow_mut().0));
+        }
         s.stack.push(Frame {
             effects,
             pc: 0,
@@ -314,12 +340,10 @@ pub fn push_frame(s: &mut GameState, effects: Vec<FEff>, ctx: Ctx) {
     }
 }
 
-#[inline]
-fn dsl_list(effects: &'static [Effect]) -> Vec<FEff> {
-    effects.iter().map(FEff::Dsl).collect()
-}
-
 fn queue(s: &mut GameState, ability: &'static Ability, ctx: Ctx) {
+    if s.queue.capacity() == 0 {
+        SPARE.with(|b| std::mem::swap(&mut s.queue, &mut b.borrow_mut().1));
+    }
     s.queue.push_back(Queued { ability, ctx });
 }
 
@@ -362,7 +386,11 @@ fn fire_side(
                 continue;
             };
             if ability.once_per_own_turn
-                && !use_once(&mut s.players[p].crests[ci].used_once, i as u8, turn_id)
+                && !use_once(
+                    &mut s.players[p].crests.make_mut()[ci].used_once,
+                    i as u8,
+                    turn_id,
+                )
             {
                 continue;
             }
@@ -523,7 +551,7 @@ pub fn leave_board(s: &mut GameState, iid: Iid, mut reason: LeaveReason) {
             if c.is_follower {
                 pl.graveyard_followers.make_mut().push(c.card);
                 let f = base.ctype == CardType::Follower;
-                pl.destroyed_this_turn.push(DestroyedRecord {
+                pl.destroyed_this_turn.make_mut().push(DestroyedRecord {
                     card: c.card,
                     attack: if f { base.attack } else { 0 },
                     defense: if f { base.defense } else { 0 },
@@ -569,10 +597,16 @@ pub fn destroy_dead(s: &mut GameState) {
         {
             continue;
         }
-        let mut dead: Vec<(i32, Iid)> = s.players[p]
-            .board
+        let is_dead = |c: &&OnBoard| c.is_follower && c.defense <= 0;
+        let board = &s.players[p].board;
+        if board.iter().filter(is_dead).count() == 1 {
+            let iid = board.iter().find(is_dead).unwrap().iid;
+            leave_board(s, iid, LeaveReason::Destroy);
+            continue;
+        }
+        let mut dead: Vec<(i32, Iid)> = board
             .iter()
-            .filter(|c| c.is_follower && c.defense <= 0)
+            .filter(is_dead)
             .map(|c| (c.order, c.iid))
             .collect();
         dead.sort_by_key(|x| x.0);
@@ -734,13 +768,29 @@ pub fn fire_spellboost(s: &mut GameState, p: PlayerIndex, iid: Iid, times: i32) 
 /// 能力を直ちに解決スタックに積む（行動による発動）。先に書かれた能力から解決するよう、逆順に積む
 pub fn push_abilities(s: &mut GameState, abilities: &[&'static Ability], ctx: &Ctx) {
     for a in abilities.iter().rev() {
-        let c = Ctx {
-            slots: Vec::new(),
-            vars: ctx.vars.clone(),
-            ..ctx.clone_shallow()
-        };
-        push_frame(s, dsl_list(&a.effects), c);
+        push_ability(s, a, ctx);
     }
+}
+
+/// カード自身の能力のうち on のものを、push_abilities(s, &own_abilities(cid, on), ctx) と同じ順に積む
+pub fn push_own_abilities(s: &mut GameState, cid: CardIdx, on: On, ctx: &Ctx) {
+    for a in abilities_of(cid)
+        .abilities
+        .iter()
+        .filter(|a| a.trigger.on() == on)
+        .rev()
+    {
+        push_ability(s, a, ctx);
+    }
+}
+
+fn push_ability(s: &mut GameState, a: &'static Ability, ctx: &Ctx) {
+    let c = Ctx {
+        slots: Vec::new(),
+        vars: ctx.vars.clone(),
+        ..ctx.clone_shallow()
+    };
+    push_frame(s, Effects::Dsl(&a.effects), c);
 }
 
 impl Ctx {
@@ -759,8 +809,8 @@ impl Ctx {
     }
 }
 
-pub fn push_internal(s: &mut GameState, effects: Vec<FEff>, ctx: Ctx) {
-    push_frame(s, effects, ctx);
+pub fn push_internal(s: &mut GameState, effects: &[FEff], ctx: Ctx) {
+    push_frame(s, Effects::internal(effects), ctx);
 }
 
 // ---- 効果の実行 ----
@@ -781,7 +831,7 @@ pub fn answer_mode(s: &mut GameState, index: usize) {
         panic!("モード選択待ちではありません")
     };
     let frame = s.stack.last_mut().expect("モード選択待ちではありません");
-    let FEff::Dsl(Effect::Mode { options }) = frame.effects[frame.pc] else {
+    let FEff::Dsl(Effect::Mode { options }) = frame.effects.get(frame.pc) else {
         panic!("モード選択の効果がありません")
     };
     splice(
@@ -795,13 +845,18 @@ pub fn answer_mode(s: &mut GameState, index: usize) {
 /// 現在の効果を effects（times 回繰り返し）で置き換える（if・repeat 等の展開）
 fn splice(frame: &mut Frame, effects: &'static [Effect], times: usize) {
     let pc = frame.pc;
-    let mut v = Vec::with_capacity(frame.effects.len() + effects.len() * times);
-    v.extend_from_slice(&frame.effects[..pc]);
+    let n = frame.effects.len();
+    if pc == 0 && n == 1 && times == 1 {
+        frame.effects = Effects::Dsl(effects);
+        return;
+    }
+    let mut v = Vec::with_capacity(n + effects.len() * times);
+    v.extend((0..pc).map(|i| frame.effects.get(i)));
     for _ in 0..times {
         v.extend(effects.iter().map(FEff::Dsl));
     }
-    v.extend_from_slice(&frame.effects[pc + 1..]);
-    frame.effects = v;
+    v.extend((pc + 1..n).map(|i| frame.effects.get(i)));
+    frame.effects = Effects::List(v);
 }
 
 fn pick_random(s: &mut GameState, mut pool: Vec<Iid>, count: usize) -> Vec<Iid> {
@@ -1289,7 +1344,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             let order = s.next_order;
             s.next_order += 1;
             let countdown = data().crests[*crest_id as usize].countdown;
-            s.players[holder].crests.push(CrestInstance {
+            s.players[holder].crests.make_mut().push(CrestInstance {
                 iid,
                 crest: *crest_id,
                 countdown,
@@ -1437,18 +1492,18 @@ pub fn run(s: &mut GameState) {
     while s.phase != Phase::Ended && s.pending.is_none() {
         let Some(top) = s.stack.last_mut() else {
             let Some(q) = s.queue.pop_front() else { break };
-            push_frame(s, dsl_list(&q.ability.effects), q.ctx);
+            push_frame(s, Effects::Dsl(&q.ability.effects), q.ctx);
             continue;
         };
         if top.pc >= top.effects.len() {
             s.stack.pop();
             // 能力の解決が1つ終わったら、誘発待ち（FIFO）から1つ取り出して解決する
             if let Some(q) = s.queue.pop_front() {
-                push_frame(s, dsl_list(&q.ability.effects), q.ctx);
+                push_frame(s, Effects::Dsl(&q.ability.effects), q.ctx);
             }
             continue;
         }
-        match top.effects[top.pc] {
+        match top.effects.get(top.pc) {
             FEff::Dsl(eff) => {
                 let mut frame = s.stack.pop().unwrap();
                 let ok = exec(s, &mut frame, eff);
@@ -1471,6 +1526,7 @@ pub fn run(s: &mut GameState) {
         s.queue.clear();
         s.pending = None;
     }
+    keep_spare(s);
 }
 
 #[cfg(feature = "coverage")]

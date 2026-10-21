@@ -430,13 +430,15 @@ pub fn evaluate_with(s: &GameState, p: PlayerIndex, ew: &EvalWeights) -> f64 {
         v += w.hold[h.card as usize];
     }
     if w.fusion_set != 0.0 {
-        let mut kinds: Vec<CardIdx> = Vec::new();
-        for h in &me.hand {
-            if t.fusion_set[h.card as usize] && !kinds.contains(&h.card) {
-                kinds.push(h.card);
-            }
-        }
-        v += kinds.len() as f64 * w.fusion_set;
+        // 融合できるカードの種類の数（同じカードは 1 つと数える）
+        let hand = &me.hand;
+        let kinds = (0..hand.len())
+            .filter(|&i| {
+                let c = hand[i].card;
+                t.fusion_set[c as usize] && !hand[..i].iter().any(|h| h.card == c)
+            })
+            .count();
+        v += kinds as f64 * w.fusion_set;
     }
     if w.kuon_reserve != 0.0 && me.sep > 0 && me.hand.iter().any(|h| h.card == ad.kuon) {
         v += w.kuon_reserve;

@@ -31,7 +31,28 @@ impl<T: Clone> Shared<T> {
     /// 書き換える（ほかの局面と共有していれば、先に自分の分を複製する）
     #[inline]
     pub fn make_mut(&mut self) -> &mut Vec<T> {
-        Rc::make_mut(&mut self.0)
+        if Rc::get_mut(&mut self.0).is_none() {
+            self.unshare();
+        }
+        Rc::get_mut(&mut self.0).unwrap()
+    }
+    /// 共有をやめて自分の分を作る。直後に足すことが多いので、少し余裕を持たせる
+    #[cold]
+    #[inline(never)]
+    fn unshare(&mut self) {
+        let mut v = Vec::with_capacity(self.0.len() + 2);
+        v.extend_from_slice(&self.0);
+        self.0 = Rc::new(v);
+    }
+    /// 空にする（共有していれば、複製せずに新しい空のものにする）
+    pub fn clear(&mut self) {
+        if self.0.is_empty() {
+            return;
+        }
+        match Rc::get_mut(&mut self.0) {
+            Some(v) => v.clear(),
+            None => self.0 = Rc::new(Vec::new()),
+        }
     }
     /// 中身の Vec（共有していなければそのまま、していれば複製）
     pub fn into_vec(self) -> Vec<T> {
@@ -196,11 +217,11 @@ pub struct PlayerState {
     pub deck_kept: Vec<HandCard>,
     pub hand: Shared<HandCard>,
     pub board: Shared<OnBoard>,
-    pub crests: Vec<CrestInstance>,
+    pub crests: Shared<CrestInstance>,
     pub graveyard: i32,
     pub graveyard_followers: Shared<CardIdx>,
     pub destroyed_amulets: Shared<CardIdx>,
-    pub destroyed_this_turn: Vec<DestroyedRecord>,
+    pub destroyed_this_turn: Shared<DestroyedRecord>,
     pub combo: i32,
     pub evolved_this_turn: bool,
     pub ep_evolved_this_turn: Option<CardIdx>,
@@ -277,9 +298,54 @@ pub enum FEff {
     FinishMulligan,
 }
 
+/// フレームの効果の並び。能力の効果はデータをそのまま指す（解決のたびに並びを作らない）
+#[derive(Clone, Debug)]
+pub enum Effects {
+    /// 能力の効果（FEff::Dsl の並びと同じ）
+    Dsl(&'static [Effect]),
+    /// エンジン内部の処理 1〜2 個（先頭の n 個）
+    Internal([FEff; 2], u8),
+    List(Vec<FEff>),
+}
+
+impl Effects {
+    #[inline]
+    pub fn len(&self) -> usize {
+        match self {
+            Effects::Dsl(e) => e.len(),
+            Effects::Internal(_, n) => *n as usize,
+            Effects::List(v) => v.len(),
+        }
+    }
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    /// i 番目の効果（範囲外なら panic）
+    #[inline]
+    pub fn get(&self, i: usize) -> FEff {
+        match self {
+            Effects::Dsl(e) => FEff::Dsl(&e[i]),
+            Effects::Internal(a, n) => a[..*n as usize][i],
+            Effects::List(v) => v[i],
+        }
+    }
+    pub fn iter(&self) -> impl Iterator<Item = FEff> + '_ {
+        (0..self.len()).map(|i| self.get(i))
+    }
+    /// エンジン内部の処理の並び
+    pub fn internal(list: &[FEff]) -> Effects {
+        match *list {
+            [a] => Effects::Internal([a, FEff::CombatEnd], 1),
+            [a, b] => Effects::Internal([a, b], 2),
+            _ => Effects::List(list.to_vec()),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Frame {
-    pub effects: Vec<FEff>,
+    pub effects: Effects,
     pub pc: usize,
     pub ctx: Ctx,
 }

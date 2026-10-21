@@ -160,7 +160,13 @@ fn feff_eq(a: &FEff, b: &FEff) -> bool {
 }
 
 fn frame_eq(a: &Frame, b: &Frame) -> bool {
-    a.pc == b.pc && list_eq(&a.effects, &b.effects, feff_eq) && ctx_eq(&a.ctx, &b.ctx)
+    a.pc == b.pc
+        && a.effects.len() == b.effects.len()
+        && a.effects
+            .iter()
+            .zip(b.effects.iter())
+            .all(|(x, y)| feff_eq(&x, &y))
+        && ctx_eq(&a.ctx, &b.ctx)
 }
 
 pub fn stack_eq(a: &[Frame], b: &[Frame]) -> bool {
