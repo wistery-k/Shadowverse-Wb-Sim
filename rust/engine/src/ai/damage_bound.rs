@@ -40,11 +40,13 @@ enum Zone {
 }
 
 /// 能力を持つもの（手札のカード、場のカード、場に出うるカード、クレスト、付与された能力）
-struct Unit {
+struct Unit<'a> {
     mine: bool,
     card: Option<CardIdx>,
     zone: Zone,
-    abilities: Vec<&'static Ability>,
+    /// 能力は own（カード・クレスト自身のもの）の後に granted（付与されたもの）の順
+    own: &'static [Ability],
+    granted: &'a [&'static Ability],
     count: i32,
     playable: bool,
     enhance_ok: bool,
@@ -234,7 +236,7 @@ enum SlotInfo {
 
 struct Frame<'u> {
     mine: bool,
-    unit: &'u Unit,
+    unit: &'u Unit<'u>,
     slots: Vec<(SlotId, SlotInfo)>,
     vars: Vec<(VarId, &'static Value)>,
 }
@@ -325,8 +327,8 @@ fn self_reduction(c: CardIdx, sb: i32, leaves: i32) -> i32 {
     })
 }
 
-struct World {
-    units: Vec<Unit>,
+struct World<'a> {
+    units: Vec<Unit<'a>>,
     /// 自分の場にいる・出うるカード（このターンに破壊されて、墓地から戻されうる）
     my_cards: Vec<CardIdx>,
     /// 自分の手札にある・加わりうるカード
@@ -335,8 +337,19 @@ struct World {
     c: Counts,
 }
 
-impl World {
-    fn build(s: &GameState, p: PlayerIndex, acc: &Acc, draws: bool) -> Result<World, Why> {
+impl<'a> Unit<'a> {
+    fn abilities(&self) -> impl Iterator<Item = &'static Ability> + '_ {
+        self.own.iter().chain(self.granted.iter().copied())
+    }
+}
+
+impl<'a> World<'a> {
+    fn build(
+        s: &'a GameState,
+        p: PlayerIndex,
+        acc: &'a Acc,
+        draws: bool,
+    ) -> Result<World<'a>, Why> {
         let pl = &s.players[p];
         let op = &s.players[opponent(p)];
         let pp_max = pl.pp + pl.extra_pp_available as i32 + acc.pp_gain;
@@ -349,7 +362,7 @@ impl World {
             evolve_effects: add(acc.evolves, acc.super_evolves),
             ..Counts::default()
         };
-        let mut units: Vec<Unit> = Vec::new();
+        let mut units: Vec<Unit<'a>> = Vec::new();
         let mut fols: Vec<Fol> = Vec::new();
         let extra = add(acc.extra_all, acc.extra_single);
 
@@ -452,7 +465,8 @@ impl World {
                 mine: true,
                 card: Some(h.card),
                 zone: Zone::Hand,
-                abilities: ab.abilities.iter().collect(),
+                own: &ab.abilities,
+                granted: &[],
                 count: h.count,
                 playable,
                 enhance_ok: playable && cd.enhance.is_some_and(|e| e <= pp_max),
@@ -467,7 +481,8 @@ impl World {
                     mine: true,
                     card: Some(h.card),
                     zone: Zone::Entering,
-                    abilities: ab.abilities.iter().collect(),
+                    own: &ab.abilities,
+                    granted: &[],
                     count: h.count,
                     playable: false,
                     enhance_ok: false,
@@ -510,7 +525,8 @@ impl World {
                 mine: true,
                 card: Some(card),
                 zone: Zone::Entering,
-                abilities: ab.abilities.iter().collect(),
+                own: &ab.abilities,
+                granted: &[],
                 count: n,
                 playable: false,
                 enhance_ok: false,
@@ -566,7 +582,8 @@ impl World {
                 mine: true,
                 card: Some(b.card),
                 zone: Zone::Board,
-                abilities: b.abilities().collect(),
+                own: &abilities_of(b.card).abilities,
+                granted: &b.granted,
                 count: 1,
                 playable: false,
                 enhance_ok: false,
@@ -598,7 +615,8 @@ impl World {
             mine,
             card: None,
             zone: Zone::Crest,
-            abilities: crest_abilities_of(crest).iter().collect(),
+            own: crest_abilities_of(crest),
+            granted: &[],
             count,
             playable: false,
             enhance_ok: false,
@@ -607,11 +625,12 @@ impl World {
             acted: false,
             x: None,
         };
-        let granted_unit = |mine: bool, a: &'static Ability, count: i32, attacks: i32| Unit {
+        let granted_unit = |mine: bool, a: &'a &'static Ability, count: i32, attacks: i32| Unit {
             mine,
             card: None,
             zone: Zone::Board,
-            abilities: vec![a],
+            own: &[],
+            granted: std::slice::from_ref(a),
             count,
             playable: false,
             enhance_ok: false,
@@ -626,8 +645,8 @@ impl World {
         for &(cr, n) in &acc.crests {
             units.push(crest_unit(true, cr, n));
         }
-        for &(a, n) in &acc.granted {
-            units.push(granted_unit(true, a, n, c.max_attacks));
+        for (a, n) in &acc.granted {
+            units.push(granted_unit(true, a, *n, c.max_attacks));
         }
         // 相手の場・クレスト
         for b in &op.board {
@@ -635,7 +654,8 @@ impl World {
                 mine: false,
                 card: Some(b.card),
                 zone: Zone::Board,
-                abilities: b.abilities().collect(),
+                own: &abilities_of(b.card).abilities,
+                granted: &b.granted,
                 count: 1,
                 playable: false,
                 enhance_ok: false,
@@ -651,8 +671,8 @@ impl World {
         for &(cr, n) in &acc.opp_crests {
             units.push(crest_unit(false, cr, n));
         }
-        for &(a, n) in &acc.opp_granted {
-            units.push(granted_unit(false, a, n, 0));
+        for (a, n) in &acc.opp_granted {
+            units.push(granted_unit(false, a, *n, 0));
         }
         let mut my_cards: Vec<CardIdx> = pl.board.iter().map(|b| b.card).collect();
         let mut hand_cards: Vec<CardIdx> = Vec::new();
@@ -732,7 +752,7 @@ impl World {
         let mut evo = Acc::default();
         for u in &self.units {
             let mut one = Acc::default();
-            for &a in &u.abilities {
+            for a in u.abilities() {
                 let on = a.trigger.on();
                 let k = self.mult(u, on);
                 if k == 0 {

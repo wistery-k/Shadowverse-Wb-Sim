@@ -6,10 +6,10 @@
 use super::damage_bound::damage_bound;
 use super::Rng;
 use crate::data::CardIdx;
+use crate::fasthash::FastMap;
 use crate::game::{legal_actions, try_apply_action};
 use crate::state::*;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fmt::Write;
 
 pub type OrderFn = fn(&GameState, PlayerIndex, Vec<Action>) -> Vec<Action>;
@@ -85,7 +85,7 @@ pub const HINT_EXACT_STATES: i64 = 20_000;
 
 thread_local! {
     /// 付与された能力の中身ごとの番号（TypeScript 版は能力の JSON をキーに入れる）
-    static GRANTED_IDS: RefCell<(HashMap<usize, u32>, HashMap<String, u32>)> = RefCell::new((HashMap::new(), HashMap::new()));
+    static GRANTED_IDS: RefCell<(FastMap<usize, u32>, FastMap<String, u32>)> = RefCell::new(Default::default());
 }
 
 fn granted_id(a: &'static crate::data::Ability) -> u32 {
@@ -291,7 +291,7 @@ enum Bound {
 struct TurnCache {
     turn: i32,
     player: PlayerIndex,
-    memo: HashMap<LethalKey, (i32, Bound)>,
+    memo: FastMap<LethalKey, (i32, Bound)>,
     visited: i64,
 }
 
@@ -375,7 +375,7 @@ struct Dfs<'a> {
     p: PlayerIndex,
     opp: PlayerIndex,
     prefix: LethalKey,
-    memo: &'a mut HashMap<LethalKey, (i32, Bound)>,
+    memo: &'a mut FastMap<LethalKey, (i32, Bound)>,
     visited: i64,
     limit: i64,
 }
@@ -603,7 +603,7 @@ pub fn search_exact_lethal(
         .unwrap_or_else(|| TurnCache {
             turn: root.turn,
             player: p,
-            memo: HashMap::new(),
+            memo: FastMap::default(),
             visited: 0,
         });
     let limit = opts
@@ -660,7 +660,7 @@ pub fn exact_max_damage(
     if root.phase != Phase::Main || actor_of(root) != p {
         return None;
     }
-    let mut memo = HashMap::new();
+    let mut memo = FastMap::default();
     let mut dfs = Dfs {
         opts,
         p,

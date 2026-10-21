@@ -1,10 +1,10 @@
 //! 合流する相打ちの検出（src/ai/convergingTrade.ts）。
 
 use crate::data::*;
+use crate::fasthash::FastMap;
 use crate::game::{attack_reach, attack_targets, try_apply_action};
 use crate::state::*;
 use std::cell::RefCell;
-use std::collections::HashMap;
 
 /// A・B が持っていてよい能力
 fn harmless_own(on: On) -> bool {
@@ -29,7 +29,7 @@ fn harmless_own(on: On) -> bool {
 }
 
 thread_local! {
-    static TOUCHES_BOARD: RefCell<HashMap<usize, bool>> = RefCell::new(HashMap::new());
+    static TOUCHES_BOARD: RefCell<FastMap<usize, bool>> = RefCell::new(FastMap::default());
 }
 
 /// 場のカードに関わる（対象にする・数える・場に出す）能力か。

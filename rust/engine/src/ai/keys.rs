@@ -4,8 +4,8 @@
 //! （同じとみなすものが同じハッシュになればよい）。
 
 use crate::data::Ability;
+use crate::fasthash::FastMap;
 use crate::state::*;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 /// 順番を問わない (キー, 値) の組の比較（TypeScript 版の Record）
@@ -111,6 +111,20 @@ fn same_cards<T>(a: &[T], b: &[T], eq: impl Fn(&T, &T) -> bool) -> bool {
         0 => return true,
         1 => return eq(&a[0], &b[0]),
         _ => {}
+    }
+    if b.len() <= 64 {
+        // 使った印をビットで持つ（下の Vec と同じ対応付け）
+        let mut used = 0u64;
+        'outer: for x in a {
+            for (j, y) in b.iter().enumerate() {
+                if used & (1 << j) == 0 && eq(x, y) {
+                    used |= 1 << j;
+                    continue 'outer;
+                }
+            }
+            return false;
+        }
+        return true;
     }
     let mut used = vec![false; b.len()];
     'outer: for x in a {
@@ -353,13 +367,13 @@ fn pending_code(s: &GameState) -> i32 {
 
 /// 自分で決めた同一判定で値をまとめる集合（keySet.ts の EqSet）
 pub struct EqSet<T> {
-    buckets: HashMap<u32, Vec<T>>,
+    buckets: FastMap<u32, Vec<T>>,
 }
 
 impl<T> Default for EqSet<T> {
     fn default() -> Self {
         EqSet {
-            buckets: HashMap::new(),
+            buckets: FastMap::default(),
         }
     }
 }
