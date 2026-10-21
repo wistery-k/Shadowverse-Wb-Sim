@@ -3,6 +3,67 @@
 
 use crate::data::*;
 use std::collections::VecDeque;
+use std::fmt;
+use std::ops::Deref;
+use std::rc::Rc;
+
+/// 書き換えるときだけ複製する列。探索は局面を 1 手ごとに複製するが、ほとんどの列はその手で変わらないので、
+/// 複製では中身を共有し（参照を数えるだけ）、書き換える側が `make_mut` で自分の分を複製する。
+/// 読むときは `Vec` と同じ（`Deref`）。中身の比べ方・表示も `Vec` と同じ
+#[derive(Clone, PartialEq)]
+pub struct Shared<T>(Rc<Vec<T>>);
+
+impl<T> Default for Shared<T> {
+    fn default() -> Shared<T> {
+        Shared(Rc::new(Vec::new()))
+    }
+}
+
+impl<T> Deref for Shared<T> {
+    type Target = Vec<T>;
+    #[inline]
+    fn deref(&self) -> &Vec<T> {
+        &self.0
+    }
+}
+
+impl<T: Clone> Shared<T> {
+    /// 書き換える（ほかの局面と共有していれば、先に自分の分を複製する）
+    #[inline]
+    pub fn make_mut(&mut self) -> &mut Vec<T> {
+        Rc::make_mut(&mut self.0)
+    }
+    /// 中身の Vec（共有していなければそのまま、していれば複製）
+    pub fn into_vec(self) -> Vec<T> {
+        Rc::unwrap_or_clone(self.0)
+    }
+}
+
+impl<T> From<Vec<T>> for Shared<T> {
+    fn from(v: Vec<T>) -> Shared<T> {
+        Shared(Rc::new(v))
+    }
+}
+
+impl<T> FromIterator<T> for Shared<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Shared<T> {
+        Shared(Rc::new(iter.into_iter().collect()))
+    }
+}
+
+impl<'a, T> IntoIterator for &'a Shared<T> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+    fn into_iter(self) -> std::slice::Iter<'a, T> {
+        self.0.iter()
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for Shared<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 pub type Iid = i32;
 pub type PlayerIndex = usize;
@@ -129,16 +190,16 @@ pub struct PlayerState {
     pub sep: i32,
     pub extra_pp_available: bool,
     pub turn_count: i32,
-    pub deck: Vec<CardRef>,
+    pub deck: Shared<CardRef>,
     /// 手札から山札に戻ったカードの、手札で付いた状態（スペルブーストの回数・コスト変化等）。
     /// 山札のカードと iid で対応し、引いたときにこの状態のまま手札に戻る。状態の変わっていないカードは持たない
     pub deck_kept: Vec<HandCard>,
-    pub hand: Vec<HandCard>,
-    pub board: Vec<OnBoard>,
+    pub hand: Shared<HandCard>,
+    pub board: Shared<OnBoard>,
     pub crests: Vec<CrestInstance>,
     pub graveyard: i32,
-    pub graveyard_followers: Vec<CardIdx>,
-    pub destroyed_amulets: Vec<CardIdx>,
+    pub graveyard_followers: Shared<CardIdx>,
+    pub destroyed_amulets: Shared<CardIdx>,
     pub destroyed_this_turn: Vec<DestroyedRecord>,
     pub combo: i32,
     pub evolved_this_turn: bool,
@@ -435,7 +496,7 @@ impl GameState {
     #[inline]
     pub fn board_card_mut(&mut self, iid: Iid) -> Option<&mut OnBoard> {
         self.find_board(iid)
-            .map(move |(p, i)| &mut self.players[p].board[i])
+            .map(move |(p, i)| &mut self.players[p].board.make_mut()[i])
     }
 
     #[inline]
@@ -497,7 +558,7 @@ impl GameState {
 
     /// 手札のカードを p の山札の末尾に戻す（並べ替えは呼ぶ側）。手札で付いた状態は維持する（公開・条件付きドローの印は情報なので消す）
     pub fn return_to_deck(&mut self, p: PlayerIndex, mut h: HandCard) {
-        self.players[p].deck.push(CardRef {
+        self.players[p].deck.make_mut().push(CardRef {
             iid: h.iid,
             card: h.card,
         });
@@ -584,7 +645,7 @@ impl GameState {
             pl.graveyard += 1;
             return false;
         }
-        pl.hand.push(c);
+        pl.hand.make_mut().push(c);
         true
     }
 
@@ -604,7 +665,7 @@ impl GameState {
                 Some(f) => {
                     let idx = self.players[p].deck.iter().position(|r| f(self, r));
                     match idx {
-                        Some(idx) => self.players[p].deck.remove(idx),
+                        Some(idx) => self.players[p].deck.make_mut().remove(idx),
                         None => break,
                     }
                 }
@@ -613,7 +674,7 @@ impl GameState {
                         self.lose(p);
                         break;
                     }
-                    self.players[p].deck.remove(0)
+                    self.players[p].deck.make_mut().remove(0)
                 }
             };
             let mut c = match self.take_kept(p, r.iid) {

@@ -191,7 +191,7 @@ fn elf_turn(names: &[&str]) -> GameState {
     s.active = 0;
     s.players[0].pp = 7;
     s.players[0].max_pp = 7;
-    s.players[0].hand = hand_cards(&mut s, names);
+    s.players[0].hand = hand_cards(&mut s, names).into();
     s
 }
 
@@ -220,7 +220,7 @@ fn turn_order_merges_states_differing_only_in_order() {
     // 効果で加わったカードの iid や場に出た順が違っても、同じ局面としてまとめる
     let mut root = elf_turn(&["フェアリーテイマー", "燐光の岩", "フェアリー"]);
     // 前のターンのスペルでスペルブーストの回数だけが増えているフェアリー
-    root.players[0].hand[2].boosts = 1;
+    root.players[0].hand.make_mut()[2].boosts = 1;
     let a = play_all(&root, &["フェアリーテイマー", "燐光の岩", "フェアリー"]);
     let b = play_all(&root, &["燐光の岩", "フェアリー!", "フェアリーテイマー"]);
     assert_ne!(canon(&a), canon(&b));

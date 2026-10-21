@@ -11,9 +11,9 @@ fn position(turn: i32) -> GameState {
     while !(s.active == 0 && s.players[0].turn_count >= turn) {
         s = apply(&s, &Action::EndTurn);
     }
-    s.players[0].board.clear();
-    s.players[0].hand.clear();
-    s.players[1].board.clear();
+    s.players[0].board.make_mut().clear();
+    s.players[0].hand.make_mut().clear();
+    s.players[1].board.make_mut().clear();
     s.players[1].leader_hp = 20;
     s
 }
@@ -36,7 +36,7 @@ fn doomed_followers_count_less() {
     let sw = search_weights();
     let empty = evaluate_with(&s, 0, &sw);
     let puppet = board_card(&mut s, "改良型・操り人形");
-    s.players[0].board = vec![puppet];
+    s.players[0].board = vec![puppet].into();
     let value = evaluate_with(&s, 0, &sw) - empty;
     let mut full = sw.w.clone();
     full.doomed = 1.0;
@@ -49,9 +49,9 @@ fn puppet_attacks_unkillable_follower() {
     // 改良型・操り人形を出したら、倒せない相手のフォロワーにも攻撃する（相手のターンの終わりに消えるので）
     let mut s = position(3);
     s.players[0].pp = 1;
-    s.players[0].hand = hand_cards(&mut s, &["改良型・操り人形"]);
+    s.players[0].hand = hand_cards(&mut s, &["改良型・操り人形"]).into();
     let target = old_follower(&mut s, "激震のゴリアテ");
-    s.players[1].board = vec![target];
+    s.players[1].board = vec![target].into();
     let moves = turn_moves(s);
     assert!(
         moves
@@ -67,10 +67,10 @@ fn super_evolves_the_follower_that_stays() {
     // アン＆グレアと一緒に出たアンの大英霊ではなく、場に残るアン＆グレアを超進化する
     let mut s = position(6);
     s.players[0].pp = 5;
-    s.players[0].hand = hand_cards(&mut s, &["マナリアフレンズ・アン＆グレア"]);
+    s.players[0].hand = hand_cards(&mut s, &["マナリアフレンズ・アン＆グレア"]).into();
     // シャークソルジャー（6/6）は、どちらかを超進化すれば倒せる。残るアン＆グレアを超進化する
     let shark = old_follower(&mut s, "シャークソルジャー");
-    s.players[1].board = vec![shark];
+    s.players[1].board = vec![shark].into();
     let moves = turn_moves(s);
     let before_end = moves
         .iter()

@@ -17,7 +17,7 @@ fn rhinoceus_position() -> (GameState, PlayerIndex, Iid) {
     let hand = hand_cards(&mut s, &["殺戮のリノセウス", "森の神秘", "森の神秘"]);
     let rhino = hand[0].iid;
     let pl = &mut s.players[me];
-    pl.hand = hand;
+    pl.hand = hand.into();
     pl.pp = 3;
     pl.max_pp = 3;
     s.players[opponent(me)].leader_hp = 3;
@@ -55,15 +55,15 @@ fn bail_position() -> GameState {
     let rod = board_card(&mut s, "聖樹の杖");
     let william = board_card(&mut s, "マナリアの学徒・ウィリアム");
     let me = &mut s.players[0];
-    me.hand = vec![fairies[0].clone(), fairies[1].clone(), bail, rhino];
-    me.board = vec![rod];
+    me.hand = vec![fairies[0].clone(), fairies[1].clone(), bail, rhino].into();
+    me.board = vec![rod].into();
     me.pp = 8;
     me.max_pp = 8;
     me.turn_count = 8;
     me.ep = 0;
     me.sep = 1;
     me.combo = 0;
-    s.players[1].board = vec![william];
+    s.players[1].board = vec![william].into();
     s.players[1].leader_hp = 11;
     s
 }
@@ -131,16 +131,16 @@ fn kuon_enhance_position() -> GameState {
     silvia.max_defense = 8;
     silvia.evolve = Evolve::SuperEvolved;
     let me = &mut s.players[0];
-    me.hand = vec![call, kuon];
-    me.hand.extend(others);
-    me.board = vec![cauldron];
+    me.hand = vec![call, kuon].into();
+    me.hand.make_mut().extend(others);
+    me.board = vec![cauldron].into();
     me.pp = 9;
     me.max_pp = 9;
     me.turn_count = 9;
     me.extra_pp_available = true;
     me.ep = 0;
     me.sep = 1;
-    s.players[1].board = vec![silvia];
+    s.players[1].board = vec![silvia].into();
     s.players[1].leader_hp = 13;
     s.players[1].turn_count = 9;
     s.turn = 18;
@@ -175,8 +175,8 @@ fn damage_bound_cuts_seven_cost_kuon() {
     let kuon = s.players[0].hand[1].clone();
     let old = old_follower(&mut s, "式神・形代");
     let me = &mut s.players[0];
-    me.hand = vec![kuon];
-    me.board.push(old);
+    me.hand = vec![kuon].into();
+    me.board.make_mut().push(old);
     me.pp = 7;
     me.extra_pp_available = false;
     let b = crate::ai::damage_bound::damage_bound(&s, 0, false).expect("上限");

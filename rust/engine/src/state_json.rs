@@ -857,8 +857,8 @@ fn player_of(v: &Json) -> R<PlayerState> {
             })
             .collect::<R<_>>()?,
         graveyard: int(v, "graveyard")?,
-        graveyard_followers: card_list(v, "graveyardFollowers")?,
-        destroyed_amulets: card_list(v, "destroyedAmulets")?,
+        graveyard_followers: card_list(v, "graveyardFollowers")?.into(),
+        destroyed_amulets: card_list(v, "destroyedAmulets")?.into(),
         destroyed_this_turn: array(v, "destroyedThisTurn")?
             .iter()
             .map(|r| {

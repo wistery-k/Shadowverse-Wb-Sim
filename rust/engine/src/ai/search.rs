@@ -22,7 +22,7 @@ use super::mulligan::{
 use super::think::{Thought, ThoughtCandidate};
 use super::valuenet::{value_net_eval, ValuePhase};
 use super::{Agent, Rng};
-use crate::game::{acting_player, legal_actions, resolve_turn_end, try_apply_action};
+use crate::game::{acting_player, apply_legal, legal_actions, resolve_turn_end, try_apply_action};
 use crate::state::*;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -235,9 +235,9 @@ pub struct Env<'a> {
     pub policy_w: &'a EvalWeights,
 }
 
+/// 並びの 1 手（手と、1 つ前の手の添字）
 struct Step {
     action: Action,
-    state: Rc<GameState>,
     prev: Option<usize>,
 }
 
@@ -295,6 +295,8 @@ fn distinct_plays(s: &GameState, actions: Vec<Action>) -> Vec<Action> {
 struct Planner<'a> {
     env: &'a Env<'a>,
     p: PlayerIndex,
+    /// 探索を始めた局面（steps の並びの局面は、ここから手を打ち直して作る）
+    root: Rc<GameState>,
     steps: Vec<Step>,
 }
 
@@ -303,25 +305,33 @@ impl<'a> Planner<'a> {
         self.env.opts
     }
 
-    fn push_step(&mut self, action: Action, state: Rc<GameState>, prev: Option<usize>) -> usize {
-        self.steps.push(Step {
-            action,
-            state,
-            prev,
-        });
+    fn push_step(&mut self, action: Action, prev: Option<usize>) -> usize {
+        self.steps.push(Step { action, prev });
         self.steps.len() - 1
     }
 
+    /// path までの並びと、各手を打った後の局面。局面は root から打ち直して作る
+    /// （探索中のすべての局面を残すとメモリを多く使って遅くなるので、並びには手だけを残している）。
+    /// 最初のターン終了は打たずに root の局面のまま（beam_terminals と同じ）
     fn steps_of(&self, path: usize) -> Vec<(Action, Rc<GameState>)> {
-        let mut out = Vec::new();
+        let mut order = Vec::new();
         let mut cur = Some(path);
         while let Some(i) = cur {
-            let s = &self.steps[i];
-            out.push((s.action.clone(), s.state.clone()));
-            cur = s.prev;
+            order.push(i);
+            cur = self.steps[i].prev;
         }
-        out.reverse();
-        out
+        let mut state = self.root.clone();
+        order
+            .into_iter()
+            .rev()
+            .map(|i| {
+                let a = &self.steps[i].action;
+                if !matches!(a, Action::EndTurn) {
+                    state = Rc::new(apply_legal(&state, a));
+                }
+                (a.clone(), state.clone())
+            })
+            .collect()
     }
 
     /// ターンを終える局面（合流する相打ちを打った後）。変わらなければ None
@@ -426,7 +436,7 @@ impl<'a> Planner<'a> {
             return Vec::new();
         };
         let next = Rc::new(next);
-        let path = self.push_step(a.clone(), next.clone(), prev);
+        let path = self.push_step(a.clone(), prev);
         let opts = self.opts();
         if !opts.chain || depth >= 8 || next.phase == Phase::Ended {
             return vec![(next, path)];
@@ -521,7 +531,7 @@ impl<'a> Planner<'a> {
                 if root_converges {
                     continue; // 合流する攻撃をしてから終える手に劣らない
                 }
-                let path = self.push_step(a.clone(), root.clone(), None);
+                let path = self.push_step(a.clone(), None);
                 let value = self.score(root);
                 terminals.push(Node {
                     state: root.clone(),
@@ -594,6 +604,66 @@ impl<'a> Planner<'a> {
     }
 }
 
+/// ビームサーチの終局面と、最初の手ごとにターン末の点数が最も高い終局面の添字（最初の手が出てきた順）
+fn turn_end_bests<'a>(
+    root: &Rc<GameState>,
+    p: PlayerIndex,
+    env: &'a Env<'a>,
+) -> (Planner<'a>, Vec<Node>, Vec<(Action, usize)>) {
+    let opts = env.opts;
+    let mut pl = Planner {
+        env,
+        p,
+        root: root.clone(),
+        steps: Vec::new(),
+    };
+    let root_converges = opts.settle_trades && !converging_attacks(root, p).is_empty();
+    let mut terminals = pl.beam_terminals(root, root_converges);
+    if opts.score_turn_end == ScoreTurnEnd::Terminal {
+        for t in terminals.iter_mut() {
+            t.value = pl.end_score(&t.state);
+        }
+    }
+    let mut best_by_first: Vec<(Action, usize)> = Vec::new();
+    for (i, t) in terminals.iter().enumerate() {
+        match best_by_first.iter_mut().find(|(k, _)| *k == t.first) {
+            None => best_by_first.push((t.first.clone(), i)),
+            Some(e) => {
+                if t.value > terminals[e.1].value {
+                    e.1 = i;
+                }
+            }
+        }
+    }
+    (pl, terminals, best_by_first)
+}
+
+/// plan_turn（相手のターンを読まない）の並びのうち点数が最も高いもの（同じなら先のもの）の、最後の手とその後の局面。
+/// 並びの局面は打ち直して作るので、使うものだけを作る
+fn best_plan_last(
+    root: &Rc<GameState>,
+    p: PlayerIndex,
+    env: &Env,
+) -> Option<(Action, Rc<GameState>)> {
+    let (pl, terminals, bests) = turn_end_bests(root, p, env);
+    let mut best: Option<usize> = None;
+    for &(_, i) in &bests {
+        if best.is_none_or(|b| terminals[i].value > terminals[b].value) {
+            best = Some(i);
+        }
+    }
+    best.and_then(|i| pl.steps_of(terminals[i].path).pop())
+}
+
+/// plan_turn（相手のターンを読まない）の並びの点数の最大（並びが無ければ None）
+fn best_plan_value(root: &Rc<GameState>, p: PlayerIndex, env: &Env) -> Option<f64> {
+    let (_, terminals, bests) = turn_end_bests(root, p, env);
+    bests
+        .iter()
+        .map(|&(_, i)| terminals[i].value)
+        .fold(None, |m: Option<f64>, v| Some(m.map_or(v, |m| m.max(v))))
+}
+
 /// 1 つの局面で、最初の手ごとの評価値を求める（挿入順。TypeScript 版の Map と同じ順）。
 /// rescore が false なら相手のターンを読まず、最初の手ごとのターン末の最善の並びとその点数を返す
 pub fn plan_turn(
@@ -616,31 +686,8 @@ pub fn plan_turn_traced(
     mut trace: Option<&mut PlanTrace>,
 ) -> Vec<(Action, Plan)> {
     let opts = env.opts;
-    let mut pl = Planner {
-        env,
-        p,
-        steps: Vec::new(),
-    };
-    let root_converges = opts.settle_trades && !converging_attacks(root, p).is_empty();
-    let mut terminals = pl.beam_terminals(root, root_converges);
-    if opts.score_turn_end == ScoreTurnEnd::Terminal {
-        for t in terminals.iter_mut() {
-            t.value = pl.end_score(&t.state);
-        }
-    }
-
     // 最初の手ごとに最善の終局面を残し、上位を相手のターンまで読んで評価し直す
-    let mut best_by_first: Vec<(Action, usize)> = Vec::new();
-    for (i, t) in terminals.iter().enumerate() {
-        match best_by_first.iter_mut().find(|(k, _)| *k == t.first) {
-            None => best_by_first.push((t.first.clone(), i)),
-            Some(e) => {
-                if t.value > terminals[e.1].value {
-                    e.1 = i;
-                }
-            }
-        }
-    }
+    let (pl, terminals, best_by_first) = turn_end_bests(root, p, env);
     if let Some(tr) = trace.as_deref_mut() {
         for (_, i) in &best_by_first {
             let t = &terminals[*i];
@@ -900,13 +947,13 @@ pub(crate) fn resample_own_draws(
             Some(k) => HandCard { iid, ..k },
             None => s.new_hand_card(card, Some(iid)),
         };
-        s.players[p].hand[i] = h;
+        s.players[p].hand.make_mut()[i] = h;
         if boosts > 0 {
             boosted.push((iid, boosts));
         }
     }
     let pl = &mut s.players[p];
-    for c in pl.deck.iter_mut() {
+    for c in pl.deck.make_mut().iter_mut() {
         let (card, kept) = pool.next().unwrap();
         c.card = card;
         if let Some(k) = kept {
@@ -934,6 +981,7 @@ fn draw_first_steps(
     let pl = Planner {
         env,
         p,
+        root: root.clone(),
         steps: Vec::new(),
     };
     let root_legal = legal_actions(root);
@@ -1020,7 +1068,7 @@ fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng) -> (f64, GameState)
     };
     let mut v = match env.opts.own_next {
         Some(on) if after.phase != Phase::Ended && after.active == p && after.pending.is_none() => {
-            let next = own_next_value(pl, &after, rng, on);
+            let next = own_next_value(pl, &after, on);
             if on.mix >= 1.0 {
                 next
             } else {
@@ -1044,7 +1092,7 @@ fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng) -> (f64, GameState)
 }
 
 /// 自分の次のターンの始めの局面 after から、自分のターンをビームサーチで打った最善のターン末の点数（ownNext）
-fn own_next_value(pl: &Planner, after: &GameState, rng: &mut Rng, on: OwnNextSearch) -> f64 {
+fn own_next_value(pl: &Planner, after: &GameState, on: OwnNextSearch) -> f64 {
     let env = pl.env;
     let opts = SearchOptions {
         beam_width: on.beam_width,
@@ -1061,11 +1109,7 @@ fn own_next_value(pl: &Planner, after: &GameState, rng: &mut Rng, on: OwnNextSea
         policy_w: env.policy_w,
     };
     let root = Rc::new(after.clone());
-    plan_turn(&root, pl.p, &next_env, rng, false)
-        .into_iter()
-        .map(|(_, x)| x.value)
-        .fold(None, |m: Option<f64>, v| Some(m.map_or(v, |m| m.max(v))))
-        .unwrap_or_else(|| pl.eval_after(after))
+    best_plan_value(&root, pl.p, &next_env).unwrap_or_else(|| pl.eval_after(after))
 }
 
 /// 自分のターンを終え、相手のターン（と、その途中の選択）を貪欲法で進め、自分の手番に戻った局面を返す
@@ -1159,13 +1203,7 @@ pub fn simulate_opponent_turn_by_search(
         if ended && !searched && cur.pending.is_none() && cur.active == q {
             searched = true;
             let root = Rc::new(cur.clone());
-            let mut best: Option<Plan> = None;
-            for (_, plan) in plan_turn(&root, q, &opp_env, rng, false) {
-                if best.as_ref().is_none_or(|b| plan.value > b.value) {
-                    best = Some(plan);
-                }
-            }
-            if let Some((action, last)) = best.as_ref().and_then(|b| b.steps.last()) {
+            if let Some((action, last)) = &best_plan_last(&root, q, &opp_env) {
                 if !matches!(action, Action::EndTurn) {
                     cur = if opts.settle_trades {
                         settle_converging_trades_with(last, q, opts.dominance)

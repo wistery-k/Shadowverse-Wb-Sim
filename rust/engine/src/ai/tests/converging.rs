@@ -12,7 +12,7 @@ fn empty_boards() -> GameState {
     s.active = 0;
     s.turn = 9;
     for pl in s.players.iter_mut() {
-        pl.board.clear();
+        pl.board.make_mut().clear();
         pl.pp = 0;
     }
     s
@@ -26,7 +26,7 @@ fn put(s: &mut GameState, p: PlayerIndex, name: &str, attack: i32, defense: i32)
     f.max_defense = defense;
     f.entered_turn = s.turn - 1;
     let iid = f.iid;
-    s.players[p].board.push(f);
+    s.players[p].board.make_mut().push(f);
     iid
 }
 

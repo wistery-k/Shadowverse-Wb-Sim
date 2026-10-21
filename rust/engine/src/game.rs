@@ -15,14 +15,14 @@ fn new_player(deck: Vec<CardRef>) -> PlayerState {
         sep: SEP,
         extra_pp_available: false,
         turn_count: 0,
-        deck,
+        deck: deck.into(),
         deck_kept: Vec::new(),
-        hand: Vec::new(),
-        board: Vec::new(),
+        hand: Shared::default(),
+        board: Shared::default(),
         crests: Vec::new(),
         graveyard: 0,
-        graveyard_followers: Vec::new(),
-        destroyed_amulets: Vec::new(),
+        graveyard_followers: Shared::default(),
+        destroyed_amulets: Shared::default(),
         destroyed_this_turn: Vec::new(),
         combo: 0,
         evolved_this_turn: false,
@@ -67,9 +67,9 @@ pub fn create_game(decks: [&[CardIdx]; 2], seed: u32) -> GameState {
     s.active = s.first;
     s.players[opponent(s.first)].extra_pp_available = true;
     for p in 0..2 {
-        let mut deck = std::mem::take(&mut s.players[p].deck);
+        let mut deck = std::mem::take(&mut s.players[p].deck).into_vec();
         s.shuffle(&mut deck);
-        s.players[p].deck = deck;
+        s.players[p].deck = deck.into();
         s.draw_cards(p, INITIAL_HAND as i32, None, None);
     }
     s
@@ -106,14 +106,14 @@ fn start_turn(s: &mut GameState, p: PlayerIndex) {
     s.players[0].destroyed_this_turn.clear();
     s.players[1].destroyed_this_turn.clear();
     let pl = &mut s.players[p];
-    for c in &mut pl.board {
+    for c in pl.board.make_mut() {
         if c.is_follower {
             c.attacks_this_turn = 0;
         } else {
             c.acted_this_turn = false;
         }
     }
-    for h in pl.hand.iter_mut().chain(pl.deck_kept.iter_mut()) {
+    for h in pl.hand.make_mut().iter_mut().chain(pl.deck_kept.iter_mut()) {
         h.fused_this_turn = false;
     }
 
@@ -172,7 +172,17 @@ fn start_turn(s: &mut GameState, p: PlayerIndex) {
 fn clear_turn_effects(s: &mut GameState) {
     let turn = s.turn;
     for p in 0..2 {
-        for c in &mut s.players[p].board {
+        // 消すものが無い場は書き換えない（ほかの局面と共有したままにする）
+        let changes = |c: &OnBoard| {
+            c.temp_keywords != Kw::EMPTY
+                || (c.is_follower
+                    && (c.temp_attack != 0
+                        || matches!(c.cannot_attack_until, Some(u) if u <= turn)))
+        };
+        if !s.players[p].board.iter().any(changes) {
+            continue;
+        }
+        for c in s.players[p].board.make_mut() {
             c.temp_keywords = Kw::EMPTY;
             if c.is_follower {
                 c.temp_attack = 0;
@@ -303,12 +313,12 @@ fn spell_has_targets(
     }
     // 手札から除いた局面（合法手の列挙 1 回につき 1 度だけ複製し、除いたカードは戻す）
     let t = scratch.get_or_insert_with(|| s.clone());
-    let removed = t.players[p].hand.remove(hi);
+    let removed = t.players[p].hand.make_mut().remove(hi);
     let ctx = Ctx::new(p, removed.iid);
     let ok = chooses
         .iter()
         .all(|from| !choose_candidates(t, &ctx, from).is_empty());
-    t.players[p].hand.insert(hi, removed);
+    t.players[p].hand.make_mut().insert(hi, removed);
     ok
 }
 
@@ -762,17 +772,17 @@ pub fn apply_in_place(s: &mut GameState, action: &Action) {
 }
 
 fn apply_mulligan(s: &mut GameState, p: PlayerIndex, swap: &[Iid]) {
-    let hand = std::mem::take(&mut s.players[p].hand);
+    let hand = std::mem::take(&mut s.players[p].hand).into_vec();
     let (aside, keep): (Vec<HandCard>, Vec<HandCard>) =
         hand.into_iter().partition(|c| swap.contains(&c.iid));
-    s.players[p].hand = keep;
+    s.players[p].hand = keep.into();
     s.draw_cards(p, aside.len() as i32, None, None);
     for c in aside {
         s.return_to_deck(p, c);
     }
-    let mut deck = std::mem::take(&mut s.players[p].deck);
+    let mut deck = std::mem::take(&mut s.players[p].deck).into_vec();
     s.shuffle(&mut deck);
-    s.players[p].deck = deck;
+    s.players[p].deck = deck.into();
     s.players[p].mulligan_done = true;
     if mulligan_player(s).is_none() {
         let f = s.first;
@@ -785,7 +795,7 @@ fn apply_play(s: &mut GameState, iid: Iid) {
     let Some(hi) = s.players[p].hand.iter().position(|c| c.iid == iid) else {
         return;
     };
-    let h = s.players[p].hand.remove(hi);
+    let h = s.players[p].hand.make_mut().remove(hi);
     let cd = card(h.card);
     let pl = &mut s.players[p];
     let cost = play_cost(cd, pl.pp, Some(&h));
@@ -827,7 +837,7 @@ fn apply_attack(s: &mut GameState, attacker_iid: Iid, target: AttackTarget) {
     else {
         return;
     };
-    let a = &mut s.players[p].board[ai];
+    let a = &mut s.players[p].board.make_mut()[ai];
     a.attacks_this_turn += 1;
     a.keywords = a.keywords.without(AMBUSH); // 攻撃すると潜伏を失う
     let (a_card, a_super, a_attack, a_x) = (
@@ -1009,7 +1019,7 @@ fn apply_act(s: &mut GameState, iid: Iid) {
         return;
     };
     s.players[p].pp -= cost;
-    s.players[p].board[ai].acted_this_turn = true;
+    s.players[p].board.make_mut()[ai].acted_this_turn = true;
     fire_ally_act(s, p);
     push_abilities(s, &[ability], &Ctx::new(p, iid));
 }
@@ -1019,12 +1029,13 @@ fn apply_fuse(s: &mut GameState, host_iid: Iid, materials: &[Iid]) {
     if !s.players[p].hand.iter().any(|c| c.iid == host_iid) {
         return;
     }
-    let hand = std::mem::take(&mut s.players[p].hand);
+    let hand = std::mem::take(&mut s.players[p].hand).into_vec();
     let (used, keep): (Vec<HandCard>, Vec<HandCard>) =
         hand.into_iter().partition(|c| materials.contains(&c.iid));
-    s.players[p].hand = keep;
+    s.players[p].hand = keep.into();
     let host = s.players[p]
         .hand
+        .make_mut()
         .iter_mut()
         .find(|c| c.iid == host_iid)
         .unwrap();

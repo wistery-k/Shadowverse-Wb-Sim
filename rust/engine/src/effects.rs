@@ -390,7 +390,11 @@ fn fire_side(
             };
             if ability.once_per_own_turn
                 && is_follower
-                && !use_once(&mut s.players[p].board[bi].used_once, i as u8, turn_id)
+                && !use_once(
+                    &mut s.players[p].board.make_mut()[bi].used_once,
+                    i as u8,
+                    turn_id,
+                )
             {
                 continue;
             }
@@ -448,12 +452,12 @@ pub fn enter_board(s: &mut GameState, p: PlayerIndex, mut c: OnBoard) -> bool {
             .position(|x| !x.is_follower && x.sigils.is_some())
         {
             c.sigils = Some(c.sigils.unwrap() + pl.board[oi].sigils.unwrap_or(0));
-            pl.board.remove(oi);
+            pl.board.make_mut().remove(oi);
         }
     }
     let (iid, cid) = (c.iid, c.card);
     let enter = board_abilities_on(&c, On::Enter);
-    s.players[p].board.push(c);
+    s.players[p].board.make_mut().push(c);
     for a in enter {
         queue(s, a, Ctx::new(p, iid));
     }
@@ -509,7 +513,7 @@ pub fn leave_board(s: &mut GameState, iid: Iid, mut reason: LeaveReason) {
         .iter()
         .position(|c| c.iid == iid)
         .unwrap();
-    let c = s.players[p].board.remove(idx);
+    let c = s.players[p].board.make_mut().remove(idx);
 
     match reason {
         LeaveReason::Destroy => {
@@ -517,7 +521,7 @@ pub fn leave_board(s: &mut GameState, iid: Iid, mut reason: LeaveReason) {
             pl.graveyard += 1;
             let base = card(c.card);
             if c.is_follower {
-                pl.graveyard_followers.push(c.card);
+                pl.graveyard_followers.make_mut().push(c.card);
                 let f = base.ctype == CardType::Follower;
                 pl.destroyed_this_turn.push(DestroyedRecord {
                     card: c.card,
@@ -525,7 +529,7 @@ pub fn leave_board(s: &mut GameState, iid: Iid, mut reason: LeaveReason) {
                     defense: if f { base.defense } else { 0 },
                 });
             } else {
-                pl.destroyed_amulets.push(c.card);
+                pl.destroyed_amulets.make_mut().push(c.card);
             }
             for a in board_abilities_on(&c, On::LastWords) {
                 let mut ctx = Ctx::new(p, c.iid);
@@ -589,7 +593,7 @@ pub fn damage_follower(s: &mut GameState, iid: Iid, amount: i32) -> i32 {
         return 0;
     };
     let active = s.active;
-    let f = &mut s.players[p].board[i];
+    let f = &mut s.players[p].board.make_mut()[i];
     if f.has_keyword(BARRIER) {
         f.keywords = f.keywords.without(BARRIER);
         f.temp_keywords = f.temp_keywords.without(BARRIER);
@@ -640,7 +644,7 @@ pub fn evolve_follower(s: &mut GameState, p: PlayerIndex, iid: Iid, kind: Evolve
         .iter()
         .position(|c| c.iid == iid)
         .unwrap();
-    let f = &mut s.players[p].board[i];
+    let f = &mut s.players[p].board.make_mut()[i];
     let bonus = if kind == EvolveKind::Evolve {
         EVOLVE_BONUS
     } else {
@@ -722,7 +726,7 @@ pub fn fire_spellboost(s: &mut GameState, p: PlayerIndex, iid: Iid, times: i32) 
         let Some(hi) = s.players[p].hand.iter().position(|c| c.iid == iid) else {
             return;
         };
-        s.players[p].hand[hi].boosts += 1;
+        s.players[p].hand.make_mut()[hi].boosts += 1;
         fire_hand(s, p, hi, On::Spellboost);
     }
 }
@@ -918,7 +922,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
         Effect::SetDefense { target, value } => {
             for id in targets!(target) {
                 if let Some((q, i)) = s.find_follower(id) {
-                    let f = &mut s.players[q].board[i];
+                    let f = &mut s.players[q].board.make_mut()[i];
                     f.defense = *value;
                     f.max_defense = *value;
                 }
@@ -1041,7 +1045,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                     .iter()
                     .position(|r| r.card == cid && deck_card_matches(s, &frame.ctx, p, r, filter))
                     .unwrap();
-                let r = s.players[p].deck.remove(idx);
+                let r = s.players[p].deck.make_mut().remove(idx);
                 // 場に出したカードには手札で付いた状態を使わない（山札から出すのはアミュレットだけで、場では状態が効かない）
                 s.take_kept(p, r.iid);
                 let h = s.new_hand_card(r.card, Some(r.iid));
@@ -1069,13 +1073,13 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 let Some((q, i)) = s.find_hand(id) else {
                     continue;
                 };
-                let h = s.players[q].hand.remove(i);
+                let h = s.players[q].hand.make_mut().remove(i);
                 s.return_to_deck(q, h);
             }
             if !ids.is_empty() {
-                let mut deck = std::mem::take(&mut s.players[p].deck);
+                let mut deck = std::mem::take(&mut s.players[p].deck).into_vec();
                 s.shuffle(&mut deck);
-                s.players[p].deck = deck;
+                s.players[p].deck = deck.into();
             }
         }
         Effect::Discard { target } => {
@@ -1085,7 +1089,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                     continue;
                 };
                 frame.ctx.set_var(var, hand_cost(&s.players[q].hand[i]));
-                let h = s.players[q].hand.remove(i);
+                let h = s.players[q].hand.make_mut().remove(i);
                 s.players[q].graveyard += 1;
                 for a in own_abilities(h.card, On::Discarded) {
                     queue(s, a, Ctx::new(q, h.iid));
@@ -1107,7 +1111,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             let d = val!(defense);
             for id in targets!(target) {
                 if let Some((q, i)) = s.find_follower(id) {
-                    let f = &mut s.players[q].board[i];
+                    let f = &mut s.players[q].board.make_mut()[i];
                     if *duration == Some(Duration::EndOfTurn) {
                         f.temp_attack += a;
                     } else {
@@ -1118,7 +1122,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                     continue;
                 }
                 if let Some((q, i)) = s.find_hand(id) {
-                    let h = &mut s.players[q].hand[i];
+                    let h = &mut s.players[q].hand.make_mut()[i];
                     h.attack_mod += a;
                     h.defense_mod += d;
                 }
@@ -1134,7 +1138,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             let kw = keywords.unwrap_or_default();
             for id in targets!(target) {
                 if let Some((q, i)) = s.find_board(id) {
-                    let b = &mut s.players[q].board[i];
+                    let b = &mut s.players[q].board.make_mut()[i];
                     if *duration == Some(Duration::EndOfTurn) {
                         b.temp_keywords = b.temp_keywords.with(kw);
                     } else {
@@ -1149,7 +1153,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                     continue;
                 }
                 if let Some((q, i)) = s.find_hand(id) {
-                    let h = &mut s.players[q].hand[i];
+                    let h = &mut s.players[q].hand.make_mut()[i];
                     h.keywords = h.keywords.with(kw);
                 }
             }
@@ -1166,7 +1170,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             let until = s.turn + 1;
             for id in targets!(target) {
                 if let Some((q, i)) = s.find_follower(id) {
-                    s.players[q].board[i].cannot_attack_until = Some(until);
+                    s.players[q].board.make_mut()[i].cannot_attack_until = Some(until);
                 }
             }
         }
@@ -1189,17 +1193,17 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
         Effect::CostChange { target, amount } => {
             for id in targets!(target) {
                 if let Some((q, i)) = s.find_hand(id) {
-                    s.players[q].hand[i].cost_mod += amount;
+                    s.players[q].hand.make_mut()[i].cost_mod += amount;
                 }
             }
         }
         Effect::AddX { target, amount } => {
             for id in targets!(target) {
                 if let Some((q, i)) = s.find_hand(id) {
-                    let h = &mut s.players[q].hand[i];
+                    let h = &mut s.players[q].hand.make_mut()[i];
                     h.x = Some(h.x.unwrap_or(0) + amount);
                 } else if let Some((q, i)) = s.find_follower(id) {
-                    let f = &mut s.players[q].board[i];
+                    let f = &mut s.players[q].board.make_mut()[i];
                     f.x = Some(f.x.unwrap_or(0) + amount);
                 }
             }
@@ -1209,7 +1213,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 let Some((q, i)) = s.find_board(id) else {
                     continue;
                 };
-                let a = &mut s.players[q].board[i];
+                let a = &mut s.players[q].board.make_mut()[i];
                 if a.is_follower {
                     continue;
                 }
@@ -1242,7 +1246,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
         Effect::AddSigils { amount } => {
             let n = val!(amount);
             if let Some(i) = sigil_amulet(s, p) {
-                let a = &mut s.players[p].board[i];
+                let a = &mut s.players[p].board.make_mut()[i];
                 a.sigils = Some(a.sigils.unwrap_or(0) + n);
             } else if s.can_add_to_board(p) {
                 let mut c = s.new_board_card(data().earth_sigil_token, None);
@@ -1254,7 +1258,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
         }
         Effect::EarthRite { amount, then } => {
             if let Some(i) = sigil_amulet(s, p) {
-                let a = &mut s.players[p].board[i];
+                let a = &mut s.players[p].board.make_mut()[i];
                 if a.sigils.unwrap_or(0) >= *amount {
                     let left = a.sigils.unwrap_or(0) - amount;
                     a.sigils = Some(left);
@@ -1302,7 +1306,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 }
             }
             s.shuffle(&mut deck);
-            s.players[p].deck = deck;
+            s.players[p].deck = deck.into();
             s.players[p].deck_kept.clear();
         }
         Effect::SetLeaderMaxHp { side, value } => {
@@ -1419,12 +1423,12 @@ fn transform(s: &mut GameState, id: Iid, cid: CardIdx) {
         if fresh.is_follower && old.is_follower {
             fresh.entered_turn = old.entered_turn;
         }
-        s.players[q].board[i] = fresh;
+        s.players[q].board.make_mut()[i] = fresh;
         return;
     }
     if let Some((q, i)) = s.find_hand(id) {
         let h = revealed_hand_card(s, cid, Some(id));
-        s.players[q].hand[i] = h;
+        s.players[q].hand.make_mut()[i] = h;
     }
 }
 

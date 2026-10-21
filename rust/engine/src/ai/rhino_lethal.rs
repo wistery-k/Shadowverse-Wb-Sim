@@ -292,7 +292,7 @@ fn best_finish(start: &Line, p: PlayerIndex, root_opp_hp: i32) -> (f64, Option<L
 
 fn without_wards(s: &GameState, opp: PlayerIndex) -> GameState {
     let mut s = s.clone();
-    for c in s.players[opp].board.iter_mut() {
+    for c in s.players[opp].board.make_mut().iter_mut() {
         if c.keywords.has(WARD) || c.temp_keywords.has(WARD) {
             c.keywords = c.keywords.without(WARD);
             c.temp_keywords = c.temp_keywords.without(WARD);

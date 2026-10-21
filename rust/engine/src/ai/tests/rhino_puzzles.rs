@@ -95,8 +95,8 @@ fn puzzle_state(pz: &Puzzle, opp_hp: i32) -> GameState {
         .map(|n| board_card(&mut s, full_name(n)))
         .collect();
     let me = &mut s.players[0];
-    me.hand = hand;
-    me.board = board;
+    me.hand = hand.into();
+    me.board = board.into();
     me.pp = pz.pp;
     me.max_pp = pz.pp;
     me.turn_count = pz.pp;
@@ -109,7 +109,7 @@ fn puzzle_state(pz: &Puzzle, opp_hp: i32) -> GameState {
         .iter()
         .map(|n| board_card(&mut s, full_name(n)))
         .collect();
-    s.players[1].board = opp;
+    s.players[1].board = opp.into();
     s.players[1].leader_hp = opp_hp;
     s
 }
@@ -211,8 +211,8 @@ fn lethal_without_luck() {
     let rod = board_card(&mut s, "聖樹の杖");
     {
         let me = &mut s.players[0];
-        me.hand = hand;
-        me.board = vec![rod];
+        me.hand = hand.into();
+        me.board = vec![rod].into();
         me.leader_hp = 19;
         me.pp = 7;
         me.max_pp = 7;
@@ -245,7 +245,7 @@ fn lethal_without_luck() {
     let mut small = knight(&mut s, 2, 1);
     small.attacks_this_turn = 1;
     let fresh_knight = knight(&mut s, 2, 2);
-    s.players[1].board = vec![lancer, mage, big, small, fresh_knight];
+    s.players[1].board = vec![lancer, mage, big, small, fresh_knight].into();
     s.players[1].leader_hp = 10;
 
     // 乱数や相手の手札を決め直しても勝てる手順を返す

@@ -61,19 +61,19 @@ fn geno_turn(geno_in_hand: bool, opp: &[&str]) -> GameState {
     while !(s.active == 0 && s.players[0].turn_count >= 8) {
         s = apply(&s, &Action::EndTurn);
     }
-    s.players[0].board.clear();
-    s.players[1].board.clear();
-    s.players[0].hand.clear();
+    s.players[0].board.make_mut().clear();
+    s.players[1].board.make_mut().clear();
+    s.players[0].hand.make_mut().clear();
     if geno_in_hand {
         let h = hand_card(&mut s, "レヴィオンアックス・ジェノ");
-        s.players[0].hand.push(h);
+        s.players[0].hand.make_mut().push(h);
     } else {
         let f = old_follower(&mut s, "レヴィオンアックス・ジェノ");
-        s.players[0].board.push(f);
+        s.players[0].board.make_mut().push(f);
     }
     for name in opp {
         let f = old_follower(&mut s, name);
-        s.players[1].board.push(f);
+        s.players[1].board.make_mut().push(f);
     }
     s
 }
@@ -101,7 +101,7 @@ fn geno_does_not_super_evolve_when_not_needed() {
     // （qlp で 24 通り中 3 回、p60p で 2 回。サタンを 1 枚持たせると、どの補正でも 24 回とも 2 回攻撃して超進化しない）
     let mut s = geno_turn(true, &["激震のゴリアテ", "異端の侍"]);
     let filler = hand_card(&mut s, "最果ての罪・サタン");
-    s.players[0].hand.push(filler);
+    s.players[0].hand.make_mut().push(filler);
     let actions = sep_turn(s, true);
     let attacks = actions
         .iter()
@@ -143,7 +143,7 @@ fn uses_extra_pp_on_turn_1() {
     assert_eq!(s.players[p].turn_count, 1);
     assert!(s.players[p].extra_pp_available);
     let h = hand_card(&mut s, "竜育の少女");
-    s.players[p].hand.push(h);
+    s.players[p].hand.make_mut().push(h);
     let mut agent = SearchAgent::new(SearchOptions::default());
     let a = agent.choose_action(&s, &legal_actions(&s), &mut Rng::new(1));
     assert_eq!(a, Action::ExtraPp);
@@ -160,7 +160,7 @@ fn resampled_draws_carry_deck_states() {
     let mut root = apply(&s0, &legal_actions(&s0)[0]);
     let p = root.active;
     let iid = root.players[p].deck[0].iid;
-    root.players[p].deck[0].card = blaze;
+    root.players[p].deck.make_mut()[0].card = blaze;
     let mut h = root.new_hand_card(blaze, Some(iid));
     h.boosts = 2;
     h.cost_mod = -2;
