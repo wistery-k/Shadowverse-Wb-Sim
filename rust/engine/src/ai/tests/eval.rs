@@ -69,7 +69,7 @@ fn dragon_oracle_raises_search_evaluation() {
     s.players[0].pp = 3;
     let c = hand_card(&mut s, "竜の啓示");
     let iid = c.iid;
-    s.players[0].hand = vec![c];
+    s.players[0].hand = vec![c].into();
     let t = apply(&s, &Action::Play(iid));
     assert_eq!(t.players[0].max_pp, 4);
     let (sw, dw) = (search_weights(), default_weights());
@@ -84,7 +84,7 @@ fn fusion_does_not_lower_search_evaluation() {
     let attack = hand_card(&mut s, "アタックアーティファクト");
     let castle = hand_card(&mut s, "キャッスルアーティファクト");
     let (host, material) = (attack.iid, castle.iid);
-    s.players[0].hand = vec![attack, castle];
+    s.players[0].hand = vec![attack, castle].into();
     let (sw, dw) = (search_weights(), default_weights());
     let before = evaluate_with(&s, 0, &sw);
     // アタック（素材のコスト 3）→ デストロイアーティファクトγ
@@ -105,15 +105,15 @@ fn fusion_does_not_lower_search_evaluation() {
 fn countdown_decay_values_amulet_payoff() {
     // countdownDecay ではカウントダウンのアミュレットを割れたときに得るもので数え、アクトでカウントを進めると評価が上がる
     let mut s = main_phase(4);
-    s.players[0].board.clear();
-    s.players[0].hand.clear();
-    s.players[1].board.clear();
+    s.players[0].board.make_mut().clear();
+    s.players[0].hand.make_mut().clear();
+    s.players[1].board.make_mut().clear();
     s.players[0].pp = 5;
     let w = with(&default_weights(), |w| w.countdown_decay = 0.8);
     let empty = evaluate_with(&s, 0, &w);
     let vow = board_card(&mut s, "獣姫の誓約");
     let vow_iid = vow.iid;
-    s.players[0].board = vec![vow];
+    s.players[0].board = vec![vow].into();
     // ホーリーフレイムタイガー 4/4: 4 + 3.2 + 1 = 8.2、カウント 2
     assert_close(evaluate_with(&s, 0, &w) - empty, 8.2 * 0.64);
     let t = apply(&s, &Action::Act(vow_iid));
@@ -122,7 +122,7 @@ fn countdown_decay_values_amulet_payoff() {
     let mut church = board_card(&mut s, "穏やかなる教会");
     church.countdown = Some(1);
     let church_iid = church.iid;
-    s.players[0].board = vec![church];
+    s.players[0].board = vec![church].into();
     let before = evaluate_with(&s, 0, &w);
     let u = apply(&s, &Action::Act(church_iid));
     assert!(u.players[0].board.is_empty());
@@ -134,11 +134,11 @@ fn jeanne_sync_counts_buffed_followers() {
     // jeanneSync では手札にジャンヌがあり、ジャンヌを出せるターンに割れるアミュレットのフォロワーを +2/+4 して数える
     let mut s = new_game(deck_at(0), deck_at(1), 4);
     let p = s.first;
-    s.players[opponent(p)].board.clear();
-    s.players[p].hand.clear();
+    s.players[opponent(p)].board.make_mut().clear();
+    s.players[p].hand.make_mut().clear();
     s.players[p].turn_count = 6;
     let vow = board_card(&mut s, "獣姫の誓約");
-    s.players[p].board = vec![vow];
+    s.players[p].board = vec![vow].into();
     let w = with(&default_weights(), |w| {
         w.countdown_decay = 0.8;
         w.jeanne_sync = 1.0;
@@ -146,7 +146,7 @@ fn jeanne_sync_counts_buffed_followers() {
     let w0 = with(&w, |w| w.jeanne_sync = 0.0);
     let without = evaluate_with(&s, p, &w);
     let jeanne = hand_card(&mut s, "純白の聖女・ジャンヌ");
-    s.players[p].hand = vec![jeanne];
+    s.players[p].hand = vec![jeanne].into();
     let hand_only = evaluate_with(&s, p, &w0) - without;
     // 6 ターン目＋カウント 2 ＝ 8: タイガー 6/8 = 6 + 6.4 + 1 = 13.4（4/4 なら 8.2）
     assert_close(
@@ -171,17 +171,17 @@ fn evo_reserve_counts_evolve_abilities_up_to_ep() {
             "栄弦の天宮・リュウフウ",
         ],
     );
-    s.players[0].hand = hand;
+    s.players[0].hand = hand.into();
     let dw = default_weights();
     let w = with(&dw, |w| w.evo_reserve = 3.0);
     let diff = |s: &GameState| evaluate_with(s, 0, &w) - evaluate_with(s, 0, &dw);
     // 3 枚あっても EP 2 回分まで
     assert_close(diff(&s), 6.0);
     // 進化時能力を持たないフォロワーは数えない
-    s.players[0].hand = hand_cards(&mut s, &["スティールナイト"]);
+    s.players[0].hand = hand_cards(&mut s, &["スティールナイト"]).into();
     assert_close(diff(&s), 0.0);
     // このターンに EP で進化させたのが進化時能力持ちなら 1 枚分数える（EP が残っていなくても）
-    s.players[0].hand.clear();
+    s.players[0].hand.make_mut().clear();
     s.players[0].ep = 0;
     s.players[0].ep_evolved_this_turn = Some(id("楽朗の天宮・フィルドア"));
     assert_close(diff(&s), 3.0);
@@ -197,17 +197,18 @@ fn sevo_reserve_counts_super_evolve_abilities_up_to_sep() {
     s.players[0].hand = hand_cards(
         &mut s,
         &["勇壮の堕天使・オリヴィエ", "水の守護神・サレファ"],
-    );
+    )
+    .into();
     let dw = default_weights();
     let w = with(&dw, |w| w.sevo_reserve = 4.0);
     let diff = |s: &GameState| evaluate_with(s, 0, &w) - evaluate_with(s, 0, &dw);
     // 2 枚あっても SEP 1 回分まで
     assert_close(diff(&s), 4.0);
     // 能力のないフォロワーは数えない
-    s.players[0].hand = hand_cards(&mut s, &["壮麗なる隼"]);
+    s.players[0].hand = hand_cards(&mut s, &["壮麗なる隼"]).into();
     assert_close(diff(&s), 0.0);
     // このターンに超進化させたのが能力持ちなら 1 枚分数える（SEP が残っていなくても）
-    s.players[0].hand.clear();
+    s.players[0].hand.make_mut().clear();
     s.players[0].sep = 0;
     s.players[0].sep_evolved_this_turn = Some(id("勇壮の堕天使・オリヴィエ"));
     assert_close(diff(&s), 4.0);
@@ -221,9 +222,9 @@ fn hand_storm_counts_griffon_attack() {
     let mut s = new_game(deck_at(0), deck_at(1), 4);
     s.players[1].leader_hp = 8;
     s.players[0].max_pp = 7;
-    s.players[0].hand = hand_cards(&mut s, &["セイクリッドグリフォン"]);
+    s.players[0].hand = hand_cards(&mut s, &["セイクリッドグリフォン"]).into();
     let sanctuary = board_card(&mut s, "禁密の聖地");
-    s.players[0].board = vec![sanctuary];
+    s.players[0].board = vec![sanctuary].into();
     let dw = default_weights();
     let w = with(&dw, |w| w.hand_storm = 0.5);
     let diff = |s: &GameState| evaluate_with(s, 0, &w) - evaluate_with(s, 0, &dw);
@@ -233,7 +234,7 @@ fn hand_storm_counts_griffon_attack() {
     assert_close(diff(&s), 0.0);
     // アクトできるアミュレットが無ければ数えない
     s.players[0].max_pp = 7;
-    s.players[0].board.clear();
+    s.players[0].board.make_mut().clear();
     assert_close(diff(&s), 0.0);
 }
 
@@ -249,15 +250,15 @@ fn last_words_counts_damage_and_heal() {
     let diff = |s: &GameState| evaluate_with(s, p, &w1) - evaluate_with(s, p, &w0);
     let (opp_hp, my_hp) = (sw.w.opp_hp, sw.w.my_hp);
     let mimi = board_card(&mut s, "番犬の右腕・ミミ");
-    s.players[p].board.push(mimi);
+    s.players[p].board.make_mut().push(mimi);
     assert_close(diff(&s), 2.0 * opp_hp);
     let coco = board_card(&mut s, "番犬の左腕・ココ");
-    s.players[p].board.push(coco);
+    s.players[p].board.make_mut().push(coco);
     assert_close(diff(&s), 2.0 * opp_hp); // 体力が減っていないので回復は 0
     s.players[p].leader_hp = 19;
     assert_close(diff(&s), 2.0 * opp_hp + my_hp);
     let mimi2 = board_card(&mut s, "番犬の右腕・ミミ");
-    s.players[q].board.push(mimi2);
+    s.players[q].board.make_mut().push(mimi2);
     assert_close(diff(&s), 2.0 * opp_hp + my_hp - 2.0 * my_hp);
 }
 
@@ -267,7 +268,7 @@ fn last_words_summon_counts_summoned_followers() {
     let mut s = new_game(deck_at(0), deck_at(1), 3);
     let p = s.active;
     let girl = board_card(&mut s, "ボーンガール");
-    s.players[p].board.push(girl);
+    s.players[p].board.make_mut().push(girl);
     let sw = search_weights();
     let w0 = with(&sw, |w| w.last_words_summon = 0.0);
     let w1 = with(&sw, |w| w.last_words_summon = 0.5);

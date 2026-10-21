@@ -70,10 +70,13 @@ fn input_ignores_hidden_information() {
         .collect();
     assert!(!hidden.is_empty());
     for (k, &i) in hidden.iter().enumerate() {
-        std::mem::swap(&mut opp.hand[i].card, &mut opp.deck[k].card);
+        std::mem::swap(
+            &mut opp.hand.make_mut()[i].card,
+            &mut opp.deck.make_mut()[k].card,
+        );
     }
-    opp.deck.reverse();
-    t.players[p].deck.reverse();
+    opp.deck.make_mut().reverse();
+    t.players[p].deck.make_mut().reverse();
     assert_eq!(
         net.encode(&t, p, ValuePhase::End),
         net.encode(&s, p, ValuePhase::End)

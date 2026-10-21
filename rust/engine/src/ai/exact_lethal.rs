@@ -6,10 +6,10 @@
 use super::damage_bound::damage_bound;
 use super::Rng;
 use crate::data::CardIdx;
+use crate::fasthash::FastMap;
 use crate::game::{legal_actions, try_apply_action};
 use crate::state::*;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fmt::Write;
 
 pub type OrderFn = fn(&GameState, PlayerIndex, Vec<Action>) -> Vec<Action>;
@@ -85,7 +85,7 @@ pub const HINT_EXACT_STATES: i64 = 20_000;
 
 thread_local! {
     /// 付与された能力の中身ごとの番号（TypeScript 版は能力の JSON をキーに入れる）
-    static GRANTED_IDS: RefCell<(HashMap<usize, u32>, HashMap<String, u32>)> = RefCell::new((HashMap::new(), HashMap::new()));
+    static GRANTED_IDS: RefCell<(FastMap<usize, u32>, FastMap<String, u32>)> = RefCell::new(Default::default());
 }
 
 fn granted_id(a: &'static crate::data::Ability) -> u32 {
@@ -103,58 +103,82 @@ fn granted_id(a: &'static crate::data::Ability) -> u32 {
     })
 }
 
+/// メモのキー。数の列で、長さの変わる部分には長さを先に入れて区切りが曖昧にならないようにする。
+/// 以前は文字列だったが、作るのが遅かった（全探索の時間の半分ほど）。同じと見なす局面は文字列のときと同じ
+pub type LethalKey = Vec<i32>;
+
+#[inline]
+fn push_opt(k: &mut LethalKey, v: Option<i32>) {
+    match v {
+        None => k.push(0),
+        Some(x) => {
+            k.push(1);
+            k.push(x);
+        }
+    }
+}
+
+#[inline]
+fn push_kw(k: &mut LethalKey, kw: crate::data::Kw) {
+    let seq = kw.seq();
+    k.push(seq as u32 as i32);
+    k.push((seq >> 32) as u32 as i32);
+}
+
+fn push_sorted_cards(k: &mut LethalKey, cards: impl Iterator<Item = CardIdx>) {
+    let mut v: Vec<CardIdx> = cards.collect();
+    v.sort_unstable();
+    k.push(v.len() as i32);
+    k.extend(v.iter().map(|&c| c as i32));
+}
+
 /// 「自分のターンごとに1回」の記録（TypeScript 版は能力の添字の文字列をキーにした記録で、JSON では添字の小さい順）
-fn used_once_key(out: &mut String, used: &[(u8, i32)]) {
+fn used_once_key(out: &mut LethalKey, used: &[(u8, i32)]) {
     let mut v = used.to_vec();
     v.sort_unstable_by_key(|e| e.0);
-    let _ = write!(out, "{v:?}");
+    out.push(v.len() as i32);
+    for (i, t) in v {
+        out.push(i as i32);
+        out.push(t);
+    }
 }
 
-fn hand_key(h: &HandCard) -> String {
-    let mut k = String::new();
-    let _ = write!(
-        k,
-        "{}:{}:{}:{}:{:?}:{:x}:{:?}:{}",
-        h.card,
-        h.cost_mod,
-        h.attack_mod,
-        h.defense_mod,
-        h.x,
-        h.keywords.seq(),
-        h.fused_kinds,
-        h.fused_this_turn as u8
-    );
-    k
+fn hand_key(k: &mut LethalKey, h: &HandCard) {
+    k.extend([h.card as i32, h.cost_mod, h.attack_mod, h.defense_mod]);
+    push_opt(k, h.x);
+    push_kw(k, h.keywords);
+    k.push(h.fused_kinds.len() as i32);
+    k.extend(h.fused_kinds.iter().map(|&c| c as i32));
+    k.push(h.fused_this_turn as i32);
 }
 
-fn board_key(c: &OnBoard, ignore_exhausted_stats: bool) -> String {
-    let mut k = String::new();
-    let granted: Vec<u32> = c.granted.iter().copied().map(granted_id).collect();
+fn board_key(k: &mut LethalKey, c: &OnBoard, ignore_exhausted_stats: bool) {
+    let granted = |k: &mut LethalKey| {
+        push_kw(k, c.keywords);
+        push_kw(k, c.temp_keywords);
+        k.push(c.granted.len() as i32);
+        k.extend(c.granted.iter().map(|&a| granted_id(a) as i32));
+    };
     if !c.is_follower {
-        let _ = write!(
-            k,
-            "A{},{:?},{:?},{}|{:x},{:x},{:?}",
-            c.card,
-            c.countdown,
-            c.sigils,
-            c.acted_this_turn as u8,
-            c.keywords.seq(),
-            c.temp_keywords.seq(),
-            granted
-        );
-        return k;
+        k.extend([0, c.card as i32]);
+        push_opt(k, c.countdown);
+        push_opt(k, c.sigils);
+        k.push(c.acted_this_turn as i32);
+        granted(k);
+        return;
     }
     if ignore_exhausted_stats && c.attacks_this_turn >= c.max_attacks {
-        let _ = write!(
-            k,
-            "F{},-,{},{},{:?}",
-            c.card, c.max_attacks, c.attacks_this_turn, c.evolve
-        );
+        k.extend([
+            1,
+            c.card as i32,
+            c.max_attacks,
+            c.attacks_this_turn,
+            c.evolve as i32,
+        ]);
     } else {
-        let _ = write!(
-            k,
-            "F{},{},{},{},{},{},{},{},{:?},{:?},{:?}",
-            c.card,
+        k.extend([
+            2,
+            c.card as i32,
             c.attack,
             c.defense,
             c.max_defense,
@@ -162,73 +186,66 @@ fn board_key(c: &OnBoard, ignore_exhausted_stats: bool) -> String {
             c.max_attacks,
             c.attacks_this_turn,
             c.entered_turn,
-            c.evolve,
-            c.cannot_attack_until,
-            c.x
-        );
+            c.evolve as i32,
+        ]);
+        push_opt(k, c.cannot_attack_until);
+        push_opt(k, c.x);
     }
-    let _ = write!(
-        k,
-        "|{:x},{:x},{:?}|",
-        c.keywords.seq(),
-        c.temp_keywords.seq(),
-        granted
-    );
-    used_once_key(&mut k, &c.used_once);
-    k
+    granted(k);
+    used_once_key(k, &c.used_once);
 }
 
-fn sorted_cards(v: &[CardIdx]) -> Vec<CardIdx> {
-    let mut v = v.to_vec();
-    v.sort_unstable();
-    v
+/// items のキーを順番によらない形で足す（各キーを並べ替えて、個数と長さ付きで並べる）
+fn push_unordered<T>(k: &mut LethalKey, items: &[T], key: impl Fn(&mut LethalKey, &T)) {
+    let mut buf: LethalKey = Vec::new();
+    let mut ranges: Vec<(usize, usize)> = Vec::with_capacity(items.len());
+    for it in items {
+        let start = buf.len();
+        key(&mut buf, it);
+        ranges.push((start, buf.len()));
+    }
+    ranges.sort_unstable_by(|a, b| buf[a.0..a.1].cmp(&buf[b.0..b.1]));
+    k.push(ranges.len() as i32);
+    for (a, b) in ranges {
+        k.push((b - a) as i32);
+        k.extend_from_slice(&buf[a..b]);
+    }
 }
 
 /// 相手（opponent）は体力と手札の中身を含めない。
 /// 手札のスペルブーストの回数（boosts）は数えるだけでルールに使わない（効果はコストや X の変化として残る）ので含めない。
 /// 破壊された記録は順番を除いた中身で比べる（記録のスタッツはカードの元のスタッツなので、カードだけでよい）
-fn player_key(out: &mut String, pl: &PlayerState, opponent: bool, ignore_exhausted_stats: bool) {
-    let destroyed: Vec<CardIdx> = pl.destroyed_this_turn.iter().map(|r| r.card).collect();
+fn player_key(out: &mut LethalKey, pl: &PlayerState, opponent: bool, ignore_exhausted_stats: bool) {
     if !opponent {
-        let _ = write!(out, "{}", pl.leader_hp);
+        out.push(pl.leader_hp);
     }
-    let _ = write!(
-        out,
-        ",{},{},{},{},{},{},{},{},{},{:?},{:?},{:?}[",
+    out.extend([
         pl.pp,
         pl.max_pp,
         pl.combo,
         pl.ep,
         pl.sep,
-        pl.evolved_this_turn as u8,
-        pl.extra_pp_available as u8,
-        pl.deck.len(),
+        pl.evolved_this_turn as i32,
+        pl.extra_pp_available as i32,
+        pl.deck.len() as i32,
         pl.graveyard,
-        sorted_cards(&pl.graveyard_followers),
-        sorted_cards(&destroyed),
-        sorted_cards(&pl.destroyed_amulets)
-    );
+    ]);
+    push_sorted_cards(out, pl.graveyard_followers.iter().copied());
+    push_sorted_cards(out, pl.destroyed_this_turn.iter().map(|r| r.card));
+    push_sorted_cards(out, pl.destroyed_amulets.iter().copied());
+    out.push(pl.crests.len() as i32);
     for c in &pl.crests {
-        let _ = write!(out, "{},{:?},", c.crest, c.countdown);
+        out.push(c.crest as i32);
+        push_opt(out, c.countdown);
         used_once_key(out, &c.used_once);
-        out.push(';');
     }
-    out.push_str("]|");
     if opponent {
-        let _ = write!(out, "{}", pl.hand.len());
+        out.push(pl.hand.len() as i32);
     } else {
-        let mut keys: Vec<String> = pl.hand.iter().map(hand_key).collect();
-        keys.sort_unstable();
-        out.push_str(&keys.join(";"));
+        push_unordered(out, &pl.hand, hand_key);
     }
-    out.push('|');
-    let mut keys: Vec<String> = pl
-        .board
-        .iter()
-        .map(|c| board_key(c, !opponent && ignore_exhausted_stats))
-        .collect();
-    keys.sort_unstable();
-    out.push_str(&keys.join(";"));
+    let ignore = !opponent && ignore_exhausted_stats;
+    push_unordered(out, &pl.board, |k, c| board_key(k, c, ignore));
 }
 
 fn is_transient(s: &GameState) -> bool {
@@ -236,14 +253,27 @@ fn is_transient(s: &GameState) -> bool {
 }
 
 /// 局面のキー（相手 opp のリーダーの体力と手札の中身、手札・場の並び順、インスタンス ID を除く）
-pub fn lethal_key(out: &mut String, s: &GameState, opp: PlayerIndex, ignore_exhausted_stats: bool) {
-    let _ = write!(out, "{}#", s.active);
+pub fn lethal_key(
+    out: &mut LethalKey,
+    s: &GameState,
+    opp: PlayerIndex,
+    ignore_exhausted_stats: bool,
+) {
+    out.push(s.active as i32);
     player_key(out, &s.players[0], opp == 0, ignore_exhausted_stats);
-    out.push('#');
     player_key(out, &s.players[1], opp == 1, ignore_exhausted_stats);
     if is_transient(s) {
-        let _ = write!(out, "#T{:?}{:?}{:?}", s.pending, s.stack, s.queue);
+        // 選択待ち・解決中（まれ）は中身をそのまま入れる
+        push_text(out, &format!("{:?}{:?}{:?}", s.pending, s.stack, s.queue));
+    } else {
+        out.push(-1);
     }
+}
+
+/// 文字列を長さ付きでキーに足す
+fn push_text(out: &mut LethalKey, text: &str) {
+    out.push(text.len() as i32);
+    out.extend(text.bytes().map(|b| b as i32));
 }
 
 /// 探索で得た値の意味
@@ -261,7 +291,7 @@ enum Bound {
 struct TurnCache {
     turn: i32,
     player: PlayerIndex,
-    memo: HashMap<String, (i32, Bound)>,
+    memo: FastMap<LethalKey, (i32, Bound)>,
     visited: i64,
 }
 
@@ -294,7 +324,7 @@ const ALT_SEEDS: [u32; 3] = [0x9e3779b9, 0x85ebca6b, 0xc2b2ae35];
 fn with_other_random(s: &GameState, p: PlayerIndex, seed: u32) -> GameState {
     let rng = s.rng ^ seed;
     let mut x = s.clone();
-    Rng::new(rng).shuffle(&mut x.players[p].deck);
+    Rng::new(rng).shuffle(x.players[p].deck.make_mut());
     x.rng = rng;
     x
 }
@@ -306,7 +336,12 @@ pub fn varies_with_random(s: &GameState, a: &Action, next: &GameState, p: Player
     }
     let opp = opponent(p);
     let key = |x: &GameState| {
-        let mut k = format!("{}|{:?}|", x.players[opp].leader_hp, x.phase);
+        let phase = match x.phase {
+            Phase::Mulligan => 0,
+            Phase::Main => 1,
+            Phase::Ended => 2,
+        };
+        let mut k = vec![x.players[opp].leader_hp, phase];
         lethal_key(&mut k, x, opp, false);
         k
     };
@@ -339,8 +374,8 @@ struct Dfs<'a> {
     opts: &'a ExactLethalOptions,
     p: PlayerIndex,
     opp: PlayerIndex,
-    prefix: String,
-    memo: &'a mut HashMap<String, (i32, Bound)>,
+    prefix: LethalKey,
+    memo: &'a mut FastMap<LethalKey, (i32, Bound)>,
     visited: i64,
     limit: i64,
 }
@@ -436,7 +471,7 @@ impl Dfs<'_> {
             } else {
                 remaining
             };
-            let _ = write!(k, "{n}|");
+            k.push(n);
             lethal_key(&mut k, s, self.opp, self.opts.ignore_exhausted_stats);
             Some(k)
         };
@@ -568,7 +603,7 @@ pub fn search_exact_lethal(
         .unwrap_or_else(|| TurnCache {
             turn: root.turn,
             player: p,
-            memo: HashMap::new(),
+            memo: FastMap::default(),
             visited: 0,
         });
     let limit = opts
@@ -593,11 +628,13 @@ pub fn search_exact_lethal(
         if let Some(k) = opts.order_key {
             let _ = write!(prefix, "{k}/");
         }
+        let mut key = Vec::new();
+        push_text(&mut key, &prefix);
         let mut dfs = Dfs {
             opts,
             p,
             opp,
-            prefix,
+            prefix: key,
             memo: &mut cache.memo,
             visited: 0,
             limit,
@@ -623,12 +660,12 @@ pub fn exact_max_damage(
     if root.phase != Phase::Main || actor_of(root) != p {
         return None;
     }
-    let mut memo = HashMap::new();
+    let mut memo = FastMap::default();
     let mut dfs = Dfs {
         opts,
         p,
         opp: opponent(p),
-        prefix: String::new(),
+        prefix: vec![0],
         memo: &mut memo,
         visited: 0,
         limit: opts.max_states,

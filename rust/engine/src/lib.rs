@@ -11,6 +11,7 @@ pub mod ai;
 pub mod canonical;
 pub mod data;
 pub mod effects;
+pub mod fasthash;
 pub mod game;
 pub mod golden;
 pub mod jsnum;

@@ -1,11 +1,12 @@
 // リプレイの打ち比べ: 今の局面で実戦の手と別の手を打ち、残りを AI に最後まで打たせて勝率を比べる（src/sim/branch.ts）。
-// 試合は複数の Web Worker で並列に打つ。結果はリプレイを開いているあいだ、局面（何手目か）ごとに残す。
+// 試合は複数の Web Worker で並列に打つ（試合と手の組を 1 つずつ配る。src/sim/pool.ts）。結果はリプレイを開いているあいだ、局面（何手目か）ごとに残す。
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { AGENTS } from "../ai/registry";
 import { actingPlayer, legalActions, type Action, type GameState, type PlayerIndex } from "../engine";
 import { branchStats, diffStats, type Outcome } from "../sim/branch";
 import type { BranchRequest, BranchResponse } from "../sim/branchWorker";
+import { runPool } from "../sim/pool";
 import { describeAction } from "./describe";
 
 /** 1 回の打ち比べ */
@@ -73,38 +74,38 @@ export function useBranchRuns() {
         stopped: false,
       }),
     );
-    const count = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 1, games));
-    let finished = 0;
-    const mine: Worker[] = [];
-    for (let w = 0; w < count; w++) {
-      const worker = new Worker(new URL("../sim/branchWorker.ts", import.meta.url), { type: "module" });
-      worker.onmessage = (e: MessageEvent<BranchResponse>) => {
-        const msg = e.data;
-        if (msg.type === "game") {
-          update(step, (r) => ({
-            ...r,
-            outcomes: r.outcomes.map((o, b) => o.map((x, g) => (g === msg.game ? msg.outcomes[b] : x))),
-            done: r.done + 1,
-          }));
-        } else if (msg.type === "error") {
-          update(step, (r) => ({ ...r, error: msg.message }));
-        } else if (++finished === count) {
-          update(step, (r) => ({ ...r, finishedAt: Date.now() }));
-          for (const x of mine) x.terminate();
-          workers.current = workers.current.filter((x) => !mine.includes(x));
-        }
-      };
-      const request: BranchRequest = {
+    // 仕事は（試合, 手）の組 1 つずつ。試合の番号の順に配るので、前の試合から揃っていく
+    const jobs = Array.from({ length: games }, (_, game) => run.actions.map((_, action) => ({ game, action }))).flat();
+    const mine = runPool<{ game: number; action: number }, BranchResponse>({
+      create: () => new Worker(new URL("../sim/branchWorker.ts", import.meta.url), { type: "module" }),
+      jobs,
+      request: ({ game, action }): BranchRequest => ({
         state,
         actions: run.actions,
         agents: run.agents,
         viewer: run.actor,
         seedBase,
-        games: Array.from({ length: games }, (_, i) => i).filter((i) => i % count === w),
-      };
-      worker.postMessage(request);
-      mine.push(worker);
-    }
+        game,
+        action,
+      }),
+      isDone: (msg) => msg.type === "done",
+      onMessage: (msg) => {
+        if (msg.type === "outcome") {
+          update(step, (r) => {
+            const outcomes = r.outcomes.map((o, b) => (b === msg.action ? o.map((x, g) => (g === msg.game ? msg.outcome : x)) : o));
+            // すべての手を打ち終えた試合の数
+            const done = outcomes[0]?.filter((_, g) => outcomes.every((o) => o[g] !== undefined)).length ?? 0;
+            return { ...r, outcomes, done };
+          });
+        } else if (msg.type === "error") {
+          update(step, (r) => ({ ...r, error: msg.message }));
+        }
+      },
+      onFinish: () => {
+        update(step, (r) => ({ ...r, finishedAt: Date.now() }));
+        workers.current = workers.current.filter((x) => !mine.includes(x));
+      },
+    });
     workers.current = mine;
   };
 

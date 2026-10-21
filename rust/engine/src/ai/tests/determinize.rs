@@ -18,7 +18,7 @@ fn keeps_own_cards_and_shuffles_hidden_ones() {
     let opp = opponent(viewer);
     let fairy = id("フェアリー");
     let h = s.new_hand_card(fairy, None);
-    s.players[opp].hand.push(h);
+    s.players[opp].hand.make_mut().push(h);
     let hidden = |st: &GameState| {
         let pl = &st.players[opp];
         let mut v: Vec<CardIdx> = pl
@@ -77,12 +77,12 @@ fn keeps_revealed_cards_and_respects_draw_conditions() {
     let any: &'static CardFilter = Box::leak(Box::new(CardFilter::default()));
     {
         let hand = &mut s.players[opp].hand;
-        hand[0].revealed = true;
-        hand[1].drawn_by = Some(DrawHint {
+        hand.make_mut()[0].revealed = true;
+        hand.make_mut()[1].drawn_by = Some(DrawHint {
             filter: spell,
             cost_eq: None,
         });
-        hand[2].drawn_by = Some(DrawHint {
+        hand.make_mut()[2].drawn_by = Some(DrawHint {
             filter: any,
             cost_eq: Some(1),
         });

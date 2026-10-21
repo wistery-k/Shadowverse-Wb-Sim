@@ -99,8 +99,8 @@ fn bound_is_not_below_exact_damage_in_random_states() {
             })
             .collect();
         let me = &mut s.players[0];
-        me.hand = hand;
-        me.board = board;
+        me.hand = hand.into();
+        me.board = board.into();
         me.pp = rng.int(11) as i32;
         me.max_pp = me.pp.max(1 + rng.int(10) as i32);
         me.turn_count = 3 + rng.int(8) as i32;
@@ -109,7 +109,7 @@ fn bound_is_not_below_exact_damage_in_random_states() {
         me.evolved_this_turn = rng.int(4) == 0;
         me.combo = rng.int(5) as i32;
         me.extra_pp_available = rng.int(4) == 0;
-        s.players[1].board = opp;
+        s.players[1].board = opp.into();
         s.players[1].leader_hp = 99;
         let Some(bound) = rhino_turn_damage_bound(&s, 0) else {
             continue;

@@ -54,7 +54,7 @@ pub fn determinize(
 ) -> GameState {
     let mut s = state.clone();
     let o = opponent(viewer);
-    rng.shuffle(&mut s.players[viewer].deck);
+    rng.shuffle(s.players[viewer].deck.make_mut());
 
     let hidden: Vec<usize> = if peek_opp_hand {
         Vec::new()
@@ -90,10 +90,11 @@ pub fn determinize(
     for i in 0..s.players[o].hand.len() {
         let iid = s.players[o].hand[i].iid;
         if let Some(&(_, c)) = assigned.iter().find(|(x, _)| *x == iid) {
-            s.players[o].hand[i] = s.new_hand_card(c, Some(iid));
+            let h = s.new_hand_card(c, Some(iid));
+            s.players[o].hand.make_mut()[i] = h;
         }
     }
-    for r in s.players[o].deck.iter_mut() {
+    for r in s.players[o].deck.make_mut().iter_mut() {
         r.card = pool[k];
         k += 1;
     }

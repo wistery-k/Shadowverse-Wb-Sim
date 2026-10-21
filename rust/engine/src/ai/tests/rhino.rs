@@ -35,14 +35,14 @@ fn next_turn_bound_grows_with_rhinos() {
     let mut s = main_phase();
     s.players[0].pp = 7;
     s.players[0].max_pp = 7;
-    s.players[0].hand.clear();
+    s.players[0].hand.make_mut().clear();
     assert_eq!(next_turn_rhino_bound(&s, 0), 0);
     let r = hand_card(&mut s, "殺戮のリノセウス");
-    s.players[0].hand.push(r);
+    s.players[0].hand.make_mut().push(r);
     let one = next_turn_rhino_bound(&s, 0);
     assert!(one > 0);
     let more = hand_cards(&mut s, &["殺戮のリノセウス", "森の神秘"]);
-    s.players[0].hand.extend(more);
+    s.players[0].hand.make_mut().extend(more);
     assert!(next_turn_rhino_bound(&s, 0) > one);
 }
 
@@ -60,8 +60,8 @@ fn rhino_lethal_replays_rhinoceus_with_rod() {
     let william = board_card(&mut s, "マナリアの学徒・ウィリアム");
     {
         let me = &mut s.players[0];
-        me.hand = vec![fairies[0].clone(), fairies[1].clone(), bail, rhino];
-        me.board = vec![rod];
+        me.hand = vec![fairies[0].clone(), fairies[1].clone(), bail, rhino].into();
+        me.board = vec![rod].into();
         me.pp = 8;
         me.max_pp = 8;
         me.turn_count = 8;
@@ -70,7 +70,7 @@ fn rhino_lethal_replays_rhinoceus_with_rod() {
         me.combo = 0;
         me.extra_pp_available = false;
     }
-    s.players[1].board = vec![william];
+    s.players[1].board = vec![william].into();
     s.players[1].leader_hp = 11;
     let seq = search_rhino_lethal(&s, 0, &DEFAULT_RHINO_LETHAL_OPTIONS).expect("リーサル");
     let rhino_card = id("殺戮のリノセウス");
@@ -106,8 +106,8 @@ fn rhino_lethal_clears_ward_first() {
     let rod = board_card(&mut s, "聖樹の杖");
     {
         let me = &mut s.players[0];
-        me.hand = vec![fairies[0].clone(), fairies[1].clone(), bail, rhino];
-        me.board = vec![rod, tamer];
+        me.hand = vec![fairies[0].clone(), fairies[1].clone(), bail, rhino].into();
+        me.board = vec![rod, tamer].into();
         me.pp = 10;
         me.max_pp = 10;
         me.turn_count = 10;
@@ -117,7 +117,7 @@ fn rhino_lethal_clears_ward_first() {
         me.extra_pp_available = false;
     }
     let tenko = board_card(&mut s, "式神・天后");
-    s.players[1].board = vec![tenko];
+    s.players[1].board = vec![tenko].into();
     s.players[1].leader_hp = 9;
     let seq = search_rhino_lethal(&s, 0, &DEFAULT_RHINO_LETHAL_OPTIONS);
     assert!(wins(&s, seq.as_deref(), 0));
@@ -127,11 +127,11 @@ fn rhino_lethal_clears_ward_first() {
 fn rhino_lethal_plays_mystery_first() {
     // 森の神秘は手札にあれば先に打つ（打ってもリーサルを逃さない）
     let mut s = main_phase();
-    s.players[0].hand = hand_cards(&mut s, &["森の神秘", "森の神秘", "殺戮のリノセウス"]);
+    s.players[0].hand = hand_cards(&mut s, &["森の神秘", "森の神秘", "殺戮のリノセウス"]).into();
     s.players[0].pp = 3;
     s.players[0].max_pp = 3;
     s.players[0].combo = 0;
-    s.players[1].board.clear();
+    s.players[1].board.make_mut().clear();
     s.players[1].leader_hp = 3;
     let rhino = s.players[0].hand[2].iid;
     let seq = search_rhino_lethal(&s, 0, &DEFAULT_RHINO_LETHAL_OPTIONS).expect("リーサル");
@@ -145,7 +145,7 @@ fn rhino_lethal_plays_mystery_first() {
 fn rhino_lethal_needs_rhinoceus_in_hand() {
     // 手札にリノセウスが無ければ探さない
     let mut s = main_phase();
-    s.players[0].hand = hand_cards(&mut s, &["フェアリー"]);
+    s.players[0].hand = hand_cards(&mut s, &["フェアリー"]).into();
     assert!(search_rhino_lethal(&s, 0, &DEFAULT_RHINO_LETHAL_OPTIONS).is_none());
 }
 
@@ -157,8 +157,8 @@ fn rhino_count_check_pays_for_carbuncle() {
     let rhino = board_card(&mut s, "殺戮のリノセウス");
     {
         let me = &mut s.players[0];
-        me.hand = vec![carbuncle];
-        me.board = vec![rhino];
+        me.hand = vec![carbuncle].into();
+        me.board = vec![rhino].into();
         me.max_pp = 8;
         me.turn_count = 8;
         me.ep = 0;
@@ -173,9 +173,9 @@ fn rhino_count_check_pays_for_carbuncle() {
     let rod = board_card(&mut s, "聖樹の杖");
     let on_board = board_card(&mut s, "ベビーカーバンクル");
     let me = &mut s.players[0];
-    me.hand.clear();
-    me.board.push(rod);
-    me.board.push(on_board);
+    me.hand.make_mut().clear();
+    me.board.make_mut().push(rod);
+    me.board.make_mut().push(on_board);
     me.pp = 0;
     assert!(can_still_play_rhinos(&s, 0, 1));
 }

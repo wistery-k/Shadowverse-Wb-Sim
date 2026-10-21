@@ -464,7 +464,7 @@ pub fn state_to_json(st: &GameState) -> Json {
                         obj(vec![
                             (
                                 "effects",
-                                Json::Arr(f.effects.iter().map(feff_json).collect()),
+                                Json::Arr(f.effects.iter().map(|e| feff_json(&e)).collect()),
                             ),
                             ("pc", num(f.pc as i32)),
                             ("ctx", ctx_json(&f.ctx)),
@@ -857,8 +857,8 @@ fn player_of(v: &Json) -> R<PlayerState> {
             })
             .collect::<R<_>>()?,
         graveyard: int(v, "graveyard")?,
-        graveyard_followers: card_list(v, "graveyardFollowers")?,
-        destroyed_amulets: card_list(v, "destroyedAmulets")?,
+        graveyard_followers: card_list(v, "graveyardFollowers")?.into(),
+        destroyed_amulets: card_list(v, "destroyedAmulets")?.into(),
         destroyed_this_turn: array(v, "destroyedThisTurn")?
             .iter()
             .map(|r| {
@@ -979,7 +979,9 @@ pub fn state_from_json(v: &Json) -> R<GameState> {
             .iter()
             .map(|f| {
                 Ok(Frame {
-                    effects: array(f, "effects")?.iter().map(feff_of).collect::<R<_>>()?,
+                    effects: Effects::List(
+                        array(f, "effects")?.iter().map(feff_of).collect::<R<_>>()?,
+                    ),
                     pc: uint(f, "pc")?,
                     ctx: ctx_of(field(f, "ctx")?)?,
                 })

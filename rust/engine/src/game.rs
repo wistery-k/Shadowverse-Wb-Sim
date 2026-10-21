@@ -15,15 +15,15 @@ fn new_player(deck: Vec<CardRef>) -> PlayerState {
         sep: SEP,
         extra_pp_available: false,
         turn_count: 0,
-        deck,
+        deck: deck.into(),
         deck_kept: Vec::new(),
-        hand: Vec::new(),
-        board: Vec::new(),
-        crests: Vec::new(),
+        hand: Shared::default(),
+        board: Shared::default(),
+        crests: Shared::default(),
         graveyard: 0,
-        graveyard_followers: Vec::new(),
-        destroyed_amulets: Vec::new(),
-        destroyed_this_turn: Vec::new(),
+        graveyard_followers: Shared::default(),
+        destroyed_amulets: Shared::default(),
+        destroyed_this_turn: Shared::default(),
         combo: 0,
         evolved_this_turn: false,
         ep_evolved_this_turn: None,
@@ -67,9 +67,9 @@ pub fn create_game(decks: [&[CardIdx]; 2], seed: u32) -> GameState {
     s.active = s.first;
     s.players[opponent(s.first)].extra_pp_available = true;
     for p in 0..2 {
-        let mut deck = std::mem::take(&mut s.players[p].deck);
+        let mut deck = std::mem::take(&mut s.players[p].deck).into_vec();
         s.shuffle(&mut deck);
-        s.players[p].deck = deck;
+        s.players[p].deck = deck.into();
         s.draw_cards(p, INITIAL_HAND as i32, None, None);
     }
     s
@@ -78,14 +78,14 @@ pub fn create_game(decks: [&[CardIdx]; 2], seed: u32) -> GameState {
 // ---- ターン進行（内部処理） ----
 
 fn push_start_turn(s: &mut GameState, p: PlayerIndex) {
-    push_internal(s, vec![FEff::StartTurnDraw], Ctx::new(p, 0));
-    push_internal(s, vec![FEff::StartTurn], Ctx::new(p, 0));
+    push_internal(s, &[FEff::StartTurnDraw], Ctx::new(p, 0));
+    push_internal(s, &[FEff::StartTurn], Ctx::new(p, 0));
 }
 
 fn push_end_turn(s: &mut GameState) {
     let a = s.active;
-    push_internal(s, vec![FEff::Cleanup], Ctx::new(a, 0));
-    push_internal(s, vec![FEff::EndTurn], Ctx::new(a, 0));
+    push_internal(s, &[FEff::Cleanup], Ctx::new(a, 0));
+    push_internal(s, &[FEff::EndTurn], Ctx::new(a, 0));
 }
 
 fn start_turn(s: &mut GameState, p: PlayerIndex) {
@@ -106,14 +106,14 @@ fn start_turn(s: &mut GameState, p: PlayerIndex) {
     s.players[0].destroyed_this_turn.clear();
     s.players[1].destroyed_this_turn.clear();
     let pl = &mut s.players[p];
-    for c in &mut pl.board {
+    for c in pl.board.make_mut() {
         if c.is_follower {
             c.attacks_this_turn = 0;
         } else {
             c.acted_this_turn = false;
         }
     }
-    for h in pl.hand.iter_mut().chain(pl.deck_kept.iter_mut()) {
+    for h in pl.hand.make_mut().iter_mut().chain(pl.deck_kept.iter_mut()) {
         h.fused_this_turn = false;
     }
 
@@ -148,14 +148,14 @@ fn start_turn(s: &mut GameState, p: PlayerIndex) {
         let Some(ci) = s.players[p].crests.iter().position(|c| c.iid == iid) else {
             continue;
         };
-        let c = &mut s.players[p].crests[ci];
+        let c = &mut s.players[p].crests.make_mut()[ci];
         let Some(cd) = c.countdown else { continue };
         c.countdown = Some(cd - 1);
         if cd - 1 > 0 {
             continue;
         }
         let crest = c.crest;
-        s.players[p].crests.remove(ci);
+        s.players[p].crests.make_mut().remove(ci);
         for a in crest_abilities_of(crest) {
             if a.trigger.on() == On::LastWords {
                 s.queue.push_back(Queued {
@@ -172,7 +172,17 @@ fn start_turn(s: &mut GameState, p: PlayerIndex) {
 fn clear_turn_effects(s: &mut GameState) {
     let turn = s.turn;
     for p in 0..2 {
-        for c in &mut s.players[p].board {
+        // 消すものが無い場は書き換えない（ほかの局面と共有したままにする）
+        let changes = |c: &OnBoard| {
+            c.temp_keywords != Kw::EMPTY
+                || (c.is_follower
+                    && (c.temp_attack != 0
+                        || matches!(c.cannot_attack_until, Some(u) if u <= turn)))
+        };
+        if !s.players[p].board.iter().any(changes) {
+            continue;
+        }
+        for c in s.players[p].board.make_mut() {
             c.temp_keywords = Kw::EMPTY;
             if c.is_follower {
                 c.temp_attack = 0;
@@ -237,7 +247,7 @@ pub fn resolve_turn_end(prev: &GameState) -> Option<GameState> {
     }
     let mut s = prev.clone();
     let a = s.active;
-    push_internal(&mut s, vec![FEff::EndTurn], Ctx::new(a, 0));
+    push_internal(&mut s, &[FEff::EndTurn], Ctx::new(a, 0));
     run(&mut s);
     if s.phase == Phase::Main && s.pending.is_none() && s.stack.is_empty() && s.queue.is_empty() {
         clear_turn_effects(&mut s);
@@ -286,29 +296,30 @@ fn spell_has_targets(
     hi: usize,
     scratch: &mut Option<GameState>,
 ) -> bool {
-    let h = &s.players[p].hand[hi];
-    let chooses: Vec<&Target> = own_abilities(h.card, On::Spell)
-        .into_iter()
-        .flat_map(|a| a.effects.iter())
-        .filter_map(|e| {
-            if let Effect::Choose { from, .. } = e {
-                Some(from)
-            } else {
-                None
-            }
-        })
-        .collect();
-    if chooses.is_empty() {
+    let cid = s.players[p].hand[hi].card;
+    let chooses = || {
+        abilities_of(cid)
+            .abilities
+            .iter()
+            .filter(|a| a.trigger.on() == On::Spell)
+            .flat_map(|a| a.effects.iter())
+            .filter_map(|e| {
+                if let Effect::Choose { from, .. } = e {
+                    Some(from)
+                } else {
+                    None
+                }
+            })
+    };
+    if chooses().next().is_none() {
         return true;
     }
     // 手札から除いた局面（合法手の列挙 1 回につき 1 度だけ複製し、除いたカードは戻す）
     let t = scratch.get_or_insert_with(|| s.clone());
-    let removed = t.players[p].hand.remove(hi);
+    let removed = t.players[p].hand.make_mut().remove(hi);
     let ctx = Ctx::new(p, removed.iid);
-    let ok = chooses
-        .iter()
-        .all(|from| !choose_candidates(t, &ctx, from).is_empty());
-    t.players[p].hand.insert(hi, removed);
+    let ok = chooses().all(|from| !choose_candidates(t, &ctx, from).is_empty());
+    t.players[p].hand.make_mut().insert(hi, removed);
     ok
 }
 
@@ -360,6 +371,11 @@ pub(crate) fn can_attack_leader(s: &GameState, f: &OnBoard) -> bool {
 
 /// 攻撃先の候補（守護を考慮済み）
 pub fn attack_targets(s: &GameState, attacker: &OnBoard, out: &mut Vec<AttackTarget>) {
+    for_each_attack_target(s, attacker, |t| out.push(t));
+}
+
+/// 攻撃先の候補を順に f に渡す（attack_targets と同じ順）
+fn for_each_attack_target(s: &GameState, attacker: &OnBoard, mut f: impl FnMut(AttackTarget)) {
     let opp = &s.players[opponent(s.active)];
     let attackable = || {
         opp.board
@@ -370,12 +386,12 @@ pub fn attack_targets(s: &GameState, attacker: &OnBoard, out: &mut Vec<AttackTar
     if can_attack_followers(s, attacker) {
         for c in attackable() {
             if !has_ward || c.has_keyword(WARD) {
-                out.push(Some(c.iid));
+                f(Some(c.iid));
             }
         }
     }
     if !has_ward && can_attack_leader(s, attacker) {
-        out.push(None);
+        f(None);
     }
 }
 
@@ -413,38 +429,47 @@ fn act_ability(cid: CardIdx) -> Option<(&'static Ability, i32)> {
     })
 }
 
+/// 融合できる手札のカードなら、素材の条件
+fn fusion_filter(host: &HandCard) -> Option<&'static CardFilter> {
+    let f = abilities_of(host.card).fusion.as_ref()?;
+    if host.fused_this_turn {
+        return None;
+    }
+    Some(f)
+}
+
+/// c が host の融合の素材にできるか（f は host の素材の条件）
+fn is_fusion_material(f: &CardFilter, host: &HandCard, c: &HandCard) -> bool {
+    if c.iid == host.iid {
+        return false;
+    }
+    let cd = card(c.card);
+    if f.ctype.map(|t| cd.ctype != t).unwrap_or(false) {
+        return false;
+    }
+    if f.tribe.map(|t| !cd.tribes.contains(&t)).unwrap_or(false) {
+        return false;
+    }
+    if f.ids
+        .as_ref()
+        .map(|ids| !ids.contains(&c.card))
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    true
+}
+
 /// 融合の素材の候補（手札の添字）
 fn fusion_materials(s: &GameState, p: PlayerIndex, host: &HandCard) -> Vec<usize> {
-    let Some(f) = &abilities_of(host.card).fusion else {
+    let Some(f) = fusion_filter(host) else {
         return Vec::new();
     };
-    if host.fused_this_turn {
-        return Vec::new();
-    }
     s.players[p]
         .hand
         .iter()
         .enumerate()
-        .filter(|(_, c)| {
-            if c.iid == host.iid {
-                return false;
-            }
-            let cd = card(c.card);
-            if f.ctype.map(|t| cd.ctype != t).unwrap_or(false) {
-                return false;
-            }
-            if f.tribe.map(|t| !cd.tribes.contains(&t)).unwrap_or(false) {
-                return false;
-            }
-            if f.ids
-                .as_ref()
-                .map(|ids| !ids.contains(&c.card))
-                .unwrap_or(false)
-            {
-                return false;
-            }
-            true
-        })
+        .filter(|(_, c)| is_fusion_material(f, host, c))
         .map(|(i, _)| i)
         .collect()
 }
@@ -482,31 +507,79 @@ pub fn acting_player(s: &GameState) -> PlayerIndex {
     s.active
 }
 
-/// 融合の素材の選び方（カードの種類ごとに使う枚数を決める。空の選び方は除く）
-fn material_choices(s: &GameState, p: PlayerIndex, materials: &[usize]) -> Vec<Vec<Iid>> {
-    let hand = &s.players[p].hand;
-    let mut groups: Vec<(CardIdx, Vec<Iid>)> = Vec::new();
-    for &m in materials {
-        let c = &hand[m];
-        match groups.iter_mut().find(|g| g.0 == c.card) {
-            Some(g) => g.1.push(c.iid),
-            None => groups.push((c.card, vec![c.iid])),
-        }
+/// 融合の素材の選び方（カードの種類ごとに使う枚数を決める。空の選び方は除く）。
+/// 並びは、先に出てくる種類の枚数を上の桁とした辞書順
+fn material_choices(s: &GameState, p: PlayerIndex, host: &HandCard) -> Vec<Vec<Iid>> {
+    let Some(f) = fusion_filter(host) else {
+        return Vec::new();
+    };
+    // 合法手の列挙のたびに呼ぶので、作業用の領域を使い回す
+    thread_local! {
+        static SCRATCH: std::cell::RefCell<MaterialScratch> = Default::default();
     }
-    let mut choices: Vec<Vec<Iid>> = vec![Vec::new()];
-    for (_, iids) in &groups {
-        let mut next = Vec::new();
-        for c in &choices {
-            for n in 0..=iids.len() {
-                let mut v = c.clone();
-                v.extend_from_slice(&iids[..n]);
-                next.push(v);
+    SCRATCH.with(|sc| {
+        let MaterialScratch {
+            kinds,
+            iids,
+            ends,
+            counts,
+        } = &mut *sc.borrow_mut();
+        let hand = &s.players[p].hand;
+        // 種類（最初に出てきた順）ごとに、素材の iid を手札の順に並べる
+        kinds.clear();
+        for c in hand.iter() {
+            if is_fusion_material(f, host, c) && !kinds.contains(&c.card) {
+                kinds.push(c.card);
             }
         }
-        choices = next;
-    }
-    choices.retain(|c| !c.is_empty());
-    choices
+        if kinds.is_empty() {
+            return Vec::new();
+        }
+        iids.clear();
+        ends.clear();
+        for &k in kinds.iter() {
+            for c in hand.iter() {
+                if c.card == k && is_fusion_material(f, host, c) {
+                    iids.push(c.iid);
+                }
+            }
+            ends.push(iids.len());
+        }
+        let start = |g: usize| if g == 0 { 0 } else { ends[g - 1] };
+        let total: usize = (0..kinds.len()).map(|g| ends[g] - start(g) + 1).product();
+        let mut choices: Vec<Vec<Iid>> = Vec::with_capacity(total - 1);
+        counts.clear();
+        counts.resize(kinds.len(), 0);
+        loop {
+            // 最後の種類から 1 つ進める（繰り上がりあり）
+            let mut g = kinds.len();
+            loop {
+                if g == 0 {
+                    return choices;
+                }
+                g -= 1;
+                if counts[g] < ends[g] - start(g) {
+                    counts[g] += 1;
+                    break;
+                }
+                counts[g] = 0;
+            }
+            let n: usize = counts.iter().sum();
+            let mut v = Vec::with_capacity(n);
+            for (g, &c) in counts.iter().enumerate() {
+                v.extend_from_slice(&iids[start(g)..start(g) + c]);
+            }
+            choices.push(v);
+        }
+    })
+}
+
+#[derive(Default)]
+struct MaterialScratch {
+    kinds: Vec<CardIdx>,
+    iids: Vec<Iid>,
+    ends: Vec<usize>,
+    counts: Vec<usize>,
 }
 
 fn subsets(items: &[Iid], size: Option<usize>) -> Vec<Vec<Iid>> {
@@ -558,24 +631,21 @@ pub fn legal_actions(s: &GameState) -> Vec<Action> {
     }
     let p = s.active;
     let pl = &s.players[p];
-    let mut actions = Vec::new();
+    let mut actions = Vec::with_capacity(16);
     let mut scratch = None;
     for hi in 0..pl.hand.len() {
         if can_play(s, p, hi, &mut scratch) {
             actions.push(Action::Play(pl.hand[hi].iid));
         }
     }
-    let mut targets = Vec::new();
     for c in &pl.board {
         if c.is_follower {
-            targets.clear();
-            attack_targets(s, c, &mut targets);
-            for &t in &targets {
+            for_each_attack_target(s, c, |t| {
                 actions.push(Action::Attack {
                     attacker: c.iid,
                     target: t,
-                });
-            }
+                })
+            });
             if can_evolve(s, c, EvolveKind::Evolve) {
                 actions.push(Action::Evolve(c.iid));
             }
@@ -594,7 +664,7 @@ pub fn legal_actions(s: &GameState) -> Vec<Action> {
         if abilities_of(host.card).fusion.is_none() {
             continue;
         }
-        let choices = material_choices(s, p, &fusion_materials(s, p, host));
+        let choices = material_choices(s, p, host);
         let key = (host.card, host.fused_kinds.as_slice());
         if choices.is_empty() || fused_hosts.contains(&key) {
             continue;
@@ -664,9 +734,9 @@ pub fn is_legal(s: &GameState, action: &Action) -> bool {
             .find(|c| c.is_follower && c.iid == *attacker)
         {
             Some(a) => {
-                let mut t = Vec::new();
-                attack_targets(s, a, &mut t);
-                t.contains(target)
+                let mut found = false;
+                for_each_attack_target(s, a, |t| found |= t == *target);
+                found
             }
             None => false,
         },
@@ -693,16 +763,19 @@ pub fn is_legal(s: &GameState, action: &Action) -> bool {
             let Some(h) = pl.hand.iter().find(|c| c.iid == *host) else {
                 return false;
             };
-            let cands: Vec<Iid> = fusion_materials(s, p, h)
-                .into_iter()
-                .map(|i| pl.hand[i].iid)
-                .collect();
+            let Some(f) = fusion_filter(h) else {
+                return false;
+            };
             !materials.is_empty()
                 && materials
                     .iter()
                     .enumerate()
                     .all(|(i, x)| !materials[..i].contains(x))
-                && materials.iter().all(|x| cands.contains(x))
+                && materials.iter().all(|x| {
+                    pl.hand
+                        .iter()
+                        .any(|c| c.iid == *x && is_fusion_material(f, h, c))
+                })
         }
         Action::ExtraPp => pl.extra_pp_available,
         Action::EndTurn => true,
@@ -762,21 +835,21 @@ pub fn apply_in_place(s: &mut GameState, action: &Action) {
 }
 
 fn apply_mulligan(s: &mut GameState, p: PlayerIndex, swap: &[Iid]) {
-    let hand = std::mem::take(&mut s.players[p].hand);
+    let hand = std::mem::take(&mut s.players[p].hand).into_vec();
     let (aside, keep): (Vec<HandCard>, Vec<HandCard>) =
         hand.into_iter().partition(|c| swap.contains(&c.iid));
-    s.players[p].hand = keep;
+    s.players[p].hand = keep.into();
     s.draw_cards(p, aside.len() as i32, None, None);
     for c in aside {
         s.return_to_deck(p, c);
     }
-    let mut deck = std::mem::take(&mut s.players[p].deck);
+    let mut deck = std::mem::take(&mut s.players[p].deck).into_vec();
     s.shuffle(&mut deck);
-    s.players[p].deck = deck;
+    s.players[p].deck = deck.into();
     s.players[p].mulligan_done = true;
     if mulligan_player(s).is_none() {
         let f = s.first;
-        push_internal(s, vec![FEff::FinishMulligan], Ctx::new(f, 0));
+        push_internal(s, &[FEff::FinishMulligan], Ctx::new(f, 0));
     }
 }
 
@@ -785,7 +858,7 @@ fn apply_play(s: &mut GameState, iid: Iid) {
     let Some(hi) = s.players[p].hand.iter().position(|c| c.iid == iid) else {
         return;
     };
-    let h = s.players[p].hand.remove(hi);
+    let h = s.players[p].hand.make_mut().remove(hi);
     let cd = card(h.card);
     let pl = &mut s.players[p];
     let cost = play_cost(cd, pl.pp, Some(&h));
@@ -809,7 +882,7 @@ fn apply_play(s: &mut GameState, iid: Iid) {
         for o in others {
             fire_spellboost(s, p, o, 1);
         }
-        push_abilities(s, &own_abilities(h.card, On::Spell), &ctx);
+        push_own_abilities(s, h.card, On::Spell, &ctx);
         return;
     }
     let b = s.new_board_card(h.card, Some(&h));
@@ -827,7 +900,7 @@ fn apply_attack(s: &mut GameState, attacker_iid: Iid, target: AttackTarget) {
     else {
         return;
     };
-    let a = &mut s.players[p].board[ai];
+    let a = &mut s.players[p].board.make_mut()[ai];
     a.attacks_this_turn += 1;
     a.keywords = a.keywords.without(AMBUSH); // 攻撃すると潜伏を失う
     let (a_card, a_super, a_attack, a_x) = (
@@ -852,7 +925,7 @@ fn apply_attack(s: &mut GameState, attacker_iid: Iid, target: AttackTarget) {
     });
     push_internal(
         s,
-        vec![
+        &[
             FEff::Combat {
                 attacker: attacker_iid,
                 target,
@@ -1009,40 +1082,39 @@ fn apply_act(s: &mut GameState, iid: Iid) {
         return;
     };
     s.players[p].pp -= cost;
-    s.players[p].board[ai].acted_this_turn = true;
+    s.players[p].board.make_mut()[ai].acted_this_turn = true;
     fire_ally_act(s, p);
     push_abilities(s, &[ability], &Ctx::new(p, iid));
 }
 
 fn apply_fuse(s: &mut GameState, host_iid: Iid, materials: &[Iid]) {
     let p = s.active;
-    if !s.players[p].hand.iter().any(|c| c.iid == host_iid) {
+    let Some(hi) = s.players[p].hand.iter().position(|c| c.iid == host_iid) else {
         return;
-    }
-    let hand = std::mem::take(&mut s.players[p].hand);
-    let (used, keep): (Vec<HandCard>, Vec<HandCard>) =
-        hand.into_iter().partition(|c| materials.contains(&c.iid));
-    s.players[p].hand = keep;
-    let host = s.players[p]
-        .hand
-        .iter_mut()
-        .find(|c| c.iid == host_iid)
-        .unwrap();
-    host.fused_this_turn = true;
-    for m in &used {
-        if !host.fused_kinds.contains(&m.card) {
-            host.fused_kinds.push(m.card);
+    };
+    let hand = s.players[p].hand.make_mut();
+    // 素材（手札の順）のコストを足し、種類を融合先に記録してから、手札から除く
+    let mut fused_cost = 0;
+    for j in 0..hand.len() {
+        if !materials.contains(&hand[j].iid) {
+            continue;
+        }
+        fused_cost += hand_cost(&hand[j]);
+        let kind = hand[j].card;
+        let host = &mut hand[hi];
+        if !host.fused_kinds.contains(&kind) {
+            host.fused_kinds.push(kind);
         }
     }
-    let host_card = host.card;
+    let host = &mut hand[hi];
+    host.fused_this_turn = true;
+    let (host_card, n_kinds) = (host.card, host.fused_kinds.len() as i32);
+    hand.retain(|c| !materials.contains(&c.iid));
     let d = data();
     let mut ctx = Ctx::new(p, host_iid);
-    ctx.set_var(
-        d.var_fused_cost,
-        // 「融合したカードのコスト」は手札で変化したコスト（docs/rules.md の「コスト」と「元のコスト」）
-        used.iter().map(hand_cost).sum(),
-    );
-    ctx.set_var(d.var_fused_kinds, host.fused_kinds.len() as i32);
+    // 「融合したカードのコスト」は手札で変化したコスト（docs/rules.md の「コスト」と「元のコスト」）
+    ctx.set_var(d.var_fused_cost, fused_cost);
+    ctx.set_var(d.var_fused_kinds, n_kinds);
     fire_ally_fuse(s, p);
-    push_abilities(s, &own_abilities(host_card, On::Fused), &ctx);
+    push_own_abilities(s, host_card, On::Fused, &ctx);
 }

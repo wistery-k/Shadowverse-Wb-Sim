@@ -594,9 +594,9 @@ fn play_one(
             let (side, pick, name) = cards.swap_remove(ivr.int(cards.len()));
             let mut s = at.clone();
             let removed = if name == "hand" {
-                s.players[side].hand.remove(pick).card
+                s.players[side].hand.make_mut().remove(pick).card
             } else {
-                s.players[side].board.remove(pick).card
+                s.players[side].board.make_mut().remove(pick).card
             };
             let r = play_out(
                 g,
@@ -782,8 +782,8 @@ mod tests {
     fn board_attributes() {
         let decks = compare_decks();
         let mut s = create_game([&decks[0].cards, &decks[1].cards], 1);
-        s.players[0].board.clear();
-        s.players[1].board.clear();
+        s.players[0].board.make_mut().clear();
+        s.players[1].board.make_mut().clear();
         // エンハンスした形のワルツを進化させて、1 ダメージ受けた（2/1 → 4/3 潜伏 → 進化 6/5 → 6/4）
         let waltz = card_named("サイレントスナイパー・ワルツ");
         let mut w = s.new_board_card(waltz, None);
@@ -794,12 +794,12 @@ mod tests {
         w.evolve = Evolve::Evolved;
         let granted = &data().abilities[waltz as usize].abilities[0];
         w.granted.push(granted);
-        s.players[0].board.push(w);
+        s.players[0].board.make_mut().push(w);
         let plain = s.new_board_card(waltz, None);
-        s.players[0].board.push(plain);
+        s.players[0].board.make_mut().push(plain);
         let garden = card_named("繚乱の庭");
         let a = s.new_board_card(garden, None);
-        s.players[1].board.push(a);
+        s.players[1].board.make_mut().push(a);
 
         let g: serde_json::Value = serde_json::from_str(&ability_json_text(granted)).unwrap();
         let mine = serde_json::json!([
