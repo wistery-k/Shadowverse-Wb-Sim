@@ -27,7 +27,7 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
 6. **非公開情報**: AI は実際の局面を直接先読みせず、`rust/engine/src/ai/determinize.rs` で作った「視点のプレイヤーから見て矛盾しない局面」（相手の手札・山札の中身と山札の順番を並べ直し、乱数の状態も新しくしたもの）で手を試す。新しい AI もこれに従う
 7. **AI インターフェース共通化**: `Agent::choose_action(state, legal, rng) -> Action`（`rust/engine/src/ai/mod.rs`）。選べる AI は `rust/engine/src/ai/registry.rs` と `src/ai/registry.ts`（表示名）に登録し、UI・自動対戦（`npm run sim`、「AI対戦」タブ）で共通に使う。UI では AI の思考を Web Worker（`src/ai/worker.ts`）で行う
 8. **AI の強さの比較**: AI を変えたら `npm run sim -- --games 50 --agents <新>,<旧>` 等で勝率を比べてから採用する
-   - 採用した版は `npm run yardstick -- --label <名前> --record` で、固定した相手との勝率を `docs/yardstick.md` の表に足す（強さの物差し。相手が動いたら表の先頭の説明に従う）
+   - 採用した版は `npm run yardstick -- --label <名前> --record` と `npm run yardstick -- --ref strong --label <名前> --record` で、固定した相手（弱い相手と強い相手）との勝率を `docs/yardstick.md` の表に足す（強さの物差し。相手が動いたら表の先頭の説明に従う）
 9. **AI の実験記録**: AI の改善で試したことと結果（不採用のものも）は `docs/ai-notes.md` に残す。新しい実験の前に読み、同じことを繰り返さない
    - 判断は勝率（探索 AI どうしなら `npm run compare`、同じシードで席とデッキを入れ替えて 200 試合程度）で行う。ランナーは Rust（`npm run compare`・`npm run rhino-compare`・`npm run svwb -- td selfplay`。`rust/README.md`）。予測精度などの代わりの指標が良くても、勝率で確かめるまで採用しない（評価関数の学習は予測精度が上がったのに勝率は下がった）
    - 1 組 20 試合の勝率表は 1 マス ±10% ほどぶれる。小さな差で結論を出さない
