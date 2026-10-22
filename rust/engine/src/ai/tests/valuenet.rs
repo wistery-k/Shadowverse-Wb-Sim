@@ -4,7 +4,7 @@
 use super::*;
 use crate::ai::aidata::{RawValueNet, RawValueNetLayer};
 use crate::ai::search::{SearchAgent, SearchOptions};
-use crate::ai::valuenet::{ValueNet, ValuePhase};
+use crate::ai::valuenet::{default_value_net, ValueNet, ValuePhase};
 use std::sync::Arc;
 
 /// 今のカード・クレストの一覧を語彙にしたモデル（valueNet.ts の defaultVocab）
@@ -406,7 +406,13 @@ fn ability_json_texts_has(text: &str) -> bool {
 fn imagined_input() {
     // 想像の局面（探索が相手のターンを読んだ後）は、"imagined" の無いモデルでは After と同じ。
     // 足したモデルでは "imagined" の重みの分だけ変わり、重みが 0 なら同じ（npm run td -- extend）
-    let old = model(4, |i| ((i * 13) % 7) as f64 / 10.0 - 0.3, 0.5);
+    let mut old = model(4, |i| ((i * 13) % 7) as f64 / 10.0 - 0.3, 0.5);
+    // 今の既定（model の入力の並び）には "imagined" があるので外す（場のカードのネットワークが無いので、最後の数値の入力の行は w1 の末尾）
+    if old.scalars.last().is_some_and(|x| x == "imagined") {
+        old.scalars.pop();
+        let n = old.w1.len() - old.hidden;
+        old.w1.truncate(n);
+    }
     assert!(!old.scalars.iter().any(|x| x == "imagined"));
     let with_row = |row: f64| {
         let mut m = old.clone();
@@ -435,4 +441,11 @@ fn imagined_input() {
         assert_eq!(learned.eval(&s, p, ValuePhase::After), after);
         assert_ne!(learned.eval(&s, p, ValuePhase::Imagined), after);
     }
+    // 今の既定の補正（s2b）は想像の局面を学んでいる
+    let net = default_value_net();
+    assert!(net.has_scalar("imagined"));
+    assert_ne!(
+        net.eval(&s, 0, ValuePhase::Imagined),
+        net.eval(&s, 0, ValuePhase::After)
+    );
 }
