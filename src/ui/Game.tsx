@@ -25,7 +25,7 @@ import {
 } from "../engine";
 import { CardDetail, CardView } from "./CardView";
 import { CLASS_NAMES, type ClassId } from "../cards";
-import { type AttackStatus, attackStatuses, crestName, describeAction, leaderClasses, modeLabels } from "./describe";
+import { type AttackStatus, attackStatuses, crestName, describeAction, leaderClasses, modeLabels, modeSourceCard } from "./describe";
 
 const AI_DELAY_MS = 700;
 const AUTO_DELAY_MS = 400;
@@ -201,6 +201,8 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
   const opp = state.players[AI];
   const pending = myTurn ? state.pending : null;
   const mulligan = myTurn && state.phase === "mulligan";
+  // モードを選んでいる能力のカード
+  const modeCard = pending?.kind === "mode" ? modeSourceCard(state) : null;
 
   // 選択中のカードでできる行動
   const selectedActions = selected === null ? [] : legal.filter((a) => actionSubject(a) === selected);
@@ -454,7 +456,7 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "も�
           </div>
         ) : pending?.kind === "mode" ? (
           <div class="banner column">
-            能力を1つ選んでください
+            {modeCard ? `${cardOf(modeCard).name}の能力を1つ選んでください` : "能力を1つ選んでください"}
             {modeLabels(state).map((label, index) => (
               <button type="button" key={index} onClick={() => act({ type: "mode", index })}>
                 {label}
