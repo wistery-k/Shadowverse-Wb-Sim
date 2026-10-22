@@ -5,7 +5,7 @@
 //!   svwb coverage [games] [--random-decks]    実行された効果の種類を数える（--features coverage でビルド）
 //!   svwb bench [games]         速さの計測（ランダムな試合の 1 手と、局面ごとに全ての合法手を試す 1 手）
 //!   svwb ai-play [games] [start] [search|rhino|rhino-lethal] AI どうしの試合を打って時間を測る
-//!   svwb compare <games> '<A>' '<B>' [start] [vsDeck]  探索 AI の設定どうしの勝率（npm run compare と同じ）
+//!   svwb compare <games> '<A>' '<B>' [start] [vsDeck] [--no-mirror]  探索 AI の設定どうしの勝率（npm run compare と同じ）
 //!   svwb rhino-compare [--subject …] [--games …] [--opts …] [--out …]  デッキ専用の AI の勝率（npm run rhino-compare と同じ）
 //!   svwb deck-compare --deck <デッキ> [--variant '<変更>']… [--add <カード>] [--games 50]  デッキのカードを入れ替えた案を元のデッキと比べる
 //!   svwb mulligan-compare [--games 50] [--a …] [--b …]  マリガンの設定どうしを同じシードの試合で打ち比べる

@@ -1,11 +1,12 @@
 //! 探索 AI の設定 A と B を対戦させる（TypeScript 版 scripts/compare-main.ts。npm run compare と同じ試合・同じ出力）。
 //!
-//!   svwb compare <試合数> '<Aの設定JSON>' '<Bの設定JSON>' [最初の試合番号] [Bのデッキ名] [--mirror]
+//!   svwb compare <試合数> '<Aの設定JSON>' '<Bの設定JSON>' [最初の試合番号] [Bのデッキ名] [--no-mirror]
 //!
 //! 同じデッキの組で席とデッキを入れ替えて 2 試合ずつ行い、A の勝率とデッキごとの A の勝率を出す。
-//! 2 試合の組ごとの勝ち数（2・1・0）と、組のばらつきから求めた標準誤差も出す。
-//! `--mirror` では組の 2 試合を同じシードで打つ（デッキと席と山札の順は同じで、A と B だけが入れ替わる）。
-//! 同じ AI どうしはちょうど 50% になり、ほとんど同じ AI どうしは運の分が打ち消し合う。
+//! 2 試合の組ごとの A の勝ち数（2・1・0）の数と、組のばらつきから求めた標準誤差も出す。
+//! 組の 2 試合は同じシードで打つ（鏡。デッキと席と山札の順は同じで、A と B だけが入れ替わる。2026-10-22 から）。
+//! 同じ AI どうしはちょうど 50% になり、似た AI どうしは運の分が打ち消し合ってぶれが小さい。
+//! `--no-mirror` は 2026-10-21 までの試合（組の 2 試合で別のシード。物差しと同じ）。
 
 use super::options::compare_options;
 use super::parallel::parallel_map;
@@ -32,6 +33,19 @@ pub fn compare_seed(g: u32, swap: bool, mirror: bool) -> u32 {
     g * 7 + if swap || mirror { 1 } else { 2 }
 }
 
+/// 試合番号 g の A の席・席ごとのデッキ・シード
+pub fn compare_setup(
+    decks: &[&'static Deck],
+    g: u32,
+    swap: bool,
+    mirror: bool,
+) -> (usize, [&'static Deck; 2], u32) {
+    let (da, db) = compare_pair(decks, g, swap);
+    let a_seat = ((g + swap as u32) % 2) as usize;
+    let seats = if a_seat == 0 { [da, db] } else { [db, da] };
+    (a_seat, seats, compare_seed(g, swap, mirror))
+}
+
 /// 試合番号 g を A と B で打つ（席・シードは g と swap と mirror で決まる）。A のデッキ名と、A が勝ったか
 pub fn play_compare_game(
     a: &SearchOptions,
@@ -41,30 +55,24 @@ pub fn play_compare_game(
     swap: bool,
     mirror: bool,
 ) -> (String, bool) {
-    let (da, db) = compare_pair(decks, g, swap);
-    let a_seat = ((g + swap as u32) % 2) as usize;
+    let (a_seat, seats, seed) = compare_setup(decks, g, swap, mirror);
     let mut a = SearchAgent::new(a.clone());
     let mut b = SearchAgent::new(b.clone());
-    let seed = compare_seed(g, swap, mirror);
-    let end = if a_seat == 0 {
-        play_match(
-            &mut [&mut a as &mut dyn Agent, &mut b],
-            [&da.cards, &db.cards],
-            seed,
-            |_, _| {},
-        )
+    let mut agents: [&mut dyn Agent; 2] = if a_seat == 0 {
+        [&mut a, &mut b]
     } else {
-        play_match(
-            &mut [&mut b as &mut dyn Agent, &mut a],
-            [&db.cards, &da.cards],
-            seed,
-            |_, _| {},
-        )
+        [&mut b, &mut a]
     };
+    let end = play_match(
+        &mut agents,
+        [&seats[0].cards, &seats[1].cards],
+        seed,
+        |_, _| {},
+    );
     let winner = end
         .winner
         .unwrap_or_else(|| panic!("勝者がいません（試合 {g}）"));
-    (da.name.clone(), winner == a_seat)
+    (seats[a_seat].name.clone(), winner == a_seat)
 }
 
 fn number_arg(v: Option<&String>, def: f64) -> Result<u32, String> {
@@ -108,8 +116,12 @@ pub fn pair_stats(tasks: &[(u32, bool)], won: &[bool]) -> ([u32; 3], f64) {
 }
 
 pub fn main(argv: &[String]) -> Result<(), String> {
-    let mirror = argv.iter().any(|s| s == "--mirror");
-    let argv: Vec<String> = argv.iter().filter(|s| *s != "--mirror").cloned().collect();
+    let mirror = !argv.iter().any(|s| s == "--no-mirror");
+    let argv: Vec<String> = argv
+        .iter()
+        .filter(|s| *s != "--no-mirror")
+        .cloned()
+        .collect();
     let games = number_arg(argv.first(), 28.0)?;
     let decks = compare_decks();
     if decks.len() != 7 {
@@ -163,4 +175,54 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pair_stats_counts_full_pairs() {
+        let tasks = [
+            (0, false),
+            (0, true),
+            (1, false),
+            (1, true),
+            (2, false),
+            (3, false),
+            (3, true),
+        ];
+        let won = [true, true, true, false, true, false, false];
+        let (counts, se) = pair_stats(&tasks, &won);
+        // 試合 2 は片方しかないので数えない
+        assert_eq!(counts, [1, 1, 1]);
+        // 組の勝率 1・0.5・0 の平均 0.5、ばらつき 0.25
+        assert!((se - (0.25f64 / 3.0).sqrt()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn mirror_swaps_only_the_agents() {
+        let decks = compare_decks();
+        for g in 0..20 {
+            let (s0, d0, seed0) = compare_setup(&decks, g, false, true);
+            let (s1, d1, seed1) = compare_setup(&decks, g, true, true);
+            assert_eq!(s0, 1 - s1);
+            assert_eq!([&d0[0].name, &d0[1].name], [&d1[0].name, &d1[1].name]);
+            assert_eq!(seed0, seed1);
+            // 鏡でなければシードだけが違う（今までの試合）
+            let (_, d2, seed2) = compare_setup(&decks, g, true, false);
+            assert_eq!([&d0[0].name, &d0[1].name], [&d2[0].name, &d2[1].name]);
+            assert_eq!(seed2, g * 7 + 1);
+            assert_eq!(compare_setup(&decks, g, false, false).2, g * 7 + 2);
+        }
+    }
+
+    #[test]
+    fn mirror_splits_pairs_of_the_same_ai() {
+        let decks = compare_decks();
+        let o = super::super::options::compare_options("{}").unwrap();
+        let x = play_compare_game(&o, &o, &decks, 0, false, true);
+        let y = play_compare_game(&o, &o, &decks, 0, true, true);
+        assert_ne!(x.1, y.1);
+    }
 }

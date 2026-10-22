@@ -18,7 +18,10 @@ rustup target add wasm32-unknown-unknown
 
 `npm run rust-data` でカード・能力のデータを `rust/engine/data/engine-data.json` に、AI の重み等を `ai-data.json` に書き出す
 （コミットしない）。`npm run wasm`・`npm test`・`npm run dev`・`npm run build`・`npm run svwb` は自動で書き出してからビルドする。
-`cargo build` だけでは書き出さないので、`rust/target/release/svwb` を直に使うときは先に `npm run rust-data` する（しないと既定の補正等が古いままになる）。
+`cargo build` だけでは書き出さないので、`rust/target/release/svwb` を直に使うときは先に `npm run rust-data` する。
+書き出すときに元のファイル（`data/`・`src/cards/`・`src/engine/` の `.ts`・`src/ai/data.ts`）の中身の指紋を `sources.txt` に書き、
+`engine/build.rs` がビルドのときに確かめる。書き出した後に元のファイルが変わっていれば（`git pull` で補正が変わった等）、
+ビルドは「埋め込むデータが古くなっています」で止まる（古い補正のまま動かさないため）。
 
 ## WASM（ブラウザ・Node）
 
@@ -60,7 +63,7 @@ npm run svwb -- ai-play 14 0 search                     # AI どうしの試合�
 試合は CPU のコア数だけのスレッドで並列に行う（環境変数 `THREADS` で変えられる。並列数によらず同じ結果）。
 
 ```sh
-npm run compare -- 105 '{}' '{"lethal":false}'                          # 探索 AI の設定どうしの勝率
+npm run compare -- 105 '{}' '{"lethal":false}'                          # 探索 AI の設定どうしの勝率（組の 2 試合は同じシードの鏡。--no-mirror で前の試合）
 npm run rhino-compare -- --games 50 --opts '{"nextLethal":10}' --out r.jsonl
 npm run af-compare -- --games 50                                         # rhino-compare --subject af
 npm run deck-compare -- --deck スペルウィッチ --variant '知恵の輝き-1,最果ての罪・サタン+1'  # デッキのカードを入れ替えた案を元のデッキと比べる
