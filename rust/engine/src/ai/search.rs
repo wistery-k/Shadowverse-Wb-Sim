@@ -124,7 +124,7 @@ pub struct SearchOptions {
     pub peek_opp_hand: bool,
     pub opp_fuse: bool,
     pub danger_rescore: usize,
-    /// 上位の手を読み直した点数に、ターン末の点数をこの割合で混ぜる（0 なら読み直した点数だけ。実験用、既定 0）
+    /// 上位の手を読み直した点数に、ターン末の点数をこの割合で混ぜる（0 なら読み直した点数だけ。既定 0.5、2026-10-22）
     pub rescore_mix: f64,
     pub reuse_agree: bool,
     /// 上位の手を読み直すとき、このターンに引いて手札に残っているカードも引き直す（oppHandSamples の引き直しごと。ビームで決めた 1 通りの引きで手を比べない）
@@ -185,7 +185,7 @@ impl Default for SearchOptions {
             peek_opp_hand: false,
             opp_fuse: false,
             danger_rescore: 0,
-            rescore_mix: 0.0,
+            rescore_mix: 0.5,
             reuse_agree: false,
             resample_draws: false,
             draw_first: false,
@@ -195,7 +195,8 @@ impl Default for SearchOptions {
 }
 
 impl SearchOptions {
-    /// 2026-10-16 より前の既定の読み方（決定化 3 回それぞれで幅 32 のビームを打ち、最初の手ごとに終局面を 3 つまで読み直す）。
+    /// 2026-10-16 より前の既定の読み方（決定化 3 回それぞれで幅 32 のビームを打ち、最初の手ごとに終局面を 3 つまで読み直す。
+    /// 読み直した点数にターン末の点数を混ぜない）。
     /// 人間の記録との比較の相手（search-classic）と TD 学習の自己対戦は、今までと比べられるようこちらを使う
     pub fn with_classic_sampling(self) -> SearchOptions {
         SearchOptions {
@@ -204,6 +205,7 @@ impl SearchOptions {
             plan_candidates: 3,
             opp_hand_samples: 1,
             opp_hand_common: false,
+            rescore_mix: 0.0,
             ..self
         }
     }
@@ -828,6 +830,8 @@ pub fn plan_turn_traced(
                 opts.opp_hand_samples,
             )
         };
+        // 選ぶときの値は、読み直した点数にターン末の点数を混ぜたもの（考えの表示の内訳は読み直した点数のまま）
+        let read_value = value;
         let value = if opts.rescore_mix > 0.0 && node.state.phase != Phase::Ended {
             (1.0 - opts.rescore_mix) * value + opts.rescore_mix * node.value
         } else {
@@ -850,7 +854,7 @@ pub fn plan_turn_traced(
             }
             if tracing {
                 let sp = ScoreParts {
-                    total: value,
+                    total: read_value,
                     eval: parts.0 / n as f64,
                     extra: parts.1 / n as f64,
                 };
@@ -1370,6 +1374,7 @@ impl SearchAgent {
         #[derive(Default)]
         struct Acc {
             sum: f64,
+            read: f64,
             count: usize,
             eval: f64,
             extra: f64,
@@ -1423,6 +1428,7 @@ impl SearchAgent {
                     }
                 }
                 acc.sum += read_plan.value;
+                acc.read += parts.total;
                 acc.eval += parts.eval;
                 acc.extra += parts.extra;
                 acc.count += 1;
@@ -1435,7 +1441,7 @@ impl SearchAgent {
             if acc.count > 0 {
                 let n = acc.count as f64;
                 c.read = Some(ScoreParts {
-                    total: acc.sum / n,
+                    total: acc.read / n,
                     eval: acc.eval / n,
                     extra: acc.extra / n,
                 });
