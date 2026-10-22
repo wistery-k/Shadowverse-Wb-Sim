@@ -124,6 +124,8 @@ pub struct SearchOptions {
     pub peek_opp_hand: bool,
     pub opp_fuse: bool,
     pub danger_rescore: usize,
+    /// 上位の手を読み直した点数に、ターン末の点数をこの割合で混ぜる（0 なら読み直した点数だけ。実験用、既定 0）
+    pub rescore_mix: f64,
     pub reuse_agree: bool,
     /// 上位の手を読み直すとき、このターンに引いて手札に残っているカードも引き直す（oppHandSamples の引き直しごと。ビームで決めた 1 通りの引きで手を比べない）
     pub resample_draws: bool,
@@ -183,6 +185,7 @@ impl Default for SearchOptions {
             peek_opp_hand: false,
             opp_fuse: false,
             danger_rescore: 0,
+            rescore_mix: 0.0,
             reuse_agree: false,
             resample_draws: false,
             draw_first: false,
@@ -824,6 +827,11 @@ pub fn plan_turn_traced(
                 sum / opts.opp_hand_samples as f64 - pl.leftover(&node.state),
                 opts.opp_hand_samples,
             )
+        };
+        let value = if opts.rescore_mix > 0.0 && node.state.phase != Phase::Ended {
+            (1.0 - opts.rescore_mix) * value + opts.rescore_mix * node.value
+        } else {
+            value
         };
         let replace = match result.iter().find(|(k, _)| *k == node.first) {
             None => true,

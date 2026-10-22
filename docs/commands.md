@@ -184,6 +184,7 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
 - 数: `samples`・`beamWidth`・`maxDepth`・`rescoreTop`・`planCandidates`・`perFirst`・`oppHandSamples`・`dangerRescore`・`mulliganSamples`・`nextLethal`・`beamPp`
 - 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`
+- `rescoreMix`: 0〜1 の数。上位の手を相手のターンまで読み直した点数に、ターン末の点数をこの割合で混ぜる（既定 0。実験用）
 - `scoreTurnEnd`: `"none"`・`"terminal"`・`"all"`
 - `mulligan`: `"model"`（既定）・`"weights"`・`"cost"`・`"sample"`
 - `opponentSearch`: `null`（相手のターンを読まない）か `{"beamWidth": …, "maxDepth": …, "extraEval": true|false}`
