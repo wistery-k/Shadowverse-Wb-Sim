@@ -817,13 +817,53 @@ pub fn push_internal(s: &mut GameState, effects: &[FEff], ctx: Ctx) {
 
 /// 選択された対象を記録して再開する
 pub fn answer_choose(s: &mut GameState, targets: Vec<Iid>) {
-    let Some(Pending::Choose { slot, .. }) = s.pending else {
+    let Some(Pending::Choose {
+        player,
+        slot,
+        candidates,
+        ..
+    }) = s.pending.take()
+    else {
         panic!("選択待ちではありません")
     };
+    let frame = s.stack.last().expect("選択待ちではありません");
+    if discards_or_returns(frame, slot) {
+        hide_hand_choice(s, player, &candidates);
+    }
     let frame = s.stack.last_mut().expect("選択待ちではありません");
     frame.ctx.set_slot(slot, targets);
     frame.pc += 1;
-    s.pending = None;
+}
+
+/// 能力の残りの効果で、slot のカードを捨てるか山札に戻すか
+fn discards_or_returns(frame: &Frame, slot: SlotId) -> bool {
+    (frame.pc + 1..frame.effects.len()).any(|i| {
+        matches!(
+            frame.effects.get(i),
+            FEff::Dsl(
+                Effect::Discard {
+                    target: Target::Slot { slot: x }
+                } | Effect::ReturnToDeck {
+                    target: Target::Slot { slot: x }
+                }
+            ) if *x == slot
+        )
+    })
+}
+
+/// 手札から選んで捨てる・山札に戻すカードは、相手にはどれを選んだか分からない（docs/rules.md）。
+/// 候補だった手札のカードは、相手に分かっていた中身（公開）や条件付きで引いた条件の印を消す
+fn hide_hand_choice(s: &mut GameState, p: PlayerIndex, candidates: &[Iid]) {
+    let marked = |h: &HandCard| candidates.contains(&h.iid) && (h.revealed || h.drawn_by.is_some());
+    if !s.players[p].hand.iter().any(marked) {
+        return;
+    }
+    for h in s.players[p].hand.make_mut().iter_mut() {
+        if candidates.contains(&h.iid) {
+            h.revealed = false;
+            h.drawn_by = None;
+        }
+    }
 }
 
 pub fn answer_mode(s: &mut GameState, index: usize) {
@@ -1146,7 +1186,12 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 frame.ctx.set_var(var, hand_cost(&s.players[q].hand[i]));
                 let h = s.players[q].hand.make_mut().remove(i);
                 s.players[q].graveyard += 1;
-                for a in own_abilities(h.card, On::Discarded) {
+                let on_discarded = own_abilities(h.card, On::Discarded);
+                // 捨てたカードは相手には見えない。公開されていたカードと、【捨てられたとき】が働くカードは分かる
+                if !h.revealed && on_discarded.is_empty() {
+                    s.players[q].hidden_discards.make_mut().push(h.card);
+                }
+                for a in on_discarded {
                     queue(s, a, Ctx::new(q, h.iid));
                 }
             }

@@ -104,7 +104,7 @@ export function describeAction(state: GameState, action: Action, human: Viewer, 
     case "fuse":
       return `${who}: ${name(action.host)}に${action.materials.map(name).join("・")}を融合`;
     case "choose":
-      return `${who}: ${action.targets.map(name).join("・") || "なし"}を選択`;
+      return `${who}: ${describeChosen(state, action.targets, human)}を選択`;
     case "mode":
       return `${who}: ${modeLabels(state)[action.index] ?? `モード${action.index + 1}`}を選択`;
     case "extraPp":
@@ -112,6 +112,17 @@ export function describeAction(state: GameState, action: Action, human: Viewer, 
     case "endTurn":
       return `${who}: ターン終了`;
   }
+}
+
+/** 選んだ対象。人間の視点では、相手が手札から選んだカードは枚数だけ書く（捨てる・山札に戻すカードはどれか分からない。docs/rules.md 11章） */
+function describeChosen(state: GameState, targets: readonly number[], human: Viewer): string {
+  const chooser = state.pending?.player ?? state.active;
+  const hidden = (iid: number) =>
+    typeof human === "number" && chooser !== human && state.players[chooser].hand.some((h) => h.iid === iid);
+  const parts = targets.filter((t) => !hidden(t)).map((t) => entityName(state, t, human));
+  const fromHand = targets.filter(hidden).length;
+  if (fromHand > 0) parts.push(`手札${fromHand}枚`);
+  return parts.join("・") || "なし";
 }
 
 /** マリガン: 残したカードと返したカード（と引いたカード）。人間の視点では相手の手札は書かない */

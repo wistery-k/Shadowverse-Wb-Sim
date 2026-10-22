@@ -23,6 +23,7 @@ fn new_player(deck: Vec<CardRef>) -> PlayerState {
         graveyard: 0,
         graveyard_followers: Shared::default(),
         destroyed_amulets: Shared::default(),
+        hidden_discards: Shared::default(),
         destroyed_this_turn: Shared::default(),
         combo: 0,
         evolved_this_turn: false,

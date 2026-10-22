@@ -221,6 +221,9 @@ pub struct PlayerState {
     pub graveyard: i32,
     pub graveyard_followers: Shared<CardIdx>,
     pub destroyed_amulets: Shared<CardIdx>,
+    /// 手札から捨てたカードのうち、相手にはどのカードか分からないもの。ルールには影響しない。
+    /// 相手の AI の determinization で、伏せた手札・山札と合わせて並べ直す
+    pub hidden_discards: Shared<CardIdx>,
     pub destroyed_this_turn: Shared<DestroyedRecord>,
     pub combo: i32,
     pub evolved_this_turn: bool,

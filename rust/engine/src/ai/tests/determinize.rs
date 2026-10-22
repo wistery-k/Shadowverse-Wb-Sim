@@ -17,7 +17,9 @@ fn keeps_own_cards_and_shuffles_hidden_ones() {
     let viewer = s.active;
     let opp = opponent(viewer);
     let fairy = id("フェアリー");
-    let h = s.new_hand_card(fairy, None);
+    // 効果で手札に加えたトークンは中身が公開されている
+    let mut h = s.new_hand_card(fairy, None);
+    h.revealed = true;
     s.players[opp].hand.make_mut().push(h);
     let hidden = |st: &GameState| {
         let pl = &st.players[opp];
@@ -144,4 +146,59 @@ fn keeps_own_deck_states_and_drops_hidden_ones() {
             .any(|r| r.iid == mine && r.card == card));
         assert!(d.players[opp].deck_kept.is_empty());
     }
+}
+
+#[test]
+fn shuffles_hidden_discards_with_hidden_cards() {
+    // 相手がどのカードを捨てたかは分からないので、伏せた手札・山札と合わせて並べ直し、残りを捨てたカードとする
+    let mut s = after_mulligan();
+    let viewer = s.active;
+    let opp = opponent(viewer);
+    let fairy = id("フェアリー");
+    s.players[opp].hidden_discards = vec![fairy, fairy].into();
+    let all = |st: &GameState| {
+        let pl = &st.players[opp];
+        let mut v: Vec<CardIdx> = pl
+            .hand
+            .iter()
+            .map(|h| h.card)
+            .chain(pl.deck.iter().map(|r| r.card))
+            .chain(pl.hidden_discards.iter().copied())
+            .collect();
+        v.sort();
+        v
+    };
+    let mut rng = Rng::new(11);
+    let mut fairy_moved = false;
+    for _ in 0..20 {
+        let d = determinize(&s, viewer, &mut rng, false);
+        assert_eq!(all(&d), all(&s));
+        assert_eq!(d.players[opp].hidden_discards.len(), 2);
+        assert_eq!(d.players[opp].hand.len(), s.players[opp].hand.len());
+        assert_eq!(d.players[opp].deck.len(), s.players[opp].deck.len());
+        fairy_moved |= d.players[opp].hidden_discards.iter().any(|&c| c != fairy);
+        // 自分が捨てたカードは自分には分かっている
+        assert_eq!(
+            d.players[viewer].hidden_discards,
+            s.players[viewer].hidden_discards
+        );
+    }
+    assert!(fairy_moved);
+}
+
+#[test]
+fn hidden_token_in_hand_is_shuffled() {
+    // 公開の印のないトークン（山札から引いた、捨てる・戻すカードの候補だった）は伏せたカードと同じく並べ直す
+    let mut s = after_mulligan();
+    let viewer = s.active;
+    let opp = opponent(viewer);
+    let fairy = id("フェアリー");
+    let h = s.new_hand_card(fairy, None);
+    s.players[opp].hand.make_mut().push(h);
+    let mut rng = Rng::new(3);
+    let moved = (0..20).any(|_| {
+        let d = determinize(&s, viewer, &mut rng, false);
+        d.players[opp].hand.last().map(|h| h.card) != Some(fairy)
+    });
+    assert!(moved);
 }

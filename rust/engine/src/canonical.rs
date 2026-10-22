@@ -132,7 +132,7 @@ fn player_canon(p: &PlayerState) -> String {
         b(p.mulligan_done).into(),
     ]
     .join(",");
-    [
+    let mut out = [
         head,
         format!(
             "D{}",
@@ -179,7 +179,15 @@ fn player_canon(p: &PlayerState) -> String {
             )
         ),
     ]
-    .join(";")
+    .join(";");
+    // 相手に分からない捨てたカード（無ければ書かない）
+    if !p.hidden_discards.is_empty() {
+        out.push_str(&format!(
+            ";X{}",
+            join(&p.hidden_discards, |c| cid(*c).to_string(), ",")
+        ));
+    }
+    out
 }
 
 pub fn state_canon(s: &GameState) -> String {
