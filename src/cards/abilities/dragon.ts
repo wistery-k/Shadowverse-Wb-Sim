@@ -80,7 +80,7 @@ export const DRAGON: Record<string, CardAbilities> = {
     abilities: [fanfare(buff(oppFollowers(), 0, -9)), onSuperEvolve(draw(3))],
   },
   [id("乙姫の扇")]: {
-    abilities: [act(3, summon("乙姫お守り隊"), choose(handCards()), discard(slot()))],
+    abilities: [act(3, choose(handCards()), summon("乙姫お守り隊"), discard(slot()))],
   },
   [id("灼熱のアナテマ・バーンドナイト")]: {
     abilities: [

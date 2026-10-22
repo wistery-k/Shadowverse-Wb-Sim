@@ -32,16 +32,16 @@ use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 /// 物差しの版（相手の手が変わって戻せないときに上げる）
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 /// 相手どうしの決まった試合（`fingerprint`）の手順のハッシュ
-pub const FINGERPRINT: &str = "c9533113";
+pub const FINGERPRINT: &str = "efc7e5ba";
 
 /// 強い相手の物差しの版
-pub const STRONG_VERSION: u32 = 1;
+pub const STRONG_VERSION: u32 = 2;
 
 /// 強い相手どうしの決まった試合の手順のハッシュ
-pub const STRONG_FINGERPRINT: &str = "b73c7599";
+pub const STRONG_FINGERPRINT: &str = "8492c675";
 
 /// 相手の評価関数の重み（2026-10-16 の SEARCH_WEIGHTS を書き写したもの。2026-10-22 の SEARCH_WEIGHTS も同じなので、強い相手もこれを使う）
 const REFERENCE_WEIGHTS: &str = r#"{"myHp":0.7,"oppHp":1,"attack":1,"defense":0.8,"followerBase":1,"tempAttack":0.3,"keywords":1,"amulet":1.5,"sigil":0.5,"sigilAmulet":1.5,"countdownDecay":0.8,"jeanneSync":0,"oppBoard":1.1,"myHand":0.6,"oppHand":0.3,"ep":1.5,"sep":5,"extraPp":1,"maxPp":8,"crest":3,"graveyard":0.05,"lethalRange":10,"lethalAttack":0.3,"fusionSet":3.6,"kuonReserve":8,"evoReserve":3,"sevoReserve":6,"kerberosReserve":0,"lastWords":1,"lastWordsSummon":0.5,"handStorm":0,"boostCard":1,"boost":0.2,"boostCap":5,"hold":{"90072110":0.6,"90072120":0.6,"90073110":1.2,"90073120":1.7999999999999998,"90073130":1.7999999999999998,"90074110":4.8},"doomed":0.3,"ppLeft":0,"extraPpExpiring":0,"passive":0}"#;
@@ -519,16 +519,21 @@ pub fn main(argv: &[String]) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    const DOC: &str = "# 物差し\n\n## 物差し 2（指紋 c9533113）\n\n| a |\n| --- |\n| 1 |\n\n## 強い相手の物差し 1（指紋 x）\n\n| a |\n| --- |\n| 2 |\n";
+    /// 今の版の両方の節がある文書
+    fn doc() -> String {
+        format!(
+            "# 物差し\n\n## {}（指紋 x）\n\n| a |\n| --- |\n| 1 |\n\n## {}（指紋 y）\n\n| a |\n| --- |\n| 2 |\n",
+            Reference::Classic.title(),
+            Reference::Strong.title()
+        )
+    }
 
     #[test]
     fn adds_a_row_to_its_own_section() {
         let decks: Vec<String> = Vec::new();
-        let doc = with_row(DOC, Reference::Classic, "| 3 |", &decks);
-        assert!(
-            doc.contains("| 1 |\n| 3 |\n\n## 強い相手の物差し 1"),
-            "{doc}"
-        );
+        let doc = with_row(&doc(), Reference::Classic, "| 3 |", &decks);
+        let next = format!("| 1 |\n| 3 |\n\n## {}", Reference::Strong.title());
+        assert!(doc.contains(&next), "{doc}");
         let doc = with_row(&doc, Reference::Strong, "| 4 |", &decks);
         assert!(doc.ends_with("| 2 |\n| 4 |\n"), "{doc}");
     }
@@ -537,10 +542,8 @@ mod tests {
     fn starts_a_section_when_missing() {
         let decks = vec!["リノセウスエルフ".to_string()];
         let doc = with_row("# 物差し\n", Reference::Strong, "| 5 |", &decks);
-        assert!(
-            doc.starts_with("# 物差し\n\n## 強い相手の物差し 1（指紋 "),
-            "{doc}"
-        );
+        let heading = format!("# 物差し\n\n## {}（指紋 ", Reference::Strong.title());
+        assert!(doc.starts_with(&heading), "{doc}");
         assert!(
             doc.contains("| 日付 | コミット | 名前 | 設定 | 勝率 | ± | 試合 | エルフ | 1 試合 |"),
             "{doc}"

@@ -184,6 +184,23 @@ describe("進化", () => {
     expect(board(t, opp)).toEqual([]);
   });
 
+  it("【進化時】の対象は、ほかの効果より先に（進化させたときに）選ぶ（ピュアクリスタリア・リリィは引く前に選ぶ）", () => {
+    let { s, me, opp } = setup();
+    s = passTurns(s, 4);
+    s.players[me].hand = [];
+    const lily = toBoard(s, me, "ピュアクリスタリア・リリィ");
+    const a = toBoard(s, opp, "キャラバンマンモス");
+    const b = toBoard(s, opp, "刹那のクイックブレイダー");
+    const deck = s.players[me].deck.length;
+    let t = applyAction(s, { type: "evolve", iid: lily.iid });
+    expect(t.pending).toMatchObject({ kind: "choose", candidates: [a.iid, b.iid] });
+    expect(t.players[me].hand).toHaveLength(0);
+    expect(t.players[me].deck).toHaveLength(deck);
+    t = applyAction(t, { type: "choose", targets: [a.iid] });
+    expect(t.players[me].hand).toHaveLength(1);
+    expect(follower(t, a.iid)?.defense).toBe((a as FollowerOnBoard).defense - 1);
+  });
+
   it("「〜ではなく」の【超進化時】は【進化時】を置き換える（アンリエット）", () => {
     let { s, me } = setup();
     s = passTurns(s, 6);
@@ -487,6 +504,8 @@ describe("ターン終了時の処理だけを進める（resolveTurnEnd）", ()
 });
 
 describe("相手から見て分かる手札の情報（AI の determinization 用）", () => {
+  const hand = (s: GameState, p: PlayerIndex, iid: number) => s.players[p].hand.find((h) => h.iid === iid);
+
   it("場から戻ったカードと効果で加えたカードは中身が公開され、条件付きで引いたカードは条件を持つ", () => {
     let { s, me } = setup();
     const target = toBoard(s, me, "キャラバンマンモス");
@@ -504,5 +523,62 @@ describe("相手から見て分かる手札の情報（AI の determinization �
     const drawn = s.players[me].hand.at(-1)!;
     expect(drawn.revealed).toBe(false);
     expect(drawn.drawnBy).toEqual({ type: "follower" });
+  });
+
+  it("手札から山札に戻すカードを選ぶと、相手にはどれを選んだか分からないので、候補だった手札の公開・条件の印を消す（グリードケルブ・ルビィ）", () => {
+    let { s, me } = setup();
+    const fairy = toHand(s, me, "フェアリー");
+    hand(s, me, fairy)!.revealed = true;
+    const hinted = toHand(s, me, "キャラバンマンモス");
+    hand(s, me, hinted)!.drawnBy = { type: "follower" };
+    const plain = toHand(s, me, "キャラバンマンモス");
+    s = applyAction(s, { type: "play", iid: toHand(s, me, "グリードケルブ・ルビィ") });
+    expect(s.pending).toMatchObject({ kind: "choose", candidates: [fairy, hinted, plain] });
+    s = applyAction(s, { type: "choose", targets: [plain] });
+    expect(hand(s, me, fairy)).toMatchObject({ revealed: false, drawnBy: null });
+    expect(hand(s, me, hinted)).toMatchObject({ revealed: false, drawnBy: null });
+  });
+
+  it("手札以外から選んだときは、手札の印は残る（ベビーカーバンクル）", () => {
+    let { s, me } = setup();
+    const fairy = toHand(s, me, "フェアリー");
+    hand(s, me, fairy)!.revealed = true;
+    const target = toBoard(s, me, "キャラバンマンモス");
+    toBoard(s, me, "キャラバンマンモス");
+    s = applyAction(s, { type: "play", iid: toHand(s, me, "ベビーカーバンクル") });
+    expect(s.pending).toMatchObject({ kind: "choose" });
+    s = applyAction(s, { type: "choose", targets: [target.iid] });
+    expect(hand(s, me, fairy)?.revealed).toBe(true);
+  });
+
+  it("手札から選んでも、捨てる・山札に戻すのでなければ印は残る（改境の再動は選んだカードのコピーを出すので相手にも分かる）", () => {
+    let { s, me } = setup();
+    const arts = [0, 1, 2].map(() => toHand(s, me, "アタックアーティファクト"));
+    for (const a of arts) hand(s, me, a)!.revealed = true;
+    s = applyAction(s, { type: "play", iid: toHand(s, me, "改境の再動") });
+    expect(s.pending).toMatchObject({ kind: "choose", candidates: arts, count: 2 });
+    s = applyAction(s, { type: "choose", targets: arts.slice(0, 2) });
+    expect(arts.map((a) => hand(s, me, a)?.revealed)).toEqual([true, true, true]);
+  });
+
+  it("捨てたカードは、相手に分からなければ hiddenDiscards に残る（公開されていたカードと【捨てられたとき】が働くカードは残らない）", () => {
+    let { s, me } = setup();
+    const a = toHand(s, me, "キャラバンマンモス");
+    toHand(s, me, "煌牙の義勇・キット");
+    s = applyAction(s, { type: "play", iid: toHand(s, me, "灼熱のアナテマ・バーンドナイト") });
+    s = applyAction(s, { type: "choose", targets: [a] });
+    expect(s.players[me].hiddenDiscards).toEqual([FILLER]);
+    // 手札がキットだけなら選ぶ余地なくキットを捨て、【捨てられたとき】が働く
+    s.players[me].pp = 10;
+    s = applyAction(s, { type: "play", iid: toHand(s, me, "灼熱のアナテマ・バーンドナイト") });
+    expect(s.players[me].hand).toEqual([]);
+    expect(s.players[me].hiddenDiscards).toEqual([FILLER]);
+    // 公開されていたカードを選ぶ余地なく捨てた
+    const fairy = toHand(s, me, "フェアリー");
+    hand(s, me, fairy)!.revealed = true;
+    s.players[me].pp = 10;
+    s = applyAction(s, { type: "play", iid: toHand(s, me, "灼熱のアナテマ・バーンドナイト") });
+    expect(s.players[me].hand).toEqual([]);
+    expect(s.players[me].hiddenDiscards).toEqual([FILLER]);
   });
 });

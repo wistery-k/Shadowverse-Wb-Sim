@@ -284,7 +284,7 @@ fn board_json(c: &OnBoard) -> Json {
 }
 
 fn player_json(p: &PlayerState) -> Json {
-    obj(vec![
+    let mut o = vec![
         ("leaderHp", num(p.leader_hp)),
         ("leaderMaxHp", num(p.leader_max_hp)),
         ("maxPp", num(p.max_pp)),
@@ -330,6 +330,12 @@ fn player_json(p: &PlayerState) -> Json {
         ("graveyard", num(p.graveyard)),
         ("graveyardFollowers", cards(&p.graveyard_followers)),
         ("destroyedAmulets", cards(&p.destroyed_amulets)),
+    ];
+    // 相手に分からない捨てたカード（無ければ省く）
+    if !p.hidden_discards.is_empty() {
+        o.push(("hiddenDiscards", cards(&p.hidden_discards)));
+    }
+    o.extend([
         (
             "destroyedThisTurn",
             Json::Arr(
@@ -357,7 +363,8 @@ fn player_json(p: &PlayerState) -> Json {
         ),
         ("leaderOncePerTurn", Json::Obj(Vec::new())),
         ("mulliganDone", Json::Bool(p.mulligan_done)),
-    ])
+    ]);
+    obj(o)
 }
 
 fn ctx_json(c: &Ctx) -> Json {
@@ -859,6 +866,10 @@ fn player_of(v: &Json) -> R<PlayerState> {
         graveyard: int(v, "graveyard")?,
         graveyard_followers: card_list(v, "graveyardFollowers")?.into(),
         destroyed_amulets: card_list(v, "destroyedAmulets")?.into(),
+        hidden_discards: match v.get("hiddenDiscards") {
+            None | Some(Json::Null) => Shared::default(),
+            Some(_) => card_list(v, "hiddenDiscards")?.into(),
+        },
         destroyed_this_turn: array(v, "destroyedThisTurn")?
             .iter()
             .map(|r| {

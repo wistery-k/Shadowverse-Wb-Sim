@@ -204,6 +204,7 @@ fn player_rest_eq(a: &PlayerState, b: &PlayerState) -> bool {
         && a.graveyard == b.graveyard
         && a.graveyard_followers == b.graveyard_followers
         && a.destroyed_amulets == b.destroyed_amulets
+        && a.hidden_discards == b.hidden_discards
         && list_eq(&a.destroyed_this_turn, &b.destroyed_this_turn, |x, y| {
             x.card == y.card && x.attack == y.attack && x.defense == y.defense
         })

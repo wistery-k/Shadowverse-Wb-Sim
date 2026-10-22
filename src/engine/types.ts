@@ -51,6 +51,7 @@ export interface HandCard extends CardRef {
   fusedThisTurn: boolean;
   /**
    * 持ち主の相手にも中身が分かっているカード（場から手札に戻った・名前の決まったカードを効果で加えた）。
+   * 手札から捨てる・山札に戻すカードを選んだときは、相手にはどれを選んだか分からないので、候補だった手札のカードの印を消す。
    * ルールには影響しない。AI の determinization（rust/engine/src/ai/determinize.rs）で並べ直さないために使う
    */
   revealed: boolean;
@@ -151,6 +152,11 @@ export interface PlayerState {
   graveyardFollowers: string[];
   /** このバトル中に破壊された自分のアミュレットのカードID */
   destroyedAmulets: string[];
+  /**
+   * 手札から捨てたカードのうち、相手にはどのカードか分からないもののカードID（無ければ省く）。ルールには影響しない。
+   * AI の determinization で、相手の伏せた手札・山札と合わせて並べ直すために使う
+   */
+  hiddenDiscards?: string[];
   /** このターン中に破壊された自分のフォロワー */
   destroyedThisTurn: DestroyedRecord[];
   /** コンボ（このターンにプレイしたカードの枚数と、効果による加算） */

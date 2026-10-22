@@ -4,8 +4,10 @@ use super::Rng;
 use crate::data::CardIdx;
 use crate::state::*;
 
+/// 相手にも中身が分かっている手札のカード。効果で加えたトークンは revealed を持つ。
+/// 山札から引いたトークンや、捨てる・山札に戻すカードを選んだときの候補だったトークンは分からない
 fn is_public(h: &HandCard) -> bool {
-    h.revealed || card(h.card).token
+    h.revealed
 }
 
 fn matches_hint(c: CardIdx, hint: &DrawHint) -> bool {
@@ -44,7 +46,7 @@ fn matches_hint(c: CardIdx, hint: &DrawHint) -> bool {
     true
 }
 
-/// viewer から見えない情報（相手の手札・山札の中身、山札の順番、乱数の状態）を並べ直した局面。
+/// viewer から見えない情報（相手の手札・山札の中身と、相手がどのカードを捨てたか、山札の順番、乱数の状態）を並べ直した局面。
 /// peek_opp_hand なら相手の手札は実際のまま（実験用）
 pub fn determinize(
     state: &GameState,
@@ -68,6 +70,7 @@ pub fn determinize(
         .iter()
         .map(|&i| opp.hand[i].card)
         .chain(opp.deck.iter().map(|r| r.card))
+        .chain(opp.hidden_discards.iter().copied())
         .collect();
     rng.shuffle(&mut pool);
     // 条件付きで引いたカードから先に、条件に合うカードを取る
@@ -97,6 +100,10 @@ pub fn determinize(
     for r in s.players[o].deck.make_mut().iter_mut() {
         r.card = pool[k];
         k += 1;
+    }
+    // 残りは、相手にはどれか分からない捨てたカード
+    if !s.players[o].hidden_discards.is_empty() {
+        s.players[o].hidden_discards = pool[k..].to_vec().into();
     }
     // 山札に戻った相手のカードの状態も、伏せた手札と同じく作り直したものとみなす
     s.players[o].deck_kept.clear();
