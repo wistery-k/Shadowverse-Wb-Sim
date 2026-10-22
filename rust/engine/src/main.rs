@@ -5,10 +5,11 @@
 //!   svwb coverage [games] [--random-decks]    実行された効果の種類を数える（--features coverage でビルド）
 //!   svwb bench [games]         速さの計測（ランダムな試合の 1 手と、局面ごとに全ての合法手を試す 1 手）
 //!   svwb ai-play [games] [start] [search|rhino|rhino-lethal] AI どうしの試合を打って時間を測る
-//!   svwb compare <games> '<A>' '<B>' [start] [vsDeck]  探索 AI の設定どうしの勝率（npm run compare と同じ）
+//!   svwb compare <games> '<A>' '<B>' [start] [vsDeck] [--no-mirror]  探索 AI の設定どうしの勝率（npm run compare と同じ）
 //!   svwb rhino-compare [--subject …] [--games …] [--opts …] [--out …]  デッキ専用の AI の勝率（npm run rhino-compare と同じ）
 //!   svwb deck-compare --deck <デッキ> [--variant '<変更>']… [--add <カード>] [--games 50]  デッキのカードを入れ替えた案を元のデッキと比べる
 //!   svwb mulligan-compare [--games 50] [--a …] [--b …]  マリガンの設定どうしを同じシードの試合で打ち比べる
+//!   svwb human-plan-value --out 結果.jsonl [--m 32] <人間の記録.jsonl>…  人間の手順と AI の手順を同じ局面から打ち比べる（report で集計）
 //!   svwb td selfplay --model m.json --games N [--start S] [--eps 0.1] --out d.jsonl  TD 学習の自己対戦
 //!   svwb yardstick [--opts …] [--games 1000] [--label …] [--record]  固定した相手との勝率（強さの物差し。docs/yardstick.md）
 
@@ -155,7 +156,7 @@ fn main() {
         }
         Some(
             cmd @ ("compare" | "rhino-compare" | "deck-compare" | "mulligan-compare" | "td"
-            | "yardstick"),
+            | "yardstick" | "human-plan-value"),
         ) => {
             let rest = &args[1..];
             let r = match cmd {
@@ -164,6 +165,7 @@ fn main() {
                 "rhino-compare" => runner::rhino_compare::main(rest),
                 "deck-compare" => runner::deck_compare::main(rest),
                 "yardstick" => runner::yardstick::main(rest),
+                "human-plan-value" => runner::human_plan::main(rest),
                 _ => runner::td::main(rest),
             };
             if let Err(e) = r {
@@ -172,7 +174,7 @@ fn main() {
             }
         }
         _ => {
-            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | mulligan-compare … | td selfplay … | yardstick …（rust/README.md）");
+            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | mulligan-compare … | td selfplay … | yardstick … | human-plan-value …（rust/README.md）");
             std::process::exit(2);
         }
     }

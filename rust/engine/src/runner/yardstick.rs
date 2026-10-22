@@ -12,7 +12,7 @@
 //! 指紋が変わったら、AI の変更が相手に漏れたのなら漏れた分をここに書き写して元に戻す。
 //! ルールの修正などで戻せないなら `VERSION` を上げて `FINGERPRINT` を書き直し、表を新しく始める（違う版の行どうしは比べない）。
 
-use super::compare::{compare_pair, play_compare_game};
+use super::compare::{compare_pair, compare_seed, play_compare_game};
 use super::options::compare_options;
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
@@ -102,7 +102,7 @@ pub fn fingerprint() -> String {
             let end = play_match(
                 &mut [&mut a as &mut dyn Agent, &mut b],
                 [&da.cards, &db.cards],
-                g * 7 + if swap { 1 } else { 2 },
+                compare_seed(g, swap, false),
                 |_, act| log.push(action_canon(act)),
             );
             format!("{g} {swap} {:?} {}", end.winner, fnv(&log.join(" ")))
@@ -271,7 +271,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let t0 = Instant::now();
     let results = parallel_map(
         &tasks,
-        |&(g, swap), _| play_compare_game(&subject, &reference, &decks, g, swap),
+        |&(g, swap), _| play_compare_game(&subject, &reference, &decks, g, swap, false),
         |done, total, _, _| {
             if done % 200 == 0 || done == total {
                 eprint!("\r{done}/{total}");

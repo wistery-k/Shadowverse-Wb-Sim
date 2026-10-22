@@ -18,7 +18,10 @@ rustup target add wasm32-unknown-unknown
 
 `npm run rust-data` でカード・能力のデータを `rust/engine/data/engine-data.json` に、AI の重み等を `ai-data.json` に書き出す
 （コミットしない）。`npm run wasm`・`npm test`・`npm run dev`・`npm run build`・`npm run svwb` は自動で書き出してからビルドする。
-`cargo build` だけでは書き出さないので、`rust/target/release/svwb` を直に使うときは先に `npm run rust-data` する（しないと既定の補正等が古いままになる）。
+`cargo build` だけでは書き出さないので、`rust/target/release/svwb` を直に使うときは先に `npm run rust-data` する。
+書き出すときに元のファイル（`data/`・`src/cards/`・`src/engine/` の `.ts`・`src/ai/data.ts`）の中身の指紋を `sources.txt` に書き、
+`engine/build.rs` がビルドのときに確かめる。書き出した後に元のファイルが変わっていれば（`git pull` で補正が変わった等）、
+ビルドは「埋め込むデータが古くなっています」で止まる（古い補正のまま動かさないため）。
 
 ## WASM（ブラウザ・Node）
 
@@ -60,11 +63,12 @@ npm run svwb -- ai-play 14 0 search                     # AI どうしの試合�
 試合は CPU のコア数だけのスレッドで並列に行う（環境変数 `THREADS` で変えられる。並列数によらず同じ結果）。
 
 ```sh
-npm run compare -- 105 '{}' '{"lethal":false}'                          # 探索 AI の設定どうしの勝率
+npm run compare -- 105 '{}' '{"lethal":false}'                          # 探索 AI の設定どうしの勝率（組の 2 試合は同じシードの鏡。--no-mirror で前の試合）
 npm run rhino-compare -- --games 50 --opts '{"nextLethal":10}' --out r.jsonl
 npm run af-compare -- --games 50                                         # rhino-compare --subject af
 npm run deck-compare -- --deck スペルウィッチ --variant '知恵の輝き-1,最果ての罪・サタン+1'  # デッキのカードを入れ替えた案を元のデッキと比べる
 npm run svwb -- mulligan-compare --games 50 --a '{"mulligan":"sample"}'  # マリガンの設定どうしを同じシードの試合で打ち比べる（相手は今の探索 AI）
+npm run svwb -- human-plan-value --out d.jsonl --m 32 <人間の記録.jsonl>...  # 人間の手順と AI の手順を同じ局面から打ち比べる（集計は human-plan-value report d.jsonl）
 npm run svwb -- td selfplay --model m0.json --games 2000 --out d0.jsonl  # TD 学習の自己対戦（試合が終わった順に書く。--opp beam・--iv k・--sampling default は td.rs の先頭の説明）
 npm run yardstick -- --opts '{}' --games 1000 --label 名前 --record    # 固定した相手との勝率を docs/yardstick.md の表に足す（強さの物差し）
 ```
@@ -84,7 +88,7 @@ npm run yardstick -- --opts '{}' --games 1000 --label 名前 --record    # 固�
 - `engine/src/effects.rs`: 能力の解釈と解決スタック
 - `engine/src/game.rs`: 対戦の生成・合法手・行動の適用
 - `engine/src/golden.rs`・`canonical.rs`・`sim.rs`・`main.rs`: ゴールデンテスト・計測・CLI
-- `engine/src/runner/`: 実験のランナー（compare・rhino-compare・deck-compare・mulligan-compare・td selfplay・yardstick）。`parallel.rs`（並列実行）、`options.rs`（設定の JSON）、
+- `engine/src/runner/`: 実験のランナー（compare・rhino-compare・deck-compare・mulligan-compare・td selfplay・yardstick・human-plan-value）。`parallel.rs`（並列実行）、`options.rs`（設定の JSON）、
   `json.rs`（項目の順番を保つ JSON）、`jsnum.rs`（JavaScript の `Number#toString`・`toPrecision`・`toFixed` と同じ数の書き方）
 - `engine/src/ai/`: AI。`registry.rs`（選べる AI の一覧）、`search.rs`（ターン単位のビームサーチ・相手のターンの読み）、`eval.rs`（評価関数）、
   `valuenet.rs`（学習した補正の推論）、`lethal.rs`（リーサル探索）、`lethal_hint.rs`（対戦画面の「リーサル」表示）、`determinize.rs`、

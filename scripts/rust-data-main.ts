@@ -3,9 +3,11 @@
 // カード能力の DSL（src/cards/abilities。関数を含まない JSON）、アポカリプスデッキ、デフォルトデッキを 1 つの JSON にまとめる。
 // 探索 AI が使うデータ（評価関数の重み、学習した評価の補正、マリガンの係数等）は ai-data.json に書き出す。
 // 出力は rust/engine/data/ の 2 つ（生成物なのでコミットしない）。
+// あわせて、元になったファイルの中身の指紋を sources.txt に書く。rust/engine/build.rs がビルドのときに確かめ、
+// 元のファイルが変わったのに書き出し直していなければ、ビルドを止める（古い補正などを埋め込まないように）。
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { ALL_CARDS, ALL_CRESTS } from "../src/cards";
 import { CARD_ABILITIES, CREST_ABILITIES } from "../src/cards/abilities";
 import { APOCALYPSE_DECK } from "../src/cards/abilities/special";
@@ -17,6 +19,36 @@ import valueNet from "../data/value-net.json";
 
 export const RUST_DATA_PATH = "rust/engine/data/engine-data.json";
 export const RUST_AI_DATA_PATH = "rust/engine/data/ai-data.json";
+
+/** 書き出すデータの元になるファイル（ディレクトリと、その下で数えるファイル名）。元データの data/raw/ は除く */
+const SOURCES: [string, RegExp][] = [
+  ["data", /./],
+  ["src/cards", /\.ts$/],
+  ["src/engine", /\.ts$/],
+  ["src/ai", /^data\.ts$/],
+];
+
+function listFiles(dir: string, keep: RegExp): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const path = `${dir}/${e.name}`;
+    if (e.isDirectory()) return path === "data/raw" ? [] : listFiles(path, keep);
+    return keep.test(e.name) ? [path] : [];
+  });
+}
+
+/** FNV-1a（32 ビット）。build.rs と同じ */
+export function fnv1a(bytes: Uint8Array): string {
+  let h = 0x811c9dc5;
+  for (const b of bytes) h = Math.imul(h ^ b, 0x01000193) >>> 0;
+  return h.toString(16).padStart(8, "0");
+}
+
+/** 元になったファイルの指紋の一覧（1 行に「指紋 パス」。パスはリポジトリの最上位から） */
+export function sourcesText(): string {
+  const paths = SOURCES.flatMap(([dir, keep]) => listFiles(dir, keep)).sort();
+  const lines = paths.map((path) => `${fnv1a(readFileSync(path))} ${path}`);
+  return `# npm run rust-data が書き出す。元のファイルの中身の指紋（FNV-1a 32 ビット）。rust/engine/build.rs が確かめる\n${lines.join("\n")}\n`;
+}
 
 export function engineData() {
   return {
@@ -85,6 +117,7 @@ export async function main(argv: string[]): Promise<number> {
   const [out = RUST_DATA_PATH, aiOut = RUST_AI_DATA_PATH] = argv.filter((a) => a !== "--quiet");
   mkdirSync(dirname(out), { recursive: true });
   const changed = [writeIfChanged(out, JSON.stringify(engineData())), writeIfChanged(aiOut, JSON.stringify(aiData()))];
+  writeIfChanged(join(dirname(aiOut), "sources.txt"), sourcesText());
   if (!quiet) console.log(changed.some((c) => c) ? `${out}・${aiOut} に書き出しました` : `${out}・${aiOut} は変わっていません`);
   return 0;
 }
