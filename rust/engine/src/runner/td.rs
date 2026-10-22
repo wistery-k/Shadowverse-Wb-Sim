@@ -933,13 +933,15 @@ mod tests {
         serde_json::from_str::<serde_json::Value>(&out).expect("JSON")["b"].clone()
     }
 
-    /// 今の既定の補正に "imagined" の入力（重み 0）を足したモデルで、速い読み方（classic・相手は貪欲法）の自己対戦の設定
+    /// 今の既定の補正（"imagined" の入力が無ければ重み 0 で足す）で、速い読み方（classic・相手は貪欲法）の自己対戦の設定
     fn imagined_model(imagined: usize) -> Model {
         let mut raw = ai_data().value_net.clone();
         assert!(raw.board.is_none());
-        raw.scalars.push("imagined".into());
-        // 場のカードのネットワークの無いモデルなので、最後の数値の入力の行は w1 の末尾
-        raw.w1.extend(std::iter::repeat_n(0.0, raw.hidden));
+        if !raw.scalars.iter().any(|x| x == "imagined") {
+            raw.scalars.push("imagined".into());
+            // 場のカードのネットワークの無いモデルなので、最後の数値の入力の行は w1 の末尾
+            raw.w1.extend(std::iter::repeat_n(0.0, raw.hidden));
+        }
         let mut m = model_options(Arc::new(ValueNet::new(raw).expect("モデル")), false, true)
             .expect("設定");
         m.board = true;

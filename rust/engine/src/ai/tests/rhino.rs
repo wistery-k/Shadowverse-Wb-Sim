@@ -326,12 +326,15 @@ fn elf_plays(agent: &mut dyn Agent, seed: u32) -> Vec<(&'static str, i32)> {
 }
 
 /// 7 ターン目（PP 7・SEP 2、相手は体力 8 で場にフォロワーなし）。アリア → 超進化 → フェアリーで顔 4 点にすると、
-/// クレストで疾走の付くフェアリーで次のターンに倒しきれる（相手のターン後に 4 割強。テイマーの手は 1 割強）
+/// クレストで疾走の付くフェアリーで次のターンに倒しきれる（相手のターン後に 4 割強。テイマーの手は 1 割強）。
+/// ビームがこの並びを切らずに読めることを見るので、学習した補正は入れない。
+/// 補正 s2b（2026-10-22 から既定）はアリアを 12 回中 4 回しか出さないが、最後まで打つと s2b の手の勝率 56.3%、
+/// 必ずアリアを出す手（前の既定 qlp）51.8%（400 回）で、アリアが良いとは言えない（docs/ai-notes.md「読みの中の相手のずれを学習で直す・資源の介入」）
 #[test]
 fn turn7_plays_aria_for_next_lethal() {
     assert_eq!(start_2275116772().players[0].combo, 0);
     for seed in [1, 2, 3] {
-        let learned = SearchOptions::default().extra_eval;
+        let learned = None;
         let mut agent = RhinoAgent::with_options(
             true,
             SearchOptions {
