@@ -180,6 +180,8 @@ function ThoughtResult({
   // 評価に足す項がどれも 0（学習した補正を使わない AI）なら内訳を出さない
   const showExtra = rows.some((r) => Math.abs(r.c.turnEnd.extra) >= 0.05 || Math.abs(r.c.read?.extra ?? 0) >= 0.05);
   const samples = thought.roots.length;
+  // 選ぶときの値が読んだ後の点数と違う（読んだ後の点数にターン末の点数を混ぜる AI など）なら、その列を出す
+  const showValue = read.some((r) => r.c.value !== null && r.c.read !== null && Math.abs(r.c.value - r.c.read.total) >= 0.05);
   const lethalLabel = thought.lethal ? describeSteps(state, [thought.lethal], names, actor)[0] : null;
 
   const row = ({ c, lines }: { c: ThoughtCandidate; lines: string[] }, rank: number | null) => {
@@ -209,6 +211,7 @@ function ThoughtResult({
             "—"
           )}
         </td>
+        {showValue && <td class="num">{c.value !== null ? <strong>{points(c.value)}</strong> : "—"}</td>}
       </tr>
     );
   };
@@ -231,16 +234,25 @@ function ThoughtResult({
             <th></th>
             <th>最初の手と、続く並び</th>
             <th title="このターンの終わりの局面の点数（ビームサーチが並びを選んだ点数）">ターン末{showExtra && "（評価 ＋ 補正）"}</th>
-            <th title="相手のターンを読んだ後の点数（相手の手札を並べ直して読んだ平均）。AI はこの点数の高い手を選ぶ">
+            <th
+              title={
+                showValue
+                  ? "相手のターンを読んだ後の点数（相手の手札を並べ直して読んだ平均）"
+                  : "相手のターンを読んだ後の点数（相手の手札を並べ直して読んだ平均）。AI はこの点数の高い手を選ぶ"
+              }
+            >
               相手のターンの後{showExtra && "（評価 ＋ 補正）"}
             </th>
+            {showValue && (
+              <th title="相手のターンの後の点数にターン末の点数を混ぜた値。AI はこの値の高い手を選ぶ">選ぶときの値</th>
+            )}
           </tr>
         </thead>
         <tbody>
           {read.map((r, i) => row(r, i + 1))}
           {unread.length > 0 && (
             <tr class="thought-sep">
-              <td colSpan={4} class="muted">
+              <td colSpan={showValue ? 5 : 4} class="muted">
                 相手のターンを読み直さなかった手（ターン末の点数の高い順に {unread.length} 個）
               </td>
             </tr>

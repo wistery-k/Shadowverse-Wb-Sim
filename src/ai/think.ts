@@ -22,7 +22,7 @@ export interface ThoughtCandidate {
   /** 相手のターンを読み直した後の点数（読み直した決定化の平均。読み直していなければ null） */
   read: ScoreParts | null;
   readCount: number;
-  /** 手を選ぶときの値（読み直していなければ null） */
+  /** 手を選ぶときの値（read にターン末の点数を混ぜた値など。読み直していなければ null） */
   value: number | null;
   /** 実際の局面で打てる手か */
   legal: boolean;

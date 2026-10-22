@@ -88,8 +88,9 @@ struct Given {
 }
 
 /// --matches のファイル（JSON Lines。各行に deck・g・seat（古い形式は elfSeat）、あれば subject・won・opponent）。
-/// ここで打つ相手は物差しと同じ手を指す search-classic なので、人間が物差し以外（opponent が "yardstick" でない）と打った行は飛ばす
-fn read_matches(file: &str, subject: &str) -> Result<Vec<Given>, String> {
+/// 人間が打った相手（opponent。無ければ "yardstick"）が、ここで打つ相手と同じ行だけを使う:
+/// --opp search-classic（物差しと同じ手を指す）なら "yardstick"、--opp search（今の既定の探索 AI）なら "latest"
+fn read_matches(file: &str, subject: &str, opponent: &str) -> Result<Vec<Given>, String> {
     let text = std::fs::read_to_string(file).map_err(|e| format!("{file} を読めません: {e}"))?;
     let mut out = Vec::new();
     let mut skipped = 0;
@@ -125,7 +126,12 @@ fn read_matches(file: &str, subject: &str) -> Result<Vec<Given>, String> {
                 i + 1
             ));
         }
-        if matches!(v.get("opponent"), Some(o) if !matches!(o, Json::Str(s) if s == "yardstick")) {
+        let played = match v.get("opponent") {
+            None => "yardstick",
+            Some(Json::Str(s)) => s.as_str(),
+            Some(_) => "",
+        };
+        if played != opponent {
             skipped += 1;
             continue;
         }
@@ -141,7 +147,7 @@ fn read_matches(file: &str, subject: &str) -> Result<Vec<Given>, String> {
         });
     }
     if skipped > 0 {
-        eprintln!("{file} のうち物差し以外の AI と打った {skipped} 試合は飛ばします");
+        eprintln!("{file} のうち相手が {opponent} 以外の {skipped} 試合は飛ばします");
     }
     Ok(out)
 }
@@ -290,7 +296,15 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         .filter(|d| d.name != subject.1)
         .collect();
     let given = match &matches {
-        Some(file) => Some(read_matches(file, subject.0)?),
+        Some(file) => Some(read_matches(
+            file,
+            subject.0,
+            if opp_key == "search" {
+                "latest"
+            } else {
+                "yardstick"
+            },
+        )?),
         None => None,
     };
     let tasks: Vec<Task> = match &given {

@@ -1,7 +1,8 @@
 // UI 表示用の文言
 
-import { CLASS_NAMES, type Card, type ClassId } from "../cards";
+import { ALL_CARDS, CLASS_NAMES, type Card, type ClassId } from "../cards";
 import {
+  abilitiesOf,
   attackReach,
   cardOf,
   crestOf,
@@ -74,12 +75,56 @@ export function entityName(state: GameState, iid: number, human: Viewer): string
   return "（不明）";
 }
 
-/** モードの選択肢の文言（能力テキストの「（1）…」の行） */
-export function modeLabels(state: GameState): string[] {
+/** JSON にしたときの中身を比べるための文字列（オブジェクトのキーの順は問わない） */
+function canonicalJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(",")}]`;
+  if (v !== null && typeof v === "object") {
+    const entries = Object.entries(v)
+      .filter(([, x]) => x !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, x]) => `${JSON.stringify(k)}:${canonicalJson(x)}`).join(",")}}`;
+  }
+  return JSON.stringify(v) ?? "null";
+}
+
+/** 能力のデータの中の【モード】の効果をすべて探す */
+function collectModes(v: unknown, found: (mode: unknown) => void): void {
+  if (Array.isArray(v)) {
+    for (const x of v) collectModes(x, found);
+  } else if (v !== null && typeof v === "object") {
+    if ("op" in v && v.op === "mode") found(v);
+    for (const x of Object.values(v)) collectModes(x, found);
+  }
+}
+
+/** 【モード】の効果（canonicalJson）→ その効果を能力に持つカードのID */
+let modeCards: Map<string, string> | undefined;
+
+/** モード選択待ちの【モード】の効果を持つカードのID。
+ *  局面（エンジンの JSON）にはどのカードの能力かが入っていない（スペルはプレイすると場にも手札にも残らない）ので、
+ *  解決中の効果の中身をカードの能力のデータと突き合わせて引く */
+export function modeSourceCard(state: GameState): string | null {
   const frame = state.stack[state.stack.length - 1];
+  if (!frame || state.pending?.kind !== "mode") return null;
+  if (!modeCards) {
+    const m = new Map<string, string>();
+    for (const card of ALL_CARDS) {
+      collectModes(abilitiesOf(card.id), (mode) => {
+        const key = canonicalJson(mode);
+        if (!m.has(key)) m.set(key, card.id);
+      });
+    }
+    modeCards = m;
+  }
+  return modeCards.get(canonicalJson(frame.effects[frame.pc])) ?? null;
+}
+
+/** モードの選択肢の文言（そのカードの能力テキストの「（1）…」の行） */
+export function modeLabels(state: GameState): string[] {
   const pending = state.pending;
-  if (!frame || pending?.kind !== "mode") return [];
-  const text = frame.ctx.sourceCardId ? cardOf(frame.ctx.sourceCardId).text : "";
+  if (pending?.kind !== "mode") return [];
+  const cardId = modeSourceCard(state);
+  const text = cardId ? cardOf(cardId).text : "";
   const lines = text.split("\n").filter((l) => /^（\d）/.test(l));
   return Array.from({ length: pending.options }, (_, i) => lines[i] ?? `選択肢${i + 1}`);
 }
@@ -105,8 +150,11 @@ export function describeAction(state: GameState, action: Action, human: Viewer, 
       return `${who}: ${name(action.host)}に${action.materials.map(name).join("・")}を融合`;
     case "choose":
       return `${who}: ${describeChosen(state, action.targets, human)}を選択`;
-    case "mode":
-      return `${who}: ${modeLabels(state)[action.index] ?? `モード${action.index + 1}`}を選択`;
+    case "mode": {
+      const cardId = modeSourceCard(state);
+      const label = modeLabels(state)[action.index] ?? `選択肢${action.index + 1}`;
+      return `${who}: ${cardId ? `${cardOf(cardId).name}の` : ""}モード「${label}」を選択`;
+    }
     case "extraPp":
       return `${who}: エクストラPP`;
     case "endTurn":

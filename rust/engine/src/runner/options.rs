@@ -121,6 +121,13 @@ pub fn search_options(
             "perFirst" => o.per_first = count(k, v)?,
             "oppHandSamples" => o.opp_hand_samples = count(k, v)?,
             "dangerRescore" => o.danger_rescore = count(k, v)?,
+            "rescoreMix" => {
+                let x = number(k, v)?;
+                if !(0.0..=1.0).contains(&x) {
+                    return Err(format!("\"rescoreMix\" は 0 以上 1 以下: {x}"));
+                }
+                o.rescore_mix = x;
+            }
             "mulliganSamples" => o.mulligan_samples = count(k, v)?,
             "lethal" => o.lethal = flag(k, v)?,
             "mulliganStatic" => o.mulligan_static = flag(k, v)?,
@@ -383,6 +390,13 @@ mod tests {
             .expect("hold");
         assert_eq!(w.hold[k], base.search_weights.hold[k] * 2.0);
         assert!(compare_options(r#"{"nope":1}"#).is_err());
+        assert_eq!(
+            compare_options(r#"{"rescoreMix":0.25}"#)
+                .unwrap()
+                .rescore_mix,
+            0.25
+        );
+        assert!(compare_options(r#"{"rescoreMix":1.5}"#).is_err());
         assert!(compare_options(r#"{"exhaustive":{"untilTurn":5,"maxStates":100}}"#).is_err());
         assert!(compare_options(r#"{"exhaustive":null,"valueNet":false}"#)
             .unwrap()

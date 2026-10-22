@@ -180,7 +180,6 @@ export interface EffectContext {
   controller: PlayerIndex;
   /** 能力の持ち主のカード（場・手札・クレスト）。スペルは使用したカード */
   source: number;
-  sourceCardId: string;
   /** 能力を誘発させたカード（場に出たフォロワー、交戦相手など） */
   event: number | null;
   /** 選択・乱数の結果 */

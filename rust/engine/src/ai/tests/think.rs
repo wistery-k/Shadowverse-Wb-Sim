@@ -104,7 +104,10 @@ fn score_parts_add_up() {
                 if let Some(r) = c.read {
                     assert!((r.total - r.eval - r.extra).abs() < 1e-6, "{r:?}");
                     assert_eq!(c.read_count, 1);
-                    assert_eq!(c.value, Some(r.total));
+                    // 選ぶときの値は、読み直した点数にターン末の点数を混ぜたもの（rescoreMix）
+                    let m = SearchOptions::default().rescore_mix;
+                    let want = (1.0 - m) * r.total + m * te.total;
+                    assert!((c.value.expect("値がある") - want).abs() < 1e-6, "{c:?}");
                 }
             }
             assert!(t.candidates.iter().filter(|c| c.read.is_some()).count() <= 4);

@@ -19,7 +19,7 @@ pub struct ThoughtCandidate {
     pub read: Option<ScoreParts>,
     /// 読み直した決定化の数
     pub read_count: usize,
-    /// 手を選ぶときの値（read の平均から、読み直されなかった決定化の数だけ割り引いたもの。読み直していなければ None）
+    /// 手を選ぶときの値（read にターン末の点数を rescoreMix の割合で混ぜた値の平均から、読み直されなかった決定化の数だけ割り引いたもの。読み直していなければ None）
     pub value: Option<f64>,
     /// 実際の局面で打てる手か
     pub legal: bool,

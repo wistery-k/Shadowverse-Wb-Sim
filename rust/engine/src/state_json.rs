@@ -3,7 +3,7 @@
 //!
 //! 能力の DSL（解決スタックの効果・誘発待ちの能力・付与された能力）は、カードの能力のデータの JSON
 //! （engine-data.json）と突き合わせて書き出し・読み込む。データに無い能力を含む局面は読み込めない。
-//! 文脈の sourceCardId（TypeScript 版だけが持ち、どこからも読まない値）は書き出さず、読み込むときは無視する。
+//! 文脈の sourceCardId（TypeScript 版のエンジンだけが持っていた値）は書き出さず、読み込むときは無視する。
 
 use crate::data::*;
 use crate::json::Json;

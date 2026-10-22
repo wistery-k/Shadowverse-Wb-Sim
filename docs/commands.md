@@ -94,7 +94,7 @@ A の勝率と、A のデッキごとの勝率を出す。5 番目にデッキ�
 ## rhino-compare（af-compare・spellwitch-compare・bishop-compare・dragon-compare・nightmare-compare・royal-compare）
 
 ```sh
-npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …] [--opts '<設定>'] [--out 結果.jsonl] [--matches 試合.jsonl]
+npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …] [--opts '<設定>'] [--opp search-classic|search] [--out 結果.jsonl] [--matches 試合.jsonl]
 ```
 
 | 引数 | 既定 | 意味 |
@@ -102,10 +102,11 @@ npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …
 | `--subject` | `rhino` | 比べるデッキ: `rhino`（リノセウスエルフ）・`af`（AFネメシス）・`spellwitch`・`bishop`（アミュレット疾走ビショップ）・`dragon`（疾走ドラゴン）・`nightmare`（ミッドレンジナイトメア）・`royal`（アマリアロイヤル）。`af-compare` 等はこれを付けた別名 |
 | `--games N` | 50 | 相手デッキ 1 つ・席 1 つあたりの試合数（全部で N × 6 デッキ × 2 席） |
 | `--start S` | 0 | 最初の試合番号 |
-| `--agent` | rhino は `rhino`、他は `search` | 比べるデッキの AI: `rhino`・`rhino-lethal`・`search`・`search-classic`。相手は `search-classic` |
+| `--agent` | rhino は `rhino`、他は `search` | 比べるデッキの AI: `rhino`・`rhino-lethal`・`search`・`search-classic` |
+| `--opp` | `search-classic` | 相手の AI: `search-classic`（物差しと同じ手を指す）・`search`（今の既定の探索 AI） |
 | `--opts JSON` | `{}` | 比べるデッキの AI の設定（`search-classic` では使わない）。下の「探索 AI の設定」に加え、リノセウス用 AI の `"potential"`（数）と `"holds"`（`{"mystery":…, "rhino":…, "extraPp":…}`） |
 | `--out ファイル` | なし | 試合ごとの結果を JSON Lines で書き出す |
-| `--matches ファイル` | なし | 「人間との比較」タブで保存した試合（JSON Lines）と同じ試合だけ打ち、人間の勝敗と並べる |
+| `--matches ファイル` | なし | 「人間との比較」タブで保存した試合（JSON Lines）と同じ試合だけ打ち、人間の勝敗と並べる。人間の相手が `--opp` と同じ試合だけを使う（`search-classic` なら相手が物差しの試合、`search` なら最新版の試合） |
 
 ## deck-compare
 
@@ -184,6 +185,7 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
 - 数: `samples`・`beamWidth`・`maxDepth`・`rescoreTop`・`planCandidates`・`perFirst`・`oppHandSamples`・`dangerRescore`・`mulliganSamples`・`nextLethal`・`beamPp`
 - 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`
+- `rescoreMix`: 0〜1 の数。上位の手を相手のターンまで読み直した点数に、ターン末の点数をこの割合で混ぜる（既定 0.5。0 で 2026-10-22 より前の読み方）
 - `scoreTurnEnd`: `"none"`・`"terminal"`・`"all"`
 - `mulligan`: `"model"`（既定）・`"weights"`・`"cost"`・`"sample"`
 - `opponentSearch`: `null`（相手のターンを読まない）か `{"beamWidth": …, "maxDepth": …, "extraEval": true|false}`
