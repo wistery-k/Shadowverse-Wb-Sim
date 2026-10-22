@@ -26,7 +26,7 @@
 //     このモデルの学習には "b" のある自己対戦（td selfplay の既定）が要る
 //   npm run td -- check --model m.json --data d.jsonl
 //     td selfplay --check 1 で書いた "z"（探索の補正）と、このファイルの計算で "x"・"b" から出した補正を比べる（"x" は 4 桁に丸めてあるので少しずれる）
-//   npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001] [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--v1Only 0] [--best 0]
+//   npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001] [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--v1Only 0] [--best 0]  [--bestOn end,after]
 //     --best 1 なら、確かめ用の局面の勝敗の交差エントロピーが一番小さかったエポック（学習前も含む）の重みを書き出す（途中で止めるのと同じ）。
 //     --cmpWeight w（既定 0）なら、td selfplay --cmp の打ち比べ（同じ局面からの並びごとに最後まで打った勝率）も学ぶ:
 //     同じ局面の並びどうしで、予測した勝つ確率の平均からのずれが、測った勝率の平均からのずれに合うように（二乗誤差 × w。--cmpBatch 局面ずつ）。
@@ -38,7 +38,9 @@
 //     --ivRes 0 なら、資源を ±1 した介入の試合（td selfplay --ivRes）を読まない（既定 1 は読む）。
 //     td selfplay --imagined で書き出した想像の局面（"ph": 2。探索が相手のターンを読んだ後の局面）は、目標を同じターンのターン末の局面と同じ
 //     （本物の次の自分のターンの最初の局面からの λ 収益）にして、--imaginedWeight の重み（既定 1。0 なら読まない）で学ぶ。
-//     確かめ用の交差エントロピー（--best の判定も）は今までどおり end・after の局面だけで測り、想像の局面は別に出す。
+//     確かめ用の交差エントロピーは今までどおり end・after の局面だけで測り、想像の局面は別に出す。
+//     --bestOn end,imagined なら、--best の判定をターン末と想像の局面（探索が点数に使う局面）の交差エントロピーで行う（既定 end,after）。
+//     想像の局面を学ぶと after の予測が少し悪くなり、既定の判定では学習前が選ばれた（docs/ai-notes.md の同じ節）。
 //     docs/ai-notes.md「読みの中の相手のずれを学習で直す・資源の介入」
 //   npm run td -- ivcheck --model m1.json --data d0.jsonl[,d1.jsonl] [--holdout 0]
 //     介入の試合で、抜いたカードごとに「測った価値」（もとの試合の勝敗 − 抜いた試合の勝敗の平均）と、
@@ -739,11 +741,14 @@ function auc(pred: number[], y: number[]): number {
   return pos === 0 || neg === 0 ? 0.5 : (rankSum - (pos * (pos + 1)) / 2) / (pos * neg);
 }
 
-/** 確かめ用の局面（holdout。ランダムに打った局面と想像の局面を除く）の、勝敗に対する交差エントロピー */
-function holdoutLoss(d: Dataset, v: Float64Array): number {
+/** --bestOn の局面の種類（end・after・imagined）→ ph */
+const PHASE_OF: Record<string, 0 | 1 | 2> = { end: 0, after: 1, imagined: 2 };
+
+/** 確かめ用の局面（holdout。ランダムに打った局面を除く）のうち、phases の種類（既定はターン末とターンの最初）の勝敗に対する交差エントロピー */
+function holdoutLoss(d: Dataset, v: Float64Array, phases: ReadonlySet<number> = new Set([0, 1])): number {
   let sum = 0, n = 0;
   for (let i = 0; i < v.length; i++) {
-    if (!d.holdout[i] || d.explored[i] || d.anchor[i]! >= 0) continue;
+    if (!d.holdout[i] || d.explored[i] || !phases.has(d.phase[i]!)) continue;
     sum += bce(v[i]!, d.outcome[i]!);
     n++;
   }
@@ -823,6 +828,14 @@ function train(args: Args): number {
   const imaginedWeight = numArg(args, "imaginedWeight", 1);
   const ivRes = numArg(args, "ivRes", 1) !== 0;
   const keepBest = numArg(args, "best", 0) !== 0;
+  // --bestOn end,imagined: --best の判定に使う局面の種類（既定 end,after）。探索が点数に使うのはターン末と想像の局面
+  const bestOn = new Set(
+    (args.get("bestOn") ?? "end,after").split(",").map((x) => {
+      const ph = PHASE_OF[x.trim()];
+      if (ph === undefined) throw new Error(`--bestOn は end・after・imagined をカンマで並べます: ${x}`);
+      return ph;
+    }),
+  );
   const cmpWeight = numArg(args, "cmpWeight", 0);
   const cmpBatch = numArg(args, "cmpBatch", 16);
 
@@ -1038,7 +1051,7 @@ function train(args: Args): number {
   report("学習前", d, v0, lambdaReturns(d, v0, lambda));
   if (cmp) console.log(`学習前: ${cmpReport(cmp, predictAll(current(), cmp))}`);
   // --best 1: 確かめ用の局面の勝敗の交差エントロピーが一番小さかったエポックの重み
-  let best = { loss: holdoutLoss(d, v0), epoch: 0, params: keepBest ? params.slice() : params };
+  let best = { loss: holdoutLoss(d, v0, bestOn), epoch: 0, params: keepBest ? params.slice() : params };
   for (let epoch = 0; epoch < epochs; epoch++) {
     const targets = lambdaReturns(d, predictAll(current(), d), lambda);
     // 並べ替え（Fisher-Yates）
@@ -1095,12 +1108,13 @@ function train(args: Args): number {
     const v = predictAll(current(), d);
     report(`エポック ${epoch + 1}（学習の TD ${(lossSum / trainIdx.length).toFixed(4)}、a ${params[oA]!.toFixed(4)}、c ${params[oC]!.toFixed(3)}）`, d, v, lambdaReturns(d, v, lambda));
     if (cmp) console.log(`エポック ${epoch + 1}（学習の打ち比べ ${(cmpLoss / Math.max(1, trainGroups.length)).toFixed(4)}）: ${cmpReport(cmp, predictAll(current(), cmp))}`);
-    const loss = holdoutLoss(d, v);
+    const loss = holdoutLoss(d, v, bestOn);
     if (keepBest && loss < best.loss) best = { loss, epoch: epoch + 1, params: params.slice() };
   }
   if (keepBest) {
     params.set(best.params);
-    console.log(`確かめ用の局面の勝敗の交差エントロピーが一番小さい ${best.epoch === 0 ? "学習前" : `エポック ${best.epoch}`}（${best.loss.toFixed(4)}）の重みを書き出す`);
+    const on = [...bestOn].map((ph) => Object.keys(PHASE_OF).find((k) => PHASE_OF[k] === ph)).join("・");
+    console.log(`確かめ用の局面（${on}）の勝敗の交差エントロピーが一番小さい ${best.epoch === 0 ? "学習前" : `エポック ${best.epoch}`}（${best.loss.toFixed(4)}）の重みを書き出す`);
   }
   // 補正の大きさ（評価の点数の単位）
   const net = current();
