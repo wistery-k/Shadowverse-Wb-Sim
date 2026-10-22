@@ -18,6 +18,7 @@ rustup target add wasm32-unknown-unknown
 
 `npm run rust-data` でカード・能力のデータを `rust/engine/data/engine-data.json` に、AI の重み等を `ai-data.json` に書き出す
 （コミットしない）。`npm run wasm`・`npm test`・`npm run dev`・`npm run build`・`npm run svwb` は自動で書き出してからビルドする。
+`cargo build` だけでは書き出さないので、`rust/target/release/svwb` を直に使うときは先に `npm run rust-data` する（しないと既定の補正等が古いままになる）。
 
 ## WASM（ブラウザ・Node）
 
