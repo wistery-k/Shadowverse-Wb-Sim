@@ -1,5 +1,5 @@
-// リプレイの「AI の考え」: 今の局面で、手番の AI が比べた手と、その点数の内訳（手で作った評価と学習した補正）を出す（src/ai/think.ts）。
-// 考えるのは Web Worker（src/ai/thinkWorker.ts）。結果はリプレイを開いているあいだ、局面（何手目か）ごとに残す。
+// 「AI の考え」: 今の局面で、手番の AI が比べた手と、その点数の内訳（手で作った評価と学習した補正）を出す（src/ai/think.ts）。
+// リプレイとサンドボックスで使う。考えるのは Web Worker（src/ai/thinkWorker.ts）。結果は画面を開いているあいだ、局面（step）ごとに残す。
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { AGENTS } from "../ai/registry";
@@ -57,14 +57,17 @@ export function useThoughts() {
 
 interface Props {
   state: GameState;
+  /** 局面の番号（結果はこれごとに残す） */
   step: number;
-  /** 実戦で打った手 */
-  actual: Action;
+  /** 実戦で打った手（あれば表で示す） */
+  actual?: Action | undefined;
   names: [string, string];
   /** 試合の AI（プレイヤー0・1） */
   matchAgents: [string, string];
   seed: number;
   thoughts: ReturnType<typeof useThoughts>;
+  /** 説明の文言（既定はリプレイ向け） */
+  caption?: string;
 }
 
 /** 表に出す読み直さなかった手の数（それより多ければ「すべて表示」） */
@@ -77,7 +80,7 @@ function seconds(ms: number): string {
   return `${(ms / 1000).toFixed(1)} 秒`;
 }
 
-export function AiThought({ state, step, actual, names, matchAgents, seed, thoughts }: Props) {
+export function AiThought({ state, step, actual, names, matchAgents, seed, thoughts, caption }: Props) {
   const actor = actingPlayer(state);
   const agent = matchAgents[actor];
   const label = AGENTS[agent]?.label ?? agent;
@@ -93,9 +96,7 @@ export function AiThought({ state, step, actual, names, matchAgents, seed, thoug
         <button type="button" class={open ? "active" : ""} onClick={() => setOpen(!open)}>
           {open ? "AI の考えを閉じる" : "AI の考え"}
         </button>
-        <span class="muted">
-          {step + 1} 手目（{names[actor]}の手）で、{label}が比べた手と点数の内訳を出します
-        </span>
+        <span class="muted">{caption ?? `${step + 1} 手目（${names[actor]}の手）で、${label}が比べた手と点数の内訳を出します`}</span>
       </div>
       {open &&
         (!supported ? (
@@ -158,7 +159,7 @@ function ThoughtResult({
 }: {
   run: ThoughtRun;
   state: GameState;
-  actual: Action;
+  actual: Action | undefined;
   names: [string, string];
   actor: PlayerIndex;
 }) {
@@ -172,7 +173,7 @@ function ThoughtResult({
   if (!thought) return <div class="muted">この局面（マリガン、または打てる手が 1 つ）は考えを表示しません。</div>;
 
   const key = (a: Action) => JSON.stringify(a);
-  const actualKey = key(actual);
+  const actualKey = actual ? key(actual) : null;
   const chosenKey = key(thought.chosen);
   const read = rows.filter((r) => r.c.read);
   const unread = rows.filter((r) => !r.c.read);
@@ -271,7 +272,7 @@ function ThoughtResult({
         点数は評価関数の点（大きいほど{names[actor]}に良い）。
         {showExtra && "「評価」は手で作った評価関数、「補正」は学習した補正（リノセウス用 AI のエルフではリノセウスの打点の項も含む）。3 つ目の数があれば残り PP の罰などです。"}
         {" "}AI から見えない相手の手札・山札の中身と山札の順番は並べ直して読むので、並べ直し方で点数と選ぶ手が変わることがあります（並びの途中で引くカードも予想です）。
-        AI は同じターンの途中では、局面が予想どおりならターンの初めに決めた並びを続けるので、実戦の手がここで選ぶ手と違うことがあります。
+        {actual && "AI は同じターンの途中では、局面が予想どおりならターンの初めに決めた並びを続けるので、実戦の手がここで選ぶ手と違うことがあります。"}
       </div>
     </div>
   );
