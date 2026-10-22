@@ -133,12 +133,14 @@ AI はどちらの側も今の既定（リノセウスエルフはリノセウ�
 ## yardstick
 
 ```sh
-npm run yardstick -- [--opts '<設定>'] [--games 1000] [--start 0] [--label 名前] [--record]
-npm run yardstick -- fingerprint
+npm run yardstick -- [--ref classic|strong] [--opts '<設定>'] [--games 1000] [--start 0] [--label 名前] [--record]
+npm run yardstick -- fingerprint [--ref classic|strong]
 ```
 
-固定した相手（凍結した探索 AI）との勝率。試合の組み方は `compare` と同じで、`--games 1000` で 2000 試合。
-`--record` で `docs/yardstick.md` の表に 1 行足す（`--label` が要る）。`fingerprint` は相手が変わっていないかの確認用。
+固定した相手（凍結した探索 AI）との勝率。`--games 1000` で 2000 試合。相手は `--ref` で選ぶ:
+`classic`（既定。学習した補正なしの 2026-10-16 の探索 AI。組の 2 試合は `compare --no-mirror` と同じく別のシード）と
+`strong`（2026-10-22 の既定の探索 AI。組の 2 試合は `compare` の既定と同じく同じシードで、その日の既定の AI はちょうど 50%）。
+`--record` で `docs/yardstick.md` のその相手の表に 1 行足す（`--label` が要る）。`fingerprint` は相手が変わっていないかの確認用。
 
 ## svwb（Rust 版の CLI）
 
