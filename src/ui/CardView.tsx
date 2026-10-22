@@ -21,6 +21,8 @@ interface Props {
   actable?: boolean;
   /** マリガンで残す・返す（手札のカードに、リプレイのマリガンのときだけ渡す） */
   mulligan?: MulliganMark | null;
+  /** カード上端の帯に出す短い文言（マリガンの印が無いとき） */
+  note?: string | null;
   /** 直前の行動の動き */
   motion?: Motion | null;
   onClick?: () => void;
@@ -55,6 +57,7 @@ export function CardView({
   attackable,
   actable,
   mulligan,
+  note,
   motion,
   onClick,
   onHover,
@@ -74,6 +77,7 @@ export function CardView({
     attackable ? `attack-${attackable}` : "",
     actable ? "actable" : "",
     mulligan ? `mull-${mulligan}` : "",
+    mulligan || note ? "tagged" : "",
     motion ? `motion-${motion}` : "",
     onPointerDown ? "draggable" : "",
     dragOffset ? "dragging" : "",
@@ -94,7 +98,7 @@ export function CardView({
       onPointerDown={onPointerDown}
       title={card.text}
     >
-      {mulligan && <div class={`card-tag mull-${mulligan}`}>{MULLIGAN_LABELS[mulligan]}</div>}
+      {mulligan ? <div class={`card-tag mull-${mulligan}`}>{MULLIGAN_LABELS[mulligan]}</div> : note && <div class="card-tag note">{note}</div>}
       <div class="card-top">
         {enhanced !== null ? (
           <span class="cost enhanced" title={`エンハンス（元のコスト ${cost}）`}>
@@ -150,4 +154,4 @@ export function CardDetail({ card }: { card: Card }) {
   );
 }
 
-const hasSpellboost = (cardId: string) => abilitiesOf(cardId).abilities.some((a) => a.trigger.on === "spellboost");
+export const hasSpellboost = (cardId: string) => abilitiesOf(cardId).abilities.some((a) => a.trigger.on === "spellboost");

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { AGENTS } from "../ai/registry";
 import { CLASS_NAMES } from "../cards";
-import type { PlayerIndex } from "../engine";
+import type { GameState, PlayerIndex } from "../engine";
 import type { Deck } from "../cards/deck";
 import { DEFAULT_DECKS } from "../cards/defaultDecks";
 import { runPool } from "../sim/pool";
@@ -15,6 +15,8 @@ import type { SavedDeck } from "./storage";
 
 interface Props {
   saved: readonly SavedDeck[];
+  /** リプレイの局面をサンドボックスで開く */
+  onSandbox?: (state: GameState, label: string) => void;
 }
 
 interface DeckOption {
@@ -70,7 +72,7 @@ function saveSelection(selection: Selection): void {
   }
 }
 
-export function Simulate({ saved }: Props) {
+export function Simulate({ saved, onSandbox }: Props) {
   const options: DeckOption[] = [
     ...DEFAULT_DECKS.map((d) => ({ key: `default:${d.key}`, deck: d, label: d.name })),
     ...saved.filter(isPlayable).map((d) => ({ key: `saved:${d.id}`, deck: d, label: `${d.name}（保存）` })),
@@ -134,7 +136,7 @@ export function Simulate({ saved }: Props) {
   const entrantCount = selected.length * agents.length;
   const pairCount = (entrantCount * (entrantCount - 1)) / 2 + (mirror ? entrantCount : 0);
 
-  if (run && replay) return <Replay record={replay} entrants={run.entrants} onClose={() => setReplay(null)} />;
+  if (run && replay) return <Replay record={replay} entrants={run.entrants} onClose={() => setReplay(null)} onSandbox={onSandbox} />;
 
   return (
     <div class="simulate">

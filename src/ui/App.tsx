@@ -1,14 +1,12 @@
 import { useState } from "preact/hooks";
-import { CLASS_NAMES } from "../cards";
-import { DECK_CLASSES, type DeckClass } from "../cards/deck";
-import { DEFAULT_DECKS } from "../cards/defaultDecks";
-import { createGame, rngFrom, type Action, type GameState, type PlayerIndex, type Rng } from "../engine";
+import { createGame, rngFrom, type Action, type GameState, type PlayerIndex } from "../engine";
 import { buildHumanRecord } from "../sim/humanRecord";
 import { compareMatch, OPPONENTS as COMPARE_OPPONENTS } from "../sim/humanCompare";
-import { randomDeck } from "../sim/decks";
-import { Decks, isPlayable } from "./Decks";
+import { DeckSelect, resolveDeck, type DeckChoice } from "./DeckSelect";
+import { Decks } from "./Decks";
 import { Game } from "./Game";
 import { HumanCompare, loadHumanRecords, saveHumanRecords, type HumanMatchChoice } from "./HumanCompare";
+import { Sandbox, type SandboxIncoming } from "./Sandbox";
 import { Simulate } from "./Simulate";
 import { loadDecks, saveDecks, type SavedDeck } from "./storage";
 
@@ -18,9 +16,6 @@ const OPPONENTS: Record<string, string> = {
   greedy: "ふつう（貪欲法）",
   random: "よわい（ランダム）",
 };
-
-/** デッキの選択肢: "saved:<id>" / "default:<key>" / "random:<class>" */
-type DeckChoice = string;
 
 const SETUP_KEY = "svwb-sim:setup:v1";
 interface Setup {
@@ -46,22 +41,20 @@ function saveSetup(setup: Setup): void {
   }
 }
 
-function resolveDeck(choice: DeckChoice, saved: readonly SavedDeck[], rng: Rng): string[] | null {
-  const [kind, value] = [choice.slice(0, choice.indexOf(":")), choice.slice(choice.indexOf(":") + 1)];
-  if (kind === "saved") {
-    const d = saved.find((x) => x.id === value);
-    return d && isPlayable(d) ? d.cards : null;
-  }
-  if (kind === "default") {
-    const d = DEFAULT_DECKS.find((x) => x.key === value);
-    return d ? d.cards : null;
-  }
-  if (kind === "random" && DECK_CLASSES.includes(value as DeckClass)) return randomDeck(value as DeckClass, rng);
-  return null;
-}
+type Tab = "play" | "decks" | "sim" | "compare" | "sandbox";
+
+const TABS: readonly [Tab, string][] = [
+  ["play", "対戦"],
+  ["decks", "デッキ"],
+  ["sim", "AI対戦"],
+  ["compare", "人間との比較"],
+  ["sandbox", "サンドボックス"],
+];
 
 export function App() {
-  const [tab, setTab] = useState<"play" | "decks" | "sim" | "compare">("play");
+  const [tab, setTab] = useState<Tab>("play");
+  // サンドボックスに開く局面（リプレイの「サンドボックスで開く」）
+  const [sandboxIncoming, setSandboxIncoming] = useState<SandboxIncoming | null>(null);
   const [saved, setSaved] = useState<SavedDeck[]>(() => loadDecks());
   const [setup, setSetupState] = useState<Setup>(() => loadSetup());
   const [game, setGame] = useState<{ state: GameState; agent: string; human?: PlayerIndex; compare?: HumanMatchChoice } | null>(null);
@@ -76,6 +69,11 @@ export function App() {
     setSaved(decks);
     if (!saveDecks(decks)) setError("デッキをブラウザに保存できませんでした（プライベートブラウズ等）");
   };
+
+  function openSandbox(state: GameState, label: string) {
+    setSandboxIncoming((x) => ({ state, label, nonce: (x?.nonce ?? 0) + 1 }));
+    setTab("sandbox");
+  }
 
   function start() {
     const seed = Math.floor(Math.random() * 2 ** 32);
@@ -112,23 +110,23 @@ export function App() {
         <span class="muted">スターター（ベーシック＋伝説の幕開け）</span>
         {!game && (
           <nav class="tabs">
-            <button type="button" class={tab === "play" ? "active" : ""} onClick={() => setTab("play")}>
-              対戦
-            </button>
-            <button type="button" class={tab === "decks" ? "active" : ""} onClick={() => setTab("decks")}>
-              デッキ
-            </button>
-            <button type="button" class={tab === "sim" ? "active" : ""} onClick={() => setTab("sim")}>
-              AI対戦
-            </button>
-            <button type="button" class={tab === "compare" ? "active" : ""} onClick={() => setTab("compare")}>
-              人間との比較
-            </button>
+            {TABS.map(([key, label]) => (
+              <button type="button" key={key} class={tab === key ? "active" : ""} onClick={() => setTab(key)}>
+                {label}
+              </button>
+            ))}
           </nav>
         )}
       </header>
       {error && <p class="problems">{error}</p>}
       <main>
+        {/* AI対戦とサンドボックスは、ほかのタブに移っても実行中の対戦・打ち比べと局面を残すため、隠すだけにする */}
+        <div hidden={!!game || tab !== "sim"}>
+          <Simulate saved={saved} onSandbox={openSandbox} />
+        </div>
+        <div hidden={!!game || tab !== "sandbox"}>
+          <Sandbox saved={saved} incoming={sandboxIncoming} />
+        </div>
         {game ? (
           <Game
             initial={game.state}
@@ -141,9 +139,7 @@ export function App() {
           />
         ) : tab === "decks" ? (
           <Decks decks={saved} onChange={updateDecks} />
-        ) : tab === "sim" ? (
-          <Simulate saved={saved} />
-        ) : tab === "compare" ? (
+        ) : tab === "sim" || tab === "sandbox" ? null : tab === "compare" ? (
           <HumanCompare onStart={startCompare} saveError={compareError} />
         ) : (
           <div class="setup panel">
@@ -178,38 +174,6 @@ export function App() {
         <BuildInfo />
       </footer>
     </div>
-  );
-}
-
-function DeckSelect({ value, saved, onChange }: { value: DeckChoice; saved: readonly SavedDeck[]; onChange: (v: DeckChoice) => void }) {
-  return (
-    <select value={value} onChange={(e) => onChange(e.currentTarget.value)}>
-      {saved.length > 0 && (
-        <optgroup label="保存したデッキ">
-          {saved.map((d) => (
-            <option key={d.id} value={`saved:${d.id}`} disabled={!isPlayable(d)}>
-              {d.name}（{CLASS_NAMES[d.class]}）{isPlayable(d) ? "" : " - 未完成"}
-            </option>
-          ))}
-        </optgroup>
-      )}
-      {DEFAULT_DECKS.length > 0 && (
-        <optgroup label="デフォルトデッキ">
-          {DEFAULT_DECKS.map((d) => (
-            <option key={d.key} value={`default:${d.key}`}>
-              {d.name}（{CLASS_NAMES[d.class]}）
-            </option>
-          ))}
-        </optgroup>
-      )}
-      <optgroup label="ランダム">
-        {DECK_CLASSES.map((c) => (
-          <option key={c} value={`random:${c}`}>
-            ランダム（{CLASS_NAMES[c]}）
-          </option>
-        ))}
-      </optgroup>
-    </select>
   );
 }
 

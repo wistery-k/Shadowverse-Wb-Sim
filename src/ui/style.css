@@ -377,10 +377,7 @@ button.end-turn {
   --glow: 0 0 10px 3px color-mix(in oklab, var(--act) 80%, transparent);
 }
 /* マリガン（リプレイ）: カード上端の帯で残す・返すを示し、返すカードは薄くする */
-.card.mull-keep,
-.card.mull-return,
-.card.mull-kept,
-.card.mull-drawn {
+.card.tagged {
   grid-template-rows: auto auto 1fr auto;
   padding-top: 0;
 }
@@ -402,6 +399,9 @@ button.end-turn {
 }
 .card-tag.mull-drawn {
   background: var(--mull-drawn);
+}
+.card-tag.note {
+  background: var(--muted);
 }
 .card.mull-keep,
 .card.mull-kept {
@@ -594,6 +594,8 @@ button.extra-pp.usable {
 }
 .banner.column {
   flex-direction: column;
+  /* 折り返すと、中の折り返す行の高さを狭い幅で測って広がることがある */
+  flex-wrap: nowrap;
   align-items: stretch;
 }
 .banner .extra-pp,
@@ -1126,4 +1128,138 @@ progress {
   margin: 0;
   padding-left: 1.5rem;
   font-size: 0.9em;
+}
+
+/* サンドボックス */
+.sandbox {
+  display: grid;
+  gap: 8px;
+}
+.sandbox .controls {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+.sandbox .banner button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.side-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+}
+.side-head button {
+  padding: 1px 8px;
+  font-size: 12px;
+}
+.side-head button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* カードを加える「＋」（空きの枠と同じ形） */
+.slot-add {
+  background: transparent;
+  color: var(--muted);
+  font-size: 20px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.slot-add:hover,
+.slot-add.selected {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.sandbox-editor {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+}
+.sandbox-editor h3 {
+  font-size: 14px;
+  margin: 0;
+}
+.fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 8px;
+}
+.field {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  align-content: start;
+}
+.field input[type="number"] {
+  width: 100%;
+  padding: 3px 6px;
+}
+.field.check {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  grid-column: 1 / -1;
+}
+.keyword-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+.keyword-checks label {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.keyword-checks label.innate {
+  color: var(--accent);
+  font-weight: bold;
+}
+.crest-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: end;
+}
+.crest-row select {
+  min-width: 0;
+  flex: 1;
+}
+.crest-name {
+  flex: 1 1 100%;
+}
+.sandbox-rows {
+  max-height: 40vh;
+}
+.sandbox-turn input[type="number"] {
+  width: 4.5em;
+  padding: 3px 6px;
+}
+.sandbox-turn label,
+.sandbox-actions label {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.sandbox-turn,
+.sandbox-actions {
+  font-size: 13px;
+}
+.action-select {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 240px;
+}
+.sandbox .log {
+  max-height: 260px;
+}
+.sandbox-io {
+  display: grid;
+  gap: 6px;
+}
+.sandbox-io h2 {
+  margin: 4px 0 0;
 }

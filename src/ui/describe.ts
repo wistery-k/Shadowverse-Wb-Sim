@@ -2,6 +2,7 @@
 
 import { CLASS_NAMES, type Card, type ClassId } from "../cards";
 import {
+  actingPlayer,
   attackReach,
   cardOf,
   crestOf,
@@ -112,6 +113,28 @@ export function describeAction(state: GameState, action: Action, human: Viewer, 
     case "endTurn":
       return `${who}: ターン終了`;
   }
+}
+
+/**
+ * 局面 state で打てる手の文言の一覧（打つ前の局面で説明する。手番のプレイヤーの「名前: 」は省く）。
+ * 同じ名前のカードが 2 枚以上あって文言が同じになるときは、何枚目かを付けて区別する
+ */
+export function actionLabels(state: GameState, actions: readonly Action[], names: readonly [string, string]): string[] {
+  const prefix = `${names[actingPlayer(state)]}: `;
+  // マリガンで引くカードは分からないので after は渡さない
+  const labels = actions.map((a) => {
+    const text = describeAction(state, a, names);
+    return text.startsWith(prefix) ? text.slice(prefix.length) : text;
+  });
+  const count = new Map<string, number>();
+  for (const l of labels) count.set(l, (count.get(l) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  return labels.map((l) => {
+    if (count.get(l)! < 2) return l;
+    const k = (seen.get(l) ?? 0) + 1;
+    seen.set(l, k);
+    return `${l}（${k} 枚目）`;
+  });
 }
 
 /** マリガン: 残したカードと返したカード（と引いたカード）。人間の視点では相手の手札は書かない */

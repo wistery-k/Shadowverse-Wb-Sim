@@ -230,6 +230,8 @@ fn dispatch(req: &Json) -> R<Json> {
             Some(next) => state_to_json(&next),
             None => Json::Null,
         },
+        // 局面を読んで書き出す（サンドボックスの読み込みで、形を確かめてエンジンの書き出す形にそろえる）
+        "normalizeState" => state_to_json(&state(req)?),
         "isLegal" => Json::Bool(is_legal(&state(req)?, &action(req, "action")?)),
         "resolveTurnEnd" => match resolve_turn_end(&state(req)?) {
             Some(next) => state_to_json(&next),
