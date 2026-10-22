@@ -70,6 +70,7 @@ export const oncePerOwnTurn = (a: Ability): Ability => ({ ...a, oncePerOwnTurn: 
 
 // ---- 効果 ----
 
+/** プレイ・進化・アクトで働く能力では、ほかの効果より前に書く（対象は行動したときに選ぶ。docs/rules.md 11章） */
 export const choose = (from: Target, count = 1, name = "t"): Effect => ({ op: "choose", slot: name, from, count });
 export const random = (from: Target, count = 1, name = "t"): Effect => ({ op: "random", slot: name, from, count });
 export const mode = (...options: Effect[][]): Effect => ({ op: "mode", options });

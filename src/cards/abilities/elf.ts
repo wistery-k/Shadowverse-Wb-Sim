@@ -96,14 +96,14 @@ export const ELF: Record<string, CardAbilities> = {
   [id("燐光の岩")]: {
     abilities: [
       fanfare(addToHand("フェアリー"), when(combo(3), [addToHand("森の神秘")])),
-      act(0, { op: "destroy", target: THIS }, choose(allyFollowers()), buff(slot(), 1, 1)),
+      act(0, choose(allyFollowers()), { op: "destroy", target: THIS }, buff(slot(), 1, 1)),
     ],
   },
   [id("薫交の思慕")]: { abilities: [spell(addToHand("森の神秘"), draw(1))] },
   [id("ピュアクリスタリア・リリィ")]: {
     abilities: [
       fanfare(when(combo(3), [choose(oppFollowers()), setDefense(slot(), 1)])),
-      onEvolve(draw(1), choose(oppFollowers()), damage(slot(), 1)),
+      onEvolve(choose(oppFollowers()), draw(1), damage(slot(), 1)),
     ],
   },
   [id("薫交の天宮・バックウッド")]: {
@@ -116,7 +116,7 @@ export const ELF: Record<string, CardAbilities> = {
   [id("聖樹の杖")]: {
     abilities: [
       onTurnEnd(when(combo(3), [draw(1)])),
-      act(0, destroy(THIS), choose(allyCards({ excludeSelf: true })), bounce(slot())),
+      act(0, choose(allyCards({ excludeSelf: true })), destroy(THIS), bounce(slot())),
     ],
   },
   [id("自然の妖精姫・アリア")]: {

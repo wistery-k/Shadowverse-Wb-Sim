@@ -78,7 +78,7 @@ export const BISHOP: Record<string, CardAbilities> = {
   [id("大地の守護神・ミーヴェ")]: { abilities: [lastWords({ op: "summonDestroyedAmulet" })] },
   [id("禁密の聖地")]: { abilities: [act(1, choose(allyFollowers()), buff(slot(), 1, 1), heal(1))] },
   [id("セイクリッドインジェクション")]: {
-    abilities: [act(0, destroy(THIS), choose(oppFollowers()), damage(slot(), 4), heal(1))],
+    abilities: [act(0, choose(oppFollowers()), destroy(THIS), damage(slot(), 4), heal(1))],
   },
   [id("終焉のスカルフェイン")]: {
     abilities: [fanfare(destroy(allyAmulets(), "x"), damage(union(oppFollowers(), OPP_LEADER), v("x")))],

@@ -39,13 +39,13 @@ export const NEUTRAL: Record<string, CardAbilities> = {
   [id("不屈のファイター")]: { abilities: [fanfare(when(ENHANCED, [buff(THIS, 3, 3)]))] },
   [id("ベルエンジェル・リア")]: { abilities: [lastWords(draw(1)), onEvolve(draw(1))] },
   [id("探偵のルーペ")]: {
-    abilities: [act(0, destroy(THIS), choose(oppFollowers()), { op: "loseKeyword", target: slot(), keyword: "ward" })],
+    abilities: [act(0, choose(oppFollowers()), destroy(THIS), { op: "loseKeyword", target: slot(), keyword: "ward" })],
   },
   [id("煌響の使者・アンリエット")]: { abilities: [onEvolve(heal(2)), onSuperEvolveInstead(heal(4))] },
   [id("冒険者のギルド")]: {
     abilities: [
       fanfare(draw(1, { type: "follower" })),
-      act(0, destroy(THIS), choose(allyFollowers()), grant(slot(), ["rush"])),
+      act(0, choose(allyFollowers()), destroy(THIS), grant(slot(), ["rush"])),
     ],
   },
   [id("グリードケルブ・ルビィ")]: { abilities: [fanfare(choose(handCards()), returnToDeck(slot()), draw(1))] },

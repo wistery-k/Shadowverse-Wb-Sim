@@ -184,6 +184,23 @@ describe("進化", () => {
     expect(board(t, opp)).toEqual([]);
   });
 
+  it("【進化時】の対象は、ほかの効果より先に（進化させたときに）選ぶ（ピュアクリスタリア・リリィは引く前に選ぶ）", () => {
+    let { s, me, opp } = setup();
+    s = passTurns(s, 4);
+    s.players[me].hand = [];
+    const lily = toBoard(s, me, "ピュアクリスタリア・リリィ");
+    const a = toBoard(s, opp, "キャラバンマンモス");
+    const b = toBoard(s, opp, "刹那のクイックブレイダー");
+    const deck = s.players[me].deck.length;
+    let t = applyAction(s, { type: "evolve", iid: lily.iid });
+    expect(t.pending).toMatchObject({ kind: "choose", candidates: [a.iid, b.iid] });
+    expect(t.players[me].hand).toHaveLength(0);
+    expect(t.players[me].deck).toHaveLength(deck);
+    t = applyAction(t, { type: "choose", targets: [a.iid] });
+    expect(t.players[me].hand).toHaveLength(1);
+    expect(follower(t, a.iid)?.defense).toBe((a as FollowerOnBoard).defense - 1);
+  });
+
   it("「〜ではなく」の【超進化時】は【進化時】を置き換える（アンリエット）", () => {
     let { s, me } = setup();
     s = passTurns(s, 6);
