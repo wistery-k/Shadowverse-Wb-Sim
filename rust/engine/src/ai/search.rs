@@ -1503,6 +1503,68 @@ impl SearchAgent {
     }
 }
 
+/// 探索の外から、探索と同じ点数で局面を採点する（人間の手順と比べる runner/human_plan.rs が使う。打つ手は変えない）
+impl SearchAgent {
+    fn env(&self) -> Env<'_> {
+        Env {
+            opts: &self.opts,
+            w: &self.w,
+            policy_w: &self.policy_w,
+        }
+    }
+
+    /// p のターン末の局面 end（ターン終了を打つ前）の、ビームが付ける点数（合流する相打ちとターン終了時の処理の後に評価し、残り PP の罰等を引く）
+    pub fn turn_end_value(&self, end: &GameState, p: PlayerIndex) -> f64 {
+        let env = self.env();
+        let pl = Planner {
+            env: &env,
+            p,
+            root: Rc::new(end.clone()),
+            steps: Vec::new(),
+        };
+        pl.end_score(end)
+    }
+
+    /// p のターン末の局面 end から相手のターンを読んだ後の点数（plan_turn の読み直しと同じ。
+    /// 引き直しは seeds ごとに 1 回で、同じ seeds なら局面が違っても同じ乱数を使う）
+    pub fn read_value(&self, end: &GameState, p: PlayerIndex, seeds: &[u32]) -> f64 {
+        let env = self.env();
+        let pl = Planner {
+            env: &env,
+            p,
+            root: Rc::new(end.clone()),
+            steps: Vec::new(),
+        };
+        if end.phase == Phase::Ended || seeds.is_empty() {
+            return pl.eval_state(end);
+        }
+        let settled = pl.settle(end);
+        let base = settled.as_ref().unwrap_or(end);
+        let mut sum = 0.0;
+        for &seed in seeds {
+            let mut r = Rng::new(seed);
+            let d = determinize(base, p, &mut r, self.opts.peek_opp_hand);
+            sum += read_once(&pl, &d, &mut r).0;
+        }
+        sum / seeds.len() as f64 - pl.leftover(end)
+    }
+
+    /// 局面 root で p が打てる並びの、最初の手ごとにターン末の点数が最も高い終局面とその点数（ビームの候補。root を決定化せずに読む）
+    pub fn turn_end_candidates(
+        &self,
+        root: &GameState,
+        p: PlayerIndex,
+    ) -> Vec<(Action, f64, GameState)> {
+        let env = self.env();
+        let root = Rc::new(root.clone());
+        let (_, terminals, bests) = turn_end_bests(&root, p, &env);
+        bests
+            .into_iter()
+            .map(|(k, i)| (k, terminals[i].value, (*terminals[i].state).clone()))
+            .collect()
+    }
+}
+
 /// 並びの、先頭から手がすべて同じ部分の長さ（reuseAgree）
 fn agreed_length(plans: &[Plan]) -> usize {
     let Some(first) = plans.first() else { return 0 };

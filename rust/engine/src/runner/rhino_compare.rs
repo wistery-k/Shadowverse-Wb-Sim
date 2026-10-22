@@ -22,7 +22,7 @@ use crate::state::{card, Action};
 use std::time::Instant;
 
 /// 比べるデッキ（src/sim/humanCompare.ts の SUBJECTS）: id、デッキ名、既定の AI、シードの基準
-const SUBJECTS: [(&str, &str, &str, u32); 7] = [
+pub(crate) const SUBJECTS: [(&str, &str, &str, u32); 7] = [
     ("rhino", "リノセウスエルフ", "rhino", 900000),
     ("af", "AFネメシス", "search", 800000),
     ("spellwitch", "スペルウィッチ", "search", 700000),
