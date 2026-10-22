@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { AGENTS } from "../ai/registry";
-import { cardOf, legalActions, opponent, type PlayerIndex } from "../engine";
+import { cardOf, legalActions, opponent, type GameState, type PlayerIndex } from "../engine";
 import { replayStates } from "../sim/replay";
 import { reproduceCommand } from "../sim/reproduce";
 import { seatDecks, type Entrant, type GameRecord } from "../sim/tournament";
@@ -16,6 +16,8 @@ interface Props {
   record: GameRecord;
   entrants: readonly Entrant[];
   onClose: () => void;
+  /** 今の局面をサンドボックスで開く */
+  onSandbox?: ((state: GameState, label: string) => void) | undefined;
 }
 
 const SPEEDS = [
@@ -24,7 +26,7 @@ const SPEEDS = [
   { ms: 200, label: "速い" },
 ];
 
-export function Replay({ record, entrants, onClose }: Props) {
+export function Replay({ record, entrants, onClose, onSandbox }: Props) {
   const actions = record.actions ?? [];
   const states = useMemo(() => replayStates(seatDecks(record, entrants), record.seed, actions), [record, entrants]);
   const classes = useMemo(() => leaderClasses(states[0]!), [states]);
@@ -67,9 +69,14 @@ export function Replay({ record, entrants, onClose }: Props) {
   const prevTurn = () => go([...turnStarts].reverse().find((s) => s < step) ?? 0);
   const nextTurn = () => go(turnStarts.find((s) => s > step) ?? last);
 
+  // 画面の外側（隠したタブの中にあるか）を調べる
+  const rootRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
+      // ほかのタブを開いているあいだ（隠れているあいだ）は動かさない
+      if (!rootRef.current?.offsetParent) return;
       if (e.key === "ArrowLeft") (e.shiftKey ? prevTurn : () => go(step - 1))();
       else if (e.key === "ArrowRight") (e.shiftKey ? nextTurn : () => go(step + 1))();
       else return;
@@ -198,7 +205,7 @@ export function Replay({ record, entrants, onClose }: Props) {
   };
 
   return (
-    <div class="replay">
+    <div class="replay" ref={rootRef}>
       <div class="banner">
         <button type="button" onClick={onClose}>
           ← 結果に戻る
@@ -255,6 +262,18 @@ export function Replay({ record, entrants, onClose }: Props) {
               <button type="button" title="表示だけ上下を入れ替えます" onClick={() => setBottom(opponent(bottom))}>
                 上下を入れ替え（下: {names[bottom]}）
               </button>
+              {onSandbox && (
+                <button
+                  type="button"
+                  title="この局面を「サンドボックス」タブで開きます（盤面・手札を編集して、AI に考えさせたり手を打ち比べたりできます）"
+                  onClick={() => {
+                    setPlaying(false);
+                    onSandbox(state, `リプレイの局面（${names[0]} vs ${names[1]}、seed ${record.seed}、${step} 手目の後）`);
+                  }}
+                >
+                  サンドボックスで開く
+                </button>
+              )}
             </div>
             <input type="range" min={0} max={last} value={step} onInput={(e) => go(Number(e.currentTarget.value))} />
             <div>
