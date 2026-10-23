@@ -316,6 +316,7 @@ interface GameRecord {
   turns: number;
   /**
    * 介入の試合: もとの試合 g のプレイヤー p の k 番目の局面から、カード card を 1 枚消して打った。zone が無ければ p の手札、board は p の場、oppBoard は相手の場。
+   * drawn は p の手札の、そのターンの始めに引いたカード（td selfplay --ivZone drawn。1 ターン目は手札のどれか）。
    * zone が res・oppRes なら、card の代わりに p・相手の資源 res（ep・sep・hp・maxPp）を d（±1）だけ変えて打った（td selfplay --ivRes）
    */
   iv?: { p: PlayerIndex; k: number; card?: string; zone?: IvZone; res?: string; d?: number };
@@ -366,7 +367,7 @@ interface Dataset {
   board?: BoardRows;
 }
 
-type IvZone = "hand" | "board" | "oppBoard" | "res" | "oppRes";
+type IvZone = "hand" | "drawn" | "board" | "oppBoard" | "res" | "oppRes";
 
 const isResZone = (z: IvZone): boolean => z === "res" || z === "oppRes";
 
@@ -787,7 +788,7 @@ function report(label: string, d: Dataset, v: Float64Array, targets: Float64Arra
 }
 
 /** 介入の対の、測った価値（勝敗の差の平均）とモデルが見ている価値（予測の差の平均） */
-const IV_ZONE_NAME: Record<IvZone, string> = { hand: "", board: "自分の場", oppBoard: "相手の場", res: "自分の", oppRes: "相手の" };
+const IV_ZONE_NAME: Record<IvZone, string> = { hand: "", drawn: "引いたとき", board: "自分の場", oppBoard: "相手の場", res: "自分の", oppRes: "相手の" };
 /** 資源の介入の資源の名前（td selfplay --ivRes の res） */
 const RES_NAME: Record<string, string> = { ep: "EP", sep: "SEP", hp: "体力", maxPp: "PP 最大値" };
 
@@ -796,7 +797,7 @@ const ivGroup = (q: IvPair): string => (isResZone(q.zone) ? `${IV_ZONE_NAME[q.zo
 
 function ivSummary(d: Dataset, v: Float64Array, holdoutOnly: boolean): string | null {
   // 手札・自分の場・相手の場・資源（自分・相手、EP・SEP・体力・PP 最大値）の順
-  const order = (q: IvPair): number => ["hand", "board", "oppBoard", "res", "oppRes"].indexOf(q.zone) * 10 + (isResZone(q.zone) ? Object.keys(RES_NAME).indexOf(q.card) + 1 : 0);
+  const order = (q: IvPair): number => ["hand", "drawn", "board", "oppBoard", "res", "oppRes"].indexOf(q.zone) * 10 + (isResZone(q.zone) ? Object.keys(RES_NAME).indexOf(q.card) + 1 : 0);
   const groups = new Map<string, { o: number; n: number; measured: number; predicted: number }>();
   for (const q of d.pairs) {
     if (holdoutOnly && !d.holdout[q.base]) continue;
@@ -1320,7 +1321,7 @@ function ivcheck(args: Args): number {
     if (holdoutOnly && !d.holdout[q.base]) continue;
     const m = ivSign(q) * (d.outcome[q.base]! - d.outcome[q.variant]!);
     const p = ivSign(q) * (v[q.base]! - v[q.variant]!);
-    const key = isResZone(q.zone) ? `${q.deck}\t${ivGroup(q)}` : `${q.deck}\t${nameOf.get(q.card) ?? q.card}${q.zone === "hand" ? "" : `（場）`}`;
+    const key = isResZone(q.zone) ? `${q.deck}\t${ivGroup(q)}` : `${q.deck}\t${nameOf.get(q.card) ?? q.card}${q.zone === "hand" ? "" : q.zone === "drawn" ? "（引いたとき）" : "（場）"}`;
     const c = by.get(key) ?? { n: 0, m: 0, m2: 0, p: 0 };
     c.n++;
     c.m += m;

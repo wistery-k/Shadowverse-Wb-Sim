@@ -1,7 +1,7 @@
 //! デッキのカードを入れ替えた案を、元のデッキと同じ試合で比べる（デッキの最適化）。
 //!
 //!   svwb deck-compare --deck <デッキ> [--variant '<変更>']… [--add <カード>[,<カード>…]] [--file <デッキ.txt>]…
-//!                     [--vs <デッキ>[,<デッキ>…]] [--net <補正.json>] [--games 50] [--start 0] [--out 結果.jsonl]
+//!                     [--vs <デッキ>[,<デッキ>…]] [--net <補正.json>] [--netSide both|subject] [--games 50] [--start 0] [--out 結果.jsonl]
 //!
 //! - 変更は「カード名-枚数」「カード名+枚数」をカンマで並べたもの（例: '知恵の輝き-1,最果ての罪・サタン+1'）。カード名の代わりにカード ID も使える。
 //!   抜く枚数と足す枚数は同じにする（40 枚・同名 3 枚まで・クラスを確かめる）
@@ -12,7 +12,8 @@
 //! - `--deck` と `--file` には、デフォルトデッキのほかにデッキのテキストファイル（data/decks/*.txt と同じ形式）も渡せる。
 //!   `--file` はデッキを丸ごと案にする（元のデッキと違うクラスでもよい。山札の並びの対応は無い）
 //! - AI はどちらの側も今の既定（リノセウスエルフはリノセウス用 AI、他は探索 AI）。`--net` なら、どちらの側も学習した補正をそのファイルのものに替える
-//!   （学び直した補正で、案と元のデッキを比べ直す用。`baseWeights` の無いモデルだけ）
+//!   （学び直した補正で、案と元のデッキを比べ直す用。`baseWeights` の無いモデルだけ）。`--netSide subject` なら、替えるのは比べるデッキ（元のデッキと案）の側だけで、
+//!   相手は今の既定のまま（学び直した補正が、そのデッキを今の AI の相手に上手く打てるようになったかを見る用）
 //! - マリガンの学習したモデルはデッキのカードの並びでデフォルトデッキを引くので、案のデッキでは使えず「コスト 4 以上を返す」だけになる。
 //!   そこで案のデッキも元のデッキのモデルでマリガンする（足したカードはモデルの表に無いので役割なし・係数 0）。
 //!   ファイルから読んだデッキ（とその案）は、元にするモデルが無いので、返し方ごとに引き直しを試して選ぶ（`mulligan: "sample"`）
@@ -371,6 +372,7 @@ fn play_one(
     entries: &[Entry],
     opponents: &[&'static Deck],
     net: Option<&ExtraEval>,
+    opp_net: Option<&ExtraEval>,
     t: &Task,
 ) -> bool {
     let me = &entries[t.entry].cards;
@@ -379,7 +381,7 @@ fn play_one(
     // 全探索のリーサル探索のメモはスレッドごとなので、前の試合のものを捨てる（試合の結果を並べ方によらず同じにする）
     reset_exact_lethal_cache();
     let mut a = subject_agent(&entries[t.entry], net);
-    let mut o = default_agent(&opp.name, net);
+    let mut o = default_agent(&opp.name, opp_net);
     let (mut agents, decks): ([&mut dyn Agent; 2], [&[CardIdx]; 2]) = if t.seat == 0 {
         ([a.as_mut(), o.as_mut()], [&me[..], &opp.cards[..]])
     } else {
@@ -402,6 +404,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut start: u32 = 0;
     let mut out: Option<String> = None;
     let mut net_path: Option<String> = None;
+    let mut subject_only = false;
     let mut it = argv.iter();
     while let Some(key) = it.next() {
         let v = it.next().ok_or_else(|| format!("{key} の値がありません"))?;
@@ -427,6 +430,13 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             "--start" => start = int()?,
             "--out" => out = Some(v.clone()),
             "--net" => net_path = Some(v.clone()),
+            "--netSide" => {
+                subject_only = match v.as_str() {
+                    "both" => false,
+                    "subject" => true,
+                    x => return Err(format!("--netSide は both か subject: {x}")),
+                }
+            }
             _ => return Err(format!("不明な引数: {key}")),
         }
     }
@@ -435,6 +445,9 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             .as_deref()
             .ok_or("--deck でデッキを指定してください")?,
     )?;
+    if subject_only && net_path.is_none() {
+        return Err("--netSide は --net と一緒に使います".into());
+    }
     let net: Option<ExtraEval> = match &net_path {
         None => None,
         Some(path) => {
@@ -444,10 +457,18 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                     "{path}: baseWeights のあるモデルには対応していません"
                 ));
             }
-            eprintln!("補正: {path}（どちらの側も）");
+            eprintln!(
+                "補正: {path}（{}）",
+                if subject_only {
+                    "比べるデッキの側だけ"
+                } else {
+                    "どちらの側も"
+                }
+            );
             Some(model_eval(Arc::new(net)))
         }
     };
+    let opp_net = if subject_only { None } else { net.clone() };
     let rhino = deck.default == Some(RHINO_DECK);
     let mut entries = vec![Entry {
         label: "元のデッキ".into(),
@@ -529,7 +550,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let step = (tasks.len() / 10).max(1);
     let results = parallel_map(
         &tasks,
-        |t, _| play_one(&entries, &opponents, net.as_ref(), t),
+        |t, _| play_one(&entries, &opponents, net.as_ref(), opp_net.as_ref(), t),
         |done, total, _, _| {
             if done % step == 0 || done == total {
                 eprintln!(

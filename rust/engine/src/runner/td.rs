@@ -1,6 +1,6 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both] [--ivRes 0] [--imagined 0] [--sampling classic|default] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--decks <デッキ>,…] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--sampling classic|default] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--decks <デッキ>,…] [--vs <デッキ>] --out d0.jsonl
 //!
 //! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・幅 128、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
 //! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
@@ -11,6 +11,9 @@
 //! 相関で覚える偏り（勝っている局面にあったカードを高く見る等）を打ち消す方向に働くと考えた。docs/ai-notes.md「介入データを TD 学習に混ぜる」
 //! --ivZone board なら、手札の代わりに場のカード（自分と相手の場のフォロワー・アミュレット）を 1 枚消す（"zone": "board" か "oppBoard" が付く）。
 //! both なら手札と場のカードを合わせた中から選ぶ。
+//! drawn なら、ターンを 1〜10（1 ターン目は 5 倍の重み）から選び、そのターンの始めに引いたカード（1 ターン目は手札のどれでも）を
+//! 手札から消す（"zone": "drawn"）。カードを引いた瞬間に抜くので、序盤のカードは序盤に引いたときの、フィニッシャーは引いてから最後まで
+//! 持っている価値で測り、実際に引くタイミングの割合で混ざる（デッキに 1 枚入れる価値に近い）。docs/ai-notes.md「引いた瞬間に抜く介入」
 //! 場にいる間に働く能力の価値を、相関ではなく消した結果から学ばせる。docs/ai-notes.md「場のカードを消す介入を混ぜる」
 //! --ivRes r なら、同じ局面から、資源（自分か相手の EP・SEP・リーダーの体力・PP 最大値のどれか 1 つ）を ±1 した局面も r 個（小数なら平均 r 個。
 //! --iv とは別に数える）作り、最後まで打った試合も書き出す（"iv": {"p", "k", "res", "d", "zone": "res" か "oppRes"} 付きの行）。
@@ -33,6 +36,9 @@
 //! 学習した補正の知らないカードの入ったデッキを自己対戦に混ぜて学び直す用。デフォルトデッキと違うデッキのマリガンは、
 //! 返し方ごとに引き直しを試して選ぶ（`mulligan: "sample"`。マリガンのモデルはデフォルトデッキしか知らない）。
 //! docs/ai-notes.md「ロイヤルに勝ち越せるデッキを探す」
+//! --vs <デッキ> なら、どの試合も片方がそのデッキで、もう片方（挑戦する側）は並べたデッキ（--decks か比較用の 7 デッキから
+//! そのデッキを除いたもの）を順に回す（m デッキなら試合 g の挑戦する側は g mod m、(g / m) mod 2 が 0 なら挑戦する側が先攻）。
+//! --iv・--cmp で介入するのは挑戦する側だけ。特定の相手との試合でのカードの価値を測る用。docs/ai-notes.md「ロイヤル対策 5 回目」
 //!
 //! 両方の席がモデルの評価で打つ探索 AI の自己対戦（7 デッキの全 49 組を順に回す）。各自分のターンの最初の局面（after）と
 //! ターン末の局面（end）を、入力と出発点の評価の点数 S と一緒に、試合が終わった順に 1 試合 1 行で書き出す。
@@ -61,7 +67,8 @@ use crate::data::{data, CardIdx, Deck};
 use crate::game::{acting_player, apply_action, create_game, legal_actions, resolve_turn_end};
 use crate::jsnum::{js_num, round_precision};
 use crate::state::{
-    next_random, opponent, Action, Evolve, GameState, OnBoard, Phase, PlayerIndex, EP, MAX_PP, SEP,
+    next_random, opponent, Action, Evolve, GameState, Iid, OnBoard, Phase, PlayerIndex, EP, MAX_PP,
+    SEP,
 };
 use crate::state_json::ability_json_text;
 use std::io::Write;
@@ -302,6 +309,8 @@ enum IvZone {
     Board,
     /// 手札と場のカードから選ぶ
     Both,
+    /// そのターンの始めに引いたカード（1 ターン目は手札のどれでも）から選ぶ
+    Drawn,
 }
 
 /// 介入で ±1 する資源（--ivRes）
@@ -373,6 +382,8 @@ struct Played {
     explored: usize,
     /// 介入する局面と、そのときの p の局面の数（その局面の添字）
     branch: Option<(GameState, usize)>,
+    /// 介入する局面で、そのターンの始めに引いた手札の iid（1 ターン目は手札のすべて）
+    drawn: Vec<Iid>,
 }
 
 /// state から最後まで打ち、各自分のターンの最初とターン末の局面を記録する
@@ -406,9 +417,18 @@ fn play_out(
     let mut counts = [0usize; 2];
     let mut explored = 0;
     let mut branch = None;
+    let mut drawn: Vec<Iid> = Vec::new();
+    // 介入するプレイヤーの、相手のターンの間の山札（ターンの始めに引いたカードを見分ける）
+    let mut pre_deck: Vec<Iid> = Vec::new();
     let mut n = 0;
     while state.phase != Phase::Ended {
         n += 1;
+        if let Some((bp, _)) = branch_at {
+            if state.active != bp && branch.is_none() {
+                pre_deck.clear();
+                pre_deck.extend(state.players[bp].deck.iter().map(|r| r.iid));
+            }
+        }
         assert!(n <= 10001, "試合 {g} のアクション数が上限を超えました");
         let legal = legal_actions(&state);
         let actor = acting_player(&state);
@@ -437,6 +457,13 @@ fn play_out(
                 && state.stack.is_empty()
                 && state.queue.is_empty()
             {
+                let pl = &state.players[actor];
+                drawn = pl
+                    .hand
+                    .iter()
+                    .filter(|h| pl.turn_count == 1 || pre_deck.contains(&h.iid))
+                    .map(|h| h.iid)
+                    .collect();
                 branch = Some((state.clone(), counts[actor]));
             }
             let choices: Vec<&Action> = legal
@@ -488,6 +515,7 @@ fn play_out(
         counts,
         explored,
         branch,
+        drawn,
     }
 }
 
@@ -622,6 +650,7 @@ fn count_of(x: f64, rng: &mut Rng) -> usize {
 fn play_one(
     g: u32,
     decks: &[&Deck],
+    vs: Option<&Deck>,
     m: &Model,
     eps: f64,
     iv: f64,
@@ -630,18 +659,46 @@ fn play_one(
     cmp: Option<&Compare>,
 ) -> Summary {
     let n = decks.len() as u32;
-    let (di, dj) = ((g % n) as usize, ((g / n) % n) as usize);
+    // 2 つのデッキと、--vs のときの相手でない側（挑戦する側）の席
+    let (pair, challenger): ([&Deck; 2], Option<PlayerIndex>) = match vs {
+        None => (
+            [decks[(g % n) as usize], decks[((g / n) % n) as usize]],
+            None,
+        ),
+        Some(v) => {
+            let c = decks[(g % n) as usize];
+            if (g / n).is_multiple_of(2) {
+                ([c, v], Some(0))
+            } else {
+                ([v, c], Some(1))
+            }
+        }
+    };
     let seed = SEED_BASE + g;
-    let state = create_game([&decks[di].cards, &decks[dj].cards], seed);
+    let state = create_game([&pair[0].cards, &pair[1].cards], seed);
     // 介入する試合・プレイヤー・ターン（自己対戦の乱数とは別の乱数で決める。--iv 0 なら今までと同じ試合）
     let mut ivr = Rng::new(seed ^ 0x6a09e667);
     // 資源の介入の数と選び方は別の乱数で決める（--ivRes があっても --iv の試合は同じ）
     let mut res_rng = Rng::new(seed ^ 0xbb67ae85);
     let plan = (iv > 0.0 || iv_res > 0.0).then(|| {
         let variants = count_of(iv, &mut ivr);
+        // --vs なら介入するのは挑戦する側（乱数は同じだけ使う）
+        let p = ivr.int(2);
+        let p = challenger.unwrap_or(p);
+        let turn = if zone == IvZone::Drawn {
+            // 1〜10（1 ターン目は手札のどれでも選べるので 5 倍の重み）
+            let r = ivr.int(14) as i32;
+            if r < 5 {
+                1
+            } else {
+                r - 3
+            }
+        } else {
+            3 + ivr.int(6) as i32
+        };
         Intervention {
-            p: ivr.int(2),
-            turn: 3 + ivr.int(6) as i32,
+            p,
+            turn,
             variants,
             res_variants: if iv_res > 0.0 {
                 count_of(iv_res, &mut res_rng)
@@ -651,7 +708,10 @@ fn play_one(
         }
     });
     // 打ち比べる局面（--iv と同じ選び方。--iv とは一緒に使わない）
-    let cmp_at = cmp.map(|_| (ivr.int(2), 3 + ivr.int(6) as i32));
+    let cmp_at = cmp.map(|_| {
+        let p = ivr.int(2);
+        (challenger.unwrap_or(p), 3 + ivr.int(6) as i32)
+    });
     let base = play_out(
         g,
         state,
@@ -663,7 +723,7 @@ fn play_one(
             .map(|x| (x.p, x.turn))
             .or(cmp_at),
     );
-    let names = [decks[di].name.clone(), decks[dj].name.clone()];
+    let names = [pair[0].name.clone(), pair[1].name.clone()];
     let winner = base
         .state
         .winner
@@ -688,7 +748,7 @@ fn play_one(
     if let (Some(plan), Some((at, k))) = (plan, base.branch.as_ref()) {
         // 消すカード（側, 添字, 場所の名前）。同じ場所の同じカードは 1 回だけ。手札は p の手札、場は p と相手の場
         let card_at = |side: PlayerIndex, i: usize, name: &str| -> CardIdx {
-            if name == "hand" {
+            if name == "hand" || name == "drawn" {
                 at.players[side].hand[i].card
             } else {
                 at.players[side].board[i].card
@@ -704,12 +764,18 @@ fn play_one(
                 cards.push((side, i, name));
             }
         };
-        if zone != IvZone::Board {
+        if zone == IvZone::Drawn {
+            for (i, h) in at.players[plan.p].hand.iter().enumerate() {
+                if base.drawn.contains(&h.iid) {
+                    add(plan.p, i, "drawn");
+                }
+            }
+        } else if zone != IvZone::Board {
             for i in 0..at.players[plan.p].hand.len() {
                 add(plan.p, i, "hand");
             }
         }
-        if zone != IvZone::Hand {
+        if zone == IvZone::Board || zone == IvZone::Both {
             for (side, name) in [(plan.p, "board"), (1 - plan.p, "oppBoard")] {
                 for i in 0..at.players[side].board.len() {
                     add(side, i, name);
@@ -719,7 +785,7 @@ fn play_one(
         for v in 0..plan.variants.min(cards.len()) {
             let (side, pick, name) = cards.swap_remove(ivr.int(cards.len()));
             let mut s = at.clone();
-            let removed = if name == "hand" {
+            let removed = if name == "hand" || name == "drawn" {
                 s.players[side].hand.make_mut().remove(pick).card
             } else {
                 s.players[side].board.make_mut().remove(pick).card
@@ -809,7 +875,8 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
         "hand" => IvZone::Hand,
         "board" => IvZone::Board,
         "both" => IvZone::Both,
-        x => return Err(format!("--ivZone は hand・board・both: {x}")),
+        "drawn" => IvZone::Drawn,
+        x => return Err(format!("--ivZone は hand・board・both・drawn: {x}")),
     };
     let opp_beam = match arg(args, "opp").unwrap_or("greedy") {
         "greedy" => false,
@@ -889,17 +956,38 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
                 .join("・")
         );
     }
-    let decks: Vec<&Deck> = if owned.is_empty() {
+    let vs: Option<Deck> = arg(args, "vs").map(read_deck).transpose()?;
+    let mut decks: Vec<&Deck> = if owned.is_empty() {
         compare_decks()
     } else {
         owned.iter().collect()
     };
+    if let Some(v) = &vs {
+        // 相手と同じデッキは挑戦する側から除く
+        decks.retain(|d| d.name != v.name);
+        if decks.is_empty() {
+            return Err("--vs のほかにデッキがありません".into());
+        }
+        println!("相手は {}（挑戦する側 {} 個）", v.name, decks.len());
+    }
     let mut file = std::fs::File::create(out).map_err(|e| format!("{out} に書けません: {e}"))?;
     let t0 = Instant::now();
     let tasks: Vec<u32> = (0..games as u32).map(|k| start as u32 + k).collect();
     let mut summaries = parallel_map(
         &tasks,
-        |&g, _| play_one(g, &decks, &m, eps, iv, zone, iv_res, cmp.as_ref()),
+        |&g, _| {
+            play_one(
+                g,
+                &decks,
+                vs.as_ref(),
+                &m,
+                eps,
+                iv,
+                zone,
+                iv_res,
+                cmp.as_ref(),
+            )
+        },
         |done, total, r, _| {
             writeln!(file, "{}", r.line).unwrap_or_else(|e| panic!("{out} に書けません: {e}"));
             if done % 100 == 0 || done == total {
@@ -1013,6 +1101,7 @@ mod tests {
             let plain = play_one(
                 g,
                 &decks,
+                None,
                 &imagined_model(0),
                 0.1,
                 0.0,
@@ -1023,6 +1112,7 @@ mod tests {
             let with = play_one(
                 g,
                 &decks,
+                None,
                 &imagined_model(2),
                 0.1,
                 0.0,
@@ -1078,6 +1168,7 @@ mod tests {
         let r = play_one(
             1,
             &decks,
+            None,
             &imagined_model(0),
             0.1,
             0.0,
@@ -1088,6 +1179,81 @@ mod tests {
         assert_eq!(r.decks, [pool[0].name.clone(), royal.name.clone()]);
         let v: serde_json::Value = serde_json::from_str(&r.line).expect("JSON");
         assert_eq!(v["decks"][0], pool[0].name.as_str());
+    }
+
+    #[test]
+    fn drawn_interventions() {
+        // --ivZone drawn: 介入する局面で「引いたカード」は、1 ターン目なら手札のすべて、2 ターン目からはそのターンの始めに引いた 1 枚（手札の最後）
+        let decks = compare_decks();
+        let m = imagined_model(0);
+        for (g, p, turn) in [
+            (0u32, 0usize, 1i32),
+            (1, 1, 1),
+            (2, 0, 3),
+            (3, 1, 4),
+            (4, 0, 6),
+        ] {
+            let seed = SEED_BASE + g;
+            let state = create_game([&decks[0].cards, &decks[(g as usize) % 7].cards], seed);
+            let r = play_out(g, state, &m, 0.1, seed, Some((p, turn)));
+            let (at, _) = r.branch.as_ref().expect("介入する局面");
+            let hand: Vec<Iid> = at.players[p].hand.iter().map(|h| h.iid).collect();
+            if turn == 1 {
+                assert_eq!(r.drawn, hand);
+            } else {
+                assert_eq!(r.drawn.len(), 1, "g{g} {:?} {:?}", r.drawn, hand);
+                assert_eq!(r.drawn.last(), hand.last());
+            }
+        }
+        // 介入の行は "zone": "drawn" で、消したカードはもとの試合のその局面の引いたカード
+        for g in [5u32, 6] {
+            let r = play_one(g, &decks, None, &m, 0.1, 1.0, IvZone::Drawn, 0.0, None);
+            let lines: Vec<serde_json::Value> = r
+                .line
+                .lines()
+                .map(|l| serde_json::from_str(l).expect("JSON"))
+                .collect();
+            for v in &lines[1..] {
+                assert_eq!(v["iv"]["zone"], "drawn", "{}", v["iv"]);
+            }
+        }
+    }
+
+    #[test]
+    fn vs_pairs_and_challenger_side() {
+        // --vs: どの試合も相手のデッキと挑戦する側の 1 つ（席は g / n で入れ替わる）で、介入するのは挑戦する側
+        let royal = read_deck("アマリアロイヤル").expect("デッキ");
+        let decks: Vec<&Deck> = compare_decks()
+            .into_iter()
+            .filter(|d| d.name != royal.name)
+            .collect();
+        let n = decks.len() as u32;
+        assert_eq!(n, 6);
+        let m = imagined_model(0);
+        for (g, seat) in [(0u32, 0usize), (1, 0), (n, 1), (n + 2, 1)] {
+            let r = play_one(
+                g,
+                &decks,
+                Some(&royal),
+                &m,
+                0.1,
+                1.0,
+                IvZone::Drawn,
+                0.0,
+                None,
+            );
+            let c = &decks[(g % n) as usize].name;
+            assert_eq!(&r.decks[seat], c, "g{g}");
+            assert_eq!(r.decks[1 - seat], royal.name, "g{g}");
+            let lines: Vec<serde_json::Value> = r
+                .line
+                .lines()
+                .map(|l| serde_json::from_str(l).expect("JSON"))
+                .collect();
+            for v in &lines[1..] {
+                assert_eq!(v["iv"]["p"], seat, "g{g} {}", v["iv"]);
+            }
+        }
     }
 
     #[test]
@@ -1115,8 +1281,8 @@ mod tests {
 
         let m = imagined_model(0);
         let g = 4;
-        let base = play_one(g, &decks, &m, 0.1, 2.0, IvZone::Both, 0.0, None);
-        let more = play_one(g, &decks, &m, 0.1, 2.0, IvZone::Both, 1.0, None);
+        let base = play_one(g, &decks, None, &m, 0.1, 2.0, IvZone::Both, 0.0, None);
+        let more = play_one(g, &decks, None, &m, 0.1, 2.0, IvZone::Both, 1.0, None);
         let (a, b): (Vec<&str>, Vec<&str>) =
             (base.line.lines().collect(), more.line.lines().collect());
         assert_eq!(more.res_ivs, 1);
