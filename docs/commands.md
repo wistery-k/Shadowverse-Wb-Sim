@@ -112,7 +112,7 @@ npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …
 
 ```sh
 npm run deck-compare -- --deck <デッキ> [--variant '<変更>']… [--add <カード>[,<カード>…]] [--file <デッキ>]…
-                        [--vs <デッキ>[,<デッキ>…]] [--net <補正.json>] [--games 50] [--start 0] [--out 結果.jsonl]
+                        [--vs <デッキ>[,<デッキ>…]] [--net <補正.json>] [--netSide both|subject] [--games 50] [--start 0] [--out 結果.jsonl]
 npm run deck-compare -- --deck リノセウスエルフ --variant '舞い踊る妖精-2,言の葉のエルダーウィードマン+2' --vs アマリアロイヤル --games 100
 npm run deck-compare -- --deck スペルウィッチ --file my-witch.txt --file ミッドレンジナイトメア --vs アマリアロイヤル  # デッキを丸ごと比べる
 ```
@@ -130,6 +130,7 @@ AI はどちらの側も今の既定（リノセウスエルフはリノセウ�
 | `--file デッキ` | なし | デッキを丸ごと案にする（`--deck` と同じくデフォルトデッキかテキストファイル。元のデッキと違うクラスでもよい。山札の並びの対応は無い）。何回でも書ける |
 | `--vs デッキ,…` | 比較用の 7 デッキのうち自分以外 | 相手のデッキ（デフォルトデッキならどれでも。元のデッキと同じデッキ・ランプドラゴンも可） |
 | `--net ファイル` | なし | 両方の席の学習した補正を、このファイルのものに替える（学び直した補正で比べ直す用。リノセウス用 AI も。`baseWeights` の無いモデルだけ） |
+| `--netSide subject` | `both` | `--net` の補正に替えるのを比べるデッキ（元のデッキと案）の側だけにする。相手は今の既定のまま |
 | `--games N` | 50 | 相手デッキ 1 つ・席 1 つあたりの試合数（1 案あたり N × 相手のデッキの数 × 2 席） |
 | `--start S` | 0 | 最初の試合番号（シードは 2000000 + 13 × 試合番号 + 席。案どうしで同じ） |
 | `--out ファイル` | なし | 試合ごとの結果（案・相手・試合番号・席・勝ち）を JSON Lines で書き出す |
@@ -165,13 +166,14 @@ npm run svwb -- yardstick …                             # npm run yardstick �
 npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mulligan":"sample"}'] [--b '{}']
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
                 [--sampling classic|default] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
-                [--decks <デッキ>,…]
+                [--decks <デッキ>,…] [--vs <デッキ>]
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI
 - `td selfplay`: TD 学習の自己対戦。各引数の意味は `rust/engine/src/runner/td.rs` の先頭。
   `--decks` で、比較用の 7 デッキの代わりに並べたデッキ（デフォルトデッキの名前かデッキのテキストファイル）の全組を回す（例: `rust/engine/td-pool/royal-counter/*.txt`）。
-  `--ivZone drawn` は、カードを引いた瞬間に手札から抜いて最後まで打つ介入（`td ivcheck` で「（引いたとき）」の行。デッキに 1 枚入れる価値に近い）
+  `--ivZone drawn` は、カードを引いた瞬間に手札から抜いて最後まで打つ介入（`td ivcheck` で「（引いたとき）」の行。デッキに 1 枚入れる価値に近い）。
+  `--vs <デッキ>` で、どの試合も片方をそのデッキにし、もう片方（挑戦する側）だけ並べたデッキを回して、介入も挑戦する側だけにする（特定の相手との試合でのカードの価値を測る用）
 
 ## td
 
