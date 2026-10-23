@@ -624,4 +624,36 @@ mod tests {
             assert_eq!(Some(&a), mulligan_action(&legal, &expected));
         }
     }
+
+    #[test]
+    fn reads_deck_files() {
+        // data/decks の各ファイルを読むと、デフォルトデッキと同じ並びのカードになる
+        for d in &data().decks {
+            let path = format!("{}/../../data/decks/{}.txt", env!("CARGO_MANIFEST_DIR"), d.key);
+            let b = load_deck(&path).unwrap();
+            assert_eq!(b.name, d.name);
+            assert_eq!(b.cards, d.cards);
+            assert_eq!(b.default, None);
+        }
+        // 「3x 名前」「3 × 名前」・カード ID・コメント・名前の行が無いもの
+        let witch = &find_deck("スペルウィッチ").unwrap().cards;
+        let mut text = String::from("# コメント\nクラス: ウィッチ\n");
+        for (i, &c) in witch.iter().enumerate() {
+            if i == 0 || witch[i - 1] != c {
+                let n = witch.iter().filter(|&&x| x == c).count();
+                let sep = ["x ", " × ", " "][i % 3];
+                let key = if i % 2 == 0 { &card(c).name } else { &card(c).id };
+                text.push_str(&format!("{n}{sep}{key}\n"));
+            }
+        }
+        let (name, cards) = parse_deck_text(&text, "既定の名前").unwrap();
+        assert_eq!(name, "既定の名前");
+        assert_eq!(&cards, witch);
+        // 同名 4 枚以上・40 枚でない・不明なカードは読まない
+        assert!(parse_deck_text("40 知恵の輝き\n", "x").is_err());
+        assert!(parse_deck_text("3 知恵の輝き\n", "x").is_err());
+        assert!(parse_deck_text("3 無いカード\n", "x").is_err());
+        // 名前ならデフォルトデッキ
+        assert_eq!(load_deck("スペルウィッチ").unwrap().default, Some("スペルウィッチ"));
+    }
 }
