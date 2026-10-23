@@ -629,7 +629,11 @@ mod tests {
     fn reads_deck_files() {
         // data/decks の各ファイルを読むと、デフォルトデッキと同じ並びのカードになる
         for d in &data().decks {
-            let path = format!("{}/../../data/decks/{}.txt", env!("CARGO_MANIFEST_DIR"), d.key);
+            let path = format!(
+                "{}/../../data/decks/{}.txt",
+                env!("CARGO_MANIFEST_DIR"),
+                d.key
+            );
             let b = load_deck(&path).unwrap();
             assert_eq!(b.name, d.name);
             assert_eq!(b.cards, d.cards);
@@ -642,7 +646,11 @@ mod tests {
             if i == 0 || witch[i - 1] != c {
                 let n = witch.iter().filter(|&&x| x == c).count();
                 let sep = ["x ", " × ", " "][i % 3];
-                let key = if i % 2 == 0 { &card(c).name } else { &card(c).id };
+                let key = if i % 2 == 0 {
+                    &card(c).name
+                } else {
+                    &card(c).id
+                };
                 text.push_str(&format!("{n}{sep}{key}\n"));
             }
         }
@@ -654,6 +662,9 @@ mod tests {
         assert!(parse_deck_text("3 知恵の輝き\n", "x").is_err());
         assert!(parse_deck_text("3 無いカード\n", "x").is_err());
         // 名前ならデフォルトデッキ
-        assert_eq!(load_deck("スペルウィッチ").unwrap().default, Some("スペルウィッチ"));
+        assert_eq!(
+            load_deck("スペルウィッチ").unwrap().default,
+            Some("スペルウィッチ")
+        );
     }
 }
