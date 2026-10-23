@@ -1,6 +1,6 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both] [--ivRes 0] [--imagined 0] [--sampling classic|default] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both] [--ivRes 0] [--imagined 0] [--sampling classic|default] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--decks <デッキ>,…] --out d0.jsonl
 //!
 //! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・幅 128、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
 //! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
@@ -28,6 +28,12 @@
 //! 見えない情報を並べ直して打つので、手札や山札の運の大半が並びどうしで共通になり、並びの差だけが残る。最後まで打つのは相手のターンを
 //! 貪欲法で読む探索 AI（ビームは 1 回・幅 128）。--iv とは一緒に使えない。docs/ai-notes.md「同じ局面からの手の比べ合いを学ぶ」
 //!
+//! --decks なら、比較用の 7 デッキの代わりに、並べたデッキ（デフォルトデッキの名前・キーか、デッキのテキストファイル。
+//! deck-compare の --file と同じ形式）の全組を順に回す（n デッキなら試合 g は (g mod n, (g / n) mod n) の組）。
+//! 学習した補正の知らないカードの入ったデッキを自己対戦に混ぜて学び直す用。デフォルトデッキと違うデッキのマリガンは、
+//! 返し方ごとに引き直しを試して選ぶ（`mulligan: "sample"`。マリガンのモデルはデフォルトデッキしか知らない）。
+//! docs/ai-notes.md「ロイヤルに勝ち越せるデッキを探す」
+//!
 //! 両方の席がモデルの評価で打つ探索 AI の自己対戦（7 デッキの全 49 組を順に回す）。各自分のターンの最初の局面（after）と
 //! ターン末の局面（end）を、入力と出発点の評価の点数 S と一緒に、試合が終わった順に 1 試合 1 行で書き出す。
 //! 書き出したファイルは `npm run td -- train` にそのまま渡せる（init・train・probe・prune は scripts/td-main.ts で行う）。
@@ -40,13 +46,15 @@
 //! --check 1 なら、各局面にモデルの補正の値（評価の点数の単位）も書く（"z"）。`npm run td -- check` で、学習側（scripts/valueNet.ts）が
 //! "x" と "b" から出す補正が探索の補正と同じかを確かめる（場のカードのネットワークを変えたとき用）。
 
+use super::deck_compare::read_deck;
 use super::options::model_eval;
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
 use crate::ai::aidata::{ai_data, weights_with};
 use crate::ai::determinize::determinize;
 use crate::ai::eval::{evaluate_with, EvalWeights};
-use crate::ai::search::{SearchAgent, SearchOptions};
+use crate::ai::mulligan::default_deck_name_of;
+use crate::ai::search::{MulliganMode, SearchAgent, SearchOptions};
 use crate::ai::valuenet::{ValueNet, ValuePhase};
 use crate::ai::{Agent, Rng};
 use crate::data::{data, CardIdx, Deck};
@@ -384,10 +392,15 @@ fn play_out(
         explore = next;
         v
     };
-    let mut agents = [
-        SearchAgent::new(m.opts.clone()),
-        SearchAgent::new(m.opts.clone()),
-    ];
+    // デフォルトデッキと違うデッキ（--decks）のマリガンは、返し方ごとに引き直しを試して選ぶ（マリガンのモデルはデフォルトデッキしか知らない）
+    let agent = |p: PlayerIndex| {
+        let mut o = m.opts.clone();
+        if state.phase == Phase::Mulligan && default_deck_name_of(&state, p).is_none() {
+            o.mulligan = MulliganMode::Sample;
+        }
+        SearchAgent::new(o)
+    };
+    let mut agents = [agent(0), agent(1)];
     let mut seen = [-1, -1];
     let mut samples = [String::new(), String::new()];
     let mut counts = [0usize; 2];
@@ -608,7 +621,7 @@ fn count_of(x: f64, rng: &mut Rng) -> usize {
 #[allow(clippy::too_many_arguments)]
 fn play_one(
     g: u32,
-    decks: &[&'static Deck],
+    decks: &[&Deck],
     m: &Model,
     eps: f64,
     iv: f64,
@@ -616,7 +629,8 @@ fn play_one(
     iv_res: f64,
     cmp: Option<&Compare>,
 ) -> Summary {
-    let (di, dj) = ((g % 7) as usize, ((g / 7) % 7) as usize);
+    let n = decks.len() as u32;
+    let (di, dj) = ((g % n) as usize, ((g / n) % n) as usize);
     let seed = SEED_BASE + g;
     let state = create_game([&decks[di].cards, &decks[dj].cards], seed);
     // 介入する試合・プレイヤー・ターン（自己対戦の乱数とは別の乱数で決める。--iv 0 なら今までと同じ試合）
@@ -852,10 +866,34 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     } else {
         None
     };
-    let decks = compare_decks();
-    if decks.len() != 7 {
-        return Err("自己対戦のデッキは 7 つの想定です".into());
+    let owned: Vec<Deck> = match arg(args, "decks") {
+        None => Vec::new(),
+        Some(list) => list
+            .split(',')
+            .map(str::trim)
+            .filter(|x| !x.is_empty())
+            .map(read_deck)
+            .collect::<Result<_, _>>()?,
+    };
+    if arg(args, "decks").is_some() {
+        if owned.len() < 2 {
+            return Err("--decks には 2 つ以上のデッキを並べます".into());
+        }
+        println!(
+            "デッキ {} 個: {}",
+            owned.len(),
+            owned
+                .iter()
+                .map(|d| d.name.as_str())
+                .collect::<Vec<_>>()
+                .join("・")
+        );
     }
+    let decks: Vec<&Deck> = if owned.is_empty() {
+        compare_decks()
+    } else {
+        owned.iter().collect()
+    };
     let mut file = std::fs::File::create(out).map_err(|e| format!("{out} に書けません: {e}"))?;
     let t0 = Instant::now();
     let tasks: Vec<u32> = (0..games as u32).map(|k| start as u32 + k).collect();
@@ -1013,6 +1051,43 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn deck_pool_from_files() {
+        // --decks: 並べたデッキの全組を回す。td-pool のファイルのデッキ（デフォルトデッキと違う）でも最後まで打てて、行にデッキの名前が入る
+        let dir = format!("{}/td-pool/royal-counter", env!("CARGO_MANIFEST_DIR"));
+        let mut files: Vec<String> = std::fs::read_dir(&dir)
+            .expect("td-pool")
+            .map(|e| e.expect("ファイル").path().display().to_string())
+            .filter(|f| f.ends_with(".txt"))
+            .collect();
+        files.sort();
+        assert_eq!(files.len(), 8);
+        let pool: Vec<Deck> = files
+            .iter()
+            .map(|f| read_deck(f).expect("デッキ"))
+            .collect();
+        for d in &pool {
+            let s = create_game([&d.cards, &d.cards], 1);
+            assert_eq!(default_deck_name_of(&s, 0), None, "{}", d.name);
+        }
+        let royal = read_deck("アマリアロイヤル").expect("デッキ");
+        let decks: Vec<&Deck> = vec![&royal, &pool[0]];
+        // g = 1 は (1 mod 2, 0) = (ファイルのデッキ, ロイヤル)
+        let r = play_one(
+            1,
+            &decks,
+            &imagined_model(0),
+            0.1,
+            0.0,
+            IvZone::Hand,
+            0.0,
+            None,
+        );
+        assert_eq!(r.decks, [pool[0].name.clone(), royal.name.clone()]);
+        let v: serde_json::Value = serde_json::from_str(&r.line).expect("JSON");
+        assert_eq!(v["decks"][0], pool[0].name.as_str());
     }
 
     #[test]

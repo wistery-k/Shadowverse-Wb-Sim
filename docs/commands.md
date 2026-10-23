@@ -111,25 +111,34 @@ npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …
 ## deck-compare
 
 ```sh
-npm run deck-compare -- --deck <デッキ> [--variant '<変更>']… [--add <カード>[,<カード>…]] [--games 50] [--start 0] [--out 結果.jsonl]
+npm run deck-compare -- --deck <デッキ> [--variant '<変更>']… [--add <カード>[,<カード>…]] [--file <デッキ>]…
+                        [--vs <デッキ>[,<デッキ>…]] [--net <補正.json>] [--games 50] [--start 0] [--out 結果.jsonl]
+npm run deck-compare -- --deck リノセウスエルフ --variant '舞い踊る妖精-2,言の葉のエルダーウィードマン+2' --vs アマリアロイヤル --games 100
+npm run deck-compare -- --deck スペルウィッチ --file my-witch.txt --file ミッドレンジナイトメア --vs アマリアロイヤル  # デッキを丸ごと比べる
 ```
 
-デッキのカードを入れ替えた案を、元のデッキと同じ試合で比べる（デッキの最適化）。元のデッキと各案は、比較用の 7 デッキのうち自分以外と両方の席で打つ。
+デッキのカードを入れ替えた案を、元のデッキと同じ試合で比べる（デッキの最適化）。元のデッキと各案は、比較用の 7 デッキのうち自分以外と両方の席で打つ（`--vs` で相手を絞れる）。
 AI はどちらの側も今の既定（リノセウスエルフはリノセウス用 AI、他は探索 AI）。
 マリガンの学習したモデルはデッキのカードの並びで引くので、案のデッキも元のデッキのモデルでマリガンする（足したカードは役割なし・係数 0）。
+ファイルから読んだデッキ（とその案）は元にするモデルが無いので、返し方ごとに引き直しを試して選ぶ（`mulligan: "sample"`。今のモデルとの差は −0.5% ほど）。
 
 | 引数 | 既定 | 意味 |
 |---|---|---|
-| `--deck` | 必須 | 比べるデッキ（デフォルトデッキの名前かファイル名） |
+| `--deck` | 必須 | 比べるデッキ（デフォルトデッキの名前か `data/decks` のファイル名（拡張子なし）。どちらでもなければ、デッキのテキストファイル（`data/decks/*.txt` と同じ形式）のパス） |
 | `--variant` | なし | 案。「カード名-枚数」「カード名+枚数」をカンマで並べる（例: `'知恵の輝き-1,最果ての罪・サタン+1'`。カード ID も可）。抜く枚数と足す枚数は同じにする。何回でも書ける |
 | `--add カード` | なし | デッキの各カードについて「そのカードを 1 枚抜いて、このカードを 1 枚足す」案をすべて作る |
-| `--games N` | 50 | 相手デッキ 1 つ・席 1 つあたりの試合数（1 案あたり N × 6 デッキ × 2 席） |
+| `--file デッキ` | なし | デッキを丸ごと案にする（`--deck` と同じくデフォルトデッキかテキストファイル。元のデッキと違うクラスでもよい。山札の並びの対応は無い）。何回でも書ける |
+| `--vs デッキ,…` | 比較用の 7 デッキのうち自分以外 | 相手のデッキ（デフォルトデッキならどれでも。元のデッキと同じデッキ・ランプドラゴンも可） |
+| `--net ファイル` | なし | 両方の席の学習した補正を、このファイルのものに替える（学び直した補正で比べ直す用。リノセウス用 AI も。`baseWeights` の無いモデルだけ） |
+| `--games N` | 50 | 相手デッキ 1 つ・席 1 つあたりの試合数（1 案あたり N × 相手のデッキの数 × 2 席） |
 | `--start S` | 0 | 最初の試合番号（シードは 2000000 + 13 × 試合番号 + 席。案どうしで同じ） |
 | `--out ファイル` | なし | 試合ごとの結果（案・相手・試合番号・席・勝ち）を JSON Lines で書き出す |
 
 - 抜いたカードの位置に足したカードを置くので、同じシードなら山札の並びは入れ替えたカードの所だけが違う。それでも 1 枚の入れ替えで 2〜3 割の試合の勝敗が入れ替わる
   （AI が自分の山札・相手の手札を並べ直して読むので、引く前から手が変わる）。1 案 2400 試合（`--games 200`）で差の標準誤差は 1 ポイントほど
-- 学習した補正は比較用の 7 デッキのカードしか学んでいないので、それ以外のカードは手で作った評価だけで打つ
+- 学習した補正は比較用の 7 デッキのカードしか学んでいないので、それ以外のカードは手で作った評価だけで打つ。
+  そのカードの入ったデッキを `td selfplay --decks` で自己対戦に混ぜて学び直し、`--net` で比べ直せる
+- 同じデッキでも、試合の組（`--start`）で勝率が 7〜10 ポイント動くことがある（ロイヤル戦 200 試合で g0〜99 と g100〜199）。良かった案は別の組で確かめる
 
 ## yardstick
 
@@ -156,10 +165,12 @@ npm run svwb -- yardstick …                             # npm run yardstick �
 npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mulligan":"sample"}'] [--b '{}']
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
                 [--sampling classic|default] [--iv 0] [--ivZone hand|board|both] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
+                [--decks <デッキ>,…]
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI
-- `td selfplay`: TD 学習の自己対戦。各引数の意味は `rust/engine/src/runner/td.rs` の先頭
+- `td selfplay`: TD 学習の自己対戦。各引数の意味は `rust/engine/src/runner/td.rs` の先頭。
+  `--decks` で、比較用の 7 デッキの代わりに並べたデッキ（デフォルトデッキの名前かデッキのテキストファイル）の全組を回す（例: `rust/engine/td-pool/royal-counter/*.txt`）
 
 ## td
 
@@ -171,7 +182,7 @@ npm run td -- board --model m.json --out b0.json [--layers 32,16] [--seed 1]
 npm run td -- check --model m.json --data d.jsonl
 npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001]
                 [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--v1Only 0] [--best 0] [--cmpWeight 0] [--cmpBatch 16]
-npm run td -- ivcheck --model m1.json --data d0.jsonl[,d1.jsonl] [--holdout 0]
+npm run td -- ivcheck --model m1.json --data d0.jsonl[,d1.jsonl] [--holdout 0] [--opp <デッキ名>] [--min 30]
 npm run td -- prune --model m4.json --data d0.jsonl,d1.jsonl,… --out data/value-net.json
 npm run td -- probe --model m1.json --data d0.jsonl [--per 2000]
 ```

@@ -1,33 +1,42 @@
 //! デッキのカードを入れ替えた案を、元のデッキと同じ試合で比べる（デッキの最適化）。
 //!
-//!   svwb deck-compare --deck <デッキ> [--variant '<変更>']… [--add <カード>[,<カード>…]] [--games 50] [--start 0] [--out 結果.jsonl]
+//!   svwb deck-compare --deck <デッキ> [--variant '<変更>']… [--add <カード>[,<カード>…]] [--file <デッキ.txt>]…
+//!                     [--vs <デッキ>[,<デッキ>…]] [--net <補正.json>] [--games 50] [--start 0] [--out 結果.jsonl]
 //!
 //! - 変更は「カード名-枚数」「カード名+枚数」をカンマで並べたもの（例: '知恵の輝き-1,最果ての罪・サタン+1'）。カード名の代わりにカード ID も使える。
 //!   抜く枚数と足す枚数は同じにする（40 枚・同名 3 枚まで・クラスを確かめる）
 //! - `--add Y` は、デッキの各カード X について「X を 1 枚抜いて Y を 1 枚足す」案をすべて作る（Y を入れるなら何を抜くか）
 //! - 抜いたカードの位置に足したカードを置く。山札の並べ方は枚数と乱数だけで決まるので、同じシードなら山札の並びは入れ替えたカードの所だけが違う
-//! - 元のデッキと各案は、比較用の 7 デッキのうち自分以外と、両方の席で `--games` 試合ずつ打つ（シードは案どうしで同じ）
-//! - AI はどちらの側も今の既定（リノセウスエルフはリノセウス用 AI、他は探索 AI）
+//! - 元のデッキと各案は、比較用の 7 デッキのうち自分以外と、両方の席で `--games` 試合ずつ打つ（シードは案どうしで同じ）。
+//!   `--vs` で相手のデッキを絞れる（デフォルトデッキならどれでも。元のデッキと同じデッキ・ランプドラゴンも可）
+//! - `--deck` と `--file` には、デフォルトデッキのほかにデッキのテキストファイル（data/decks/*.txt と同じ形式）も渡せる。
+//!   `--file` はデッキを丸ごと案にする（元のデッキと違うクラスでもよい。山札の並びの対応は無い）
+//! - AI はどちらの側も今の既定（リノセウスエルフはリノセウス用 AI、他は探索 AI）。`--net` なら、どちらの側も学習した補正をそのファイルのものに替える
+//!   （学び直した補正で、案と元のデッキを比べ直す用。`baseWeights` の無いモデルだけ）
 //! - マリガンの学習したモデルはデッキのカードの並びでデフォルトデッキを引くので、案のデッキでは使えず「コスト 4 以上を返す」だけになる。
-//!   そこで案のデッキも元のデッキのモデルでマリガンする（足したカードはモデルの表に無いので役割なし・係数 0）
+//!   そこで案のデッキも元のデッキのモデルでマリガンする（足したカードはモデルの表に無いので役割なし・係数 0）。
+//!   ファイルから読んだデッキ（とその案）は、元にするモデルが無いので、返し方ごとに引き直しを試して選ぶ（`mulligan: "sample"`）
 //! - 各案の勝率と、元のデッキとの入れ替わり（案で勝ち・元で負け / 元で勝ち・案で負け）、符号検定の z を出す
 //! - 同じシードでも、1 枚の入れ替えで 2〜3 割の試合の勝敗が入れ替わる（AI が自分の山札・相手の手札を並べ直して読むので、
 //!   入れ替えたカードを引く前から手が変わる）。1 ポイントの差を見分けるには 1 案 1 万試合ほど要る
 
+use super::options::model_eval;
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
 use crate::ai::exact_lethal::reset_exact_lethal_cache;
 use crate::ai::mulligan::{
     default_deck_name_of, model_mulligan_swap_as, mulligan_action, weighted_mulligan_swap_as,
 };
-use crate::ai::rhino::RhinoAgent;
-use crate::ai::search::{SearchAgent, SearchOptions};
+use crate::ai::rhino::{rhino_search_options, RhinoAgent, RHINO_POTENTIAL};
+use crate::ai::search::{ExtraEval, MulliganMode, SearchAgent, SearchOptions};
+use crate::ai::valuenet::ValueNet;
 use crate::ai::{Agent, Rng};
 use crate::data::{data, CardIdx, ClassId, Deck};
 use crate::game::acting_player;
 use crate::json::Json;
 use crate::sim::play_match;
 use crate::state::{card, Action, GameState};
+use std::sync::Arc;
 use std::time::Instant;
 
 /// シードの基準（compare・rhino-compare・td selfplay の試合と重ならないように大きくする）
@@ -42,6 +51,19 @@ const RHINO_DECK: &str = "リノセウスエルフ";
 struct Entry {
     label: String,
     cards: Vec<CardIdx>,
+    /// リノセウス用 AI で打つ（元のデッキがリノセウスエルフのとき）
+    rhino: bool,
+    /// デフォルトデッキと違うとき、マリガンをこのデフォルトデッキのモデルで行う。
+    /// None なら返し方ごとに引き直しを試して選ぶ（`mulligan: "sample"`）
+    mulligan_as: Option<&'static str>,
+}
+
+/// 元のデッキ（デフォルトデッキかファイル）
+struct BaseDeck {
+    name: String,
+    cards: Vec<CardIdx>,
+    /// デフォルトデッキならその名前
+    default: Option<&'static str>,
 }
 
 struct Task {
@@ -51,12 +73,51 @@ struct Task {
     seat: usize,
 }
 
+/// 探索 AI の既定の設定。net（`--net`）があれば学習した補正をそれに替える
+fn search_options(net: Option<&ExtraEval>) -> SearchOptions {
+    let mut o = SearchOptions::default();
+    if let Some(n) = net {
+        o.extra_eval = Some(n.clone());
+    }
+    o
+}
+
+/// リノセウス用 AI の既定（RhinoAgent::new(true)）。net があれば学習した補正をそれに替える
+fn rhino_agent(net: Option<&ExtraEval>) -> RhinoAgent {
+    match net {
+        None => RhinoAgent::new(true),
+        Some(n) => RhinoAgent::with_options(
+            true,
+            rhino_search_options(RHINO_POTENTIAL, Some(n.clone())),
+            search_options(Some(n)),
+        ),
+    }
+}
+
 /// そのデッキの既定の AI
-fn default_agent(deck_name: &str) -> Box<dyn Agent> {
+fn default_agent(deck_name: &str, net: Option<&ExtraEval>) -> Box<dyn Agent> {
     if deck_name == RHINO_DECK {
-        Box::new(RhinoAgent::new(true))
+        Box::new(rhino_agent(net))
     } else {
-        Box::new(SearchAgent::new(SearchOptions::default()))
+        Box::new(SearchAgent::new(search_options(net)))
+    }
+}
+
+/// 比べる側の AI（マリガンの仕方は Entry の mulligan_as）
+fn subject_agent(e: &Entry, net: Option<&ExtraEval>) -> Box<dyn Agent> {
+    let inner: Box<dyn Agent> = if e.rhino {
+        Box::new(rhino_agent(net))
+    } else if e.mulligan_as.is_some() {
+        Box::new(SearchAgent::new(search_options(net)))
+    } else {
+        Box::new(SearchAgent::new(SearchOptions {
+            mulligan: MulliganMode::Sample,
+            ..search_options(net)
+        }))
+    };
+    match e.mulligan_as {
+        Some(deck) => Box::new(MulliganAs { inner, deck }),
+        None => inner,
     }
 }
 
@@ -170,8 +231,13 @@ fn apply_changes(base: &[CardIdx], changes: &[(CardIdx, i32)]) -> Result<Vec<Car
     for (i, c) in slots.into_iter().zip(adds) {
         cards[i] = c;
     }
-    let class = deck_class(base);
-    for &c in &cards {
+    check_deck(&cards, deck_class(base))?;
+    Ok(cards)
+}
+
+/// スターターの構築ルール（40 枚・同名 3 枚まで・クラス）を満たすか
+fn check_deck(cards: &[CardIdx], class: ClassId) -> Result<(), String> {
+    for &c in cards {
         let k = card(c).class;
         if k != ClassId::Neutral && k != class {
             return Err(format!(
@@ -193,7 +259,82 @@ fn apply_changes(base: &[CardIdx], changes: &[(CardIdx, i32)]) -> Result<Vec<Car
             cards.len()
         ));
     }
-    Ok(cards)
+    Ok(())
+}
+
+/// デッキのテキスト（src/cards/deck.ts の parseDeckText と同じ形式）から [名前, カード]。名前の行が無ければ default_name
+fn parse_deck_text(text: &str, default_name: &str) -> Result<(String, Vec<CardIdx>), String> {
+    let mut name = default_name.to_string();
+    let mut cards: Vec<CardIdx> = Vec::new();
+    for (i, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let meta = ["名前", "クラス", "name", "class"].iter().find_map(|k| {
+            let rest = line.strip_prefix(k)?.trim_start();
+            rest.strip_prefix([':', '：']).map(|v| (*k, v.trim()))
+        });
+        if let Some((k, v)) = meta {
+            if (k == "名前" || k == "name") && !v.is_empty() {
+                name = v.to_string();
+            }
+            continue;
+        }
+        let digits = line.chars().take_while(|c| c.is_ascii_digit()).count();
+        let rest = line[digits..].trim_start();
+        let rest = rest
+            .strip_prefix(['x', 'X', '×'])
+            .map(|r| r.trim_start())
+            .unwrap_or(rest);
+        if digits == 0 || rest.is_empty() {
+            return Err(format!(
+                "{} 行目: 「枚数 カード名」の形式ではありません: {line}",
+                i + 1
+            ));
+        }
+        let n: usize = line[..digits]
+            .parse()
+            .map_err(|_| format!("{} 行目: 枚数が数ではありません: {line}", i + 1))?;
+        let c = find_card(rest).map_err(|e| format!("{} 行目: {e}", i + 1))?;
+        cards.extend(std::iter::repeat_n(c, n));
+    }
+    check_deck(&cards, deck_class(&cards))?;
+    Ok((name, cards))
+}
+
+/// デフォルトデッキの名前か、デッキのテキストファイル
+fn load_deck(name: &str) -> Result<BaseDeck, String> {
+    if let Ok(d) = find_deck(name) {
+        return Ok(BaseDeck {
+            name: d.name.clone(),
+            cards: d.cards.clone(),
+            default: Some(d.name.as_str()),
+        });
+    }
+    let text = std::fs::read_to_string(name)
+        .map_err(|e| format!("{name} はデフォルトデッキでもなく、読めません: {e}"))?;
+    let stem = std::path::Path::new(name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(name);
+    let (deck_name, cards) = parse_deck_text(&text, stem).map_err(|e| format!("{name}: {e}"))?;
+    Ok(BaseDeck {
+        name: deck_name,
+        cards,
+        default: None,
+    })
+}
+
+/// デッキ（デフォルトデッキの名前・キーか、デッキのテキストファイル）を読む（td selfplay --decks でも使う）。
+/// ファイルのデッキは構築ルールを確かめる。key は渡した名前のまま
+pub(crate) fn read_deck(name: &str) -> Result<Deck, String> {
+    let d = load_deck(name)?;
+    Ok(Deck {
+        key: name.to_string(),
+        name: d.name,
+        cards: d.cards,
+    })
 }
 
 /// 変更を読みやすい名前に（「知恵の輝き-1,最果ての罪・サタン+1」）
@@ -229,7 +370,7 @@ fn find_deck(name: &str) -> Result<&'static Deck, String> {
 fn play_one(
     entries: &[Entry],
     opponents: &[&'static Deck],
-    subject: &'static Deck,
+    net: Option<&ExtraEval>,
     t: &Task,
 ) -> bool {
     let me = &entries[t.entry].cards;
@@ -237,15 +378,12 @@ fn play_one(
     let seed = SEED_BASE + t.g * 13 + t.seat as u32;
     // 全探索のリーサル探索のメモはスレッドごとなので、前の試合のものを捨てる（試合の結果を並べ方によらず同じにする）
     reset_exact_lethal_cache();
-    let mut a = MulliganAs {
-        inner: default_agent(&subject.name),
-        deck: &subject.name,
-    };
-    let mut o = default_agent(&opp.name);
+    let mut a = subject_agent(&entries[t.entry], net);
+    let mut o = default_agent(&opp.name, net);
     let (mut agents, decks): ([&mut dyn Agent; 2], [&[CardIdx]; 2]) = if t.seat == 0 {
-        ([&mut a, o.as_mut()], [&me[..], &opp.cards[..]])
+        ([a.as_mut(), o.as_mut()], [&me[..], &opp.cards[..]])
     } else {
-        ([o.as_mut(), &mut a], [&opp.cards[..], &me[..]])
+        ([o.as_mut(), a.as_mut()], [&opp.cards[..], &me[..]])
     };
     let end = play_match(&mut agents, decks, seed, |_, _| {});
     let winner = end
@@ -258,9 +396,12 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut deck_name: Option<String> = None;
     let mut variants: Vec<String> = Vec::new();
     let mut add: Vec<String> = Vec::new();
+    let mut files: Vec<String> = Vec::new();
+    let mut vs: Vec<String> = Vec::new();
     let mut games: u32 = 50;
     let mut start: u32 = 0;
     let mut out: Option<String> = None;
+    let mut net_path: Option<String> = None;
     let mut it = argv.iter();
     while let Some(key) = it.next() {
         let v = it.next().ok_or_else(|| format!("{key} の値がありません"))?;
@@ -276,26 +417,54 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty()),
             ),
+            "--file" => files.push(v.clone()),
+            "--vs" => vs.extend(
+                v.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty()),
+            ),
             "--games" => games = int()?,
             "--start" => start = int()?,
             "--out" => out = Some(v.clone()),
+            "--net" => net_path = Some(v.clone()),
             _ => return Err(format!("不明な引数: {key}")),
         }
     }
-    let deck = find_deck(
+    let deck = load_deck(
         deck_name
             .as_deref()
             .ok_or("--deck でデッキを指定してください")?,
     )?;
+    let net: Option<ExtraEval> = match &net_path {
+        None => None,
+        Some(path) => {
+            let net = ValueNet::load(path)?;
+            if !net.base_weights.is_empty() {
+                return Err(format!(
+                    "{path}: baseWeights のあるモデルには対応していません"
+                ));
+            }
+            eprintln!("補正: {path}（どちらの側も）");
+            Some(model_eval(Arc::new(net)))
+        }
+    };
+    let rhino = deck.default == Some(RHINO_DECK);
     let mut entries = vec![Entry {
         label: "元のデッキ".into(),
         cards: deck.cards.clone(),
+        rhino,
+        mulligan_as: deck.default,
     }];
     let mut push = |changes: Vec<(CardIdx, i32)>| -> Result<(), String> {
         let label = changes_label(&changes);
         let cards = apply_changes(&deck.cards, &changes).map_err(|e| format!("{label}: {e}"))?;
         if !entries.iter().any(|e| e.label == label) {
-            entries.push(Entry { label, cards });
+            entries.push(Entry {
+                label,
+                cards,
+                rhino,
+                mulligan_as: deck.default,
+            });
         }
         Ok(())
     };
@@ -313,13 +482,27 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             push(vec![(x, -1), (y, 1)])?;
         }
     }
-    if entries.len() < 2 {
-        return Err("--variant か --add で案を 1 つ以上指定してください".into());
+    for f in &files {
+        let d = load_deck(f)?;
+        let label = match d.default {
+            Some(n) => n.to_string(),
+            None => format!("{}（{f}）", d.name),
+        };
+        entries.push(Entry {
+            label,
+            cards: d.cards,
+            rhino: d.default == Some(RHINO_DECK),
+            mulligan_as: d.default,
+        });
     }
-    let opponents: Vec<&'static Deck> = compare_decks()
-        .into_iter()
-        .filter(|d| d.name != deck.name)
-        .collect();
+    let opponents: Vec<&'static Deck> = if vs.is_empty() {
+        compare_decks()
+            .into_iter()
+            .filter(|d| d.name != deck.name)
+            .collect()
+    } else {
+        vs.iter().map(|n| find_deck(n)).collect::<Result<_, _>>()?
+    };
     let tasks: Vec<Task> = (0..entries.len())
         .flat_map(|entry| {
             (0..opponents.len()).flat_map(move |opp| {
@@ -346,7 +529,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let step = (tasks.len() / 10).max(1);
     let results = parallel_map(
         &tasks,
-        |t, _| play_one(&entries, &opponents, deck, t),
+        |t, _| play_one(&entries, &opponents, net.as_ref(), t),
         |done, total, _, _| {
             if done % step == 0 || done == total {
                 eprintln!(
@@ -490,11 +673,54 @@ mod tests {
             assert_eq!(default_deck_name_of(&s, p), None);
             let expected = model_mulligan_swap_as(&s, p, &base.name).unwrap();
             let mut agent = MulliganAs {
-                inner: default_agent(&base.name),
+                inner: default_agent(&base.name, None),
                 deck: &base.name,
             };
             let a = agent.choose_action(&s, &legal, &mut Rng::new(seed));
             assert_eq!(Some(&a), mulligan_action(&legal, &expected));
         }
+    }
+
+    #[test]
+    fn reads_deck_files() {
+        // data/decks の各ファイルを読むと、デフォルトデッキと同じ並びのカードになる
+        for d in &data().decks {
+            let path = format!(
+                "{}/../../data/decks/{}.txt",
+                env!("CARGO_MANIFEST_DIR"),
+                d.key
+            );
+            let b = load_deck(&path).unwrap();
+            assert_eq!(b.name, d.name);
+            assert_eq!(b.cards, d.cards);
+            assert_eq!(b.default, None);
+        }
+        // 「3x 名前」「3 × 名前」・カード ID・コメント・名前の行が無いもの
+        let witch = &find_deck("スペルウィッチ").unwrap().cards;
+        let mut text = String::from("# コメント\nクラス: ウィッチ\n");
+        for (i, &c) in witch.iter().enumerate() {
+            if i == 0 || witch[i - 1] != c {
+                let n = witch.iter().filter(|&&x| x == c).count();
+                let sep = ["x ", " × ", " "][i % 3];
+                let key = if i % 2 == 0 {
+                    &card(c).name
+                } else {
+                    &card(c).id
+                };
+                text.push_str(&format!("{n}{sep}{key}\n"));
+            }
+        }
+        let (name, cards) = parse_deck_text(&text, "既定の名前").unwrap();
+        assert_eq!(name, "既定の名前");
+        assert_eq!(&cards, witch);
+        // 同名 4 枚以上・40 枚でない・不明なカードは読まない
+        assert!(parse_deck_text("40 知恵の輝き\n", "x").is_err());
+        assert!(parse_deck_text("3 知恵の輝き\n", "x").is_err());
+        assert!(parse_deck_text("3 無いカード\n", "x").is_err());
+        // 名前ならデフォルトデッキ
+        assert_eq!(
+            load_deck("スペルウィッチ").unwrap().default,
+            Some("スペルウィッチ")
+        );
     }
 }

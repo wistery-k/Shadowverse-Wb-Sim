@@ -7,7 +7,7 @@
 //!   svwb ai-play [games] [start] [search|rhino|rhino-lethal] AI どうしの試合を打って時間を測る
 //!   svwb compare <games> '<A>' '<B>' [start] [vsDeck] [--no-mirror]  探索 AI の設定どうしの勝率（npm run compare と同じ）
 //!   svwb rhino-compare [--subject …] [--games …] [--opts …] [--out …]  デッキ専用の AI の勝率（npm run rhino-compare と同じ）
-//!   svwb deck-compare --deck <デッキ> [--variant '<変更>']… [--add <カード>] [--games 50]  デッキのカードを入れ替えた案を元のデッキと比べる
+//!   svwb deck-compare --deck <デッキ> [--variant '<変更>']… [--add <カード>] [--file <デッキ>]… [--vs <デッキ>] [--games 50]  デッキのカードを入れ替えた案を元のデッキと比べる
 //!   svwb mulligan-compare [--games 50] [--a …] [--b …]  マリガンの設定どうしを同じシードの試合で打ち比べる
 //!   svwb human-plan-value --out 結果.jsonl [--m 32] <人間の記録.jsonl>…  人間の手順と AI の手順を同じ局面から打ち比べる（report で集計）
 //!   svwb td selfplay --model m.json --games N [--start S] [--eps 0.1] --out d.jsonl  TD 学習の自己対戦
