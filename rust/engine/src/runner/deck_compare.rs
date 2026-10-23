@@ -1,7 +1,7 @@
 //! デッキのカードを入れ替えた案を、元のデッキと同じ試合で比べる（デッキの最適化）。
 //!
 //!   svwb deck-compare --deck <デッキ> [--variant '<変更>']… [--add <カード>[,<カード>…]] [--file <デッキ.txt>]…
-//!                     [--vs <デッキ>[,<デッキ>…]] [--games 50] [--start 0] [--out 結果.jsonl]
+//!                     [--vs <デッキ>[,<デッキ>…]] [--net <補正.json>] [--games 50] [--start 0] [--out 結果.jsonl]
 //!
 //! - 変更は「カード名-枚数」「カード名+枚数」をカンマで並べたもの（例: '知恵の輝き-1,最果ての罪・サタン+1'）。カード名の代わりにカード ID も使える。
 //!   抜く枚数と足す枚数は同じにする（40 枚・同名 3 枚まで・クラスを確かめる）
@@ -11,7 +11,8 @@
 //!   `--vs` で相手のデッキを絞れる（デフォルトデッキならどれでも。元のデッキと同じデッキ・ランプドラゴンも可）
 //! - `--deck` と `--file` には、デフォルトデッキのほかにデッキのテキストファイル（data/decks/*.txt と同じ形式）も渡せる。
 //!   `--file` はデッキを丸ごと案にする（元のデッキと違うクラスでもよい。山札の並びの対応は無い）
-//! - AI はどちらの側も今の既定（リノセウスエルフはリノセウス用 AI、他は探索 AI）
+//! - AI はどちらの側も今の既定（リノセウスエルフはリノセウス用 AI、他は探索 AI）。`--net` なら、どちらの側も学習した補正をそのファイルのものに替える
+//!   （学び直した補正で、案と元のデッキを比べ直す用。`baseWeights` の無いモデルだけ）
 //! - マリガンの学習したモデルはデッキのカードの並びでデフォルトデッキを引くので、案のデッキでは使えず「コスト 4 以上を返す」だけになる。
 //!   そこで案のデッキも元のデッキのモデルでマリガンする（足したカードはモデルの表に無いので役割なし・係数 0）。
 //!   ファイルから読んだデッキ（とその案）は、元にするモデルが無いので、返し方ごとに引き直しを試して選ぶ（`mulligan: "sample"`）
@@ -19,20 +20,23 @@
 //! - 同じシードでも、1 枚の入れ替えで 2〜3 割の試合の勝敗が入れ替わる（AI が自分の山札・相手の手札を並べ直して読むので、
 //!   入れ替えたカードを引く前から手が変わる）。1 ポイントの差を見分けるには 1 案 1 万試合ほど要る
 
+use super::options::model_eval;
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
 use crate::ai::exact_lethal::reset_exact_lethal_cache;
 use crate::ai::mulligan::{
     default_deck_name_of, model_mulligan_swap_as, mulligan_action, weighted_mulligan_swap_as,
 };
-use crate::ai::rhino::RhinoAgent;
-use crate::ai::search::{MulliganMode, SearchAgent, SearchOptions};
+use crate::ai::rhino::{rhino_search_options, RhinoAgent, RHINO_POTENTIAL};
+use crate::ai::search::{ExtraEval, MulliganMode, SearchAgent, SearchOptions};
+use crate::ai::valuenet::ValueNet;
 use crate::ai::{Agent, Rng};
 use crate::data::{data, CardIdx, ClassId, Deck};
 use crate::game::acting_player;
 use crate::json::Json;
 use crate::sim::play_match;
 use crate::state::{card, Action, GameState};
+use std::sync::Arc;
 use std::time::Instant;
 
 /// シードの基準（compare・rhino-compare・td selfplay の試合と重ならないように大きくする）
@@ -69,25 +73,46 @@ struct Task {
     seat: usize,
 }
 
+/// 探索 AI の既定の設定。net（`--net`）があれば学習した補正をそれに替える
+fn search_options(net: Option<&ExtraEval>) -> SearchOptions {
+    let mut o = SearchOptions::default();
+    if let Some(n) = net {
+        o.extra_eval = Some(n.clone());
+    }
+    o
+}
+
+/// リノセウス用 AI の既定（RhinoAgent::new(true)）。net があれば学習した補正をそれに替える
+fn rhino_agent(net: Option<&ExtraEval>) -> RhinoAgent {
+    match net {
+        None => RhinoAgent::new(true),
+        Some(n) => RhinoAgent::with_options(
+            true,
+            rhino_search_options(RHINO_POTENTIAL, Some(n.clone())),
+            search_options(Some(n)),
+        ),
+    }
+}
+
 /// そのデッキの既定の AI
-fn default_agent(deck_name: &str) -> Box<dyn Agent> {
+fn default_agent(deck_name: &str, net: Option<&ExtraEval>) -> Box<dyn Agent> {
     if deck_name == RHINO_DECK {
-        Box::new(RhinoAgent::new(true))
+        Box::new(rhino_agent(net))
     } else {
-        Box::new(SearchAgent::new(SearchOptions::default()))
+        Box::new(SearchAgent::new(search_options(net)))
     }
 }
 
 /// 比べる側の AI（マリガンの仕方は Entry の mulligan_as）
-fn subject_agent(e: &Entry) -> Box<dyn Agent> {
+fn subject_agent(e: &Entry, net: Option<&ExtraEval>) -> Box<dyn Agent> {
     let inner: Box<dyn Agent> = if e.rhino {
-        Box::new(RhinoAgent::new(true))
+        Box::new(rhino_agent(net))
     } else if e.mulligan_as.is_some() {
-        Box::new(SearchAgent::new(SearchOptions::default()))
+        Box::new(SearchAgent::new(search_options(net)))
     } else {
         Box::new(SearchAgent::new(SearchOptions {
             mulligan: MulliganMode::Sample,
-            ..SearchOptions::default()
+            ..search_options(net)
         }))
     };
     match e.mulligan_as {
@@ -301,6 +326,17 @@ fn load_deck(name: &str) -> Result<BaseDeck, String> {
     })
 }
 
+/// デッキ（デフォルトデッキの名前・キーか、デッキのテキストファイル）を読む（td selfplay --decks でも使う）。
+/// ファイルのデッキは構築ルールを確かめる。key は渡した名前のまま
+pub(crate) fn read_deck(name: &str) -> Result<Deck, String> {
+    let d = load_deck(name)?;
+    Ok(Deck {
+        key: name.to_string(),
+        name: d.name,
+        cards: d.cards,
+    })
+}
+
 /// 変更を読みやすい名前に（「知恵の輝き-1,最果ての罪・サタン+1」）
 fn changes_label(changes: &[(CardIdx, i32)]) -> String {
     changes
@@ -331,14 +367,19 @@ fn find_deck(name: &str) -> Result<&'static Deck, String> {
         })
 }
 
-fn play_one(entries: &[Entry], opponents: &[&'static Deck], t: &Task) -> bool {
+fn play_one(
+    entries: &[Entry],
+    opponents: &[&'static Deck],
+    net: Option<&ExtraEval>,
+    t: &Task,
+) -> bool {
     let me = &entries[t.entry].cards;
     let opp = opponents[t.opp];
     let seed = SEED_BASE + t.g * 13 + t.seat as u32;
     // 全探索のリーサル探索のメモはスレッドごとなので、前の試合のものを捨てる（試合の結果を並べ方によらず同じにする）
     reset_exact_lethal_cache();
-    let mut a = subject_agent(&entries[t.entry]);
-    let mut o = default_agent(&opp.name);
+    let mut a = subject_agent(&entries[t.entry], net);
+    let mut o = default_agent(&opp.name, net);
     let (mut agents, decks): ([&mut dyn Agent; 2], [&[CardIdx]; 2]) = if t.seat == 0 {
         ([a.as_mut(), o.as_mut()], [&me[..], &opp.cards[..]])
     } else {
@@ -360,6 +401,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut games: u32 = 50;
     let mut start: u32 = 0;
     let mut out: Option<String> = None;
+    let mut net_path: Option<String> = None;
     let mut it = argv.iter();
     while let Some(key) = it.next() {
         let v = it.next().ok_or_else(|| format!("{key} の値がありません"))?;
@@ -384,6 +426,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             "--games" => games = int()?,
             "--start" => start = int()?,
             "--out" => out = Some(v.clone()),
+            "--net" => net_path = Some(v.clone()),
             _ => return Err(format!("不明な引数: {key}")),
         }
     }
@@ -392,6 +435,19 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             .as_deref()
             .ok_or("--deck でデッキを指定してください")?,
     )?;
+    let net: Option<ExtraEval> = match &net_path {
+        None => None,
+        Some(path) => {
+            let net = ValueNet::load(path)?;
+            if !net.base_weights.is_empty() {
+                return Err(format!(
+                    "{path}: baseWeights のあるモデルには対応していません"
+                ));
+            }
+            eprintln!("補正: {path}（どちらの側も）");
+            Some(model_eval(Arc::new(net)))
+        }
+    };
     let rhino = deck.default == Some(RHINO_DECK);
     let mut entries = vec![Entry {
         label: "元のデッキ".into(),
@@ -473,7 +529,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let step = (tasks.len() / 10).max(1);
     let results = parallel_map(
         &tasks,
-        |t, _| play_one(&entries, &opponents, t),
+        |t, _| play_one(&entries, &opponents, net.as_ref(), t),
         |done, total, _, _| {
             if done % step == 0 || done == total {
                 eprintln!(
@@ -617,7 +673,7 @@ mod tests {
             assert_eq!(default_deck_name_of(&s, p), None);
             let expected = model_mulligan_swap_as(&s, p, &base.name).unwrap();
             let mut agent = MulliganAs {
-                inner: default_agent(&base.name),
+                inner: default_agent(&base.name, None),
                 deck: &base.name,
             };
             let a = agent.choose_action(&s, &legal, &mut Rng::new(seed));

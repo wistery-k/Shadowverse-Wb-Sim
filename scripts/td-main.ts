@@ -42,9 +42,11 @@
 //     --bestOn end,imagined なら、--best の判定をターン末と想像の局面（探索が点数に使う局面）の交差エントロピーで行う（既定 end,after）。
 //     想像の局面を学ぶと after の予測が少し悪くなり、既定の判定では学習前が選ばれた（docs/ai-notes.md の同じ節）。
 //     docs/ai-notes.md「読みの中の相手のずれを学習で直す・資源の介入」
-//   npm run td -- ivcheck --model m1.json --data d0.jsonl[,d1.jsonl] [--holdout 0]
+//   npm run td -- ivcheck --model m1.json --data d0.jsonl[,d1.jsonl] [--holdout 0] [--opp <デッキ名>] [--min 30]
 //     介入の試合で、抜いたカードごとに「測った価値」（もとの試合の勝敗 − 抜いた試合の勝敗の平均）と、
-//     モデルが見ている価値（その局面の勝つ確率の予測の差）を比べる（docs/ai-notes.md「介入データを TD 学習に混ぜる」）
+//     モデルが見ている価値（その局面の勝つ確率の予測の差）を比べる（docs/ai-notes.md「介入データを TD 学習に混ぜる」）。
+//     --opp なら、カードの持ち主の相手がそのデッキの試合だけで数える（そのデッキとの対戦でのカードの価値。
+//     docs/ai-notes.md「ロイヤルに勝ち越せるデッキを探す」）。--min 未満の対しかないカードは表に出さない
 //   npm run td -- prune --model m4.json --data d0.jsonl,d1.jsonl,... --out data/value-net.json
 //     学習データに一度も現れなかった入力（デフォルトデッキに無いカードなど）の重みを 0 にする。学ばれずに初期値の乱数のまま残っているので、
 //     そのカードを使う自作デッキで補正がでたらめに動かないようにする（ファイルも小さくなる）。
@@ -379,6 +381,8 @@ interface IvPair {
   card: string;
   /** カード・資源の持ち主のデッキ */
   deck: string;
+  /** 持ち主の相手のデッキ */
+  opp: string;
   zone: IvZone;
   /** 資源の増減（カードの介入は 0） */
   d: number;
@@ -534,7 +538,7 @@ function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: num
         const zone = r.iv.zone ?? "hand";
         const owner = zone === "oppBoard" || zone === "oppRes" ? 1 - r.iv.p : r.iv.p;
         if (base !== undefined && base >= 0 && variant !== undefined && variant >= 0) {
-          pairs.push({ base, variant, card: r.iv.card ?? r.iv.res ?? "", deck: r.decks[owner]!, zone, d: r.iv.d ?? 0 });
+          pairs.push({ base, variant, card: r.iv.card ?? r.iv.res ?? "", deck: r.decks[owner]!, opp: r.decks[1 - owner]!, zone, d: r.iv.d ?? 0 });
         }
       } else {
         posOf.set(r.g, pos);
@@ -1300,9 +1304,13 @@ function prune(args: Args): number {
 function ivcheck(args: Args): number {
   const model = loadValueNet(need(args, "model"));
   const net = compileValueNet(model);
-  const d = loadData(need(args, "data").split(","), numArg(args, "holdout", 0), 1, undefined, net.board);
-  const v = predictAll(net, d);
+  const loaded = loadData(need(args, "data").split(","), numArg(args, "holdout", 0), 1, undefined, net.board);
+  const v = predictAll(net, loaded);
   const holdoutOnly = numArg(args, "holdout", 0) > 0;
+  const opp = args.get("opp");
+  if (opp !== undefined && !loaded.pairs.some((q) => q.opp === opp)) throw new Error(`相手が ${opp} の介入の試合がありません`);
+  const d: Dataset = opp === undefined ? loaded : { ...loaded, pairs: loaded.pairs.filter((q) => q.opp === opp) };
+  if (opp !== undefined) console.log(`相手が ${opp} の試合だけ（介入の対 ${d.pairs.length}）`);
   console.log(ivSummary(d, v, holdoutOnly) ?? "介入の試合がありません");
   const nameOf = new Map(ALL_CARDS.map((c): [string, string] => [c.id, c.name]));
   // デッキ・カードごと
