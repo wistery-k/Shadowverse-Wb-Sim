@@ -1153,7 +1153,7 @@ mod tests {
             .filter(|f| f.ends_with(".txt"))
             .collect();
         files.sort();
-        assert_eq!(files.len(), 8);
+        assert_eq!(files.len(), 9);
         let pool: Vec<Deck> = files
             .iter()
             .map(|f| read_deck(f).expect("デッキ"))
