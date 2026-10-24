@@ -51,9 +51,11 @@
 //     学習データに一度も現れなかった入力（デフォルトデッキに無いカードなど）の重みを 0 にする。学ばれずに初期値の乱数のまま残っているので、
 //     そのカードを使う自作デッキで補正がでたらめに動かないようにする（ファイルも小さくなる）。
 //     場のカードのネットワークを持つモデルなら、場に現れなかったカード・付与された能力の行も 0 にする（そのカードは数値の入力だけで見る）
-//   npm run td -- probe --model m1.json --data d0.jsonl [--per 2000]
+//   npm run td -- probe --model m1.json --data d0.jsonl [--per 2000] [--ep 1 --min 30]
 //     学んだ補正が何を見ているか: デッキごとのターン末の局面で、入力を 1 つ増やしたときの補正 (c + L) / a の変化（評価の点数の単位）の平均。
 //     PP 最大値・EP・SEP を 1 増やす、手札・場にカードを 1 枚足す（変化の大きい順）
+//     --ep 1 なら、EP が残っているターン末の局面で、残りの EP 1 つの価値（EP を 1 減らしたときの点数の下がり）が、手札のカードでどれだけ変わるか
+//     （そのカードを手札から 1 枚抜くと EP 1 つの価値がどれだけ下がるか）をカードごとに出す。--min 局面より少ないカードは出さない
 //
 // カードの重みを属性とカードごとの残りに分ける（docs/ai-notes.md の同じ名前の節。属性は scripts/cardAttrs.ts）:
 //   最初の層のゾーン z・カード c の行を W1[z,c] = Σ_k 属性 k(c) · A[z,k] + R[z,c] と見る。属性はカードのデータと能力の定義から作る
@@ -61,8 +63,9 @@
 //   R = 0 で属性の分だけになるので、初見のカードもそれらしい行から始まる。書き出す w1 は足し込んだ行なので、推論（Rust）は今のまま。
 //   npm run td -- attr --model m.json --out m2.json [--data d.jsonl,...] [--ridge 3] [--n0 0] [--keepA 1]
 //     学び直さずに、学んだ行に A をリッジ回帰で当てはめ、学んでいない行を属性の分で埋める（関数の先頭の説明）
-//   npm run td -- train ... --attr 1 [--ridge 3] [--l2Res <l2>] [--l2Attr <l2>]
+//   npm run td -- train ... --attr 1 [--ridge 3] [--l2Res <l2>] [--l2Attr <l2>] [--lrAttr 1]
 //     A と R を一緒に学ぶ。A はモデルの attr か、無ければ今の行への当てはめから始める。R の減衰は --l2Res、A は --l2Attr。
+//     A の学習率は lr × --lrAttr（0 なら A を当てはめたまま動かさない）。
 //     書き出すモデルは A（attr）も持つ。td prune は、データに出なかったカードの行を 0 でなく属性の分にし、A を外す
 //   npm run td -- train ... --exclude <カード名,...>（td prune にも同じものを渡す）
 //     そのカードが入力にある試合を学ばない（知らないカードを作って、属性の分の効き目を確かめる用）
@@ -978,8 +981,9 @@ function train(args: Args): number {
       }
     }
   };
-  /** Adam で更新する範囲（--attr 1 なら、学習データに出なかったカードの行の R は 0 のまま動かないので飛ばす） */
-  const active: [number, number][] = [[0, size]];
+  /** Adam で更新する範囲と学習率の倍率（--attr 1 なら、学習データに出なかったカードの行の R は 0 のまま動かないので飛ばす。A は --lrAttr 倍） */
+  const active: [number, number, number][] = [[0, size, 1]];
+  const lrAttr = numArg(args, "lrAttr", 1);
   if (attrOn && basis) {
     const seen = new Uint8Array(ZV);
     for (const r of d.idx) if (r < ZV) seen[r] = 1;
@@ -1005,12 +1009,13 @@ function train(args: Args): number {
     for (const r of dataRows) {
       const last = active[active.length - 1];
       if (last && last[1] === r * H) last[1] += H;
-      else active.push([r * H, r * H + H]);
+      else active.push([r * H, r * H + H, 1]);
     }
-    active.push([ZV * H, size]);
+    active.push([ZV * H, oAttr, 1]);
+    if (lrAttr !== 0) active.push([oAttr, size, lrAttr]);
     console.log(
       `属性 ${KA} 個（${fromModel ? "モデルの A から" : `今の行にリッジ回帰（λ ${numArg(args, "ridge", 3)}）で当てはめて`}始める）、カードの行 ${ZV} のうち学んだ行 ${learned}・学習データに出た行 ${dataRows.length}、` +
-        `減衰 R ${l2Res}・A ${l2Attr}`,
+        `減衰 R ${l2Res}・A ${l2Attr}、A の学習率 ×${lrAttr}`,
     );
   }
   const touched: number[] = [], touchedMark = new Uint8Array(attrOn ? ZV : 0);
@@ -1231,13 +1236,14 @@ function train(args: Args): number {
       // Adam（重みは減衰させる）
       step++;
       const c1 = 1 - beta1 ** step, c2 = 1 - beta2 ** step;
-      for (const [q0, q1] of active) {
+      for (const [q0, q1, scale] of active) {
+        const lrq = lr * scale;
         for (let q = q0; q < q1; q++) {
           const gq = grad[q]!;
           m1[q] = beta1 * m1[q]! + (1 - beta1) * gq;
           m2[q] = beta2 * m2[q]! + (1 - beta2) * gq * gq;
           const decay = decayCoef[q]! * params[q]!;
-          params[q]! -= lr * ((m1[q]! / c1) / (Math.sqrt(m2[q]! / c2) + 1e-8) + decay);
+          params[q]! -= lrq * ((m1[q]! / c1) / (Math.sqrt(m2[q]! / c2) + 1e-8) + decay);
         }
       }
       // a が 0 に近いと補正 (c + L) / a が発散するので下限を置く
@@ -1364,6 +1370,44 @@ function probe(args: Args): number {
     }
     return [n === 0 ? 0 : sum / n, n];
   };
+  if (numArg(args, "ep", 0) !== 0) {
+    const iEp = scalar("myEp"), hand0 = zone("myHand");
+    const valOf = (x: ProbeInput, i: number) => {
+      const k = x.idx.indexOf(i);
+      return k < 0 ? 0 : x.val[k]!;
+    };
+    const per = new Map<number, { n: number; sum: number; sq: number; ep: number }>();
+    let n = 0, epSum = 0;
+    for (const x of [...byDeck.values()].flat()) {
+      if (valOf(x, iEp) < 1e-9) continue;
+      const lessEp = bump(x, iEp, -1 / 3);
+      const epValue = points(x) - points(lessEp);
+      n++;
+      epSum += epValue;
+      x.idx.forEach((i, k) => {
+        if (i < hand0 || i >= hand0 + V || !(x.val[k]! > 0)) return;
+        const d = epValue - (points(bump(x, i, -1)) - points(bump(lessEp, i, -1)));
+        const a = per.get(i) ?? { n: 0, sum: 0, sq: 0, ep: 0 };
+        a.n++;
+        a.sum += d;
+        a.sq += d * d;
+        a.ep += epValue;
+        per.set(i, a);
+      });
+    }
+    console.log(`EP が残っているターン末の局面 ${n}: 残りの EP 1 つの価値の平均 ${(epSum / Math.max(1, n)).toFixed(2)} 点`);
+    const min = numArg(args, "min", 30);
+    const rows = [...per]
+      .filter(([, a]) => a.n >= min)
+      .map(([i, a]) => {
+        const mean = a.sum / a.n;
+        return { name: nameOf.get(model.vocab[i - hand0]!) ?? model.vocab[i - hand0]!, n: a.n, mean, se: Math.sqrt(Math.max(0, a.sq / a.n - mean * mean) / a.n), ep: a.ep / a.n };
+      })
+      .sort((x, y) => y.mean - x.mean);
+    console.log("手札のカード（局面の数）: そのカードがあることで EP 1 つの価値が上がる分 ± 標準誤差（そのカードがあるときの EP 1 つの価値）");
+    for (const r of rows) console.log(`  ${r.name}（${r.n}）: ${r.mean >= 0 ? "+" : ""}${r.mean.toFixed(2)} ± ${r.se.toFixed(2)}（${r.ep.toFixed(2)}）`);
+    return 0;
+  }
   for (const [deck, list] of byDeck) {
     const mean = list.reduce((x, s) => x + points(s), 0) / Math.max(1, list.length);
     const sc = ([["myMaxPp", 0.1, "PP最大値+1"], ["myEp", 1 / 3, "EP+1"], ["mySep", 0.5, "SEP+1"], ["myHp", 0.05, "体力+1"], ["oppHp", 0.05, "相手の体力+1"]] as const)

@@ -135,6 +135,10 @@ describe("最初の層のカードの行を属性で表す学習（td attr・tra
       expect(rowOf(m0p, unseen).every((w) => w === 0)).toBe(true);
       expect(rowOf(m2, unseen).some((w) => w !== 0)).toBe(true);
       expect(rowOf(m2, seen)).toEqual(rowOf(m0p, seen));
+      // --lrAttr 0: A は当てはめたまま動かない（td attr と同じ当てはめ）
+      await quiet(["train", "--model", p("m0p.json"), "--data", data, "--out", p("m3.json"), "--attr", "1", "--lrAttr", "0", "--epochs", "1", "--lr", "0.01", "--holdout", "0.2"]);
+      const m3 = loadValueNet(p("m3.json"));
+      m3.attr!.a.forEach((v, i) => expect(v).toBeCloseTo(m2.attr!.a[i]!, 5));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
