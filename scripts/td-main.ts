@@ -61,8 +61,9 @@
 //   R = 0 で属性の分だけになるので、初見のカードもそれらしい行から始まる。書き出す w1 は足し込んだ行なので、推論（Rust）は今のまま。
 //   npm run td -- attr --model m.json --out m2.json [--data d.jsonl,...] [--ridge 3] [--n0 0] [--keepA 1]
 //     学び直さずに、学んだ行に A をリッジ回帰で当てはめ、学んでいない行を属性の分で埋める（関数の先頭の説明）
-//   npm run td -- train ... --attr 1 [--ridge 3] [--l2Res <l2>] [--l2Attr <l2>]
+//   npm run td -- train ... --attr 1 [--ridge 3] [--l2Res <l2>] [--l2Attr <l2>] [--lrAttr 1]
 //     A と R を一緒に学ぶ。A はモデルの attr か、無ければ今の行への当てはめから始める。R の減衰は --l2Res、A は --l2Attr。
+//     A の学習率は lr × --lrAttr（0 なら A を当てはめたまま動かさない）。
 //     書き出すモデルは A（attr）も持つ。td prune は、データに出なかったカードの行を 0 でなく属性の分にし、A を外す
 //   npm run td -- train ... --exclude <カード名,...>（td prune にも同じものを渡す）
 //     そのカードが入力にある試合を学ばない（知らないカードを作って、属性の分の効き目を確かめる用）
@@ -978,8 +979,9 @@ function train(args: Args): number {
       }
     }
   };
-  /** Adam で更新する範囲（--attr 1 なら、学習データに出なかったカードの行の R は 0 のまま動かないので飛ばす） */
-  const active: [number, number][] = [[0, size]];
+  /** Adam で更新する範囲と学習率の倍率（--attr 1 なら、学習データに出なかったカードの行の R は 0 のまま動かないので飛ばす。A は --lrAttr 倍） */
+  const active: [number, number, number][] = [[0, size, 1]];
+  const lrAttr = numArg(args, "lrAttr", 1);
   if (attrOn && basis) {
     const seen = new Uint8Array(ZV);
     for (const r of d.idx) if (r < ZV) seen[r] = 1;
@@ -1005,12 +1007,13 @@ function train(args: Args): number {
     for (const r of dataRows) {
       const last = active[active.length - 1];
       if (last && last[1] === r * H) last[1] += H;
-      else active.push([r * H, r * H + H]);
+      else active.push([r * H, r * H + H, 1]);
     }
-    active.push([ZV * H, size]);
+    active.push([ZV * H, oAttr, 1]);
+    if (lrAttr !== 0) active.push([oAttr, size, lrAttr]);
     console.log(
       `属性 ${KA} 個（${fromModel ? "モデルの A から" : `今の行にリッジ回帰（λ ${numArg(args, "ridge", 3)}）で当てはめて`}始める）、カードの行 ${ZV} のうち学んだ行 ${learned}・学習データに出た行 ${dataRows.length}、` +
-        `減衰 R ${l2Res}・A ${l2Attr}`,
+        `減衰 R ${l2Res}・A ${l2Attr}、A の学習率 ×${lrAttr}`,
     );
   }
   const touched: number[] = [], touchedMark = new Uint8Array(attrOn ? ZV : 0);
@@ -1231,13 +1234,14 @@ function train(args: Args): number {
       // Adam（重みは減衰させる）
       step++;
       const c1 = 1 - beta1 ** step, c2 = 1 - beta2 ** step;
-      for (const [q0, q1] of active) {
+      for (const [q0, q1, scale] of active) {
+        const lrq = lr * scale;
         for (let q = q0; q < q1; q++) {
           const gq = grad[q]!;
           m1[q] = beta1 * m1[q]! + (1 - beta1) * gq;
           m2[q] = beta2 * m2[q]! + (1 - beta2) * gq * gq;
           const decay = decayCoef[q]! * params[q]!;
-          params[q]! -= lr * ((m1[q]! / c1) / (Math.sqrt(m2[q]! / c2) + 1e-8) + decay);
+          params[q]! -= lrq * ((m1[q]! / c1) / (Math.sqrt(m2[q]! / c2) + 1e-8) + decay);
         }
       }
       // a が 0 に近いと補正 (c + L) / a が発散するので下限を置く
