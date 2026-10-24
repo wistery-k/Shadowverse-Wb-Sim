@@ -4,7 +4,7 @@
 //!   svwb meta round --state 環境.json [--out 次.json] [--classes witch,bishop] [--games 30] [--draw 1]
 //!                   [--stages 150:10,450:3] [--confirm 1200] [--zmin 2] [--eta 1] [--minUsage 0.02]
 //!                   [--pool <カード>,…] [--net 補正.json] [--report 記録.md] [--jsonl 試合.jsonl]
-//!   svwb meta export --state 環境.json --dir <フォルダ>
+//!   svwb meta export --state 環境.json --dir <フォルダ> [--top 1]
 //!   svwb meta show --state 環境.json
 //!
 //! - **init:** 環境（デッキ・使用率）のファイルを作る。既定は比較用の 7 デッキ。`--decks` にはデフォルトデッキの名前か、
@@ -27,7 +27,8 @@
 //!   - 試合番号は環境のファイルの `nextG` から順に使い、回りごと・段ごとに新しくする（シードは 5000000 + 試合番号 × 13 + 席。他のランナーと重ならない）
 //!   - AI は deck-compare と同じ（どちらの側も今の既定。`--net` ならどちらの側も学習した補正をそのファイルのものに替える）
 //!   - 回りのまとめを `--report` に（Markdown で）書き足し、試合ごとの結果を `--jsonl` に書き足す
-//! - **export:** 環境のデッキをテキストファイル（`<key>.txt`）に書き出し、カンマで並べたパスを出す（td selfplay `--decks` に渡す。補正の学び直し用）
+//! - **export:** 環境のデッキをテキストファイル（`<key>.txt`）に書き出し、カンマで並べたパスを出す（td selfplay `--decks` に渡す。補正の学び直し用）。
+//!   `--top 1` なら、クラスごとに使用率が一番のデッキだけ（クラスの順。compare `--decks` に渡す）
 //! - **show:** 環境のデッキ・使用率・入れ替えの履歴を出す
 
 use super::deck_compare::{
@@ -865,13 +866,33 @@ fn deck_text(d: &MetaDeck) -> Result<String, String> {
     Ok(s)
 }
 
+/// クラスごとに使用率が一番のデッキ（環境の添字、クラスの順）
+fn class_tops(st: &MetaState) -> Result<Vec<usize>, String> {
+    let mut out = Vec::new();
+    for (c, _) in CLASSES {
+        let mut best: Option<usize> = None;
+        for (i, d) in st.decks.iter().enumerate() {
+            if d.class_id()? == c && best.is_none_or(|b| d.usage > st.decks[b].usage) {
+                best = Some(i);
+            }
+        }
+        out.extend(best);
+    }
+    Ok(out)
+}
+
 fn export(a: &Args) -> Result<(), String> {
-    a.check(&["state", "dir"])?;
+    a.check(&["state", "dir", "top"])?;
     let st = read_state(a.need("state")?)?;
     let dir = a.need("dir")?;
     std::fs::create_dir_all(dir).map_err(|e| format!("{dir} を作れません: {e}"))?;
+    let which: Vec<usize> = if a.int("top", 0)? > 0 {
+        class_tops(&st)?
+    } else {
+        (0..st.decks.len()).collect()
+    };
     let mut paths = Vec::new();
-    for d in &st.decks {
+    for d in which.iter().map(|&i| &st.decks[i]) {
         let path = format!("{}/{}.txt", dir.trim_end_matches('/'), d.key);
         std::fs::write(&path, deck_text(d)?).map_err(|e| format!("{path} に書けません: {e}"))?;
         paths.push(path);

@@ -31,6 +31,7 @@
 | `npm run compare` | 探索 AI の設定 A と B の勝率（下） | `rust/engine/src/runner/compare.rs` |
 | `npm run rhino-compare` 等 | デッキ 1 つと他の 6 デッキの勝率（下） | `rust/engine/src/runner/rhino_compare.rs` |
 | `npm run deck-compare` | デッキのカードを入れ替えた案と元のデッキの勝率（下） | `rust/engine/src/runner/deck_compare.rs` |
+| `npm run meta` | 環境（デッキと使用率）のアジャスト合戦を 1 回りずつ回す（下） | `rust/engine/src/runner/meta.rs` |
 | `npm run yardstick` | 固定した相手との勝率（強さの物差し。下） | `rust/engine/src/runner/yardstick.rs` |
 | `npm run svwb` | Rust 版の CLI（下） | `rust/engine/src/main.rs` |
 | `npm run td` | TD 学習のモデルの作成・学習・分析（下） | `scripts/td-main.ts` |
@@ -141,6 +142,54 @@ AI はどちらの側も今の既定（リノセウスエルフはリノセウ�
   そのカードの入ったデッキを `td selfplay --decks` で自己対戦に混ぜて学び直し、`--net` で比べ直せる
 - 同じデッキでも、試合の組（`--start`）で勝率が 7〜10 ポイント動くことがある（ロイヤル戦 200 試合で g0〜99 と g100〜199）。良かった案は別の組で確かめる
 
+## meta
+
+```sh
+npm run meta -- init --out 環境.json [--decks <デッキ>,…] [--usage class|uniform]
+npm run meta -- round --state 環境.json [--out 次.json] [--classes witch,bishop] [--games 30] [--draw 1]
+                [--stages 150:10,450:3] [--confirm 1200] [--zmin 2] [--eta 1] [--minUsage 0.02]
+                [--pool <カード>,…] [--net 補正.json] [--report 記録.md] [--jsonl 試合.jsonl]
+npm run meta -- export --state 環境.json --dir <フォルダ> [--top 1]  # 環境のデッキを td selfplay --decks 用のファイルに（--top 1 ならクラスごとに一番のデッキだけ。compare --decks 用）
+npm run meta -- show --state 環境.json
+```
+
+環境（デッキと使用率）を持ち、1 回りごとに、各クラスが今の環境に一番効く入れ替えを探して採り、使用率を更新する（docs/ai-notes.md「環境を自動で回す」）。
+環境のファイル（JSON）に、デッキ（カードの並び・元にしたデフォルトデッキ・使用率・入れ替えの履歴・引いた瞬間の価値）と回りのまとめが入る。
+AI は deck-compare と同じ（どちらの側も今の既定）。
+
+`init`:
+
+| 引数 | 既定 | 意味 |
+|---|---|---|
+| `--out` | 必須 | 書き出す環境のファイル |
+| `--decks デッキ,…` | 比較用の 7 デッキ | 環境のデッキ（デフォルトデッキの名前か、デッキのテキストファイルのパス）。ファイルのデッキは、同じクラスのデフォルトデッキと 30 枚以上同じならそれを元にする（マリガンのモデルとリノセウス用 AI）。元が無ければマリガンは引き直しを試して選ぶ |
+| `--usage` | `class` | 最初の使用率。`class` はクラスごとに 1/クラス数 を、そのクラスのデッキで等分。`uniform` はデッキごとに等分 |
+
+`round`（1 回り。総当たり → 使用率の更新 → 案 → ふるい → 確かめ → 採る）:
+
+| 引数 | 既定 | 意味 |
+|---|---|---|
+| `--state` | 必須 | 環境のファイル |
+| `--out` | `--state` と同じ | 回りの後の環境を書き出すファイル |
+| `--classes` | 環境のすべてのクラス | 入れ替えを探すクラス（`elf`・`royal`・`witch`・`dragon`・`nightmare`・`bishop`・`nemesis` か日本語の名前） |
+| `--games N` | 30 | 総当たりの 1 組・席 1 つあたりの試合数（0 なら総当たりをせず、使用率も変えない） |
+| `--draw p` | 1 | 総当たりの各試合で、各席について「引いた瞬間に抜く」介入をする確率（td selfplay `--ivZone drawn` と同じ選び方）。カードの価値は環境のファイルに足していく |
+| `--eta` | 1 | 使用率の更新 u ← u × (2 × 全体の勝率)^eta |
+| `--minUsage` | 0.02 | これ未満になったデッキは環境から外す（クラスで一番のデッキは残す） |
+| `--stages 試合:残す数,…` | `150:10,450:3` | ふるいの段。各段で新しい試合番号の試合（相手は使用率に比例して割り当て、両方の席）を足し、元のデッキとの差の上位を残す |
+| `--confirm N` | 1200 | 確かめの試合数（新しい試合番号）。元のデッキに z ≥ `--zmin` で勝つ案のうち、差の一番大きいものを採る |
+| `--zmin` | 2 | 採る z の下限 |
+| `--pool カード,…` | クラスとニュートラルの全カード | 足すカードを絞る |
+| `--net ファイル` | なし | 両方の席の学習した補正をこのファイルのものに替える（学び直した補正で回す用。`baseWeights` の無いモデルだけ） |
+| `--report ファイル` | なし | 回りのまとめ（Markdown。標準出力と同じ）を書き足す |
+| `--jsonl ファイル` | なし | 試合ごとの結果（段・デッキ・案・相手・試合番号・席・勝ち・介入）を JSON Lines で書き足す |
+
+- 案は、クラスごとに使用率が一番のデッキについて、クラスとニュートラルの各カードを 2 枚（3 枚を超えるなら入るだけ）足し、
+  引いた瞬間の価値の低いカード（2 枚以上入っているもの）を 1 枚ずつ同じ枚数抜く。1 クラス 40 案ほど
+- 採った案は元のデッキに替わる（使用率はそのまま。名前に「改 n」が付き、履歴に残る）
+- 試合番号は環境のファイルの `nextG` から順に使う（シードは 5000000 + 13 × 試合番号 + 席）。同じ環境のファイルと引数なら同じ結果
+- 試合数の目安（既定、クラス 7 つ・環境 14 デッキ）: 総当たり 5460 試合と介入、ふるいと確かめで 1 クラス 1.6 万試合ほど、全部で 12 万試合ほど
+
 ## yardstick
 
 ```sh
@@ -163,6 +212,7 @@ npm run svwb -- ai-play [試合数 14] [最初の試合 0] [search|rhino|rhino-l
 npm run svwb -- compare …                               # npm run compare と同じ
 npm run svwb -- rhino-compare …                         # npm run rhino-compare と同じ
 npm run svwb -- yardstick …                             # npm run yardstick と同じ
+npm run svwb -- meta …                                  # npm run meta と同じ
 npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mulligan":"sample"}'] [--b '{}']
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
                 [--sampling classic|default] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
