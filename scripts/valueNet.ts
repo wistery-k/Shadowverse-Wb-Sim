@@ -189,6 +189,19 @@ export interface ValueNetModel {
   baseWeights: Record<string, unknown>;
   /** 場のカードのネットワーク（無ければ使わない。npm run td -- board で足す） */
   board?: ValueNetBoard;
+  /**
+   * 最初の層のカードの行を属性で表す分（scripts/cardAttrs.ts。npm run td -- attr・train --attr が書く）。推論は使わない（w1 に足し込み済み）。
+   * w1 のゾーン z・カード c の行 = Σ_k 属性 k(c) · a[z,k,·] + カードごとの残り。a はゾーン × names × 隠れ層の大きさ
+   */
+  attr?: ValueNetAttr;
+}
+
+/** 最初の層のカードの行の、属性で表す分 */
+export interface ValueNetAttr {
+  /** 属性の名前（scripts/cardAttrs.ts の attributeNames） */
+  names: string[];
+  /** ゾーン × 属性 × 隠れ層 */
+  a: number[];
 }
 
 /** 足した隠れ層 */
@@ -238,6 +251,12 @@ export function parseValueNetModel(raw: unknown): ValueNetModel {
     const r = o.board as Record<string, unknown>;
     board = { features: strsOf(r.features, "board.features"), grants: strsOf(r.grants, "board.grants"), layers: layersOf(r.layers, "board.layers") };
   }
+  let attr: ValueNetAttr | undefined;
+  if (o.attr !== undefined) {
+    if (typeof o.attr !== "object" || o.attr === null) throw new Error("ValueNetModel の attr がオブジェクトではありません");
+    const r = o.attr as Record<string, unknown>;
+    attr = { names: strsOf(r.names, "attr.names"), a: numsOf(r.a, "attr.a") };
+  }
   return {
     kind: "td-value-net",
     version: 1,
@@ -254,6 +273,7 @@ export function parseValueNetModel(raw: unknown): ValueNetModel {
     c: num("c"),
     baseWeights: baseWeights as Record<string, unknown>,
     ...(board ? { board } : {}),
+    ...(attr ? { attr } : {}),
   };
 }
 
