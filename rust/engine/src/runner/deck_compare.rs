@@ -43,28 +43,28 @@ use std::time::Instant;
 /// シードの基準（compare・rhino-compare・td selfplay の試合と重ならないように大きくする）
 const SEED_BASE: u32 = 2_000_000;
 /// スターターの構築ルール（src/cards/format.ts）
-const DECK_SIZE: usize = 40;
-const MAX_COPIES: usize = 3;
+pub(crate) const DECK_SIZE: usize = 40;
+pub(crate) const MAX_COPIES: usize = 3;
 /// リノセウス用 AI で打つデッキ
-const RHINO_DECK: &str = "リノセウスエルフ";
+pub(crate) const RHINO_DECK: &str = "リノセウスエルフ";
 
 /// 比べるデッキ 1 つ（元のデッキか案）
-struct Entry {
-    label: String,
-    cards: Vec<CardIdx>,
+pub(crate) struct Entry {
+    pub(crate) label: String,
+    pub(crate) cards: Vec<CardIdx>,
     /// リノセウス用 AI で打つ（元のデッキがリノセウスエルフのとき）
-    rhino: bool,
+    pub(crate) rhino: bool,
     /// デフォルトデッキと違うとき、マリガンをこのデフォルトデッキのモデルで行う。
     /// None なら返し方ごとに引き直しを試して選ぶ（`mulligan: "sample"`）
-    mulligan_as: Option<&'static str>,
+    pub(crate) mulligan_as: Option<&'static str>,
 }
 
 /// 元のデッキ（デフォルトデッキかファイル）
-struct BaseDeck {
-    name: String,
-    cards: Vec<CardIdx>,
+pub(crate) struct BaseDeck {
+    pub(crate) name: String,
+    pub(crate) cards: Vec<CardIdx>,
     /// デフォルトデッキならその名前
-    default: Option<&'static str>,
+    pub(crate) default: Option<&'static str>,
 }
 
 struct Task {
@@ -105,7 +105,7 @@ fn default_agent(deck_name: &str, net: Option<&ExtraEval>) -> Box<dyn Agent> {
 }
 
 /// 比べる側の AI（マリガンの仕方は Entry の mulligan_as）
-fn subject_agent(e: &Entry, net: Option<&ExtraEval>) -> Box<dyn Agent> {
+pub(crate) fn subject_agent(e: &Entry, net: Option<&ExtraEval>) -> Box<dyn Agent> {
     let inner: Box<dyn Agent> = if e.rhino {
         Box::new(rhino_agent(net))
     } else if e.mulligan_as.is_some() {
@@ -145,7 +145,7 @@ impl Agent for MulliganAs {
 }
 
 /// カード名かカード ID からカードを引く（トークンは不可）
-fn find_card(name: &str) -> Result<CardIdx, String> {
+pub(crate) fn find_card(name: &str) -> Result<CardIdx, String> {
     let d = data();
     let idx = match d.card_by_id.get(name) {
         Some(&i) => i,
@@ -163,7 +163,7 @@ fn find_card(name: &str) -> Result<CardIdx, String> {
 }
 
 /// デッキのクラス（ニュートラル以外のカードのクラス）
-fn deck_class(cards: &[CardIdx]) -> ClassId {
+pub(crate) fn deck_class(cards: &[CardIdx]) -> ClassId {
     cards
         .iter()
         .map(|&c| card(c).class)
@@ -195,7 +195,10 @@ fn parse_changes(text: &str) -> Result<Vec<(CardIdx, i32)>, String> {
 }
 
 /// 元のデッキに変更を当てた案。抜いたカードの位置（後ろから）に、足すカードを書いた順に置く
-fn apply_changes(base: &[CardIdx], changes: &[(CardIdx, i32)]) -> Result<Vec<CardIdx>, String> {
+pub(crate) fn apply_changes(
+    base: &[CardIdx],
+    changes: &[(CardIdx, i32)],
+) -> Result<Vec<CardIdx>, String> {
     let mut cards = base.to_vec();
     let mut slots: Vec<usize> = Vec::new();
     let mut adds: Vec<CardIdx> = Vec::new();
@@ -237,7 +240,7 @@ fn apply_changes(base: &[CardIdx], changes: &[(CardIdx, i32)]) -> Result<Vec<Car
 }
 
 /// スターターの構築ルール（40 枚・同名 3 枚まで・クラス）を満たすか
-fn check_deck(cards: &[CardIdx], class: ClassId) -> Result<(), String> {
+pub(crate) fn check_deck(cards: &[CardIdx], class: ClassId) -> Result<(), String> {
     for &c in cards {
         let k = card(c).class;
         if k != ClassId::Neutral && k != class {
@@ -305,7 +308,7 @@ fn parse_deck_text(text: &str, default_name: &str) -> Result<(String, Vec<CardId
 }
 
 /// デフォルトデッキの名前か、デッキのテキストファイル
-fn load_deck(name: &str) -> Result<BaseDeck, String> {
+pub(crate) fn load_deck(name: &str) -> Result<BaseDeck, String> {
     if let Ok(d) = find_deck(name) {
         return Ok(BaseDeck {
             name: d.name.clone(),
@@ -339,7 +342,7 @@ pub(crate) fn read_deck(name: &str) -> Result<Deck, String> {
 }
 
 /// 変更を読みやすい名前に（「知恵の輝き-1,最果ての罪・サタン+1」）
-fn changes_label(changes: &[(CardIdx, i32)]) -> String {
+pub(crate) fn changes_label(changes: &[(CardIdx, i32)]) -> String {
     changes
         .iter()
         .map(|&(c, n)| {
@@ -350,7 +353,7 @@ fn changes_label(changes: &[(CardIdx, i32)]) -> String {
         .join(",")
 }
 
-fn find_deck(name: &str) -> Result<&'static Deck, String> {
+pub(crate) fn find_deck(name: &str) -> Result<&'static Deck, String> {
     data()
         .decks
         .iter()

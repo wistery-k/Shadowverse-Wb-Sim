@@ -7,6 +7,7 @@
 pub mod compare;
 pub mod deck_compare;
 pub mod human_plan;
+pub mod meta;
 pub mod mulligan_compare;
 pub mod options;
 pub mod parallel;

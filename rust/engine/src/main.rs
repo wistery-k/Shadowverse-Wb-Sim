@@ -8,6 +8,7 @@
 //!   svwb compare <games> '<A>' '<B>' [start] [vsDeck] [--no-mirror]  探索 AI の設定どうしの勝率（npm run compare と同じ）
 //!   svwb rhino-compare [--subject …] [--games …] [--opts …] [--out …]  デッキ専用の AI の勝率（npm run rhino-compare と同じ）
 //!   svwb deck-compare --deck <デッキ> [--variant '<変更>']… [--add <カード>] [--file <デッキ>]… [--vs <デッキ>] [--games 50]  デッキのカードを入れ替えた案を元のデッキと比べる
+//!   svwb meta init|round|export|show …  環境（デッキと使用率）のアジャスト合戦を 1 回りずつ回す（runner/meta.rs）
 //!   svwb mulligan-compare [--games 50] [--a …] [--b …]  マリガンの設定どうしを同じシードの試合で打ち比べる
 //!   svwb human-plan-value --out 結果.jsonl [--m 32] <人間の記録.jsonl>…  人間の手順と AI の手順を同じ局面から打ち比べる（report で集計）
 //!   svwb td selfplay --model m.json --games N [--start S] [--eps 0.1] --out d.jsonl  TD 学習の自己対戦
@@ -156,7 +157,7 @@ fn main() {
         }
         Some(
             cmd @ ("compare" | "rhino-compare" | "deck-compare" | "mulligan-compare" | "td"
-            | "yardstick" | "human-plan-value"),
+            | "yardstick" | "human-plan-value" | "meta"),
         ) => {
             let rest = &args[1..];
             let r = match cmd {
@@ -166,6 +167,7 @@ fn main() {
                 "deck-compare" => runner::deck_compare::main(rest),
                 "yardstick" => runner::yardstick::main(rest),
                 "human-plan-value" => runner::human_plan::main(rest),
+                "meta" => runner::meta::main(rest),
                 _ => runner::td::main(rest),
             };
             if let Err(e) = r {
@@ -174,7 +176,7 @@ fn main() {
             }
         }
         _ => {
-            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | mulligan-compare … | td selfplay … | yardstick … | human-plan-value …（rust/README.md）");
+            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | td selfplay … | yardstick … | human-plan-value …（rust/README.md）");
             std::process::exit(2);
         }
     }
