@@ -25,8 +25,8 @@ if (!isMainThread && workerData?.viteRun) {
     console.error("使い方: node scripts/vite-run.mjs <スクリプト.ts> [引数...]");
     process.exit(2);
   }
-  // rust-data は WASM を作る途中で呼ばれる（WASM を使わない）
-  if (basename(script) !== "rust-data-main.ts") {
+  // rust-data は WASM を作る途中で呼ばれる。pack-run はファイルをまとめるだけ（どちらも WASM を使わない）
+  if (!["rust-data-main.ts", "pack-run-main.ts"].includes(basename(script))) {
     execFileSync(process.execPath, [fileURLToPath(new URL("./build-wasm.mjs", import.meta.url))], { stdio: ["ignore", "inherit", "inherit"] });
   }
   const { build } = await import("vite");

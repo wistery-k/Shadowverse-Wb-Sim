@@ -34,6 +34,7 @@
 | `npm run yardstick` | 固定した相手との勝率（強さの物差し。下） | `rust/engine/src/runner/yardstick.rs` |
 | `npm run svwb` | Rust 版の CLI（下） | `rust/engine/src/main.rs` |
 | `npm run td` | TD 学習のモデルの作成・学習・分析（下） | `scripts/td-main.ts` |
+| `npm run pack-run` | PC で回した 1 回分の出力（自己対戦・モデル・ログ）を、共有フォルダに上げる `.tar.gz` にまとめる（下） | `scripts/pack-run-main.ts` |
 
 ## sim
 
@@ -191,6 +192,65 @@ npm run td -- probe --model m1.json --data d0.jsonl [--per 2000]
 ```
 
 自己対戦（`selfplay`）は Rust 版（`npm run svwb -- td selfplay`）で行う。各引数の意味は `scripts/td-main.ts` の先頭。
+
+## pack-run（PC で回した結果をクラウドから見られるようにする）
+
+```sh
+npm run pack-run -- <フォルダ> [--name 名前] [--note 'メモ'] [--out ~/svwb-upload] [--only selfplay,models,logs]
+                    [--include 'f*,rf*'] [--exclude 'r*'] [--max-mb 0] [--force]
+npm run pack-run -- ~/td-royal --name royal-9 --note 'ロイヤル対策 9 回目（rf.sh）' --include 'f*,rf*'
+```
+
+PC で回した 1 回分の出力（フォルダの中のファイル）を、1 つの `.tar.gz` にまとめる。
+これをプロジェクトのファイル（共有フォルダ。クラウドでは `/mnt/project-files/`）に上げると、クラウドのスレッドから読める。
+
+1. PC で、リポジトリの一番上で `npm run pack-run -- <フォルダ> --name <名前>` を実行する（数秒〜数分）
+2. できた `~/svwb-upload/<名前>.tar.gz` を、プロジェクトのファイルに上げる。WSL なら Windows のエクスプローラーから
+   `\\wsl.localhost\<ディストリ名>\home\<ユーザー名>\svwb-upload` で開ける（最後にこの場所を表示する）
+3. スレッドで「<名前> を上げた」と伝える。Claude が展開して、共有フォルダの `data/`・`logs/` に置く
+
+アーカイブの中は共有フォルダと同じ形にしてある（展開するとこの場所に入る）:
+
+| 種類 | 何か | 入る場所 |
+|---|---|---|
+| 自己対戦 | `td selfplay` の `.jsonl`（1 行目に `"samples"` があるもの） | `data/selfplay/<名前>/`（1 ファイルずつ gzip して `.jsonl.gz`） |
+| モデル | 学習した補正（`"kind":"td-value-net"` で始まる `.json`） | `data/models/<名前>/` |
+| ログ等 | それ以外（`.log`・`.sh`・`.txt`、`--out` で書いた試合ごとの結果の `.jsonl`（gzip する）など） | `logs/<名前>/` |
+| 一覧 | メモ、まとめた日時・元のフォルダ・その時の commit、ファイルごとの元の大きさ・行数・更新日時・sha256、入れなかったファイル | `logs/<名前>/MANIFEST.md` |
+
+`.done`・`.tmp`・`.` で始まるファイルと、サブフォルダ（の中）は入れない（一覧の「入れなかったもの」に出る）。
+
+| 引数 | 既定 | 意味 |
+|---|---|---|
+| `<フォルダ>` | 必須 | まとめるフォルダ（例: `~/td-royal`）。中のファイルだけを見る |
+| `--name 名前` | フォルダ名と日付（例: `td-royal-20261024`） | まとめの名前。アーカイブのファイル名と、共有フォルダの中のフォルダ名になる（空白・`/` 等は使えない） |
+| `--note 'メモ'` | なし | 一覧（MANIFEST.md）の先頭に書く。何の実験か（例: `ロイヤル対策 9 回目（rf.sh）`） |
+| `--out フォルダ` | `~/svwb-upload` | アーカイブを書く場所 |
+| `--only 種類,…` | 全部 | 入れる種類（`selfplay`・`models`・`logs`）。例: `--only models,logs` でログとモデルだけ（小さい） |
+| `--include パターン,…` | 全部 | ファイル名がどれかに当たるものだけ入れる（`*` と `?` が使える。シェルに展開されないよう `'` で囲む） |
+| `--exclude パターン,…` | なし | ファイル名がどれかに当たるものを入れない（例: 前に上げた自己対戦 `--exclude 'r*,d*'`） |
+| `--max-mb N` | 0（分けない） | 1 つのアーカイブをおよそ N MB までにして、いくつかに分ける（`<名前>-1of3.tar.gz` …）。どれも単独で展開でき、どれにも同じ一覧が入る |
+| `--force` | なし | 同じ名前のまとめが `--out` にあっても作り直す（前のものは消す）。無ければエラーにする |
+
+- 大きさ: 自己対戦の `.jsonl` は gzip で 1/7〜1/8 ほどになる（3000 試合の 70 MB が 9 MB。`notes/big-net/r0a.jsonl.gz`）。
+  モデルは 4〜9 MB ほどで、アーカイブ全体の gzip で 1/3 ほどになる
+- プロジェクトのファイルに上げられる大きさの上限は確かめていない。大きすぎて上がらなければ `--max-mb` で分ける
+- 自己対戦を回している途中でまとめると、まとめ始めたときの長さまでを入れる（1 分以内に書き換わったファイルがあれば注意を出す）
+- 同じフォルダに何回分もの出力がたまっているとき（`~/td-royal` など）は、`--include`・`--exclude` でその回のファイルだけにする
+- 実験用の `.sh` の最後に `npm run -s pack-run -- $W --name <名前> --include '…'` を入れておくと、回し終わったときにまとまる
+
+### クラウドで展開する（Claude 向け）
+
+```sh
+F=<上がったファイル>   # 上がった場所。メッセージに添付されたものは /mnt/project-files/uploads/hearth/<id>（拡張子なし）
+tar -tzf "$F" | head  # 中身を見る（1 つ目が logs/<名前>/MANIFEST.md）
+tar -xzf "$F" -C /mnt/project-files/ --skip-old-files  # 共有フォルダの data/・logs/ に展開する（あるファイルは上書きしない）
+zcat /mnt/project-files/data/selfplay/<名前>/f0.jsonl.gz | head -c 500
+```
+
+- 展開したら `logs/<名前>/MANIFEST.md` を読む（何の実験か、どのファイルがあるか、モデルの sha256）
+- `npm run td` は `.jsonl.gz` をそのまま読めない。学習・分析に使うときは `zcat` でスクラッチに展開してから渡す
+- 分けたアーカイブは、どれから展開してもよい
 
 ## 探索 AI の設定（compare の A・B、rhino-compare・yardstick の `--opts`）
 

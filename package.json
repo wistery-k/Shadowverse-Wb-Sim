@@ -28,7 +28,8 @@
     "royal-compare": "node scripts/svwb.mjs rhino-compare --subject royal",
     "yardstick": "node scripts/svwb.mjs yardstick",
     "td": "node scripts/vite-run.mjs scripts/td-main.ts",
-    "rust-data": "node scripts/vite-run.mjs scripts/rust-data-main.ts"
+    "rust-data": "node scripts/vite-run.mjs scripts/rust-data-main.ts",
+    "pack-run": "node scripts/vite-run.mjs scripts/pack-run-main.ts"
   },
   "repository": {
     "type": "git",

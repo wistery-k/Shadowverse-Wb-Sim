@@ -75,6 +75,7 @@ npm run compare    # 探索 AI の設定同士の比較（例: npm run compare -
 npm run sim-report # sim の --json の結果（--shard で分けたものも）を Markdown の表にまとめる
 npm run game       # 1試合だけ行い、行動の列を表示する（リプレイ画面の「再現に必要な情報」のコマンド）
 npm run svwb       # Rust 版の CLI（ゴールデンテスト・計測・自己対戦。rust/README.md）
+npm run pack-run   # PC で回した 1 回分の出力（自己対戦・モデル・ログ）を、共有フォルダに上げる .tar.gz にまとめる
 ```
 
 各コマンドが受け付ける引数の一覧は [`docs/commands.md`](docs/commands.md) にまとめてあります。
