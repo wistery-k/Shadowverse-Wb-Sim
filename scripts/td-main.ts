@@ -51,11 +51,12 @@
 //     学習データに一度も現れなかった入力（デフォルトデッキに無いカードなど）の重みを 0 にする。学ばれずに初期値の乱数のまま残っているので、
 //     そのカードを使う自作デッキで補正がでたらめに動かないようにする（ファイルも小さくなる）。
 //     場のカードのネットワークを持つモデルなら、場に現れなかったカード・付与された能力の行も 0 にする（そのカードは数値の入力だけで見る）
-//   npm run td -- probe --model m1.json --data d0.jsonl [--per 2000] [--ep 1 --min 30]
+//   npm run td -- probe --model m1.json --data d0.jsonl [--per 2000] [--ep 1 --min 30 --minMaxPp 0 --zone myHand]
 //     学んだ補正が何を見ているか: デッキごとのターン末の局面で、入力を 1 つ増やしたときの補正 (c + L) / a の変化（評価の点数の単位）の平均。
 //     PP 最大値・EP・SEP を 1 増やす、手札・場にカードを 1 枚足す（変化の大きい順）
 //     --ep 1 なら、EP が残っているターン末の局面で、残りの EP 1 つの価値（EP を 1 減らしたときの点数の下がり）が、手札のカードでどれだけ変わるか
-//     （そのカードを手札から 1 枚抜くと EP 1 つの価値がどれだけ下がるか）をカードごとに出す。--min 局面より少ないカードは出さない
+//     （そのカードを手札から 1 枚抜くと EP 1 つの価値がどれだけ下がるか）をカードごとに出す。--min 局面より少ないカードは出さない。
+//     --minMaxPp k なら、PP 最大値が k 以上の局面だけ（重いカードを次のターンに出せる局面）。--zone myBoard なら手札でなく場のカード
 //
 // カードの重みを属性とカードごとの残りに分ける（docs/ai-notes.md の同じ名前の節。属性は scripts/cardAttrs.ts）:
 //   最初の層のゾーン z・カード c の行を W1[z,c] = Σ_k 属性 k(c) · A[z,k] + R[z,c] と見る。属性はカードのデータと能力の定義から作る
@@ -1371,7 +1372,10 @@ function probe(args: Args): number {
     return [n === 0 ? 0 : sum / n, n];
   };
   if (numArg(args, "ep", 0) !== 0) {
-    const iEp = scalar("myEp"), hand0 = zone("myHand");
+    const zoneName = args.get("zone") ?? "myHand";
+    if (!(VALUE_ZONES as readonly string[]).includes(zoneName) || !model.zones.includes(zoneName)) throw new Error(`--zone ${zoneName} はこのモデルの入力にありません`);
+    const iEp = scalar("myEp"), hand0 = zone(zoneName as (typeof VALUE_ZONES)[number]), iMaxPp = scalar("myMaxPp");
+    const minMaxPp = numArg(args, "minMaxPp", 0);
     const valOf = (x: ProbeInput, i: number) => {
       const k = x.idx.indexOf(i);
       return k < 0 ? 0 : x.val[k]!;
@@ -1379,7 +1383,7 @@ function probe(args: Args): number {
     const per = new Map<number, { n: number; sum: number; sq: number; ep: number }>();
     let n = 0, epSum = 0;
     for (const x of [...byDeck.values()].flat()) {
-      if (valOf(x, iEp) < 1e-9) continue;
+      if (valOf(x, iEp) < 1e-9 || valOf(x, iMaxPp) * 10 < minMaxPp - 1e-6) continue;
       const lessEp = bump(x, iEp, -1 / 3);
       const epValue = points(x) - points(lessEp);
       n++;
@@ -1395,7 +1399,7 @@ function probe(args: Args): number {
         per.set(i, a);
       });
     }
-    console.log(`EP が残っているターン末の局面 ${n}: 残りの EP 1 つの価値の平均 ${(epSum / Math.max(1, n)).toFixed(2)} 点`);
+    console.log(`EP が残っているターン末の局面${minMaxPp > 0 ? `（PP 最大値 ${minMaxPp} 以上）` : ""} ${n}: 残りの EP 1 つの価値の平均 ${(epSum / Math.max(1, n)).toFixed(2)} 点`);
     const min = numArg(args, "min", 30);
     const rows = [...per]
       .filter(([, a]) => a.n >= min)
@@ -1404,7 +1408,7 @@ function probe(args: Args): number {
         return { name: nameOf.get(model.vocab[i - hand0]!) ?? model.vocab[i - hand0]!, n: a.n, mean, se: Math.sqrt(Math.max(0, a.sq / a.n - mean * mean) / a.n), ep: a.ep / a.n };
       })
       .sort((x, y) => y.mean - x.mean);
-    console.log("手札のカード（局面の数）: そのカードがあることで EP 1 つの価値が上がる分 ± 標準誤差（そのカードがあるときの EP 1 つの価値）");
+    console.log(`${zoneName} のカード（局面の数）: そのカードがあることで EP 1 つの価値が上がる分 ± 標準誤差（そのカードがあるときの EP 1 つの価値）`);
     for (const r of rows) console.log(`  ${r.name}（${r.n}）: ${r.mean >= 0 ? "+" : ""}${r.mean.toFixed(2)} ± ${r.se.toFixed(2)}（${r.ep.toFixed(2)}）`);
     return 0;
   }
