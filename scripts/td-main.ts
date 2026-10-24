@@ -55,9 +55,26 @@
 //     学んだ補正が何を見ているか: デッキごとのターン末の局面で、入力を 1 つ増やしたときの補正 (c + L) / a の変化（評価の点数の単位）の平均。
 //     PP 最大値・EP・SEP を 1 増やす、手札・場にカードを 1 枚足す（変化の大きい順）
 //
+// カードの重みを属性とカードごとの残りに分ける（docs/ai-notes.md の同じ名前の節。属性は scripts/cardAttrs.ts）:
+//   最初の層のゾーン z・カード c の行を W1[z,c] = Σ_k 属性 k(c) · A[z,k] + R[z,c] と見る。属性はカードのデータと能力の定義から作る
+//   （種類・クラス・コスト・攻撃力・体力・キーワード・タイプ・能力のきっかけ × 効果のプリミティブ等）。学習データに出なかったカードは
+//   R = 0 で属性の分だけになるので、初見のカードもそれらしい行から始まる。書き出す w1 は足し込んだ行なので、推論（Rust）は今のまま。
+//   npm run td -- attr --model m.json --out m2.json [--data d.jsonl,...] [--ridge 3] [--n0 0] [--keepA 1]
+//     学び直さずに、学んだ行に A をリッジ回帰で当てはめ、学んでいない行を属性の分で埋める（関数の先頭の説明）
+//   npm run td -- train ... --attr 1 [--ridge 3] [--l2Res <l2>] [--l2Attr <l2>]
+//     A と R を一緒に学ぶ。A はモデルの attr か、無ければ今の行への当てはめから始める。R の減衰は --l2Res、A は --l2Attr。
+//     書き出すモデルは A（attr）も持つ。td prune は、データに出なかったカードの行を 0 でなく属性の分にし、A を外す
+//   npm run td -- train ... --exclude <カード名,...>（td prune にも同じものを渡す）
+//     そのカードが入力にある試合を学ばない（知らないカードを作って、属性の分の効き目を確かめる用）
+//   npm run td -- attrcheck --model m.json --data d.jsonl [--ridge 3] [--min 300]
+//     学んだカードを 1 枚ずつ抜いて当てはめた属性の行と 0 の行とで、そのカードの局面の予測を比べる（関数の先頭の説明）
+//   npm run td -- eval --model a.json,b.json --data d.jsonl [--cards <カード名,...>]
+//     モデルどうしの予測（勝敗の交差エントロピー・AUC）を同じ局面で比べる。--cards ならそのカードが入力にある局面だけでも
+//
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { ALL_CARDS, ALL_CRESTS } from "../src/cards";
+import { attributeMatrix, attributeNames, attributeRow, choleskyFactor, choleskySolve, normalEquations, ridgePenalty, ridgeSolve, rowCanOccur, sparseRows } from "./cardAttrs";
 import { nextRandom, type PlayerIndex } from "../src/engine";
 import {
   baseInputSize,
@@ -106,7 +123,10 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === "probe") return probe(args);
   if (cmd === "prune") return prune(args);
   if (cmd === "ivcheck") return ivcheck(args);
-  throw new Error("npm run td -- init|extend|widen|board|selfplay|train|check|probe|prune|ivcheck ...（scripts/td-main.ts の先頭の説明を参照）");
+  if (cmd === "attr") return attr(args);
+  if (cmd === "attrcheck") return attrcheck(args);
+  if (cmd === "eval") return evalModels(args);
+  throw new Error("npm run td -- init|extend|widen|board|selfplay|train|check|probe|prune|ivcheck|attr|attrcheck|eval ...（scripts/td-main.ts の先頭の説明を参照）");
 }
 
 type Args = Map<string, string>;
@@ -217,7 +237,7 @@ function extend(args: Args): number {
   for (const k of from) for (let j = 0; j < H; j++) w1.push(k < 0 ? 0 : model.w1[k * H + j]!);
   // 場のカードのネットワークの出力の重み（入力の末尾）はそのまま
   w1.push(...model.w1.slice(baseInputSize(model) * H));
-  writeFileSync(out, JSON.stringify({ ...model, zones, scalars, w1 }));
+  writeFileSync(out, JSON.stringify({ ...withoutAttr(model), zones, scalars, w1 }));
   console.log(`${out}: 入力 ${baseInputSize(model)} → ${from.length}（足した ${from.filter((k) => k < 0).length} 個の重みは 0）`);
   return 0;
 }
@@ -253,7 +273,7 @@ function widen(args: Args): number {
   }
   const b = [...Array.from({ length: H0 }, () => 0), ...Array.from({ length: H2 - H0 }, () => 0.1)];
   const w2 = [...model.w2, ...Array.from({ length: H2 - H0 }, () => 0)];
-  writeFileSync(out, JSON.stringify({ ...model, hidden: H1, w1, b1, layers: [{ w, b }], w2 }));
+  writeFileSync(out, JSON.stringify({ ...withoutAttr(model), hidden: H1, w1, b1, layers: [{ w, b }], w2 }));
   console.log(`${out}: 隠れ層 ${H0} → ${H1}・${H2}（補正は元のモデルと同じ）`);
   return 0;
 }
@@ -365,6 +385,8 @@ interface Dataset {
   pairs: IvPair[];
   /** 場のカード（場のカードのネットワークを持つモデルのときだけ） */
   board?: BoardRows;
+  /** 局面 i の試合（読んだ順の通し番号。介入の試合も 1 試合と数える） */
+  game: Int32Array;
 }
 
 type IvZone = "hand" | "drawn" | "board" | "oppBoard" | "res" | "oppRes";
@@ -477,15 +499,18 @@ interface LoadOptions {
   imaginedWeight?: number;
   /** 資源の介入の試合を読む（既定 true） */
   ivRes?: boolean;
+  /** 真を返した試合は読まない（train の --exclude） */
+  skipGame?: (r: GameRecord) => boolean;
 }
 
 function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: number) => boolean, board?: CompiledBoard, opts: LoadOptions = {}): Dataset {
   const imaginedWeight = opts.imaginedWeight ?? 1;
   const off = new Grow(i32), idx = new Grow(i32), val = new Grow(f32), s = new Grow(f64), next = new Grow(i32), outcome = new Grow(f64);
   const cards = board ? new BoardGrow(board) : null;
-  const explored = new Grow(u8), hold = new Grow(u8), phase = new Grow(u8), weight = new Grow(f64), anchor = new Grow(i32);
+  const explored = new Grow(u8), hold = new Grow(u8), phase = new Grow(u8), weight = new Grow(f64), anchor = new Grow(i32), game = new Grow(i32);
   off.push(0);
   const pairs: IvPair[] = [];
+  let games = 0;
   for (const file of files) {
     // もとの試合の各プレイヤーの局面の、試合の中の位置 → 添字（介入の対を作る）。介入の試合はもとの試合のすぐ後の行にある
     const posOf = new Map<number, [number[], number[]]>();
@@ -495,6 +520,8 @@ function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: num
       if (isCmp(r)) continue;
       if (r.iv && ivWeight === 0) continue;
       if (r.iv && isResZone(r.iv.zone ?? "hand") && opts.ivRes === false) continue;
+      if (opts.skipGame?.(r)) continue;
+      games++;
       // 試合番号で決める（ファイルを足しても同じ試合は同じ側）
       const isHold = ((Math.imul(r.g, 2654435761) >>> 0) % 1000) / 1000 < holdout ? 1 : 0;
       const pos: [number[], number[]] = [[], []];
@@ -517,6 +544,7 @@ function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: num
           cards?.add(x.b);
           s.push(x.s);
           next.push(-1);
+          game.push(games);
           outcome.push(r.winner === p ? 1 : 0);
           explored.push(x.ex ? 1 : 0);
           hold.push(isHold);
@@ -560,6 +588,7 @@ function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: num
     weight: weight.done(),
     pairs,
     ...(cards ? { board: cards.done() } : {}),
+    game: game.done(),
   };
 }
 
@@ -669,8 +698,13 @@ const newBoardActs = (m: ValueNetModel): BoardActs => ({ cards: [], sums: new Fl
 
 /** 局面 i の NN の出力（acts に各隠れ層の値（ReLU の後）を、ba に場のカードのネットワークの値を書く。forwardValueNet と同じ計算） */
 function forwardAt(net: CompiledValueNet, d: SparseRows, i: number, acts: Float64Array[], ba: BoardActs): number {
+  preActAt(net, d, i, acts[0]!, ba);
+  return forwardRest(net, net.model.b2, acts);
+}
+
+/** 局面 i の最初の隠れ層の ReLU の前の値を hidden に書く（ba に場のカードのネットワークの値を書く） */
+function preActAt(net: CompiledValueNet, d: SparseRows, i: number, hidden: Float64Array, ba: BoardActs): void {
   const H = net.model.hidden;
-  const hidden = acts[0]!;
   hidden.set(net.b1);
   for (let q = d.off[i]!; q < d.off[i + 1]!; q++) {
     const row = d.idx[q]! * H, x = d.val[q]!;
@@ -698,7 +732,6 @@ function forwardAt(net: CompiledValueNet, d: SparseRows, i: number, acts: Float6
       for (let j = 0; j < H; j++) hidden[j]! += x * net.w1[row + j]!;
     }
   }
-  return forwardRest(net, net.model.b2, acts);
 }
 
 /** 全局面の勝つ確率の予測 */
@@ -856,7 +889,9 @@ function train(args: Args): number {
       }
     : undefined;
   const compiled0 = compileValueNet(model);
-  const d = loadData(files, holdout, ivWeight, keep, compiled0.board, { imaginedWeight, ivRes });
+  // --exclude: そのカードが入力にある試合を学ばない（知らないカードを作る確かめ用。docs/ai-notes.md「カードの重みを属性とカードごとの残りに分ける」）
+  const skipGame = excludeGames(model, args.get("exclude"));
+  const d = loadData(files, holdout, ivWeight, keep, compiled0.board, { imaginedWeight, ivRes, ...(skipGame ? { skipGame } : {}) });
   const n = d.s.length;
   const nImagined = d.anchor.reduce((x, a) => x + (a >= 0 ? 1 : 0), 0);
   console.log(
@@ -888,6 +923,14 @@ function train(args: Args): number {
     boardOff.push({ w: o, b: o + prev * m });
     o += (prev + 1) * m;
   });
+  // --attr 1: 最初の層のカードの行を「属性 × A ＋ カードごとの残り R」に分けて学ぶ（A は場のカードのネットワークの後ろ。docs/ai-notes.md「カードの重みを属性とカードごとの残りに分ける」）
+  const attrOn = numArg(args, "attr", 0) !== 0;
+  if (attrOn && cmp) throw new Error("--attr と --cmpWeight は一緒に使えません");
+  const Z = model.zones.length, ZV = Z * V;
+  const basis = attrOn ? attrBasis(model, numArg(args, "minSupport", 3)) : null;
+  const KA = basis?.K ?? 0;
+  const oAttr = o;
+  o += Z * KA * H;
   const size = o;
   const params = new Float64Array(size);
   params.set(model.w1, 0);
@@ -904,12 +947,73 @@ function train(args: Args): number {
     params.set(l.w, boardOff[k]!.w);
     params.set(l.b, boardOff[k]!.b);
   });
-  // 減衰させる重み（w1・足した層の w・w2。バイアスと c・a は減衰させない）
-  const decayed = new Uint8Array(size);
-  decayed.fill(1, 0, oB1);
-  for (let k = 1; k < L; k++) decayed.fill(1, layerOff[k - 1]!.w, layerOff[k - 1]!.b);
-  decayed.fill(1, oW2, oB2);
-  for (const lo of boardOff) decayed.fill(1, lo.w, lo.b);
+  // 重みの減衰の係数（w1・足した層の w・w2 は l2。バイアスと c・a は減衰させない）。
+  // --attr 1 なら、カードの行の残り R は --l2Res（既定 l2）、属性の分 A は --l2Attr（既定 l2）
+  const l2Res = numArg(args, "l2Res", l2), l2Attr = numArg(args, "l2Attr", l2);
+  const decayCoef = new Float64Array(size);
+  decayCoef.fill(l2, 0, oB1);
+  if (attrOn) decayCoef.fill(l2Res, 0, ZV * H);
+  for (let k = 1; k < L; k++) decayCoef.fill(l2, layerOff[k - 1]!.w, layerOff[k - 1]!.b);
+  decayCoef.fill(l2, oW2, oB2);
+  for (const lo of boardOff) decayCoef.fill(l2, lo.w, lo.b);
+  decayCoef.fill(l2Attr, oAttr, size);
+
+  // 属性の分: params の w1 のカードの行は残り R を持ち、予測と逆伝播は足し込んだ行 effW1（R + 属性 × A）を使う
+  const effW1 = attrOn ? new Float64Array(oB1) : null;
+  /** 学習データに出たカードの行（予測に使う行）と、全部のカードの行 */
+  const dataRows: number[] = [];
+  const allCardRows = Array.from({ length: attrOn ? ZV : 0 }, (_, r) => r);
+  /** effW1 を params から作り直す（all なら全部のカードの行、でなければ学習データに出た行だけ。カードでない行は写す） */
+  const materialize = (all: boolean): void => materializeRows(all ? allCardRows : dataRows);
+  /** effW1 のカードの行 rows とカードでない行を params から作り直す */
+  const materializeRows = (rows: readonly number[]): void => {
+    if (!effW1 || !basis) return;
+    effW1.set(params.subarray(ZV * H, oB1), ZV * H);
+    for (const r of rows) {
+      const sp = basis.sparse[r % V]!, base = oAttr + Math.floor(r / V) * KA * H, e = r * H;
+      for (let j = 0; j < H; j++) effW1[e + j] = params[e + j]!;
+      for (let t = 0; t < sp.idx.length; t++) {
+        const ak = base + sp.idx[t]! * H, x = sp.val[t]!;
+        for (let j = 0; j < H; j++) effW1[e + j]! += x * params[ak + j]!;
+      }
+    }
+  };
+  /** Adam で更新する範囲（--attr 1 なら、学習データに出なかったカードの行の R は 0 のまま動かないので飛ばす） */
+  const active: [number, number][] = [[0, size]];
+  if (attrOn && basis) {
+    const seen = new Uint8Array(ZV);
+    for (const r of d.idx) if (r < ZV) seen[r] = 1;
+    for (let r = 0; r < ZV; r++) if (seen[r]) dataRows.push(r);
+    const fromModel = model.attr && model.attr.names.join("\n") === basis.names.join("\n") && model.attr.a.length === Z * KA * H;
+    const a0 = fromModel ? Float64Array.from(model.attr!.a) : fitAttr(model, basis, numArg(args, "ridge", 3));
+    params.set(a0, oAttr);
+    // R: 0 でない行（学んだ行）は今の行から属性の分を引いたもの、0 の行（学んでいない・td prune で 0 にした行）は 0（属性の分から始める）
+    const tmp = new Float64Array(H);
+    let learned = 0;
+    for (let r = 0; r < ZV; r++) {
+      if (rowIsZero(model.w1, r, H)) {
+        params.fill(0, r * H, r * H + H);
+        continue;
+      }
+      learned++;
+      const z = Math.floor(r / V);
+      attributeRow(basis.x, KA, H, r % V, a0.subarray(z * KA * H, (z + 1) * KA * H), tmp);
+      for (let j = 0; j < H; j++) params[r * H + j] = model.w1[r * H + j]! - tmp[j]!;
+    }
+    materialize(true);
+    active.length = 0;
+    for (const r of dataRows) {
+      const last = active[active.length - 1];
+      if (last && last[1] === r * H) last[1] += H;
+      else active.push([r * H, r * H + H]);
+    }
+    active.push([ZV * H, size]);
+    console.log(
+      `属性 ${KA} 個（${fromModel ? "モデルの A から" : `今の行にリッジ回帰（λ ${numArg(args, "ridge", 3)}）で当てはめて`}始める）、カードの行 ${ZV} のうち学んだ行 ${learned}・学習データに出た行 ${dataRows.length}、` +
+        `減衰 R ${l2Res}・A ${l2Attr}`,
+    );
+  }
+  const touched: number[] = [], touchedMark = new Uint8Array(attrOn ? ZV : 0);
   const grad = new Float64Array(size), m1 = new Float64Array(size), m2 = new Float64Array(size);
   const beta1 = 0.9, beta2 = 0.999;
   let step = 0;
@@ -922,7 +1026,7 @@ function train(args: Args): number {
     return {
       model: mdl,
       index: new Map(),
-      w1: params.subarray(0, oB1),
+      w1: effW1 ?? params.subarray(0, oB1),
       b1: params.subarray(oB1, oB1 + H),
       layers,
       w2: params.subarray(oW2, oB2),
@@ -1082,6 +1186,21 @@ function train(args: Args): number {
     for (const job of jobs) {
       const net = current();
       grad.fill(0);
+      // 属性の分: このミニバッチの局面に出るカードの行だけ作り直す（A が変わると全部の行が変わるが、使う行だけで足りる）
+      if (basis && job >= 0) {
+        const end = Math.min(trainIdx.length, job + batch);
+        for (let k = job; k < end; k++) {
+          const i = trainIdx[k]!;
+          for (let q = d.off[i]!; q < d.off[i + 1]!; q++) {
+            const r = d.idx[q]!;
+            if (r < ZV && !touchedMark[r]) {
+              touchedMark[r] = 1;
+              touched.push(r);
+            }
+          }
+        }
+        materializeRows(touched);
+      }
       if (job < 0) {
         const g0 = -1 - job;
         cmpLoss += cmpStep(net, cmp!, trainGroups.slice(g0, g0 + cmpBatch));
@@ -1097,19 +1216,34 @@ function train(args: Args): number {
           backward(dz, d.s[i]!, acts, d, i, bacts);
         }
       }
+      // 属性の分: 足し込んだ行の勾配（grad の w1 のカードの行。そのまま R の勾配）を A にも足す（A[z,k] の勾配 = Σ_c 属性 k(c) × 行 (z,c) の勾配）
+      if (basis && job >= 0) {
+        for (const r of touched) {
+          touchedMark[r] = 0;
+          const sp = basis.sparse[r % V]!, base = oAttr + Math.floor(r / V) * KA * H, g = r * H;
+          for (let t = 0; t < sp.idx.length; t++) {
+            const ak = base + sp.idx[t]! * H, x = sp.val[t]!;
+            for (let j = 0; j < H; j++) grad[ak + j]! += x * grad[g + j]!;
+          }
+        }
+        touched.length = 0;
+      }
       // Adam（重みは減衰させる）
       step++;
       const c1 = 1 - beta1 ** step, c2 = 1 - beta2 ** step;
-      for (let q = 0; q < size; q++) {
-        const gq = grad[q]!;
-        m1[q] = beta1 * m1[q]! + (1 - beta1) * gq;
-        m2[q] = beta2 * m2[q]! + (1 - beta2) * gq * gq;
-        const decay = decayed[q] ? l2 * params[q]! : 0;
-        params[q]! -= lr * ((m1[q]! / c1) / (Math.sqrt(m2[q]! / c2) + 1e-8) + decay);
+      for (const [q0, q1] of active) {
+        for (let q = q0; q < q1; q++) {
+          const gq = grad[q]!;
+          m1[q] = beta1 * m1[q]! + (1 - beta1) * gq;
+          m2[q] = beta2 * m2[q]! + (1 - beta2) * gq * gq;
+          const decay = decayCoef[q]! * params[q]!;
+          params[q]! -= lr * ((m1[q]! / c1) / (Math.sqrt(m2[q]! / c2) + 1e-8) + decay);
+        }
       }
       // a が 0 に近いと補正 (c + L) / a が発散するので下限を置く
       if (params[oA]! < 0.005) params[oA] = 0.005;
     }
+    materialize(false);
     const v = predictAll(current(), d);
     report(`エポック ${epoch + 1}（学習の TD ${(lossSum / trainIdx.length).toFixed(4)}、a ${params[oA]!.toFixed(4)}、c ${params[oC]!.toFixed(3)}）`, d, v, lambdaReturns(d, v, lambda));
     if (cmp) console.log(`エポック ${epoch + 1}（学習の打ち比べ ${(cmpLoss / Math.max(1, trainGroups.length)).toFixed(4)}）: ${cmpReport(cmp, predictAll(current(), cmp))}`);
@@ -1118,6 +1252,7 @@ function train(args: Args): number {
   }
   if (keepBest) {
     params.set(best.params);
+    materialize(false);
     const on = [...bestOn].map((ph) => Object.keys(PHASE_OF).find((k) => PHASE_OF[k] === ph)).join("・");
     console.log(`確かめ用の局面（${on}）の勝敗の交差エントロピーが一番小さい ${best.epoch === 0 ? "学習前" : `エポック ${best.epoch}`}（${best.loss.toFixed(4)}）の重みを書き出す`);
   }
@@ -1128,9 +1263,11 @@ function train(args: Args): number {
   for (let i = 0; i < n; i++) absSum += Math.abs((net.model.c + forwardAt(net, d, i, hBuf, bBuf)) / net.model.a);
   console.log(`補正 (c + L) / a の絶対値の平均 ${(absSum / n).toFixed(2)} 点、${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
+  // 属性の分を足し込んで書き出す（学習データに出なかったカードの行は属性の分だけ）。A も残す（続きを学ぶ・td prune で埋める用）
+  materialize(true);
   const outModel: ValueNetModel = {
     ...model,
-    w1: Array.from(params.subarray(0, oB1), (x) => round(x, 6)),
+    w1: Array.from(effW1 ?? params.subarray(0, oB1), (x) => round(x, 6)),
     b1: Array.from(params.subarray(oB1, oB1 + H), (x) => round(x, 6)),
     ...(L > 1 ? { layers: current().layers.map((l) => ({ w: Array.from(l.w, (x) => round(x, 6)), b: Array.from(l.b, (x) => round(x, 6)) })) } : {}),
     w2: Array.from(params.subarray(oW2, oB2), (x) => round(x, 6)),
@@ -1138,6 +1275,7 @@ function train(args: Args): number {
     c: round(params[oC]!, 6),
     a: round(params[oA]!, 6),
     ...(model.board ? { board: { ...model.board, layers: boardLayers.map((l) => ({ w: Array.from(l.w, (x) => round(x, 6)), b: Array.from(l.b, (x) => round(x, 6)) })) } } : {}),
+    ...(basis ? { attr: { names: basis.names, a: Array.from(params.subarray(oAttr, size), (x) => round(x, 6)) } } : {}),
   };
   writeFileSync(out, JSON.stringify(outModel));
   console.log(`${out} に書き出しました`);
@@ -1257,13 +1395,15 @@ function prune(args: Args): number {
   const files = need(args, "data").split(",");
   const out = need(args, "out");
   const used = new Set<number>();
+  // --exclude: train --exclude で学ばなかった試合は数えない
+  const skipGame = excludeGames(model, args.get("exclude"));
   // 場のカードのネットワーク: 場に現れたカードと付与された能力
   const onBoard = new Set<string>(), grants = new Set<string>();
   for (const file of files) {
     for (const line of readFileSync(file, "utf8").split("\n")) {
       if (!line.trim()) continue;
       const r = parseLine(line);
-      if (isCmp(r)) continue;
+      if (isCmp(r) || skipGame?.(r)) continue;
       for (const seq of r.samples) {
         for (const x of seq) {
           for (const i of x.x) used.add(i);
@@ -1282,8 +1422,13 @@ function prune(args: Args): number {
   // 場のカードのネットワークの出力の重み（入力の末尾）は残す
   const w1 = model.w1.map((w, k) => (used.has(Math.floor(k / H)) || Math.floor(k / H) >= n ? w : 0));
   console.log(`${out}: 入力 ${n} のうち、データに現れた ${used.size} 個の重みを残し、${n - used.size} 個を 0 にしました`);
+  // 属性の分を持つモデル（train --attr・td attr）: データに現れなかったカードの行は 0 でなく属性の分にする。書き出すモデルには A を残さない（推論は使わない）
+  if (model.attr) {
+    const filled = fillFromAttr(model, w1, (r) => !used.has(r));
+    console.log(`属性の分を持つモデルなので、データに現れなかったカードの行のうち現れうる ${filled} 個を 0 でなく属性の分にしました`);
+  }
   if (!model.board) {
-    writeFileSync(out, JSON.stringify({ ...model, w1 }));
+    writeFileSync(out, JSON.stringify({ ...withoutAttr(model), w1 }));
     return 0;
   }
   // 場のカードのネットワークの最初の層: 場に現れなかったカード・付与された能力の行を 0 にする（数値の入力の行は残す）
@@ -1294,9 +1439,371 @@ function prune(args: Args): number {
   const m0 = l0.b.length;
   const w0 = l0.w.map((w, k) => (Math.floor(k / m0) >= keep.length || keep[Math.floor(k / m0)] ? w : 0));
   const layers = [{ ...l0, w: w0 }, ...b.layers.slice(1)];
-  writeFileSync(out, JSON.stringify({ ...model, w1, board: { ...b, layers } }));
+  writeFileSync(out, JSON.stringify({ ...withoutAttr(model), w1, board: { ...b, layers } }));
   const kept = (from: number, to: number) => keep.slice(from, to).filter((x) => x).length;
   console.log(`場のカードのネットワーク: 場に現れたカード ${kept(0, V)}/${V}・付与された能力 ${kept(V, keep.length)}/${b.grants.length} の重みを残しました`);
+  return 0;
+}
+
+/** カード名か ID（"crest:" を付けたクレスト ID も）→ vocab の添字 */
+function vocabIndexOf(model: ValueNetModel, nameOrId: string): number {
+  const id = ALL_CARDS.find((c) => c.name === nameOrId)?.id ?? ALL_CRESTS.find((c) => c.name === nameOrId || c.name === `クレスト：${nameOrId}`)?.id;
+  const k = model.vocab.indexOf(id === undefined ? nameOrId : ALL_CRESTS.some((c) => c.id === id) ? `crest:${id}` : id);
+  if (k < 0) throw new Error(`モデルの vocab にないカードです: ${nameOrId}`);
+  return k;
+}
+
+/** カードの行（どのゾーンでも）が入力にあるか（cards は vocab の添字） */
+function rowsOfCards(model: ValueNetModel, cards: readonly number[]): Set<number> {
+  const V = model.vocab.length;
+  const rows = new Set<number>();
+  for (let z = 0; z < model.zones.length; z++) for (const c of cards) rows.add(z * V + c);
+  return rows;
+}
+
+/** --exclude（カード名か ID をカンマで並べたもの）: そのカードの行が入力にある局面を含む試合を除く述語（無ければ undefined） */
+function excludeGames(model: ValueNetModel, list: string | undefined): ((r: GameRecord) => boolean) | undefined {
+  if (list === undefined) return undefined;
+  const rows = rowsOfCards(
+    model,
+    list
+      .split(",")
+      .map((x) => x.trim())
+      .filter((x) => x)
+      .map((x) => vocabIndexOf(model, x)),
+  );
+  return (r) => r.samples.some((seq) => seq.some((x) => x.x.some((i) => rows.has(i))));
+}
+
+/**
+ * npm run td -- eval --model a.json[,b.json,...] --data d.jsonl[,...] [--cards 名前,...]
+ * モデルごとに、局面（ランダムに打った局面と介入の試合を除く）の勝敗の交差エントロピーと AUC を出す（ターン末とターンの最初・想像の局面）。
+ * --cards なら、そのカードが入力にある局面だけでも出す（知らないカードの局面の予測を比べる用）。
+ * 2 つ目からのモデルは 1 つ目との交差エントロピーの差と、その標準誤差（試合ごとにまとめたばらつきから）も出す。場のカードのネットワークを持たないモデルだけ
+ */
+function evalModels(args: Args): number {
+  const models = need(args, "model").split(",").map((f) => ({ file: f, net: compileValueNet(loadValueNet(f)) }));
+  if (models.some((m) => m.net.board)) throw new Error("eval は場のカードのネットワークを持たないモデルだけ");
+  const first = models[0]!.net.model;
+  if (models.some((m) => m.net.model.vocab.join() !== first.vocab.join() || m.net.model.zones.join() !== first.zones.join() || m.net.model.scalars.join() !== first.scalars.join())) {
+    throw new Error("eval のモデルは入力の並び（vocab・zones・scalars）が同じものだけ");
+  }
+  const d = loadData(need(args, "data").split(","), 0, 0);
+  const cards = args.get("cards");
+  const rows = cards === undefined ? null : rowsOfCards(first, cards.split(",").map((x) => vocabIndexOf(first, x.trim())));
+  const hasCard = new Uint8Array(d.s.length);
+  if (rows) for (let i = 0; i < d.s.length; i++) for (let q = d.off[i]!; q < d.off[i + 1]!; q++) if (rows.has(d.idx[q]!)) hasCard[i] = 1;
+  const preds = models.map((m) => predictAll(m.net, d));
+  const subsets: [string, (i: number) => boolean][] = [
+    ["end・after", (i) => d.phase[i] !== 2],
+    ["imagined", (i) => d.phase[i] === 2],
+  ];
+  if (rows) {
+    subsets.push([`カードあり end・after`, (i) => hasCard[i] === 1 && d.phase[i] !== 2]);
+    subsets.push([`カードあり imagined`, (i) => hasCard[i] === 1 && d.phase[i] === 2]);
+  }
+  console.log(`局面 ${d.s.length}（ランダムに打った ${d.explored.reduce((x, y) => x + y, 0)} を除く）${cards ? `、カード ${cards}` : ""}`);
+  for (const [label, inSubset] of subsets) {
+    const idx: number[] = [];
+    for (let i = 0; i < d.s.length; i++) if (!d.explored[i] && inSubset(i)) idx.push(i);
+    if (idx.length === 0) continue;
+    const y = idx.map((i) => d.outcome[i]!);
+    const ce = (v: Float64Array) => idx.map((i) => bce(v[i]!, d.outcome[i]!));
+    const base = ce(preds[0]!);
+    const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    const parts = models.map((m, k) => {
+      const c = ce(preds[k]!);
+      const head = `${m.file} ${mean(c).toFixed(4)}（AUC ${auc(idx.map((i) => preds[k]![i]!), y).toFixed(3)}）`;
+      if (k === 0) return head;
+      // 試合ごとの差の和のばらつきから、差の平均の標準誤差
+      const byGame = new Map<number, number>();
+      idx.forEach((i, t) => byGame.set(d.game[i]!, (byGame.get(d.game[i]!) ?? 0) + c[t]! - base[t]!));
+      const diff = mean(c) - mean(base);
+      let ss = 0, cnt = new Map<number, number>();
+      for (const i of idx) cnt.set(d.game[i]!, (cnt.get(d.game[i]!) ?? 0) + 1);
+      for (const [g, sum] of byGame) ss += (sum - cnt.get(g)! * diff) ** 2;
+      const se = Math.sqrt(ss) / idx.length;
+      return `${head} 差 ${diff >= 0 ? "+" : ""}${diff.toFixed(4)} ± ${se.toFixed(4)}`;
+    });
+    console.log(`${label}(${idx.length}): ${parts.join(" / ")}`);
+  }
+  return 0;
+}
+
+// ---- 属性（scripts/cardAttrs.ts。docs/ai-notes.md「カードの重みを属性とカードごとの残りに分ける」） ----
+
+/** 最初の層のカードの行を属性で表す材料 */
+interface AttrBasis {
+  names: string[];
+  K: number;
+  /** vocab × 属性 */
+  x: Float64Array;
+  /** vocab の各項目の 0 でない属性 */
+  sparse: { idx: Int32Array; val: Float64Array }[];
+}
+
+/** モデルの属性（A を持つモデルならその名前、無ければ今のカードから作る。minSupport 項目以上が持つ属性） */
+function attrBasis(model: ValueNetModel, minSupport: number): AttrBasis {
+  const names = model.attr?.names ?? attributeNames(model.vocab, minSupport);
+  const x = attributeMatrix(model.vocab, names);
+  return { names, K: names.length, x, sparse: sparseRows(x, model.vocab.length, names.length) };
+}
+
+/** w1 の行 row が全部 0 か（学んでいない・td prune で 0 にした行） */
+function rowIsZero(w1: ArrayLike<number>, row: number, H: number): boolean {
+  for (let j = 0; j < H; j++) if (w1[row * H + j] !== 0) return false;
+  return true;
+}
+
+/** A を外したモデル（入力の並び・隠れ層を変えたモデルや、推論に使うモデル） */
+function withoutAttr(m: ValueNetModel): ValueNetModel {
+  const { attr: _attr, ...rest } = m;
+  return rest;
+}
+
+/**
+ * ゾーンごとに、カードの行のうち fitRow が真の行（既定は 0 でない行 = 学んだ行）に属性の重み A をリッジ回帰で当てはめる。
+ * 返すのはゾーン × 属性 × 隠れ層。weight(row) は行の重み（既定 1）
+ */
+function fitAttr(model: ValueNetModel, basis: AttrBasis, lambda: number, opts: { fitRow?: (row: number) => boolean; weight?: (row: number) => number } = {}): Float64Array {
+  const H = model.hidden, V = model.vocab.length, Z = model.zones.length, K = basis.K;
+  const w1 = Float64Array.from(model.w1);
+  const a = new Float64Array(Z * K * H);
+  const penalty = ridgePenalty(basis.names, lambda);
+  for (let z = 0; z < Z; z++) {
+    const rows: number[] = [];
+    for (let c = 0; c < V; c++) if (opts.fitRow ? opts.fitRow(z * V + c) : !rowIsZero(w1, z * V + c, H)) rows.push(c);
+    if (rows.length === 0) continue;
+    const { gram, xty } = normalEquations(
+      basis.x,
+      K,
+      H,
+      rows,
+      (c) => opts.weight?.(z * V + c) ?? 1,
+      (c) => w1.subarray((z * V + c) * H, (z * V + c + 1) * H),
+    );
+    a.set(ridgeSolve(gram, xty, K, H, penalty), z * K * H);
+  }
+  return a;
+}
+
+/**
+ * モデルの A（model.attr）で、fill が真のカードの行を属性の分にする（w1 を書き換える）。埋めた行の数を返す。
+ * そのゾーンに現れえない行（スペルの場の行等。cardAttrs.ts の rowCanOccur）は 0 にする
+ */
+function fillFromAttr(model: ValueNetModel, w1: number[] | Float64Array, fill: (row: number) => boolean): number {
+  const at = model.attr;
+  if (!at) throw new Error("モデルに属性の分（attr）がありません");
+  const H = model.hidden, V = model.vocab.length, Z = model.zones.length;
+  const basis = attrBasis(model, 0);
+  const K = basis.K;
+  if (at.a.length !== Z * K * H) throw new Error("モデルの attr.a の大きさが合いません");
+  const a = Float64Array.from(at.a);
+  const tmp = new Float64Array(H);
+  let filled = 0;
+  for (let r = 0; r < Z * V; r++) {
+    if (!fill(r)) continue;
+    const z = Math.floor(r / V);
+    if (!rowCanOccur(model.zones[z]!, model.vocab[r % V]!)) {
+      w1.fill(0, r * H, (r + 1) * H);
+      continue;
+    }
+    attributeRow(basis.x, K, H, r % V, a.subarray(z * K * H, (z + 1) * K * H), tmp);
+    for (let j = 0; j < H; j++) w1[r * H + j] = round(tmp[j]!, 6);
+    filled++;
+  }
+  return filled;
+}
+
+/** 学習データ（試合の行）の各入力が現れた局面の数 */
+function inputCounts(files: string[], n: number): Float64Array {
+  const counts = new Float64Array(n);
+  for (const file of files) {
+    for (const line of readFileSync(file, "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      const r = parseLine(line);
+      if (isCmp(r)) continue;
+      for (const seq of r.samples) for (const x of seq) for (const i of x.x) if (i < n) counts[i]!++;
+    }
+  }
+  return counts;
+}
+
+/**
+ * npm run td -- attr --model m.json --out m2.json [--data d0.jsonl,...] [--ridge 3] [--n0 0] [--minSupport 3]
+ * 学び直さずに、モデルのカードの行に属性の重み A を当てはめ（ゾーンごとのリッジ回帰）、学んでいない行を属性の分で埋める。
+ * --data があれば、そのデータに現れた行を学んだ行とみなす（現れなかった行は td prune と同じく捨てて、カードの行は属性の分、数値の入力は 0 にする）。
+ * --n0 > 0 なら、現れた局面の数 n で n / (n + n0) の重みを付けて当てはめる（めったに出ない行は学べていない）。
+ * --data が無ければ、0 でない行を学んだ行とみなす（td prune した後のモデル用）。A は attr に残す（train --attr の出発点になる）。
+ * --keepA 0 なら A を残さない（推論に使うだけのモデル。data/value-net.json 等）
+ */
+function attr(args: Args): number {
+  const model = loadValueNet(need(args, "model"));
+  compileValueNet(model);
+  const out = need(args, "out");
+  const H = model.hidden, V = model.vocab.length, ZV = model.zones.length * V, n = baseInputSize(model);
+  const basis = attrBasis(model, numArg(args, "minSupport", 3));
+  const lambda = numArg(args, "ridge", 3), n0 = numArg(args, "n0", 0);
+  const data = args.get("data");
+  const counts = data ? inputCounts(data.split(","), n) : null;
+  const w1 = Float64Array.from(model.w1);
+  const learned = (r: number): boolean => (counts ? counts[r]! > 0 : !rowIsZero(w1, r, H));
+  const a = fitAttr(model, basis, lambda, { fitRow: learned, ...(counts && n0 > 0 ? { weight: (r: number) => counts[r]! / (counts[r]! + n0) } : {}) });
+  const withA: ValueNetModel = { ...model, attr: { names: basis.names, a: Array.from(a, (x) => round(x, 6)) } };
+  const outW1 = Array.from(w1, (x) => round(x, 6));
+  const filled = fillFromAttr(withA, outW1, (r) => !learned(r));
+  // 数値の入力で、データに現れなかったものは td prune と同じく 0 にする
+  if (counts) for (let r = ZV; r < n; r++) if (counts[r] === 0) outW1.fill(0, r * H, r * H + H);
+  writeFileSync(out, JSON.stringify({ ...(numArg(args, "keepA", 1) !== 0 ? withA : model), w1: outW1 }));
+  let nLearned = 0;
+  for (let r = 0; r < ZV; r++) if (learned(r)) nLearned++;
+  console.log(
+    `${out}: 属性 ${basis.K} 個、カードの行 ${ZV} のうち学んだ ${nLearned} 行に当てはめ（λ ${lambda}${n0 > 0 ? `、n0 ${n0}` : ""}）、` +
+      `残りのうち現れうる ${filled} 行を属性の分で埋めました`,
+  );
+  return 0;
+}
+
+/**
+ * npm run td -- attrcheck --model m.json --data d.jsonl[,...] [--ridge 3] [--n0 0] [--min 300] [--per 3000] [--minSupport 3]
+ * 属性の分で、知らないカードがどこまで見えるかを予測で確かめる（学び直さない。td prune した後のモデルに使う。0 の行を学んでいない行とみなす）。
+ * - 学んだカード（どれかのゾーンの行が 0 でない）: そのカードの行を、そのカードを抜いて当てはめた A から出した行に替えたとき（属性）と、
+ *   0 にしたとき（今の初見のカードの扱い）とで、そのカードが入力にある局面の勝敗の交差エントロピーがどれだけ増えるかを比べる。
+ *   埋まった割合 = (0 にしたときの増え − 属性の行の増え) / 0 にしたときの増え（1 なら学んだ行と同じだけ当たる、0 なら 0 の行と同じ）
+ * - 学んでいないカード（全部の行が 0）でデータに出るもの: 属性の分で埋めたときの交差エントロピーの差（負なら良くなった）
+ * 局面はランダムに打った局面と介入の試合を除く全部（ターン末・ターンの最初・想像の局面）。--min 局面未満のカードは出さない。1 枚あたり --per 局面まで（等間隔に間引く）
+ */
+function attrcheck(args: Args): number {
+  const model = loadValueNet(need(args, "model"));
+  const net = compileValueNet(model);
+  const H = model.hidden, V = model.vocab.length, Z = model.zones.length, ZV = Z * V;
+  const basis = attrBasis(model, numArg(args, "minSupport", 3));
+  const K = basis.K;
+  const lambdas = (args.get("ridge") ?? "3").split(",").map(Number);
+  const n0 = numArg(args, "n0", 0), minN = numArg(args, "min", 300), per = numArg(args, "per", 3000);
+  const d = loadData(need(args, "data").split(","), 0, 0, undefined, net.board);
+  // 行が現れた局面の数と、カードごとの局面
+  const counts = new Float64Array(ZV);
+  const byCard: number[][] = Array.from({ length: V }, () => []);
+  const lastPos = new Int32Array(V).fill(-1);
+  for (let i = 0; i < d.s.length; i++) {
+    if (d.explored[i]) continue;
+    for (let q = d.off[i]!; q < d.off[i + 1]!; q++) {
+      const r = d.idx[q]!;
+      if (r >= ZV) continue;
+      counts[r]!++;
+      const c = r % V;
+      if (lastPos[c] !== i) {
+        lastPos[c] = i;
+        byCard[c]!.push(i);
+      }
+    }
+  }
+  const w1 = Float64Array.from(model.w1);
+  const learned = (r: number): boolean => !rowIsZero(w1, r, H);
+  const weight = (r: number): number => (n0 > 0 ? counts[r]! / (counts[r]! + n0) : 1);
+  const eqs = Array.from({ length: Z }, (_, z) => {
+    const rows: number[] = [];
+    for (let c = 0; c < V; c++) if (learned(z * V + c)) rows.push(c);
+    return normalEquations(basis.x, K, H, rows, (c) => weight(z * V + c), (c) => w1.subarray((z * V + c) * H, (z * V + c + 1) * H));
+  });
+  const penalties = lambdas.map((l) => ridgePenalty(basis.names, l));
+  /** 行 (z, c) を、c を抜いて当てはめた A から出した行（c を学んでいなければ全部で当てはめたものと同じ） */
+  const predictRow = (z: number, c: number, li: number): Float64Array => {
+    const r = z * V + c, xc = basis.x.subarray(c * K, (c + 1) * K);
+    let { gram, xty } = eqs[z]!;
+    if (learned(r)) {
+      gram = gram.slice();
+      xty = xty.slice();
+      const w = weight(r), yc = w1.subarray(r * H, (r + 1) * H);
+      for (let i = 0; i < K; i++) {
+        const xi = xc[i]!;
+        if (xi === 0) continue;
+        for (let j = 0; j < K; j++) gram[i * K + j]! -= w * xi * xc[j]!;
+        for (let h = 0; h < H; h++) xty[i * H + h]! -= w * xi * yc[h]!;
+      }
+    }
+    // 行 = xcᵀ (G + P)⁻¹ xty
+    const u = choleskySolve(choleskyFactor(gram, K, penalties[li]!), K, xc, 1);
+    const out = new Float64Array(H);
+    for (let k = 0; k < K; k++) {
+      const uk = u[k]!;
+      if (uk === 0) continue;
+      for (let h = 0; h < H; h++) out[h]! += uk * xty[k * H + h]!;
+    }
+    return out;
+  };
+  const nameOf = new Map([...ALL_CARDS.map((c): [string, string] => [c.id, c.name]), ...ALL_CRESTS.map((c): [string, string] => [`crest:${c.id}`, c.name])]);
+  const acts = newActs(model), ba = newBoardActs(model), h0 = new Float64Array(H);
+  const nv = 1 + lambdas.length;
+  const results: { name: string; learned: boolean; n: number; ce: number; diff: number[] }[] = [];
+  for (let c = 0; c < V; c++) {
+    const list = byCard[c]!;
+    if (list.length < minN) continue;
+    const isLearned = Array.from({ length: Z }, (_, z) => learned(z * V + c)).some((x) => x);
+    // 変える行の差（変えた行 − 今の行）。[0 にした行, 属性の行（λ ごと）] × ゾーン
+    const deltas: (Float64Array | null)[][] = Array.from({ length: nv }, (_, v) =>
+      Array.from({ length: Z }, (_, z) => {
+        const r = z * V + c;
+        if (counts[r] === 0) return null;
+        const cur = w1.subarray(r * H, (r + 1) * H);
+        const target = v === 0 ? new Float64Array(H) : predictRow(z, c, v - 1);
+        return target.map((x, j) => x - cur[j]!);
+      }),
+    );
+    const step = Math.ceil(list.length / per);
+    let n = 0, base = 0;
+    const sums = new Float64Array(nv);
+    for (let t = 0; t < list.length; t += step) {
+      const i = list[t]!;
+      n++;
+      preActAt(net, d, i, h0, ba);
+      const ce = (delta: (Float64Array | null)[] | null): number => {
+        const h = acts[0]!;
+        h.set(h0);
+        if (delta) {
+          for (let q = d.off[i]!; q < d.off[i + 1]!; q++) {
+            const r = d.idx[q]!;
+            if (r >= ZV || r % V !== c) continue;
+            const dz = delta[Math.floor(r / V)];
+            if (!dz) continue;
+            const x = d.val[q]!;
+            for (let j = 0; j < H; j++) h[j]! += x * dz[j]!;
+          }
+        }
+        const p = sigmoid(model.a * d.s[i]! + model.c + forwardRest(net, model.b2, acts));
+        return bce(p, d.outcome[i]!);
+      };
+      base += ce(null);
+      for (let v = 0; v < nv; v++) sums[v]! += ce(deltas[v]!);
+    }
+    results.push({ name: nameOf.get(model.vocab[c]!) ?? model.vocab[c]!, learned: isLearned, n, ce: base / n, diff: Array.from(sums, (x) => x / n - base / n) });
+  }
+  const f = (x: number) => `${x >= 0 ? "+" : ""}${x.toFixed(4)}`;
+  const lam = lambdas.map((l) => `属性 λ${l}`);
+  console.log(`属性 ${K} 個、局面 ${d.s.length}、カード ${results.length} 枚（${minN} 局面以上、1 枚 ${per} 局面まで）${n0 > 0 ? `、行の重み n / (n + ${n0})` : ""}`);
+  console.log("");
+  console.log(`| カード | 学んだ | 局面 | 交差エントロピー | 0 にした差 | ${lam.map((x) => `${x} の差`).join(" | ")} |`);
+  console.log(`| --- | --- | ---: | ---: | ---: | ${lam.map(() => "---:").join(" | ")} |`);
+  for (const r of results) {
+    console.log(`| ${r.name} | ${r.learned ? "○" : ""} | ${r.n} | ${r.ce.toFixed(4)} | ${r.learned ? f(r.diff[0]!) : "（今のまま）"} | ${r.diff.slice(1).map(f).join(" | ")} |`);
+  }
+  console.log("");
+  const known = results.filter((r) => r.learned), unknown = results.filter((r) => !r.learned);
+  const mean = (rs: typeof results, v: number) => rs.reduce((x, r) => x + r.diff[v]!, 0) / Math.max(1, rs.length);
+  if (known.length > 0) {
+    const z0 = mean(known, 0);
+    const parts = lambdas.map((l, k) => {
+      const m = mean(known, k + 1);
+      const worse = known.filter((r) => r.diff[k + 1]! > r.diff[0]!).length;
+      return `λ${l} ${f(m)}（埋まった割合 ${(((z0 - m) / z0) * 100).toFixed(1)}%、0 より悪いカード ${worse}）`;
+    });
+    console.log(`学んだカード ${known.length} 枚（そのカードを抜いて当てはめ）の交差エントロピーの差の平均: 0 にした ${f(z0)}、属性 ${parts.join("、")}`);
+  }
+  if (unknown.length > 0) {
+    const parts = lambdas.map((l, k) => `λ${l} ${f(mean(unknown, k + 1))}（良くなったカード ${unknown.filter((r) => r.diff[k + 1]! < 0).length}）`);
+    console.log(`学んでいないカード ${unknown.length} 枚を属性の分で埋めたときの交差エントロピーの差の平均: ${parts.join("、")}`);
+  }
   return 0;
 }
 
