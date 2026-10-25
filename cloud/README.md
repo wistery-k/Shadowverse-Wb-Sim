@@ -93,7 +93,7 @@ P=<プロジェクト ID> AMOUNT=30USD bash cloud/setup-billing-cap.sh
 ```
 
 最後に予算内の試しの通知を送るので、1 分ほど後に `gcloud functions logs read billing-cap --region us-central1 --gen2 --limit 5` で
-「上限内: 0.0 / 30.0 USD」と出ていればよい。
+「上限内: 0.0 / 30.0 USD」（AMOUNT の額と通貨）と出ていればよい。
 
 - 費用の反映には数時間の遅れがあるので、止まるのは超えてから数時間後（その間の分は超える）。1 時間 3.1 ドルなら数ドルほど
 - 課金が外れると VM は止まる。Google の文書によれば、リソースが消えることもある（結果は毎回共有フォルダへ取り出しておく）

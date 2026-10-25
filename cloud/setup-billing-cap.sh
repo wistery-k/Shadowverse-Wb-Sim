@@ -92,7 +92,9 @@ else
 fi
 
 echo "== 試し: 予算内の通知を送る（課金は外れない）"
+NUM=${AMOUNT%%[A-Za-z]*}
+CUR=${AMOUNT##*[0-9.]}
 gcloud pubsub topics publish "$TOPIC" \
-  --message='{"budgetDisplayName":"test","costAmount":0.0,"budgetAmount":30.0,"currencyCode":"USD"}' > /dev/null
-echo "1 分ほど後に次を流し、「上限内: 0.0 / 30.0 USD」と出ればよい:"
+  --message="{\"budgetDisplayName\":\"test\",\"costAmount\":0.0,\"budgetAmount\":$NUM,\"currencyCode\":\"$CUR\"}" > /dev/null
+echo "1 分ほど後に次を流し、「上限内: 0.0 / $NUM $CUR」（額は 4500.0 のように小数で出る）と出ればよい:"
 echo "  gcloud functions logs read billing-cap --region $REGION --gen2 --limit 5"
