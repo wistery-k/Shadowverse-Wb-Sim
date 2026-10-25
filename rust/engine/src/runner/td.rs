@@ -1,6 +1,6 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--sampling classic|default] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--decks <デッキ>,…] [--vs <デッキ>] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--sampling classic|default] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] --out d0.jsonl
 //!
 //! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・幅 128、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
 //! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
@@ -40,6 +40,14 @@
 //! そのデッキを除いたもの）を順に回す（m デッキなら試合 g の挑戦する側は g mod m、(g / m) mod 2 が 0 なら挑戦する側が先攻）。
 //! --iv・--cmp で介入するのは挑戦する側だけ。特定の相手との試合でのカードの価値を測る用。docs/ai-notes.md「ロイヤル対策 5 回目」
 //!
+//! --frozen '<設定の JSON>' なら、片方の席（学ぶ側）だけが --model の補正で打ち、もう片方の席を compare の設定の JSON（'{}' なら今の既定の AI。
+//! '{"valueNet":"x.json"}' 等）の探索 AI に固定する（狙い撃ちの相手を学ばせる。AlphaStar の league の exploiter と同じ考え）。
+//! 学ぶ側の席は試合 g で (g / n²) mod 2（n はデッキの数。n² 試合ごとに入れ替わるので、どのデッキの組も両方の席で打つ）。
+//! --eps のランダムな手を打つのは学ぶ側だけで、固定した側は設定どおりに打つ。--iv・--ivRes で介入するのも学ぶ側の局面。
+//! 行には "learner": 学ぶ側の席 が付く。局面は両方の席のものを書く（入力は --model の並び）ので、学習は
+//! `npm run td -- train --seat learner` で学ぶ側の局面だけを学ぶ（--seat frozen なら固定した側の局面だけ。狙い撃ちされた対局を混ぜる用）。
+//! --vs・--cmp とは一緒に使えない。docs/ai-notes.md「狙い撃ちする相手を学ばせて死角を探す」
+//!
 //! 両方の席がモデルの評価で打つ探索 AI の自己対戦（7 デッキの全 49 組を順に回す）。各自分のターンの最初の局面（after）と
 //! ターン末の局面（end）を、入力と出発点の評価の点数 S と一緒に、試合が終わった順に 1 試合 1 行で書き出す。
 //! 書き出したファイルは `npm run td -- train` にそのまま渡せる（init・train・probe・prune は scripts/td-main.ts で行う）。
@@ -53,7 +61,7 @@
 //! "x" と "b" から出す補正が探索の補正と同じかを確かめる（場のカードのネットワークを変えたとき用）。
 
 use super::deck_compare::read_deck;
-use super::options::model_eval;
+use super::options::{compare_options, model_eval};
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
 use crate::ai::aidata::{ai_data, weights_with};
@@ -119,6 +127,8 @@ struct Model {
     check: bool,
     /// ターン末の後に書く想像の局面の数（--imagined）
     imagined: usize,
+    /// 固定した相手の設定（--frozen）。あれば、学ぶ側でない席はこの設定で打つ
+    frozen: Option<SearchOptions>,
 }
 
 fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Model, String> {
@@ -151,6 +161,7 @@ fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Mo
         board: false,
         check: false,
         imagined: 0,
+        frozen: None,
     })
 }
 
@@ -168,6 +179,8 @@ struct Summary {
     res_ivs: usize,
     /// 打ち比べた局面の数
     groups: usize,
+    /// 学ぶ側の席（--frozen のときだけ）
+    learner: Option<PlayerIndex>,
 }
 
 /// 局面 1 つ（{"ph":…,"s":…,"x":[…],"v":[…]}、ランダムに打った局面は "ex":1、board なら場のカードの属性 "b" も）。
@@ -386,7 +399,8 @@ struct Played {
     drawn: Vec<Iid>,
 }
 
-/// state から最後まで打ち、各自分のターンの最初とターン末の局面を記録する
+/// state から最後まで打ち、各自分のターンの最初とターン末の局面を記録する。
+/// learner があれば（--frozen）、その席だけが m.opts で打ってランダムな手も打ち、もう片方の席は m.frozen で打つ
 fn play_out(
     g: u32,
     mut state: GameState,
@@ -394,6 +408,7 @@ fn play_out(
     eps: f64,
     seed: u32,
     branch_at: Option<(PlayerIndex, i32)>,
+    learner: Option<PlayerIndex>,
 ) -> Played {
     let mut agent_rng = Rng::new(seed ^ 0x9e3779b9);
     let mut img_rng = Rng::new(seed ^ 0x3c6ef372);
@@ -405,7 +420,10 @@ fn play_out(
     };
     // デフォルトデッキと違うデッキ（--decks）のマリガンは、返し方ごとに引き直しを試して選ぶ（マリガンのモデルはデフォルトデッキしか知らない）
     let agent = |p: PlayerIndex| {
-        let mut o = m.opts.clone();
+        let mut o = match (learner, &m.frozen) {
+            (Some(l), Some(f)) if p != l => f.clone(),
+            _ => m.opts.clone(),
+        };
         if state.phase == Phase::Mulligan && default_deck_name_of(&state, p).is_none() {
             o.mulligan = MulliganMode::Sample;
         }
@@ -470,7 +488,12 @@ fn play_out(
                 .iter()
                 .filter(|a| !matches!(a, Action::EndTurn))
                 .collect();
-            if eps > 0.0 && !choices.is_empty() && next_float() < eps {
+            // 固定した相手（--frozen）はランダムな手を打たない
+            if eps > 0.0
+                && learner.is_none_or(|l| l == actor)
+                && !choices.is_empty()
+                && next_float() < eps
+            {
                 action =
                     Some(choices[(next_float() * choices.len() as f64).floor() as usize].clone());
                 explored += 1;
@@ -519,17 +542,26 @@ fn play_out(
     }
 }
 
-/// 試合 1 つの JSON の 1 行（介入した試合は "iv" も）
-fn record_line(g: u32, names: &[String; 2], r: &Played, iv: Option<String>) -> String {
+/// 試合 1 つの JSON の 1 行（介入した試合は "iv" も、--frozen なら学ぶ側の席 "learner" も）
+fn record_line(
+    g: u32,
+    names: &[String; 2],
+    r: &Played,
+    iv: Option<String>,
+    learner: Option<PlayerIndex>,
+) -> String {
     let winner = r
         .state
         .winner
         .unwrap_or_else(|| panic!("試合 {g} に勝者がいません"));
     format!(
-        "{{\"g\":{g},\"decks\":[{},{}],\"winner\":{winner},\"turns\":{},{}\"samples\":[[{}],[{}]]}}",
+        "{{\"g\":{g},\"decks\":[{},{}],\"winner\":{winner},\"turns\":{},{}{}\"samples\":[[{}],[{}]]}}",
         serde_json::to_string(&names[0]).expect("名前"),
         serde_json::to_string(&names[1]).expect("名前"),
         r.state.turn,
+        learner
+            .map(|l| format!("\"learner\":{l},"))
+            .unwrap_or_default(),
         iv.map(|x| format!("\"iv\":{x},")).unwrap_or_default(),
         r.samples[0],
         r.samples[1]
@@ -674,6 +706,11 @@ fn play_one(
             }
         }
     };
+    // --frozen なら学ぶ側の席（n² 試合ごとに入れ替える。どのデッキの組も両方の席で打つ）
+    let learner = m
+        .frozen
+        .as_ref()
+        .map(|_| ((g / (n * n)) % 2) as PlayerIndex);
     let seed = SEED_BASE + g;
     let state = create_game([&pair[0].cards, &pair[1].cards], seed);
     // 介入する試合・プレイヤー・ターン（自己対戦の乱数とは別の乱数で決める。--iv 0 なら今までと同じ試合）
@@ -682,9 +719,9 @@ fn play_one(
     let mut res_rng = Rng::new(seed ^ 0xbb67ae85);
     let plan = (iv > 0.0 || iv_res > 0.0).then(|| {
         let variants = count_of(iv, &mut ivr);
-        // --vs なら介入するのは挑戦する側（乱数は同じだけ使う）
+        // --vs なら介入するのは挑戦する側、--frozen なら学ぶ側（乱数は同じだけ使う）
         let p = ivr.int(2);
-        let p = challenger.unwrap_or(p);
+        let p = challenger.or(learner).unwrap_or(p);
         let turn = if zone == IvZone::Drawn {
             // 1〜10（1 ターン目は手札のどれでも選べるので 5 倍の重み）
             let r = ivr.int(14) as i32;
@@ -722,13 +759,14 @@ fn play_one(
             .filter(|x| x.variants + x.res_variants > 0)
             .map(|x| (x.p, x.turn))
             .or(cmp_at),
+        learner,
     );
     let names = [pair[0].name.clone(), pair[1].name.clone()];
     let winner = base
         .state
         .winner
         .unwrap_or_else(|| panic!("試合 {g} に勝者がいません"));
-    let mut line = record_line(g, &names, &base, None);
+    let mut line = record_line(g, &names, &base, None, learner);
     let mut samples = base.counts[0] + base.counts[1];
     let mut ivs = 0;
     let mut res_ivs = 0;
@@ -797,6 +835,7 @@ fn play_one(
                 eps,
                 seed ^ (0x85ebca6b_u32.wrapping_mul(v as u32 + 1)),
                 None,
+                learner,
             );
             let info = format!(
                 "{{\"p\":{},\"k\":{k},\"card\":{}{}}}",
@@ -809,7 +848,7 @@ fn play_one(
                 }
             );
             line.push('\n');
-            line.push_str(&record_line(g, &names, &r, Some(info)));
+            line.push_str(&record_line(g, &names, &r, Some(info), learner));
             samples += r.counts[0] + r.counts[1];
             ivs += 1;
         }
@@ -826,6 +865,7 @@ fn play_one(
                 eps,
                 seed ^ (0xc2b2ae35_u32.wrapping_mul(v as u32 + 1)),
                 None,
+                learner,
             );
             let info = format!(
                 "{{\"p\":{},\"k\":{k},\"res\":\"{}\",\"d\":{d},\"zone\":\"{}\"}}",
@@ -834,7 +874,7 @@ fn play_one(
                 if side == plan.p { "res" } else { "oppRes" }
             );
             line.push('\n');
-            line.push_str(&record_line(g, &names, &r, Some(info)));
+            line.push_str(&record_line(g, &names, &r, Some(info), learner));
             samples += r.counts[0] + r.counts[1];
             ivs += 1;
             res_ivs += 1;
@@ -850,6 +890,7 @@ fn play_one(
         ivs,
         res_ivs,
         groups,
+        learner,
     }
 }
 
@@ -924,6 +965,16 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
         "1" => true,
         x => return Err(format!("--check は 0 か 1: {x}")),
     };
+    // 固定した相手（--frozen）。想像の局面を書くなら、固定した側も読んだ局面を残す（打つ手は変わらない）
+    if let Some(text) = arg(args, "frozen") {
+        if cmp_k > 0.0 || arg(args, "vs").is_some() {
+            return Err("--frozen と --cmp・--vs は一緒に使えません".into());
+        }
+        let mut f = compare_options(text).map_err(|e| format!("--frozen: {e}"))?;
+        f.record_reads = m.opts.record_reads;
+        println!("固定した相手: {text}（学ぶ側は --model {model_path}）");
+        m.frozen = Some(f);
+    }
     let cmp = if cmp_k > 0.0 {
         Some(Compare {
             k: cmp_k as usize,
@@ -1025,6 +1076,28 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
         }
     }
     println!("{}", per_deck.line());
+    // --frozen: 学ぶ側の勝率（もとの試合だけ。学ぶ側はランダムな手も打つので、compare で測る勝率より低めに出る）
+    if m.frozen.is_some() {
+        let mut by_deck = Tally::default();
+        let mut by_seat = [0usize; 2];
+        let mut seat_games = [0usize; 2];
+        for r in &summaries {
+            let l = r.learner.expect("学ぶ側の席");
+            by_deck.add(&r.decks[l], r.winner == l);
+            seat_games[l] += 1;
+            by_seat[l] += usize::from(r.winner == l);
+        }
+        let wins = by_seat[0] + by_seat[1];
+        println!(
+            "学ぶ側の勝率 {wins}/{n} = {}%（先攻 {}/{}・後攻 {}/{}。ランダムに打った手を含む）",
+            fixed(wins as f64 / n as f64 * 100.0, 1),
+            by_seat[0],
+            seat_games[0],
+            by_seat[1],
+            seat_games[1]
+        );
+        println!("学ぶ側のデッキごと: {}", by_deck.line());
+    }
     Ok(())
 }
 
@@ -1195,7 +1268,7 @@ mod tests {
         ] {
             let seed = SEED_BASE + g;
             let state = create_game([&decks[0].cards, &decks[(g as usize) % 7].cards], seed);
-            let r = play_out(g, state, &m, 0.1, seed, Some((p, turn)));
+            let r = play_out(g, state, &m, 0.1, seed, Some((p, turn)), None);
             let (at, _) = r.branch.as_ref().expect("介入する局面");
             let hand: Vec<Iid> = at.players[p].hand.iter().map(|h| h.iid).collect();
             if turn == 1 {
@@ -1254,6 +1327,78 @@ mod tests {
                 assert_eq!(v["iv"]["p"], seat, "g{g} {}", v["iv"]);
             }
         }
+    }
+
+    /// 行の JSON から "learner" を外したもの
+    fn without_learner(text: &str) -> Vec<serde_json::Value> {
+        text.lines()
+            .map(|l| {
+                let mut v: serde_json::Value = serde_json::from_str(l).expect("JSON");
+                v.as_object_mut().expect("行").remove("learner");
+                v
+            })
+            .collect()
+    }
+
+    #[test]
+    fn frozen_opponent_seats() {
+        // --frozen: 学ぶ側の席は (g / 49) mod 2。固定した側に学ぶ側と同じ設定を渡し、ランダムな手を打たなければ、
+        // "learner" のほかは --frozen なしと同じ試合になる
+        let decks = compare_decks();
+        let plain = imagined_model(0);
+        let mut same = imagined_model(0);
+        same.frozen = Some(same.opts.clone());
+        for (g, seat) in [(2u32, 0usize), (49 + 5, 1), (98 + 1, 0)] {
+            let a = play_one(g, &decks, None, &plain, 0.0, 0.0, IvZone::Hand, 0.0, None);
+            let b = play_one(g, &decks, None, &same, 0.0, 0.0, IvZone::Hand, 0.0, None);
+            assert_eq!(b.learner, Some(seat), "g{g}");
+            assert_eq!(a.learner, None);
+            let v: serde_json::Value = serde_json::from_str(&b.line).expect("JSON");
+            assert_eq!(v["learner"], seat, "g{g}");
+            assert_eq!(without_learner(&a.line), without_learner(&b.line), "g{g}");
+        }
+        // ランダムな手を打つのは学ぶ側だけ。介入するのも学ぶ側の局面で、介入した試合にも "learner" が付く
+        let mut hits = 0;
+        for g in [7u32, 49 + 8, 30] {
+            let r = play_one(g, &decks, None, &same, 0.5, 1.0, IvZone::Both, 0.0, None);
+            let seat = r.learner.expect("学ぶ側");
+            let lines: Vec<serde_json::Value> = r
+                .line
+                .lines()
+                .map(|l| serde_json::from_str(l).expect("JSON"))
+                .collect();
+            assert!(lines.len() >= 2, "g{g} 介入の試合が無い");
+            for (k, v) in lines.iter().enumerate() {
+                assert_eq!(v["learner"], seat, "g{g}");
+                if k > 0 {
+                    assert_eq!(v["iv"]["p"], seat, "g{g} {}", v["iv"]);
+                }
+                let ex = |p: usize| {
+                    v["samples"][p]
+                        .as_array()
+                        .expect("局面")
+                        .iter()
+                        .filter(|x| x["ex"] == 1)
+                        .count()
+                };
+                assert_eq!(ex(1 - seat), 0, "g{g} 固定した側がランダムに打った");
+                hits += ex(seat);
+            }
+        }
+        assert!(hits > 0, "学ぶ側がランダムに打っていない");
+        // 固定した側の設定を変えると試合が変わる（補正なし・幅 4 の探索で打つ）
+        let mut weak = imagined_model(0);
+        weak.frozen = Some(SearchOptions {
+            extra_eval: None,
+            beam_width: 4,
+            ..weak.opts.clone()
+        });
+        let changed = (0..4u32).any(|g| {
+            let a = play_one(g, &decks, None, &plain, 0.0, 0.0, IvZone::Hand, 0.0, None);
+            let b = play_one(g, &decks, None, &weak, 0.0, 0.0, IvZone::Hand, 0.0, None);
+            without_learner(&a.line) != without_learner(&b.line)
+        });
+        assert!(changed, "固定した側の設定が効いていない");
     }
 
     #[test]
