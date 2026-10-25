@@ -36,6 +36,7 @@
 | `npm run svwb` | Rust 版の CLI（下） | `rust/engine/src/main.rs` |
 | `npm run td` | TD 学習のモデルの作成・学習・分析（下） | `scripts/td-main.ts` |
 | `npm run pack-run` | PC で回した 1 回分の出力（自己対戦・モデル・ログ）を、共有フォルダに上げる `.tar.gz` にまとめる（下） | `scripts/pack-run-main.ts` |
+| `cloud/gcp.sh` | ジョブ（meta.sh 等）をクラウドの Spot VM で回す（下） | `cloud/gcp.sh`・`cloud/vm-startup.sh` |
 
 ## sim
 
@@ -303,6 +304,20 @@ zcat /mnt/project-files/data/selfplay/<名前>/f0.jsonl.gz | head -c 500
 - 展開したら `logs/<名前>/MANIFEST.md` を読む（何の実験か、どのファイルがあるか、モデルの sha256）
 - `npm run td` は `.jsonl.gz` をそのまま読めない。学習・分析に使うときは `zcat` でスクラッチに展開してから渡す
 - 分けたアーカイブは、どれから展開してもよい
+
+## cloud/gcp.sh（クラウドの Spot VM で回す）
+
+```sh
+cloud/gcp.sh run <名前> <ジョブ.sh> [--machine c3d-highcpu-360] [--hours 4] [--input <手元>=<作業フォルダの中の名前>]... [--env K=V]...
+cloud/gcp.sh watch|status|stop|preempt <名前>
+cloud/gcp.sh pull <名前> <行き先>
+cloud/gcp.sh list
+```
+
+今のコミット（push してあるもの）のソースとジョブを Cloud Storage に送り、Google Cloud の Spot VM を立てて回す。VM はビルドとゴールデンテストの後に
+ジョブを流し、作業フォルダ（ジョブの中では `CLOUD_W`）を 3 分ごとに Cloud Storage に写す。止められたら `watch` が VM を作り直し、
+ジョブは終わった部分を飛ばして続きから回る。設定（`GCP_PROJECT`・`GCP_BUCKET`・`GCP_SA_KEY`）、準備、ジョブの書き方、手元で試す方法は
+`cloud/README.md`。
 
 ## 探索 AI の設定（compare の A・B、rhino-compare・yardstick の `--opts`）
 
