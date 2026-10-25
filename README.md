@@ -66,6 +66,7 @@ docs/
   rules.md    実装するルールの仕様メモ（出典付き）
   ai-notes.md AI の実験記録（今の AI・分かったこと・全部の節の索引）
   ai-notes/   AI の実験記録の詳しい記録（時期ごと）
+  value-net.md 評価に使うネットワーク（学習した補正）の形・入力・出力・学習のまとめ
 tests/
 scripts/
   convert-cards.ts  カードデータ変換

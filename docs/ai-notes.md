@@ -46,7 +46,7 @@ AI の改善で試したことと結果。同じ実験を繰り返さないた�
       手札の α・β・γ の種類（`fusionSet` 3.6）、超進化を 1 回残す（`kuonReserve` 8）、EP の数まで進化時能力持ちを残す（`evoReserve` 3）、
       超進化を進化時・超進化時能力持ちに残す（`sevoReserve` 6）、ラストワード（`lastWords` 1・`lastWordsSummon` 0.5）、スペルブーストで育つカード（`boostCard` 1・`boost` 0.2）、
       カウントダウンのアミュレット（`countdownDecay` 0.8）、相手のターン終了時に自壊するフォロワー（`doomed` 0.3）、後攻 5 ターン目に残したエクストラPP（`extraPpExpiring` 0）
-    - 補正は隠れ層 256・32 の小さな NN（入力は手札・場・墓地等のカードの枚数と数値、想像の局面の印）。今の既定は **s2ba**（2026-10-24）。
+    - 補正は隠れ層 256・32 の小さな NN（入力は手札・場・墓地等のカードの枚数と数値、想像の局面の印。形・入力・出力・学習のまとめは [value-net.md](value-net.md)）。今の既定は **s2ba**（2026-10-24）。
       自己対戦の TD 学習（手札・場のカードを消す介入と、想像の局面を含む）で学んだ s2b に、学んでいないカードの行をカードの属性から埋めたもの（`td attr`）
   - **マリガン**: 手札の形のモデル（`mulligan: "model"`。係数 `data/mulligan-model.json`、役割 `data/mulligan-roles.json`、`mulligan.rs`）。
     役割の表の無いデッキはカードごとの表（`data/mulligan-weights.json`）、それも無ければコスト 4 以上を返す
