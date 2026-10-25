@@ -297,7 +297,9 @@ export function Sandbox({ saved, incoming }: Props) {
           上下を入れ替え（下: {NAMES[bottom]}）
         </button>
       )}
-      <span class="muted">盤面・手札・リーダーを編集して、AI に考えさせたり、手を打ち比べたりできます</span>
+      <span class="muted">
+        盤面・手札・リーダーを編集して、AI に考えさせたり、手を打ち比べたりできます。ゲームの実際の対戦の最中に、手を決める助けとして使うこと（ソフト打ち）は禁止です
+      </span>
     </div>
   );
 
