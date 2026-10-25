@@ -15,7 +15,9 @@
 # 設定（環境変数）:
 #   GCP_PROJECT・GCP_BUCKET  プロジェクト ID とバケット名（必須）
 #   GCP_SA                   VM に付けるサービスアカウント（既定 svwb-runner@<プロジェクト>.iam.gserviceaccount.com）
-#   GCP_SA_KEY               サービスアカウントの鍵（JSON の中身か、`base64 -w0 key.json` の 1 行）。あれば、それで gcloud にログインする
+#   GCP_SA_KEY               サービスアカウントの鍵（JSON の中身か、`base64 -w0 key.json` の 1 行）。あれば、それで gcloud にログインする。
+#                            Claude のクラウド環境では、鍵はネットワークのシークレット（GCP access token）に置くほうがよい。そのときは
+#                            これを置かず、gcloud は環境の CLOUDSDK_AUTH_ACCESS_TOKEN（通信の出口で本物の token に差し替わる）で動く
 #   CLOUD_LOCAL=<フォルダ>   手元で試す: Cloud Storage の代わりに <フォルダ>/store、VM の代わりに手元のプロセスで動かす
 #
 # ジョブは VM のソースのフォルダ（リポジトリの一番上）で bash で流れ、作業フォルダが環境変数 CLOUD_W に入る。
@@ -47,6 +49,8 @@ auth() {
   [[ $key == *'{'* ]] || key=$(printf '%s' "$key" | tr -d ' \n' | base64 -d 2> /dev/null) || die "GCP_SA_KEY を base64 として読めません"
   sa=$(printf '%s' "$key" | python3 -c 'import json,sys; print(json.load(sys.stdin)["client_email"])') ||
     die "GCP_SA_KEY が鍵の JSON（か、その base64）ではありません"
+  # 環境が token を決めていると gcloud はそちらを使うので、鍵を使うときは外す
+  unset CLOUDSDK_AUTH_ACCESS_TOKEN
   if [ "$(gcloud config get-value account 2> /dev/null)" != "$sa" ]; then
     local k
     k=$(mktemp)
