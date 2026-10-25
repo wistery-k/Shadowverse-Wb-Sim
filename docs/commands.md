@@ -36,6 +36,7 @@
 | `npm run svwb` | Rust 版の CLI（下） | `rust/engine/src/main.rs` |
 | `npm run td` | TD 学習のモデルの作成・学習・分析（下） | `scripts/td-main.ts` |
 | `npm run pack-run` | PC で回した 1 回分の出力（自己対戦・モデル・ログ）を、共有フォルダに上げる `.tar.gz` にまとめる（下） | `scripts/pack-run-main.ts` |
+| `cloud/gcp.sh` | ジョブ（meta.sh 等）をクラウドの Spot VM で回す（下） | `cloud/gcp.sh`・`cloud/vm-startup.sh` |
 
 ## sim
 
@@ -149,7 +150,7 @@ AI はどちらの側も今の既定（リノセウスエルフはリノセウ�
 npm run meta -- init --out 環境.json [--decks <デッキ>,…] [--usage class|uniform]
 npm run meta -- round --state 環境.json [--out 次.json] [--classes witch,bishop] [--games 30] [--draw 1]
                 [--stages 150:10,450:3] [--confirm 1200] [--zmin 2] [--eta 1] [--minUsage 0.02]
-                [--pool <カード>,…] [--net 補正.json] [--report 記録.md] [--jsonl 試合.jsonl]
+                [--pool <カード>,…] [--net 補正.json] [--report 記録.md] [--jsonl 試合.jsonl] [--cache 途中.txt]
 npm run meta -- export --state 環境.json --dir <フォルダ> [--top 1]  # 環境のデッキを td selfplay --decks 用のファイルに（--top 1 ならクラスごとに一番のデッキだけ。compare --decks 用）
 npm run meta -- show --state 環境.json
 ```
@@ -184,6 +185,7 @@ AI は deck-compare と同じ（どちらの側も今の既定）。
 | `--net ファイル` | なし | 両方の席の学習した補正をこのファイルのものに替える（学び直した補正で回す用。`baseWeights` の無いモデルだけ） |
 | `--report ファイル` | なし | 回りのまとめ（Markdown。標準出力と同じ）を書き足す |
 | `--jsonl ファイル` | なし | 試合ごとの結果（段・デッキ・案・相手・試合番号・席・勝ち・介入）を JSON Lines で書き足す |
+| `--cache ファイル` | なし | 打った試合の結果を 1 試合ずつ書き足し、次に同じファイルで回すとき、その試合を打たずに使う（回りの途中で止めても、続きから回る。結果は止めないときと同じ）。回りが終わったら消してよい |
 
 - 案は、クラスごとに使用率が一番のデッキについて、クラスとニュートラルの各カードを 2 枚（3 枚を超えるなら入るだけ）足し、
   引いた瞬間の価値の低いカード（2 枚以上入っているもの）を 1 枚ずつ同じ枚数抜く。1 クラス 40 案ほど
@@ -303,6 +305,20 @@ zcat /mnt/project-files/data/selfplay/<名前>/f0.jsonl.gz | head -c 500
 - 展開したら `logs/<名前>/MANIFEST.md` を読む（何の実験か、どのファイルがあるか、モデルの sha256）
 - `npm run td` は `.jsonl.gz` をそのまま読めない。学習・分析に使うときは `zcat` でスクラッチに展開してから渡す
 - 分けたアーカイブは、どれから展開してもよい
+
+## cloud/gcp.sh（クラウドの Spot VM で回す）
+
+```sh
+cloud/gcp.sh run <名前> <ジョブ.sh> [--machine c3d-highcpu-180] [--hours 4] [--input <手元>=<作業フォルダの中の名前>]... [--env K=V]...
+cloud/gcp.sh watch|status|stop|preempt <名前>
+cloud/gcp.sh pull <名前> <行き先>
+cloud/gcp.sh list
+```
+
+今のコミット（push してあるもの）のソースとジョブを Cloud Storage に送り、Google Cloud の Spot VM を立てて回す。VM はビルドとゴールデンテストの後に
+ジョブを流し、作業フォルダ（ジョブの中では `CLOUD_W`）を 3 分ごとに Cloud Storage に写す。止められたら `watch` が VM を作り直し、
+ジョブは終わった部分を飛ばして続きから回る。設定（鍵の置き方、`GCP_PROJECT`・`GCP_BUCKET`）、準備、月の費用の上限（`cloud/setup-billing-cap.sh`）、
+ジョブの書き方、手元で試す方法は `cloud/README.md`。
 
 ## 探索 AI の設定（compare の A・B、rhino-compare・yardstick の `--opts`）
 

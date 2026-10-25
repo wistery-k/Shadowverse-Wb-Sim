@@ -3,7 +3,7 @@
 //!   svwb meta init --out 環境.json [--decks <デッキ>,…] [--usage class|uniform]
 //!   svwb meta round --state 環境.json [--out 次.json] [--classes witch,bishop] [--games 30] [--draw 1]
 //!                   [--stages 150:10,450:3] [--confirm 1200] [--zmin 2] [--eta 1] [--minUsage 0.02]
-//!                   [--pool <カード>,…] [--net 補正.json] [--report 記録.md] [--jsonl 試合.jsonl]
+//!                   [--pool <カード>,…] [--net 補正.json] [--report 記録.md] [--jsonl 試合.jsonl] [--cache 途中.txt]
 //!   svwb meta export --state 環境.json --dir <フォルダ> [--top 1]
 //!   svwb meta show --state 環境.json
 //!
@@ -27,6 +27,8 @@
 //!   - 試合番号は環境のファイルの `nextG` から順に使い、回りごと・段ごとに新しくする（シードは 5000000 + 試合番号 × 13 + 席。他のランナーと重ならない）
 //!   - AI は deck-compare と同じ（どちらの側も今の既定。`--net` ならどちらの側も学習した補正をそのファイルのものに替える）
 //!   - 回りのまとめを `--report` に（Markdown で）書き足し、試合ごとの結果を `--jsonl` に書き足す
+//!   - `--cache` なら打った試合の結果を 1 試合ずつそのファイルに書き足し、次に同じファイルで回すときはその試合を打たずに使う
+//!     （回りの途中で止めても続きから回る。結果は止めないときと同じ。クラウドの Spot VM で止められたとき用）
 //! - **export:** 環境のデッキをテキストファイル（`<key>.txt`）に書き出し、カンマで並べたパスを出す（td selfplay `--decks` に渡す。補正の学び直し用）。
 //!   `--top 1` なら、クラスごとに使用率が一番のデッキだけ（クラスの順。compare `--decks` に渡す）
 //! - **show:** 環境のデッキ・使用率・入れ替えの履歴を出す
@@ -46,7 +48,7 @@ use crate::data::{data, CardIdx, ClassId};
 use crate::game::{acting_player, apply_action, create_game, legal_actions};
 use crate::state::{card, GameState, Iid, Phase, PlayerIndex};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::sync::Arc;
 use std::time::Instant;
@@ -328,6 +330,114 @@ struct GameOut {
 
 type MakeAgent<'a> = &'a (dyn Fn(PlayerIndex) -> Box<dyn Agent> + Sync);
 
+// ---- 途中の結果（--cache） ----
+
+/// 回りの途中で止めても打ち直さないよう、打った試合の結果を 1 行ずつ書き足しておくファイル（`--cache`）。
+/// 鍵は試合を決めるもの（補正のファイル・両方の席のデッキと AI の種類・シード・介入するターン）のハッシュで、
+/// 同じ鍵の試合は同じ結果になる。回りが終わったら消してよい（meta.sh が消す）
+struct GameCache {
+    done: HashMap<u64, GameOut>,
+    file: Option<(String, std::fs::File)>,
+}
+
+impl GameCache {
+    fn open(path: Option<&str>) -> Result<GameCache, String> {
+        let mut done = HashMap::new();
+        let Some(path) = path else {
+            return Ok(GameCache { done, file: None });
+        };
+        let mut bad = 0;
+        let mut ends_mid_line = false;
+        if let Ok(text) = std::fs::read_to_string(path) {
+            ends_mid_line = !text.is_empty() && !text.ends_with('\n');
+            for line in text.lines().filter(|l| !l.trim().is_empty()) {
+                // 止められたときの書きかけの行は読めないので飛ばす
+                match parse_cache_line(line) {
+                    Some((k, g)) => {
+                        done.insert(k, g);
+                    }
+                    None => bad += 1,
+                }
+            }
+        }
+        if !done.is_empty() || bad > 0 {
+            eprintln!(
+                "{path}: 打った試合 {} 個の結果を使う（読めない行 {bad}）",
+                done.len()
+            );
+        }
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .map_err(|e| format!("{path} に書けません: {e}"))?;
+        if ends_mid_line {
+            // 書きかけの行の続きに書かないよう、行を終えておく
+            f.write_all(b"\n")
+                .map_err(|e| format!("{path} に書けません: {e}"))?;
+        }
+        Ok(GameCache {
+            done,
+            file: Some((path.to_string(), f)),
+        })
+    }
+}
+
+/// 打った試合 1 つを書き足す（行ごとに書くので、止められても失うのは書きかけの 1 行だけ）
+fn write_cache(file: &mut Option<(String, std::fs::File)>, k: u64, g: &GameOut) {
+    let Some((path, f)) = file else { return };
+    let line = serde_json::json!({
+        "k": format!("{k:016x}"),
+        "w": g.winner,
+        "d": g.drawn.iter().map(|d| serde_json::json!([d.side, d.turn, card(d.card).id, d.value])).collect::<Vec<_>>(),
+    });
+    if let Err(e) = f.write_all(format!("{line}\n").as_bytes()) {
+        eprintln!("{path} に書けません: {e}");
+        *file = None;
+    }
+}
+
+fn parse_cache_line(line: &str) -> Option<(u64, GameOut)> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    let k = u64::from_str_radix(v.get("k")?.as_str()?, 16).ok()?;
+    let winner = v.get("w")?.as_u64()? as PlayerIndex;
+    let mut drawn = Vec::new();
+    for d in v.get("d")?.as_array()? {
+        let d = d.as_array()?;
+        drawn.push(Drawn {
+            side: d.first()?.as_u64()? as PlayerIndex,
+            turn: d.get(1)?.as_i64()? as i32,
+            card: *data().card_by_id.get(d.get(2)?.as_str()?)?,
+            value: d.get(3)?.as_i64()? as i32,
+        });
+    }
+    Some((k, GameOut { winner, drawn }))
+}
+
+/// 試合の鍵（FNV-1a）。entries は席の順
+fn game_key(net: Option<&str>, entries: [&Entry; 2], seed: u32, turns: [Option<i32>; 2]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    let mut put = |bytes: &[u8]| {
+        for &b in bytes {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x100000001b3);
+        }
+        h ^= 0xff;
+        h = h.wrapping_mul(0x100000001b3);
+    };
+    put(net.unwrap_or("").as_bytes());
+    for (e, t) in entries.iter().zip(turns) {
+        put(&[u8::from(e.rhino)]);
+        put(e.mulligan_as.unwrap_or("").as_bytes());
+        for &c in &e.cards {
+            put(card(c).id.as_bytes());
+        }
+        put(&t.unwrap_or(-1).to_le_bytes());
+    }
+    put(&seed.to_le_bytes());
+    h
+}
+
 /// 介入するターン（1〜10。1 ターン目は手札のどれでも選べるので 5 倍の重み。td selfplay --ivZone drawn と同じ）
 fn draw_turn(rng: &mut Rng) -> i32 {
     let r = rng.int(14) as i32;
@@ -607,6 +717,7 @@ struct SieveTask {
     entry: usize,
     k: usize,
     seat: usize,
+    key: u64,
 }
 
 /// 各クラスの残っている案と元のデッキを、試合番号 g0..g0+opp_of.len() で打つ（試合番号 g0+k の相手は field[opp_of[k]]）。
@@ -619,6 +730,8 @@ fn play_block(
     opp_of: &[usize],
     g0: u32,
     net: Option<&ExtraEval>,
+    net_path: Option<&str>,
+    cache: &mut GameCache,
     what: &str,
     jsonl: &mut Vec<String>,
     round: u32,
@@ -628,11 +741,14 @@ fn play_block(
         for entry in std::iter::once(0).chain(p.alive.iter().copied()) {
             for k in 0..opp_of.len() {
                 for seat in 0..2 {
+                    let (me, opp) = (&p.entries[entry], &field[opp_of[k]]);
+                    let seated = if seat == 0 { [me, opp] } else { [opp, me] };
                     tasks.push(SieveTask {
                         plan: pi,
                         entry,
                         k,
                         seat,
+                        key: game_key(net_path, seated, seed_of(g0 + k as u32, seat), [None, None]),
                     });
                 }
             }
@@ -640,9 +756,13 @@ fn play_block(
     }
     let t0 = Instant::now();
     let step = (tasks.len() / 10).max(1);
+    let (done_before, file) = (&cache.done, &mut cache.file);
     let results = parallel_map(
         &tasks,
         |t, _| {
+            if let Some(g) = done_before.get(&t.key) {
+                return g.clone();
+            }
             let me = &plans[t.plan].entries[t.entry];
             let opp = &field[opp_of[t.k]];
             let make = |p: PlayerIndex| -> Box<dyn Agent> {
@@ -653,9 +773,12 @@ fn play_block(
             } else {
                 [&opp.cards, &me.cards]
             };
-            play_game(&make, decks, seed_of(g0 + t.k as u32, t.seat), [None, None]).winner == t.seat
+            play_game(&make, decks, seed_of(g0 + t.k as u32, t.seat), [None, None])
         },
-        |done, total, _, _| {
+        |done, total, r, i| {
+            if !done_before.contains_key(&tasks[i].key) {
+                write_cache(file, tasks[i].key, r);
+            }
             if done % step == 0 || done == total {
                 eprintln!(
                     "{what}: {done}/{total} 試合 {}s/試合",
@@ -668,7 +791,8 @@ fn play_block(
         .iter()
         .map(|p| vec![Vec::new(); p.entries.len()])
         .collect();
-    for (t, &w) in tasks.iter().zip(&results) {
+    for (t, r) in tasks.iter().zip(&results) {
+        let w = r.winner == t.seat;
         out[t.plan][t.entry].push(w);
         let p = &plans[t.plan];
         jsonl.push(
@@ -904,7 +1028,7 @@ fn export(a: &Args) -> Result<(), String> {
 fn round(a: &Args) -> Result<(), String> {
     a.check(&[
         "state", "out", "classes", "games", "draw", "stages", "confirm", "zmin", "eta", "minUsage",
-        "pool", "net", "report", "jsonl",
+        "pool", "net", "report", "jsonl", "cache",
     ])?;
     let state_path = a.need("state")?;
     let out_path = a.get("out").unwrap_or(state_path).to_string();
@@ -938,6 +1062,7 @@ fn round(a: &Args) -> Result<(), String> {
         }
     };
     let net = net.as_ref();
+    let mut cache = GameCache::open(a.get("cache"))?;
     let round = st.round + 1;
     let g_start = st.next_g;
     let mut g_next = g_start;
@@ -974,17 +1099,36 @@ fn round(a: &Args) -> Result<(), String> {
             b: usize,
             g: u32,
             seat: usize,
+            turns: [Option<i32>; 2],
+            key: u64,
         }
         let mut tasks = Vec::new();
         for i in 0..nf {
             for j in i + 1..nf {
                 for g in g_next..g_next + games {
                     for seat in 0..2 {
+                        let seed = seed_of(g, seat);
+                        // 介入するかとターンは組ごとにも変える（試合のシードは組によらず試合番号と席で決まる）
+                        let mut r = Rng::new(
+                            seed ^ 0x6a09e667 ^ ((i * 64 + j) as u32).wrapping_mul(0x9e3779b1),
+                        );
+                        let mut turns = [None, None];
+                        for t in turns.iter_mut() {
+                            let take = r.int(1000) < (draw * 1000.0).round() as usize;
+                            let turn = draw_turn(&mut r);
+                            if take {
+                                *t = Some(turn);
+                            }
+                        }
+                        let (x, y) = (&field[i], &field[j]);
+                        let seated = if seat == 0 { [x, y] } else { [y, x] };
                         tasks.push(MTask {
                             a: i,
                             b: j,
                             g,
                             seat,
+                            turns,
+                            key: game_key(net_path.as_deref(), seated, seed, turns),
                         });
                     }
                 }
@@ -999,9 +1143,13 @@ fn round(a: &Args) -> Result<(), String> {
         );
         let t0 = Instant::now();
         let step = (tasks.len() / 10).max(1);
+        let (done_before, file) = (&cache.done, &mut cache.file);
         let results = parallel_map(
             &tasks,
             |t, _| {
+                if let Some(g) = done_before.get(&t.key) {
+                    return g.clone();
+                }
                 // 席 seat が a
                 let (x, y) = (&field[t.a], &field[t.b]);
                 let make = |p: PlayerIndex| -> Box<dyn Agent> {
@@ -1012,22 +1160,12 @@ fn round(a: &Args) -> Result<(), String> {
                 } else {
                     [&y.cards, &x.cards]
                 };
-                let seed = seed_of(t.g, t.seat);
-                // 介入するかとターンは組ごとにも変える（試合のシードは組によらず試合番号と席で決まる）
-                let mut r = Rng::new(
-                    seed ^ 0x6a09e667 ^ ((t.a * 64 + t.b) as u32).wrapping_mul(0x9e3779b1),
-                );
-                let mut turns = [None, None];
-                for t in turns.iter_mut() {
-                    let take = r.int(1000) < (draw * 1000.0).round() as usize;
-                    let turn = draw_turn(&mut r);
-                    if take {
-                        *t = Some(turn);
-                    }
-                }
-                play_game(&make, decks, seed, turns)
+                play_game(&make, decks, seed_of(t.g, t.seat), t.turns)
             },
-            |done, total, _, _| {
+            |done, total, r, i| {
+                if !done_before.contains_key(&tasks[i].key) {
+                    write_cache(file, tasks[i].key, r);
+                }
                 if done % step == 0 || done == total {
                     eprintln!(
                         "総当たり: {done}/{total} 試合 {}s/試合",
@@ -1250,6 +1388,8 @@ fn round(a: &Args) -> Result<(), String> {
             &opp_of,
             g0,
             net,
+            net_path.as_deref(),
+            &mut cache,
             &what,
             &mut jsonl,
             round,
@@ -1277,6 +1417,8 @@ fn round(a: &Args) -> Result<(), String> {
             &opp_of,
             g0,
             net,
+            net_path.as_deref(),
+            &mut cache,
             "confirm",
             &mut jsonl,
             round,
@@ -1470,6 +1612,51 @@ mod tests {
             .unwrap()
             .decks
             .remove(0)
+    }
+
+    #[test]
+    fn game_cache_round_trips_and_skips_partial_lines() {
+        let path = std::env::temp_dir().join(format!("svwb-meta-cache-{}.txt", std::process::id()));
+        let path = path.to_str().unwrap().to_string();
+        let _ = std::fs::remove_file(&path);
+        let cards = witch_deck().card_idx().unwrap();
+        let g = GameOut {
+            winner: 1,
+            drawn: vec![Drawn {
+                side: 0,
+                turn: 3,
+                card: cards[0],
+                value: -1,
+            }],
+        };
+        let e = Entry {
+            label: "w".into(),
+            cards: cards.clone(),
+            rhino: false,
+            mulligan_as: Some("スペルウィッチ"),
+        };
+        let k = game_key(None, [&e, &e], 7, [Some(3), None]);
+        // 鍵は試合を決めるものが違えば変わる
+        assert_ne!(k, game_key(None, [&e, &e], 8, [Some(3), None]));
+        assert_ne!(k, game_key(None, [&e, &e], 7, [None, None]));
+        assert_ne!(k, game_key(Some("n.json"), [&e, &e], 7, [Some(3), None]));
+        {
+            let mut c = GameCache::open(Some(&path)).unwrap();
+            assert!(c.done.is_empty());
+            write_cache(&mut c.file, k, &g);
+        }
+        // 止められて書きかけの行が残っても、読める行は使い、続きは次の行から書く
+        append(&path, "{\"d\":[],\"k\":\"00").unwrap();
+        {
+            let mut c = GameCache::open(Some(&path)).unwrap();
+            assert_eq!(c.done.get(&k), Some(&g));
+            assert_eq!(c.done.len(), 1);
+            write_cache(&mut c.file, k ^ 1, &g);
+        }
+        let c = GameCache::open(Some(&path)).unwrap();
+        assert_eq!(c.done.len(), 2);
+        assert_eq!(c.done.get(&(k ^ 1)), Some(&g));
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
