@@ -1,10 +1,16 @@
 # クラウドの Spot VM で対戦を回す
 
 meta.sh や自己対戦のような重いジョブを、Google Cloud の Spot VM（既定は c3d-highcpu-180、180 スレッド、1 時間 1.55 ドル）で回すためのスクリプト。
-クォータが 360 まで通れば `--machine c3d-highcpu-360`（1 時間 3.1 ドル）で倍の速さになる（スレッドあたりの値段は同じ）。
-対戦は試合ごとに独立していて、1 スレッドあたりのメモリは 25 MB ほどなので、スレッドの多いマシンほどそのまま速くなる。
-計画と見積もり（360 スレッドならユーザーの PC の 15〜25 倍、meta の 1 回りが 10 分ほど・1 時間 3.1 ドル。180 スレッドならその半分の速さ）はプロジェクトの Claude Doc
-「クラウドのスポットインスタンスで対戦を回す計画」（2026-10-25）にある。
+計画はプロジェクトの Claude Doc「クラウドのスポットインスタンスで対戦を回す計画」（2026-10-25）にある。
+
+測った速さ（2026-10-25、共有フォルダの `logs/cloud-bench1`・`logs/cloud-scale1`）:
+
+- c3d-highcpu-180 で、ふるい・確かめの試合（deck-compare）が 0.0165 秒/試合、compare が 0.018 秒/試合。ユーザーの PC の 6〜7 倍で、
+  meta の 1 回りは 25 分ほど、学び直しなしの 4 回りは 2 時間弱・3 ドルほどの見込み
+- 45 スレッドまでは 1 スレッドが PC の 2 倍ほど速いが、スレッドを増やすほど 1 本ずつが遅くなり、90 スレッドより先はほとんど伸びない
+  （sys の時間は 0 で、2 プロセス × 90 スレッドも 1 プロセス × 180 スレッドと同じなので、マシン全体のメモリかキャッシュの限界と見ている）。
+  glibc の malloc の設定（`bench-scale.sh` の TUNED）で 5〜9% 速くなる
+- 360 スレッドのマシン（クォータが通れば `--machine c3d-highcpu-360`）は CPU 2 つ分なので、限界が CPU ごとのメモリなら 2 倍近く速くなるかもしれない（未確認）
 
 - `cloud/gcp.sh`: 動かす側（Claude のクラウド環境か、ユーザーの PC）で使う。ソースを包んで送り、VM を立て、見張り、結果を取り出す
 - `cloud/vm-startup.sh`: VM が起動したときに流れる。ツールを入れてビルドし、ゴールデンテストを通してからジョブを流す
@@ -36,6 +42,8 @@ meta.sh や自己対戦のような重いジョブを、Google Cloud の Spot VM
 - VM は Spot で、止められると消える（`--instance-termination-action=DELETE`）。`watch` が 1 分ごとに見て、VM が無く、印も無ければ
   次の番号の VM を立てる（`--zones` の順に、立てられるゾーンを探す）
 - 新しい VM は `work/` を戻してから、ジョブを最初から流す。ジョブは終わった部分を飛ばすので、続きから回る
+- 本当に止められることがある（2026-10-25 の試しでは、c3d-highcpu-180 が 5 分で 1 回止められ、同じゾーンに空きが無く別のゾーンに立った）。
+  長い段階は途中の結果を残す（meta.sh なら `CACHE=1` で、回りの途中の試合結果を残して続きから打つ）
 - VM は最初にゴールデンテスト（`svwb golden`、1〜2 分）を通す。別の CPU で試合の結果がずれていれば、ここで FAILED になる
 - 1 回の上限: `--hours`（既定 4 時間）は、最初の VM から数えた上限の時刻。どの VM もその時刻で必ず消え（`--max-run-duration`）、
   `watch` もそれ以降は作り直さない。立てる VM の数も `--max-vms`（既定 6）まで。延ばすときは `watch <名前> --extend <時間>`
@@ -130,7 +138,7 @@ meta.sh（共有フォルダの `notes/meta/meta.sh`）を回す例。PC の `~/
 ```sh
 cloud/gcp.sh run meta-r5 /mnt/project-files/notes/meta/meta.sh --hours 3 \
   --input <PC から上げた meta のフォルダ>=meta \
-  --env 'TD=$CLOUD_W' --env R=6 --env RETRAIN=0 --env ZMIN=3 --env 'NET0=$CLOUD_W/meta/rm1a.json'
+  --env 'TD=$CLOUD_W' --env R=6 --env RETRAIN=0 --env ZMIN=3 --env 'NET0=$CLOUD_W/meta/rm1a.json' --env CACHE=1
 ```
 
 `--env` の値はシングルクォートで渡すと、VM の上で展開される（`$CLOUD_W` は VM の作業フォルダ）。

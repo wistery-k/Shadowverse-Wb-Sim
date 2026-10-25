@@ -150,7 +150,7 @@ AI はどちらの側も今の既定（リノセウスエルフはリノセウ�
 npm run meta -- init --out 環境.json [--decks <デッキ>,…] [--usage class|uniform]
 npm run meta -- round --state 環境.json [--out 次.json] [--classes witch,bishop] [--games 30] [--draw 1]
                 [--stages 150:10,450:3] [--confirm 1200] [--zmin 2] [--eta 1] [--minUsage 0.02]
-                [--pool <カード>,…] [--net 補正.json] [--report 記録.md] [--jsonl 試合.jsonl]
+                [--pool <カード>,…] [--net 補正.json] [--report 記録.md] [--jsonl 試合.jsonl] [--cache 途中.txt]
 npm run meta -- export --state 環境.json --dir <フォルダ> [--top 1]  # 環境のデッキを td selfplay --decks 用のファイルに（--top 1 ならクラスごとに一番のデッキだけ。compare --decks 用）
 npm run meta -- show --state 環境.json
 ```
@@ -185,6 +185,7 @@ AI は deck-compare と同じ（どちらの側も今の既定）。
 | `--net ファイル` | なし | 両方の席の学習した補正をこのファイルのものに替える（学び直した補正で回す用。`baseWeights` の無いモデルだけ） |
 | `--report ファイル` | なし | 回りのまとめ（Markdown。標準出力と同じ）を書き足す |
 | `--jsonl ファイル` | なし | 試合ごとの結果（段・デッキ・案・相手・試合番号・席・勝ち・介入）を JSON Lines で書き足す |
+| `--cache ファイル` | なし | 打った試合の結果を 1 試合ずつ書き足し、次に同じファイルで回すとき、その試合を打たずに使う（回りの途中で止めても、続きから回る。結果は止めないときと同じ）。回りが終わったら消してよい |
 
 - 案は、クラスごとに使用率が一番のデッキについて、クラスとニュートラルの各カードを 2 枚（3 枚を超えるなら入るだけ）足し、
   引いた瞬間の価値の低いカード（2 枚以上入っているもの）を 1 枚ずつ同じ枚数抜く。1 クラス 40 案ほど
