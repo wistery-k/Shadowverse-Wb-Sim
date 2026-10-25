@@ -116,6 +116,9 @@ if [ -z "$LOCAL" ]; then
     curl -sSf https://sh.rustup.rs | sh -s -- -y -q --profile minimal --default-toolchain "$RUST_VER" > /dev/null ||
       finish FAILED "Rust を入れられない"
   fi
+  # npm run td 等（scripts/vite-run.mjs）は先に WASM を作るので、wasm32 のターゲットも要る
+  rustup target list --installed 2> /dev/null | grep -q '^wasm32-unknown-unknown$' ||
+    rustup target add wasm32-unknown-unknown > /dev/null 2>&1 || finish FAILED "wasm32-unknown-unknown を入れられない"
 fi
 
 # --- ソースとジョブ ---
