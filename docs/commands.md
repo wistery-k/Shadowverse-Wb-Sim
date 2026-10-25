@@ -219,14 +219,17 @@ npm run svwb -- meta …                                  # npm run meta と同�
 npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mulligan":"sample"}'] [--b '{}']
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
                 [--sampling classic|default] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
-                [--decks <デッキ>,…] [--vs <デッキ>]
+                [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>']
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI
 - `td selfplay`: TD 学習の自己対戦。各引数の意味は `rust/engine/src/runner/td.rs` の先頭。
   `--decks` で、比較用の 7 デッキの代わりに並べたデッキ（デフォルトデッキの名前かデッキのテキストファイル）の全組を回す（例: `rust/engine/td-pool/royal-counter/*.txt`）。
   `--ivZone drawn` は、カードを引いた瞬間に手札から抜いて最後まで打つ介入（`td ivcheck` で「（引いたとき）」の行。デッキに 1 枚入れる価値に近い）。
-  `--vs <デッキ>` で、どの試合も片方をそのデッキにし、もう片方（挑戦する側）だけ並べたデッキを回して、介入も挑戦する側だけにする（特定の相手との試合でのカードの価値を測る用）
+  `--vs <デッキ>` で、どの試合も片方をそのデッキにし、もう片方（挑戦する側）だけ並べたデッキを回して、介入も挑戦する側だけにする（特定の相手との試合でのカードの価値を測る用）。
+  `--frozen '{}'` で、片方の席（学ぶ側。49 試合ごとに入れ替わる）だけを `--model` の補正で打ち、もう片方を設定の JSON の探索 AI（`'{}'` は今の既定の AI）に固定する。
+  ランダムな手・介入は学ぶ側だけ。行に `"learner"` が付き、学習は `td train --seat learner` で学ぶ側の局面だけを読む（狙い撃ちの相手を学ばせる。
+  回りを回すジョブは `cloud/jobs/exploit.sh`。docs/ai-notes.md「狙い撃ちする相手を学ばせて死角を探す」）
 
 ## td
 
@@ -238,12 +241,15 @@ npm run td -- board --model m.json --out b0.json [--layers 32,16] [--seed 1]
 npm run td -- check --model m.json --data d.jsonl
 npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001]
                 [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--v1Only 0] [--best 0] [--cmpWeight 0] [--cmpBatch 16]
+                [--seat learner|frozen|both]
 npm run td -- ivcheck --model m1.json --data d0.jsonl[,d1.jsonl] [--holdout 0] [--opp <デッキ名>] [--min 30]
-npm run td -- prune --model m4.json --data d0.jsonl,d1.jsonl,… --out data/value-net.json
+npm run td -- prune --model m4.json --data d0.jsonl,d1.jsonl,… --out data/value-net.json [--seat both]
 npm run td -- probe --model m1.json --data d0.jsonl [--per 2000]
+npm run td -- eval --model a.json,b.json --data d.jsonl [--cards <カード名,…>] [--seat both]
 ```
 
 自己対戦（`selfplay`）は Rust 版（`npm run svwb -- td selfplay`）で行う。各引数の意味は `scripts/td-main.ts` の先頭。
+`--seat learner` は `td selfplay --frozen` の自己対戦の学ぶ側の席の局面だけを、`--seat frozen` は固定した相手の席の局面だけを読む（既定 both は両方）。
 
 ## pack-run（PC で回した結果をクラウドから見られるようにする）
 

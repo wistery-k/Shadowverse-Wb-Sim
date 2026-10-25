@@ -26,7 +26,7 @@
 //     このモデルの学習には "b" のある自己対戦（td selfplay の既定）が要る
 //   npm run td -- check --model m.json --data d.jsonl
 //     td selfplay --check 1 で書いた "z"（探索の補正）と、このファイルの計算で "x"・"b" から出した補正を比べる（"x" は 4 桁に丸めてあるので少しずれる）
-//   npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001] [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--v1Only 0] [--best 0]  [--bestOn end,after]
+//   npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001] [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--v1Only 0] [--best 0]  [--bestOn end,after] [--seat both]
 //     --best 1 なら、確かめ用の局面の勝敗の交差エントロピーが一番小さかったエポック（学習前も含む）の重みを書き出す（途中で止めるのと同じ）。
 //     --cmpWeight w（既定 0）なら、td selfplay --cmp の打ち比べ（同じ局面からの並びごとに最後まで打った勝率）も学ぶ:
 //     同じ局面の並びどうしで、予測した勝つ確率の平均からのずれが、測った勝率の平均からのずれに合うように（二乗誤差 × w。--cmpBatch 局面ずつ）。
@@ -47,7 +47,7 @@
 //     モデルが見ている価値（その局面の勝つ確率の予測の差）を比べる（docs/ai-notes.md「介入データを TD 学習に混ぜる」）。
 //     --opp なら、カードの持ち主の相手がそのデッキの試合だけで数える（そのデッキとの対戦でのカードの価値。
 //     docs/ai-notes.md「ロイヤルに勝ち越せるデッキを探す」）。--min 未満の対しかないカードは表に出さない
-//   npm run td -- prune --model m4.json --data d0.jsonl,d1.jsonl,... --out data/value-net.json
+//   npm run td -- prune --model m4.json --data d0.jsonl,d1.jsonl,... --out data/value-net.json [--seat both]
 //     学習データに一度も現れなかった入力（デフォルトデッキに無いカードなど）の重みを 0 にする。学ばれずに初期値の乱数のまま残っているので、
 //     そのカードを使う自作デッキで補正がでたらめに動かないようにする（ファイルも小さくなる）。
 //     場のカードのネットワークを持つモデルなら、場に現れなかったカード・付与された能力の行も 0 にする（そのカードは数値の入力だけで見る）
@@ -72,8 +72,13 @@
 //     そのカードが入力にある試合を学ばない（知らないカードを作って、属性の分の効き目を確かめる用）
 //   npm run td -- attrcheck --model m.json --data d.jsonl [--ridge 3] [--min 300]
 //     学んだカードを 1 枚ずつ抜いて当てはめた属性の行と 0 の行とで、そのカードの局面の予測を比べる（関数の先頭の説明）
-//   npm run td -- eval --model a.json,b.json --data d.jsonl [--cards <カード名,...>]
+//   npm run td -- eval --model a.json,b.json --data d.jsonl [--cards <カード名,...>] [--seat learner|frozen|both]
 //     モデルどうしの予測（勝敗の交差エントロピー・AUC）を同じ局面で比べる。--cards ならそのカードが入力にある局面だけでも
+//
+// 狙い撃ちの相手を学ばせる（docs/ai-notes.md「狙い撃ちする相手を学ばせて死角を探す」）:
+//   svwb td selfplay --frozen '{}' --model l0.json ... で、片方の席（学ぶ側）だけが l0 の補正で打ち、もう片方を今の既定の AI に固定した試合を作る
+//   （行に "learner": 学ぶ側の席 が付く）。train・prune・eval に --seat learner を付けると、学ぶ側の席の局面だけを読む
+//   （--seat frozen なら固定した相手の席だけ。狙い撃ちされた対局を今の AI の学習に混ぜる用。既定 both は両方の席）
 //
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -344,6 +349,8 @@ interface GameRecord {
    * zone が res・oppRes なら、card の代わりに p・相手の資源 res（ep・sep・hp・maxPp）を d（±1）だけ変えて打った（td selfplay --ivRes）
    */
   iv?: { p: PlayerIndex; k: number; card?: string; zone?: IvZone; res?: string; d?: number };
+  /** td selfplay --frozen の試合: 学ぶ側の席（もう片方は固定した相手） */
+  learner?: PlayerIndex;
   samples: [Sample[], Sample[]];
 }
 
@@ -505,6 +512,25 @@ interface LoadOptions {
   ivRes?: boolean;
   /** 真を返した試合は読まない（train の --exclude） */
   skipGame?: (r: GameRecord) => boolean;
+  /** 偽を返した席の局面は読まない（train の --seat） */
+  useSeat?: SeatFilter;
+}
+
+/** 試合 r の席 p の局面を読むか（--seat） */
+type SeatFilter = (r: GameRecord, p: PlayerIndex) => boolean;
+
+/**
+ * --seat learner|frozen|both（既定 both）。td selfplay --frozen の試合で、学ぶ側（learner）か固定した相手（frozen）の席の局面だけを読む。
+ * "learner" の無い試合（--frozen なしの自己対戦）に learner・frozen を指定したらエラーにする。docs/ai-notes.md「狙い撃ちする相手を学ばせて死角を探す」
+ */
+function seatFilter(args: Args): SeatFilter | undefined {
+  const seat = args.get("seat") ?? "both";
+  if (seat === "both") return undefined;
+  if (seat !== "learner" && seat !== "frozen") throw new Error(`--seat は learner・frozen・both: ${seat}`);
+  return (r, p) => {
+    if (r.learner === undefined) throw new Error(`--seat ${seat} には td selfplay --frozen の自己対戦が要ります（試合 ${r.g} に "learner" がありません）`);
+    return (p === r.learner) === (seat === "learner");
+  };
 }
 
 function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: number) => boolean, board?: CompiledBoard, opts: LoadOptions = {}): Dataset {
@@ -530,6 +556,7 @@ function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: num
       const isHold = ((Math.imul(r.g, 2654435761) >>> 0) % 1000) / 1000 < holdout ? 1 : 0;
       const pos: [number[], number[]] = [[], []];
       r.samples.forEach((seq, p) => {
+        if (opts.useSeat && !opts.useSeat(r, p as PlayerIndex)) return;
         // 同じプレイヤーの 1 つ前の（想像の局面でない）局面
         let prev = -1;
         for (const x of seq) {
@@ -895,7 +922,9 @@ function train(args: Args): number {
   const compiled0 = compileValueNet(model);
   // --exclude: そのカードが入力にある試合を学ばない（知らないカードを作る確かめ用。docs/ai-notes.md「カードの重みを属性とカードごとの残りに分ける」）
   const skipGame = excludeGames(model, args.get("exclude"));
-  const d = loadData(files, holdout, ivWeight, keep, compiled0.board, { imaginedWeight, ivRes, ...(skipGame ? { skipGame } : {}) });
+  // --seat learner: td selfplay --frozen の学ぶ側の局面だけで学ぶ（狙い撃ちの相手を学ばせる）
+  const useSeat = seatFilter(args);
+  const d = loadData(files, holdout, ivWeight, keep, compiled0.board, { imaginedWeight, ivRes, ...(skipGame ? { skipGame } : {}), ...(useSeat ? { useSeat } : {}) });
   const n = d.s.length;
   const nImagined = d.anchor.reduce((x, a) => x + (a >= 0 ? 1 : 0), 0);
   console.log(
@@ -1445,6 +1474,8 @@ function prune(args: Args): number {
   const used = new Set<number>();
   // --exclude: train --exclude で学ばなかった試合は数えない
   const skipGame = excludeGames(model, args.get("exclude"));
+  // --seat: train --seat で学ばなかった席の局面は数えない
+  const useSeat = seatFilter(args);
   // 場のカードのネットワーク: 場に現れたカードと付与された能力
   const onBoard = new Set<string>(), grants = new Set<string>();
   for (const file of files) {
@@ -1452,7 +1483,8 @@ function prune(args: Args): number {
       if (!line.trim()) continue;
       const r = parseLine(line);
       if (isCmp(r) || skipGame?.(r)) continue;
-      for (const seq of r.samples) {
+      for (const [p, seq] of r.samples.entries()) {
+        if (useSeat && !useSeat(r, p as PlayerIndex)) continue;
         for (const x of seq) {
           for (const i of x.x) used.add(i);
           if (!model.board) continue;
@@ -1536,7 +1568,8 @@ function evalModels(args: Args): number {
   if (models.some((m) => m.net.model.vocab.join() !== first.vocab.join() || m.net.model.zones.join() !== first.zones.join() || m.net.model.scalars.join() !== first.scalars.join())) {
     throw new Error("eval のモデルは入力の並び（vocab・zones・scalars）が同じものだけ");
   }
-  const d = loadData(need(args, "data").split(","), 0, 0);
+  const useSeat = seatFilter(args);
+  const d = loadData(need(args, "data").split(","), 0, 0, undefined, undefined, useSeat ? { useSeat } : {});
   const cards = args.get("cards");
   const rows = cards === undefined ? null : rowsOfCards(first, cards.split(",").map((x) => vocabIndexOf(first, x.trim())));
   const hasCard = new Uint8Array(d.s.length);
