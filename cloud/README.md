@@ -71,11 +71,12 @@ VM は `svwb-runner` で動き、自分を消すこととバケットの読み�
 - **Claude のクラウド環境から動かす:** `gcloud iam service-accounts keys create key.json --iam-account=$SA` で鍵を作り、
   プロジェクトのクラウド環境の「ネットワークのシークレット」に置く。種類は「GCP access token (with Service Account Key)」、値は
   `cat key.json` の JSON をそのまま、許可するホストは `*.googleapis.com`。鍵はセッションに渡らず、通信の出口で token に差し替わる
-  （セッションの gcloud は `CLOUDSDK_AUTH_ACCESS_TOKEN=proxy-injected` で動くようになっている）。環境変数には `GCP_PROJECT`・`GCP_BUCKET`
-  だけを置く。鍵はチャットに貼らない。置いたら `rm key.json` で消す。新しいセッションから効く
+  （セッションの gcloud は `CLOUDSDK_AUTH_ACCESS_TOKEN=proxy-injected` で動くようになっている）。プロジェクト ID とバケット名は
+  `cloud/gcp.sh` の既定値（`shadowverse-wb-sim`・`shadowverse-wb-sim-runs`）なので、環境変数は要らない（別のものを使うときは
+  `GCP_PROJECT`・`GCP_BUCKET`）。鍵はチャットに貼らない。置いたら `rm key.json` で消す。今のセッションでもすぐ効く
   - ネットワークのシークレットが使えないときは、`base64 -w0 key.json` の 1 行を環境変数 `GCP_SA_KEY` に置く（環境を使う人には読める）。
     `cloud/gcp.sh` は `GCP_SA_KEY`（JSON の中身か、その base64）があればそれでログインする
-- **PC から動かす:** gcloud を入れて `gcloud auth login`、`GCP_PROJECT`・`GCP_BUCKET` を環境変数に置く
+- **PC から動かす:** gcloud を入れて `gcloud auth login`
 
 ### 費用の上限
 

@@ -13,7 +13,7 @@
 #   cloud/gcp.sh list                             回した名前と状態の一覧
 #
 # 設定（環境変数）:
-#   GCP_PROJECT・GCP_BUCKET  プロジェクト ID とバケット名（必須）
+#   GCP_PROJECT・GCP_BUCKET  プロジェクト ID とバケット名（既定 shadowverse-wb-sim・shadowverse-wb-sim-runs）
 #   GCP_SA                   VM に付けるサービスアカウント（既定 svwb-runner@<プロジェクト>.iam.gserviceaccount.com）
 #   GCP_SA_KEY               サービスアカウントの鍵（JSON の中身か、`base64 -w0 key.json` の 1 行）。あれば、それで gcloud にログインする。
 #                            Claude のクラウド環境では、鍵はネットワークのシークレット（GCP access token）に置くほうがよい。そのときは
@@ -35,8 +35,9 @@ if [ -n "$LOCAL" ]; then
   LOCAL=$(cd "$LOCAL" && pwd)
   STORE_ROOT=$LOCAL/store/runs
 else
-  [ -n "${GCP_PROJECT:-}" ] || die "GCP_PROJECT がありません"
-  [ -n "${GCP_BUCKET:-}" ] || die "GCP_BUCKET がありません"
+  # このリポジトリのプロジェクトとバケット（どちらも秘密ではない。別のものを使うときは環境変数で）
+  GCP_PROJECT=${GCP_PROJECT:-shadowverse-wb-sim}
+  GCP_BUCKET=${GCP_BUCKET:-shadowverse-wb-sim-runs}
   STORE_ROOT=gs://$GCP_BUCKET/runs
   GCP_SA=${GCP_SA:-svwb-runner@$GCP_PROJECT.iam.gserviceaccount.com}
 fi
