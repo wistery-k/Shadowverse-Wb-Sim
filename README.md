@@ -51,7 +51,8 @@ data/
   raw/        公式カード一覧APIのレスポンス（コミットしない）
 docs/
   rules.md    実装するルールの仕様メモ（出典付き）
-  ai-notes.md AI の実験記録（試したこと・結果・採否）
+  ai-notes.md AI の実験記録（今の AI・分かったこと・全部の節の索引）
+  ai-notes/   AI の実験記録の詳しい記録（時期ごと）
 tests/
 scripts/
   convert-cards.ts  カードデータ変換
