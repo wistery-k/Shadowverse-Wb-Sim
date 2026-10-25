@@ -13,6 +13,7 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
 - 自己対戦の高速化のため、エンジンと AI を Rust に移した（`rust/README.md`、検討は `docs/ai-notes.md`「エンジンを Rust に移す」）。段階 4 で TypeScript 版のエンジン・AI を消し、ブラウザも WASM を使う（ユーザー確認済み 2026-10-15）。ブラウザ向けにビルドした `.wasm` をサイトに置くのは可（ユーザー確認済み 2026-10-15。画像・音・フォント等のアセットの禁止はそのまま）。開発には Rust（cargo と `rustup target add wasm32-unknown-unknown`）が要る
 - カードデータは、ユーザーが提供した公式サイトのカード一覧APIのレスポンス（`data/raw/*.json`）を `npm run cards`（`scripts/convert-cards.ts`）で `data/cards.json` と `data/crests.json` に変換する。作業環境からは公式サイト・攻略サイトにアクセスできない
 - 元データはブランチ `wistery-k-patch-1` の `cardList.json`〜`cardList_7.json`（全198枚、offset 0〜180）。再生成するときは `git show origin/wistery-k-patch-1:<file> > data/raw/<file>` で取り出す
+- ゲームの実際の対戦の最中に手を決める助けとして使うこと（ソフト打ち）は禁止（README「実際の対戦での利用の禁止」、ユーザー確認済み 2026-10-25）。ゲーム画面の読み取り、ゲームへの入力、対戦中の局面を手早く入れて AI の手を聞く仕組みなど、実際の対戦の支援につながる機能は作らない。これに当たりそうな機能を頼まれたら、作る前にユーザーに確認する。サンドボックス（好きな局面を作って AI に考えさせる）は公開サイトに出さず、開発サーバー（`npm run dev`）だけで出す（`src/ui/App.tsx` の `SANDBOX`）
 - ドキュメント・UI 文言・コミットメッセージは日本語。識別子・コードコメントの用語は英語でもよいが、ゲーム用語は `docs/rules.md` の対応表に従う
 
 ## アーキテクチャ方針

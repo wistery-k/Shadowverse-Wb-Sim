@@ -43,12 +43,18 @@ function saveSetup(setup: Setup): void {
 
 type Tab = "play" | "decks" | "sim" | "compare" | "sandbox";
 
+/**
+ * サンドボックス（好きな局面を作って AI に考えさせる）は、ゲームの実際の対戦の局面を入れて手を聞く
+ * 「ソフト打ち」に使えてしまうので、開発サーバー（npm run dev）だけで出し、公開サイト（vite build）には出さない
+ */
+const SANDBOX = import.meta.env.DEV;
+
 const TABS: readonly [Tab, string][] = [
   ["play", "対戦"],
   ["decks", "デッキ"],
   ["sim", "AI対戦"],
   ["compare", "人間との比較"],
-  ["sandbox", "サンドボックス"],
+  ...(SANDBOX ? [["sandbox", "サンドボックス"] as [Tab, string]] : []),
 ];
 
 export function App() {
@@ -122,11 +128,13 @@ export function App() {
       <main>
         {/* AI対戦とサンドボックスは、ほかのタブに移っても実行中の対戦・打ち比べと局面を残すため、隠すだけにする */}
         <div hidden={!!game || tab !== "sim"}>
-          <Simulate saved={saved} onSandbox={openSandbox} />
+          <Simulate saved={saved} {...(SANDBOX ? { onSandbox: openSandbox } : {})} />
         </div>
-        <div hidden={!!game || tab !== "sandbox"}>
-          <Sandbox saved={saved} incoming={sandboxIncoming} />
-        </div>
+        {SANDBOX && (
+          <div hidden={!!game || tab !== "sandbox"}>
+            <Sandbox saved={saved} incoming={sandboxIncoming} />
+          </div>
+        )}
         {game ? (
           <Game
             initial={game.state}
@@ -171,6 +179,7 @@ export function App() {
       <footer>
         非公式ファンプロジェクトです。Cygames 社および関連企業とは一切関係ありません。
         ゲーム名・カード名・カードテキストの権利は各権利者に帰属します。
+        ゲームの実際の対戦の最中に、手を決める助けとして使うこと（ソフト打ち）は禁止です。
         <BuildInfo />
       </footer>
     </div>
