@@ -15,7 +15,7 @@
 # 設定（環境変数）:
 #   GCP_PROJECT・GCP_BUCKET  プロジェクト ID とバケット名（必須）
 #   GCP_SA                   VM に付けるサービスアカウント（既定 svwb-runner@<プロジェクト>.iam.gserviceaccount.com）
-#   GCP_SA_KEY               サービスアカウントの鍵（JSON の中身）。あれば、それで gcloud にログインする
+#   GCP_SA_KEY               サービスアカウントの鍵（JSON の中身か、`base64 -w0 key.json` の 1 行）。あれば、それで gcloud にログインする
 #   CLOUD_LOCAL=<フォルダ>   手元で試す: Cloud Storage の代わりに <フォルダ>/store、VM の代わりに手元のプロセスで動かす
 #
 # ジョブは VM のソースのフォルダ（リポジトリの一番上）で bash で流れ、作業フォルダが環境変数 CLOUD_W に入る。
@@ -42,14 +42,16 @@ fi
 auth() {
   [ -n "$LOCAL" ] && return 0
   [ -n "${GCP_SA_KEY:-}" ] || return 0
-  local sa
-  sa=$(printf '%s' "$GCP_SA_KEY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["client_email"])') ||
-    die "GCP_SA_KEY が鍵の JSON ではありません"
+  local sa key=$GCP_SA_KEY
+  # 環境変数の欄に 1 行で置けるよう、base64 にしたものも受ける
+  [[ $key == *'{'* ]] || key=$(printf '%s' "$key" | tr -d ' \n' | base64 -d 2> /dev/null) || die "GCP_SA_KEY を base64 として読めません"
+  sa=$(printf '%s' "$key" | python3 -c 'import json,sys; print(json.load(sys.stdin)["client_email"])') ||
+    die "GCP_SA_KEY が鍵の JSON（か、その base64）ではありません"
   if [ "$(gcloud config get-value account 2> /dev/null)" != "$sa" ]; then
     local k
     k=$(mktemp)
     chmod 600 "$k"
-    printf '%s' "$GCP_SA_KEY" > "$k"
+    printf '%s' "$key" > "$k"
     gcloud auth activate-service-account --key-file="$k" --quiet > /dev/null 2>&1 || { rm -f "$k"; die "鍵でログインできません"; }
     rm -f "$k"
   fi

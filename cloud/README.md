@@ -66,9 +66,10 @@ VM は `svwb-runner` で動き、自分を消すこととバケットの読み�
 
 動かす側の準備:
 
-- **Claude のクラウド環境から動かす:** `gcloud iam service-accounts keys create key.json --iam-account=$SA` で鍵を作り、中身を
-  プロジェクトのクラウド環境の秘密の値 `GCP_SA_KEY` に置く（`GCP_PROJECT`・`GCP_BUCKET` も）。鍵はチャットに貼らない。置いたら `key.json` は消す。
-  `cloud/gcp.sh` は `GCP_SA_KEY` があればそれでログインする
+- **Claude のクラウド環境から動かす:** `gcloud iam service-accounts keys create key.json --iam-account=$SA` で鍵を作り、
+  `base64 -w0 key.json` で 1 行にしたものを、プロジェクトのクラウド環境の環境変数 `GCP_SA_KEY` に置く（`GCP_PROJECT`・`GCP_BUCKET` も）。
+  鍵はチャットに貼らない。置いたら `rm key.json` で消す。新しいセッションから読める。
+  `cloud/gcp.sh` は `GCP_SA_KEY`（JSON の中身か、その base64）があればそれでログインする
 - **PC から動かす:** gcloud を入れて `gcloud auth login`、`GCP_PROJECT`・`GCP_BUCKET` を環境変数に置く
 
 ### 費用の上限
