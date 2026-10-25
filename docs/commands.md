@@ -316,8 +316,8 @@ cloud/gcp.sh list
 
 今のコミット（push してあるもの）のソースとジョブを Cloud Storage に送り、Google Cloud の Spot VM を立てて回す。VM はビルドとゴールデンテストの後に
 ジョブを流し、作業フォルダ（ジョブの中では `CLOUD_W`）を 3 分ごとに Cloud Storage に写す。止められたら `watch` が VM を作り直し、
-ジョブは終わった部分を飛ばして続きから回る。設定（`GCP_PROJECT`・`GCP_BUCKET`・`GCP_SA_KEY`）、準備、ジョブの書き方、手元で試す方法は
-`cloud/README.md`。
+ジョブは終わった部分を飛ばして続きから回る。設定（`GCP_PROJECT`・`GCP_BUCKET`・`GCP_SA_KEY`）、準備、月の費用の上限（`cloud/setup-billing-cap.sh`）、
+ジョブの書き方、手元で試す方法は `cloud/README.md`。
 
 ## 探索 AI の設定（compare の A・B、rhino-compare・yardstick の `--opts`）
 
