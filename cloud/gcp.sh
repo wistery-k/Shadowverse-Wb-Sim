@@ -62,22 +62,44 @@ auth() {
   fi
 }
 
+# --- Cloud Storage ---
+# Claude のクラウド環境の通信の出口は、JSON API の URL の %2F（object 名の /）を通さず、読み出しや削除が 404 になる。
+# そこ（鍵を通信の出口で付ける形）では、URL に / をそのまま書く XML API を gsutil で使う
+GS_XML=
+[ "${CLOUDSDK_AUTH_ACCESS_TOKEN:-}" = proxy-injected ] && [ -z "${GCP_SA_KEY:-}" ] && GS_XML=1
+gs() {  # gs <ls|cat|cp|rm|rsync> 引数…（rsync は -r を付けて流す）
+  local op=$1
+  shift
+  if [ -n "$GS_XML" ]; then
+    case $op in
+      rsync) gsutil -q -o GSUtil:prefer_api=xml -m rsync -r "$@" ;;
+      *) gsutil -q -o GSUtil:prefer_api=xml "$op" "$@" ;;
+    esac
+  else
+    case $op in
+      rsync) gcloud storage rsync -r -q "$@" ;;
+      ls | cat) gcloud storage "$op" "$@" ;;
+      *) gcloud storage "$op" -q "$@" ;;
+    esac
+  fi
+}
+
 # --- 置き場所（STORE = <STORE_ROOT>/<名前>） ---
 is_gs() { [[ $STORE == gs://* ]]; }
-st_has() { if is_gs; then gcloud storage ls "$STORE/$1" > /dev/null 2>&1; else [ -e "$STORE/$1" ]; fi; }
-st_cat() { if is_gs; then gcloud storage cat "$STORE/$1" 2> /dev/null; else cat "$STORE/$1" 2> /dev/null; fi; }
+st_has() { if is_gs; then gs ls "$STORE/$1" > /dev/null 2>&1; else [ -e "$STORE/$1" ]; fi; }
+st_cat() { if is_gs; then gs cat "$STORE/$1" 2> /dev/null; else cat "$STORE/$1" 2> /dev/null; fi; }
 st_put() {  # st_put <手元のファイル> <置き場所の中の名前>
-  if is_gs; then gcloud storage cp -q "$1" "$STORE/$2"; else mkdir -p "$(dirname "$STORE/$2")" && cp "$1" "$STORE/$2"; fi
+  if is_gs; then gs cp "$1" "$STORE/$2"; else mkdir -p "$(dirname "$STORE/$2")" && cp "$1" "$STORE/$2"; fi
 }
 st_put_text() { local f; f=$(mktemp); printf '%s\n' "$2" > "$f"; st_put "$f" "$1"; rm -f "$f"; }
 st_put_dir() {  # st_put_dir <手元のフォルダ> <置き場所の中の名前>
-  if is_gs; then gcloud storage rsync -r -q "$1" "$STORE/$2"; else mkdir -p "$STORE/$2" && cp -a "$1/." "$STORE/$2/"; fi
+  if is_gs; then gs rsync "$1" "$STORE/$2"; else mkdir -p "$STORE/$2" && cp -a "$1/." "$STORE/$2/"; fi
 }
 st_get_dir() {  # st_get_dir <置き場所の中の名前> <手元のフォルダ>
   mkdir -p "$2"
-  if is_gs; then gcloud storage rsync -r -q "$STORE/$1" "$2"; else cp -a "$STORE/$1/." "$2/"; fi
+  if is_gs; then gs rsync "$STORE/$1" "$2"; else cp -a "$STORE/$1/." "$2/"; fi
 }
-st_rm() { if is_gs; then gcloud storage rm -q "$STORE/$1" > /dev/null 2>&1 || true; else rm -f "$STORE/$1"; fi; }
+st_rm() { if is_gs; then gs rm "$STORE/$1" > /dev/null 2>&1 || true; else rm -f "$STORE/$1"; fi; }
 
 set_run() {
   NAME=$1
@@ -101,7 +123,7 @@ vm_list() {  # 名前 ゾーン 状態 を 1 行ずつ
     return 0
   fi
   gcloud compute instances list --project "$GCP_PROJECT" --filter="labels.svwb-run=$NAME" \
-    --format='value(name,zone.basename(),status)'
+    --format='value(name,zone.basename(),status)' 2> /dev/null || true
 }
 vm_status() {  # vm_status <VM の名前> <ゾーン>: RUNNING 等の状態、無ければ GONE、分からなければ UNKNOWN
   if [ -n "$LOCAL" ]; then
@@ -151,7 +173,7 @@ vm_create() {  # vm_create <番号> <ゾーン> <最長の秒数>
     --quiet > /dev/null
 }
 
-tail_log() { st_cat "work/$1" | tail -n "${2:-1}"; }
+tail_log() { { st_cat "work/$1" || true; } | tail -n "${2:-1}"; }
 
 cmd_run() {
   set_run "${1:-}"
@@ -344,7 +366,7 @@ cmd_list() {
   auth
   local runs r
   if [[ $STORE_ROOT == gs://* ]]; then
-    runs=$(gcloud storage ls "$STORE_ROOT/" 2> /dev/null | awk -F/ '{print $(NF-1)}')
+    runs=$(gs ls "$STORE_ROOT/" 2> /dev/null | awk -F/ '{print $(NF-1)}')
   else
     runs=$(ls "$STORE_ROOT" 2> /dev/null || true)
   fi
