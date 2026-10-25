@@ -1,7 +1,7 @@
 #!/bin/bash
 # クラウド（Google Cloud の Spot VM）でジョブ（meta.sh 等のシェルスクリプト）を回す（cloud/README.md）。
 #
-#   cloud/gcp.sh run <名前> <ジョブ.sh> [--machine c3d-highcpu-360] [--zones us-central1-a,...] [--hours 4]
+#   cloud/gcp.sh run <名前> <ジョブ.sh> [--machine c3d-highcpu-180] [--zones us-central1-a,...] [--hours 4]
 #                    [--input <手元のファイルかフォルダ>=<作業フォルダの中の名前>]... [--env K=V]... [--max-vms 6]
 #                    [--no-golden] [--no-watch] [--allow-unpushed]
 #       今のコミットのソース・ジョブ・入力を置き場所に送り、VM を立てて、終わるまで見張る
@@ -153,7 +153,7 @@ cmd_run() {
   local job=${2:-}
   [ -f "$job" ] || die "ジョブのファイルがありません: $job"
   shift 2
-  MACHINE=c3d-highcpu-360 ZONES=us-central1-a,us-central1-b,us-central1-c,us-central1-f HOURS=4 MAXVMS=6 GOLDEN=1
+  MACHINE=c3d-highcpu-180 ZONES=us-central1-a,us-central1-b,us-central1-c,us-central1-f HOURS=4 MAXVMS=6 GOLDEN=1
   local watch=1 pushed=1 inputs=() envs=()
   while [ $# -gt 0 ]; do
     case $1 in

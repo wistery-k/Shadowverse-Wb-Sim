@@ -308,7 +308,7 @@ zcat /mnt/project-files/data/selfplay/<名前>/f0.jsonl.gz | head -c 500
 ## cloud/gcp.sh（クラウドの Spot VM で回す）
 
 ```sh
-cloud/gcp.sh run <名前> <ジョブ.sh> [--machine c3d-highcpu-360] [--hours 4] [--input <手元>=<作業フォルダの中の名前>]... [--env K=V]...
+cloud/gcp.sh run <名前> <ジョブ.sh> [--machine c3d-highcpu-180] [--hours 4] [--input <手元>=<作業フォルダの中の名前>]... [--env K=V]...
 cloud/gcp.sh watch|status|stop|preempt <名前>
 cloud/gcp.sh pull <名前> <行き先>
 cloud/gcp.sh list
