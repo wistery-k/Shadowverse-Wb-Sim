@@ -1,8 +1,9 @@
 //! マリガンの設定 A と B を、同じシードの試合で打ち比べる（判断が違った試合だけが差を生む対照比較）。
 //!
-//!   svwb mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '<設定JSON>'] [--b '<設定JSON>']
+//!   svwb mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '<設定JSON>'] [--b '<設定JSON>'] [--decks <デッキ>,…]
 //!
 //! 7 デッキ × 相手 6 デッキ × 席 2 × games のシードの組ごとに、自分だけ A と B の設定で打つ（相手は今の探索 AI）。
+//! --decks なら、自分のデッキをその名前のものだけにする（相手は 6 デッキのまま。試合のシードは全部のときと同じ）。
 //! A と B のマリガンの判断が同じなら試合はまったく同じになる（マリガンが試合の乱数を進めないとき）ので、
 //! B の試合はマリガンの判断が違ったときだけ最後まで打つ。勝ち負けが入れ替わった組を数える（McNemar 検定）。
 
@@ -96,9 +97,23 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let b = compare_options(b_text).map_err(|e| format!("B の設定: {e}"))?;
     let decks = compare_decks();
     let n = decks.len();
+    let only: Option<Vec<&str>> = arg(argv, "--decks").map(|x| x.split(',').collect());
+    if let Some(names) = &only {
+        for name in names {
+            if !decks.iter().any(|d| d.name == *name) {
+                return Err(format!("--decks のデッキがありません: {name}"));
+            }
+        }
+    }
     let mut tasks: Vec<(usize, usize, usize, u32)> = Vec::new();
     for k in start..start + games {
-        for i in 0..n {
+        for (i, d) in decks.iter().enumerate() {
+            if only
+                .as_ref()
+                .is_some_and(|names| !names.contains(&d.name.as_str()))
+            {
+                continue;
+            }
             for j in (0..n).filter(|&j| j != i) {
                 for seat in 0..2 {
                     tasks.push((i, j, seat, k));
@@ -162,7 +177,9 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     };
     for (i, d) in decks.iter().enumerate() {
         let ps: Vec<&Pair> = pairs.iter().filter(|p| p.deck == i).collect();
-        row(&d.name, &ps);
+        if !ps.is_empty() {
+            row(&d.name, &ps);
+        }
     }
     let all: Vec<&Pair> = pairs.iter().collect();
     row("全体", &all);

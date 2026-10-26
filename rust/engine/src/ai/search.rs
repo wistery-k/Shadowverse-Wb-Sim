@@ -103,6 +103,8 @@ pub struct SearchOptions {
     pub mulligan_turns: i32,
     /// MulliganMode::Turn1 で先へ進めるときの手（0 なら貪欲法、1 以上ならその幅のビームの探索）
     pub mulligan_rollout_beam: usize,
+    /// 初手にあれば 1 枚目を必ず残すカード（手札の形のモデル・カードごとの表・コストのマリガンの判断の後で直す。2 枚目以降は判断のまま）
+    pub mulligan_keep: Vec<crate::data::CardIdx>,
     pub settle_trades: bool,
     /// 下位互換の味方で同じことができる攻撃を展開せず、合流する相打ちも下位互換の味方で打つ（converging.rs の dominated_attack）
     pub dominance: bool,
@@ -169,6 +171,7 @@ impl Default for SearchOptions {
             mulligan_net: true,
             mulligan_turns: 0,
             mulligan_rollout_beam: 0,
+            mulligan_keep: Vec::new(),
             settle_trades: true,
             dominance: true,
             reuse_plan: true,
@@ -1604,6 +1607,29 @@ fn agreed_length(plans: &[Plan]) -> usize {
     n
 }
 
+/// 返すカード swap のうち、keep のカードの 1 枚目（手札で最初のもの）を残すように直す（mulliganKeep）
+fn keep_first_copies(
+    s: &GameState,
+    p: PlayerIndex,
+    mut swap: Vec<Iid>,
+    keep: &[crate::data::CardIdx],
+) -> Vec<Iid> {
+    for &c in keep {
+        let copies: Vec<Iid> = s.players[p]
+            .hand
+            .iter()
+            .filter(|h| h.card == c)
+            .map(|h| h.iid)
+            .collect();
+        if let Some(&first) = copies.first() {
+            if copies.iter().all(|i| swap.contains(i)) {
+                swap.retain(|&i| i != first);
+            }
+        }
+    }
+    swap
+}
+
 impl Agent for SearchAgent {
     fn think(&mut self, real: &GameState, legal: &[Action], rng: &mut Rng) -> Option<Thought> {
         self.think_with(real, legal, rng, None)
@@ -1693,6 +1719,19 @@ impl Agent for SearchAgent {
                     None
                 }
             });
+            let swap = match (swap, opts.mulligan_keep.is_empty()) {
+                (Some(swap), false) => Some(keep_first_copies(real, p0, swap, &opts.mulligan_keep)),
+                (None, false) => {
+                    let costs: Vec<Iid> = real.players[p0]
+                        .hand
+                        .iter()
+                        .filter(|h| card(h.card).cost >= 4)
+                        .map(|h| h.iid)
+                        .collect();
+                    Some(keep_first_copies(real, p0, costs, &opts.mulligan_keep))
+                }
+                (swap, true) => swap,
+            };
             if let Some(a) = swap.and_then(|swap| mulligan_action(legal, &swap)) {
                 return a.clone();
             }

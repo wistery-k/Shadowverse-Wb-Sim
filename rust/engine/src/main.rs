@@ -10,6 +10,7 @@
 //!   svwb deck-compare --deck <デッキ> [--variant '<変更>']… [--add <カード>] [--file <デッキ>]… [--vs <デッキ>] [--games 50]  デッキのカードを入れ替えた案を元のデッキと比べる
 //!   svwb meta init|round|export|show …  環境（デッキと使用率）のアジャスト合戦を 1 回りずつ回す（runner/meta.rs）
 //!   svwb mulligan-compare [--games 50] [--a …] [--b …]  マリガンの設定どうしを同じシードの試合で打ち比べる
+//!   svwb mulligan-data --games 6000 --out d.jsonl  マリガンの残す・返すをコインで決めた試合を書き出す
 //!   svwb human-plan-value --out 結果.jsonl [--m 32] <人間の記録.jsonl>…  人間の手順と AI の手順を同じ局面から打ち比べる（report で集計）
 //!   svwb td selfplay --model m.json --games N [--start S] [--eps 0.1] --out d.jsonl  TD 学習の自己対戦
 //!   svwb yardstick [--opts …] [--games 1000] [--label …] [--record]  固定した相手との勝率（強さの物差し。docs/yardstick.md）
@@ -156,13 +157,14 @@ fn main() {
             }
         }
         Some(
-            cmd @ ("compare" | "rhino-compare" | "deck-compare" | "mulligan-compare" | "td"
-            | "yardstick" | "human-plan-value" | "meta"),
+            cmd @ ("compare" | "rhino-compare" | "deck-compare" | "mulligan-compare"
+            | "mulligan-data" | "td" | "yardstick" | "human-plan-value" | "meta"),
         ) => {
             let rest = &args[1..];
             let r = match cmd {
                 "compare" => runner::compare::main(rest),
                 "mulligan-compare" => runner::mulligan_compare::main(rest),
+                "mulligan-data" => runner::mulligan_data::main(rest),
                 "rhino-compare" => runner::rhino_compare::main(rest),
                 "deck-compare" => runner::deck_compare::main(rest),
                 "yardstick" => runner::yardstick::main(rest),
@@ -176,7 +178,7 @@ fn main() {
             }
         }
         _ => {
-            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | td selfplay … | yardstick … | human-plan-value …（rust/README.md）");
+            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | mulligan-data … | td selfplay … | yardstick … | human-plan-value …（rust/README.md）");
             std::process::exit(2);
         }
     }

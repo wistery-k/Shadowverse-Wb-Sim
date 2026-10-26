@@ -217,13 +217,18 @@ npm run svwb -- compare …                               # npm run compare と�
 npm run svwb -- rhino-compare …                         # npm run rhino-compare と同じ
 npm run svwb -- yardstick …                             # npm run yardstick と同じ
 npm run svwb -- meta …                                  # npm run meta と同じ
-npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mulligan":"sample"}'] [--b '{}']
+npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mulligan":"sample"}'] [--b '{}'] [--decks <デッキ>,…]
+npm run svwb -- mulligan-data --games 6000 [--start 0] [--seed 1] [--flip 0.5] --out d.jsonl
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
                 [--sampling classic|default] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
                 [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>']
 ```
 
-- `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI
+- `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI。
+  `--decks` で自分のデッキを絞る（特定のデッキのカードの残し方を比べる用。相手は 6 デッキのまま）
+- `mulligan-data`: 両プレイヤーとも初手の各カードの残す・返すをコインで決め（`--flip` が 0.5 未満なら今のマリガンの判断を各カードその確率で反転し）、
+  その後は今の探索 AI で打った試合を 1 試合 1 行で追記する（初手・残したか・先後・勝敗。TypeScript 版の `mulligan-data` と同じ形）。
+  残し方の因果的な効き目の推定と、どんなマリガンの勝率も試合を打たずに推定する（逆確率重み付け）のに使う
 - `td selfplay`: TD 学習の自己対戦。各引数の意味は `rust/engine/src/runner/td.rs` の先頭。
   `--decks` で、比較用の 7 デッキの代わりに並べたデッキ（デフォルトデッキの名前かデッキのテキストファイル）の全組を回す（例: `rust/engine/td-pool/royal-counter/*.txt`）。
   `--ivZone drawn` は、カードを引いた瞬間に手札から抜いて最後まで打つ介入（`td ivcheck` で「（引いたとき）」の行。デッキに 1 枚入れる価値に近い）。
@@ -341,6 +346,7 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
 - `scoreTurnEnd`: `"none"`・`"terminal"`・`"all"`
 - `mulligan`: `"model"`（既定）・`"weights"`・`"cost"`・`"sample"`・`"turn1"`（引き直した後、自分の 1 ターン目の最初か `mulliganTurns` ターン目の終わりまで
   貪欲法か幅 `mulliganRolloutBeam` のビームで進めてから採点する）・`"keep"`（1 枚も返さない。比べ用）
+- `mulliganKeep`: カード名の配列。初手にあれば 1 枚目を必ず残す（マリガンの判断の後で直す）
 - `opponentSearch`: `null`（相手のターンを読まない）か `{"beamWidth": …, "maxDepth": …, "extraEval": true|false}`
 - `weights`: `"default"`（基準の重み）か、変えたい項目だけのオブジェクト（`"holdScale"` で hold を何倍にするか）
 - `valueNet`: 学習した補正のファイル名か `false`（補正なし）
