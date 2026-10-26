@@ -1,18 +1,22 @@
 //! マリガンの設定 A と B を、同じシードの試合で打ち比べる（判断が違った試合だけが差を生む対照比較）。
 //!
-//!   svwb mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '<設定JSON>'] [--b '<設定JSON>'] [--decks <デッキ>,…]
+//!   svwb mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '<設定JSON>'] [--b '<設定JSON>'] [--decks <デッキ>,…] [--rhino]
 //!
 //! 7 デッキ × 相手 6 デッキ × 席 2 × games のシードの組ごとに、自分だけ A と B の設定で打つ（相手は今の探索 AI）。
 //! --decks なら、自分のデッキをその名前のものだけにする（相手は 6 デッキのまま。試合のシードは全部のときと同じ）。
+//! --rhino なら、自分がリノセウスエルフのときはリノセウス用 AI で打ち、A・B の設定はそのマリガンの項目（mulligan…）だけを使う
+//! （リノセウス用 AI のマリガンは、打点の項を足した補正で採点する）。
 //! A と B のマリガンの判断が同じなら試合はまったく同じになる（マリガンが試合の乱数を進めないとき）ので、
 //! B の試合はマリガンの判断が違ったときだけ最後まで打つ。勝ち負けが入れ替わった組を数える（McNemar 検定）。
 
 use super::compare_decks;
+use super::deck_compare::RHINO_DECK;
 use super::options::compare_options;
 use super::parallel::parallel_map;
 use super::{fixed, seconds_since};
 use crate::ai::exact_lethal::reset_exact_lethal_cache;
 use crate::ai::lethal::reset_lethal;
+use crate::ai::rhino::{rhino_search_options, RhinoAgent, RHINO_POTENTIAL};
 use crate::ai::search::{SearchAgent, SearchOptions};
 use crate::ai::{Agent, Rng};
 use crate::data::Deck;
@@ -20,10 +24,34 @@ use crate::game::{acting_player, apply_action, create_game, legal_actions};
 use crate::state::*;
 use std::time::Instant;
 
+/// 自分の AI。rhino ならリノセウス用 AI の既定に、subject のマリガンの項目だけを載せる
+fn subject_agent(subject: &SearchOptions, rhino: bool) -> Box<dyn Agent> {
+    if !rhino {
+        return Box::new(SearchAgent::new(subject.clone()));
+    }
+    let learned = subject.extra_eval.clone();
+    let search = SearchOptions {
+        mulligan: subject.mulligan,
+        mulligan_samples: subject.mulligan_samples,
+        mulligan_static: subject.mulligan_static,
+        mulligan_net: subject.mulligan_net,
+        mulligan_turns: subject.mulligan_turns,
+        mulligan_rollout_beam: subject.mulligan_rollout_beam,
+        mulligan_keep: subject.mulligan_keep.clone(),
+        ..rhino_search_options(RHINO_POTENTIAL, learned.clone())
+    };
+    let plain = SearchOptions {
+        extra_eval: learned,
+        ..SearchOptions::default()
+    };
+    Box::new(RhinoAgent::with_options(true, search, plain))
+}
+
 /// 試合を打ち、自分（subject の席）が勝ったかと、自分のマリガンを返す。
 /// stop が自分のマリガンと同じなら、そこで打ち切って勝ち負けは None
 fn play(
     subject: &SearchOptions,
+    rhino: bool,
     decks: [&Deck; 2],
     subject_seat: usize,
     seed: u32,
@@ -31,7 +59,7 @@ fn play(
 ) -> (Option<bool>, Action) {
     reset_lethal();
     reset_exact_lethal_cache();
-    let mut me = SearchAgent::new(subject.clone());
+    let mut me = subject_agent(subject, rhino);
     let mut opp = SearchAgent::new(SearchOptions::default());
     let mut s = create_game([&decks[0].cards, &decks[1].cards], seed);
     let mut rng = Rng::new(seed ^ 0x9e3779b9);
@@ -97,6 +125,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let b = compare_options(b_text).map_err(|e| format!("B の設定: {e}"))?;
     let decks = compare_decks();
     let n = decks.len();
+    let rhino = argv.iter().any(|a| a == "--rhino");
     let only: Option<Vec<&str>> = arg(argv, "--decks").map(|x| x.split(',').collect());
     if let Some(names) = &only {
         for name in names {
@@ -132,9 +161,10 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             } else {
                 [decks[j], decks[i]]
             };
-            let (won_a, mull_a) = play(&a, ds, seat, seed, None);
+            let rh = rhino && decks[i].name == RHINO_DECK;
+            let (won_a, mull_a) = play(&a, rh, ds, seat, seed, None);
             let won_a = won_a.expect("A の勝ち負け");
-            let (won_b, _) = play(&b, ds, seat, seed, Some(&mull_a));
+            let (won_b, _) = play(&b, rh, ds, seat, seed, Some(&mull_a));
             Pair {
                 deck: i,
                 a: won_a,
@@ -149,8 +179,13 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         },
     );
     println!(
-        "A {a_text} vs B {b_text}（相手は今の探索 AI、seed {base}、games {start}〜{}）",
-        start + games - 1
+        "A {a_text} vs B {b_text}（相手は今の探索 AI、seed {base}、games {start}〜{}{}）",
+        start + games - 1,
+        if rhino {
+            "、リノセウスエルフはリノセウス用 AI"
+        } else {
+            ""
+        }
     );
     println!("| デッキ | 組 | 判断が違った組 | A で勝ち・B で負け | A で負け・B で勝ち | A の勝率 | B の勝率 | 差 | z |");
     println!("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");

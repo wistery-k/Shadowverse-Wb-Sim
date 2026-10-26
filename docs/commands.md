@@ -218,7 +218,7 @@ npm run svwb -- compare …                               # npm run compare と�
 npm run svwb -- rhino-compare …                         # npm run rhino-compare と同じ
 npm run svwb -- yardstick …                             # npm run yardstick と同じ
 npm run svwb -- meta …                                  # npm run meta と同じ
-npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mulligan":"sample"}'] [--b '{}'] [--decks <デッキ>,…]
+npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mulligan":"sample"}'] [--b '{}'] [--decks <デッキ>,…] [--rhino]
 npm run svwb -- mulligan-data --games 6000 [--start 0] [--seed 1] [--flip 0.5] --out d.jsonl
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
                 [--sampling classic|default] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
@@ -227,7 +227,8 @@ npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI。
   `'{}'` は今の既定（`turn1`・3 ターン）。2026-10-26 より前の既定の手札の形のモデルは `'{"mulligan":"model"}'`。
-  `--decks` で自分のデッキを絞る（特定のデッキのカードの残し方を比べる用。相手は 6 デッキのまま）
+  `--decks` で自分のデッキを絞る（特定のデッキのカードの残し方を比べる用。相手は 6 デッキのまま）。
+  `--rhino` なら自分のリノセウスエルフをリノセウス用 AI で打つ（A・B はマリガンの項目だけを使う）
 - `mulligan-data`: 両プレイヤーとも初手の各カードの残す・返すをコインで決め（`--flip` が 0.5 未満なら今のマリガンの判断を各カードその確率で反転し）、
   その後は今の探索 AI で打った試合を 1 試合 1 行で追記する（初手・残したか・先後・勝敗。TypeScript 版の `mulligan-data` と同じ形）。
   残し方の因果的な効き目の推定と、どんなマリガンの勝率も試合を打たずに推定する（逆確率重み付け）のに使う
