@@ -203,6 +203,7 @@ pub fn search_options(
             "passLethal" => o.pass_lethal = count(k, v)?,
             "beamPp" => o.beam_pp = number(k, v)?,
             "attackLater" => o.attack_later = count(k, v)?,
+            "perPlan" => o.per_plan = count(k, v)?,
             "scoreTurnEnd" => {
                 o.score_turn_end = match v {
                     Json::Str(s) if s == "none" => ScoreTurnEnd::None,

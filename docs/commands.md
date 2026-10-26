@@ -225,7 +225,7 @@ npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 
                 [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>']
 npm run svwb -- deep-gap play --out gap.jsonl [--games 100] [--start 0] [--deep '<設定の JSON>'] [--k 4] [--evalSeeds 48] [--turns 1-30]
 npm run svwb -- deep-gap rollout --in gap.jsonl[,…] --out roll.jsonl [--top 200] [--random 200] [--seed 1] [--m 48]
-npm run svwb -- deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 30]
+npm run svwb -- deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 30] [--only <内訳の一部>] [--skipDecks <デッキ>,…] [--sort gap|rollout] [--listOnly 1]
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI。
@@ -248,6 +248,8 @@ npm run svwb -- deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 
   相手のリーサルになった引き直しの割合を書く（実際の試合のターン末どうしだと、途中で引いたカードの当たり外れが混ざるため）。`rollout` は差の大きい `--top` 局面と乱数で選んだ `--random` 局面を、
   決定化 `--m` 通りずつ両方に打たせて今の AI どうしで最後まで打ち、`report` はまとめ（差の分布・内訳・最後まで打った差との突き合わせ・差の大きい局面の中身）を
   Markdown で出す。どれも出力に済んだ試合・局面があれば飛ばす。各引数の意味は `rust/engine/src/runner/deep_gap.rs` の先頭。
+  `report` の局面の中身は、`--only`（内訳の名前の一部。例: `ビームが届かない`）・`--skipDecks`（手番の側のデッキ）で絞れる。`--listOnly 1` はまとめを出さず、
+  デッキごとに 1 行 1 局面の表（両方のターンで使ったものの違いつき）と各局面の中身だけを出す（一覧の例: 共有フォルダの `notes/beam-miss/beam-miss.md`）
   クラウドで回すジョブは `cloud/jobs/deep-gap.sh`（`DANGER_CMP` を付けると `dangerRescore` と今の既定の compare も回す。docs/ai-notes.md「深い読みと食い違う局面を集める」）
 
 ## td
@@ -354,6 +356,7 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
 
 - 数: `samples`・`beamWidth`・`maxDepth`・`rescoreTop`・`planCandidates`・`perFirst`・`oppHandSamples`・`dangerRescore`・`mulliganSamples`・`mulliganTurns`・`mulliganRolloutBeam`・`nextLethal`・`beamPp`
 - `attackLater`: 数（既定 0 で使わない）。今のビームに加えて、攻撃以外の手（自分の場が埋まっているときは攻撃も）で手順を作り、攻撃は貪欲に済ませた後の点数で並べるビームを、この幅で打つ（2026-10-26。docs/ai-notes.md「攻撃を後にまとめるビーム」）
+- `perPlan`: 数（既定 0 で使わない）。ビームの各深さで、同じ「手の組」（手札から出したカード・進化・超進化・能力・エクストラPP の組。攻撃・融合・選ぶ手は数えない）の局面をまずこの数まで残し、余った枠を点数の順に埋める。攻撃先・融合の素材だけが違う並びが枠を埋めて、別のカードを使う手順が切られるのを防ぐ（2026-10-26。docs/ai-notes.md「手の組ごとにビームの枠を設ける」）
 - 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`
 - `rescoreMix`: 0〜1 の数。上位の手を相手のターンまで読み直した点数に、ターン末の点数をこの割合で混ぜる（既定 0.5。0 で 2026-10-22 より前の読み方）

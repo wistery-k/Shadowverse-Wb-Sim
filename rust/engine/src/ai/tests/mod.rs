@@ -16,6 +16,7 @@ mod eval;
 mod keys;
 mod lethal;
 mod mulligan;
+mod per_plan;
 mod rhino;
 mod rhino_bound;
 mod rhino_puzzles;
