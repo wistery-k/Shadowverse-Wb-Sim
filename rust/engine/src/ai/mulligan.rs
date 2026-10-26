@@ -255,16 +255,52 @@ pub(crate) fn default_mulligan_action(s: &GameState, legal: &[Action], p: Player
         .unwrap_or_else(|| cost_mulligan(s, legal, p))
 }
 
+/// rollout_mulligan で先へ進める中の相手のマリガン（`mulliganOpp`。docs/ai-notes.md「先へ進める中の相手のマリガン」）
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum OppMulligan {
+    /// 手札の形のモデル（default_mulligan_action）
+    Model,
+    /// コスト 4 以上を返す
+    Cost,
+    /// 1 枚も返さない
+    Keep,
+}
+
+fn opp_mulligan_action(s: &GameState, legal: &[Action], p: PlayerIndex, m: OppMulligan) -> Action {
+    match m {
+        OppMulligan::Model => default_mulligan_action(s, legal, p),
+        OppMulligan::Cost => cost_mulligan(s, legal, p),
+        OppMulligan::Keep => mulligan_action(legal, &[]).unwrap_or(&legal[0]).clone(),
+    }
+}
+
+/// 決定化した局面 d で、相手（p の相手）が実際の局面でもうマリガンしていたら、決定化で引き直した手札から m でマリガンし直す
+/// （決定化は相手の手札を手札＋山札から一様に引き直すので、そのままでは相手のマリガンの分が消える）。Keep なら何もしない
+pub(crate) fn remulligan_opponent(d: GameState, p: PlayerIndex, m: OppMulligan) -> GameState {
+    let o = opponent(p);
+    if !d.players[o].mulligan_done || d.phase != Phase::Mulligan || m == OppMulligan::Keep {
+        return d;
+    }
+    let mut s = d;
+    s.players[o].mulligan_done = false;
+    // マリガンは先攻から順に行うので、相手（先攻）の番に戻る
+    debug_assert_eq!(acting_player(&s), o);
+    let legal = legal_actions(&s);
+    let a = opp_mulligan_action(&s, &legal, o, m);
+    apply_action(&s, &a)
+}
+
 /// マリガンの後に先へ進めるときの打ち手
 pub type RolloutPolicy = Box<dyn FnMut(&GameState, &[Action], &mut Rng) -> Action>;
 
 /// マリガンを終えた局面から先へ進める。turns が 0 なら p の 1 ターン目の最初（TD 学習の自己対戦が "after" の局面を書き出すのと
 /// 同じ時点）で止めて ValuePhase::After、1 以上なら p の turns ターン目の終わり（ターン終了時の処理を進めた後。探索がターン末を
-/// 採点するのと同じ時点）で止めて ValuePhase::End を返す。まだのマリガンは探索 AI の既定のマリガン、それ以外の手は policy で打つ
+/// 採点するのと同じ時点）で止めて ValuePhase::End を返す。まだのマリガンは opp（既定は手札の形のモデル）、それ以外の手は policy で打つ
 pub(crate) fn advance_after_mulligan(
     mut s: GameState,
     p: PlayerIndex,
     turns: i32,
+    opp: OppMulligan,
     rng: &mut Rng,
     policy: &mut dyn FnMut(&GameState, &[Action], &mut Rng) -> Action,
 ) -> (GameState, ValuePhase) {
@@ -279,7 +315,7 @@ pub(crate) fn advance_after_mulligan(
         }
         let legal = legal_actions(&s);
         let a = if s.phase == Phase::Mulligan {
-            default_mulligan_action(&s, &legal, actor)
+            opp_mulligan_action(&s, &legal, actor, opp)
         } else {
             policy(&s, &legal, rng)
         };
@@ -297,12 +333,14 @@ pub(crate) fn advance_after_mulligan(
 /// 局面だった（docs/ai-notes.md「マリガンで返し方ごとに引き直しを試し、評価の平均で選ぶ」）。1 ターン目の最初や
 /// ターン末は自己対戦で学んでいる局面なので、補正の値がそのまま使える。
 /// 並べ方と、その後の手を打つ乱数は、全ての返し方で共通に使う。乱数は rng を進めない（sampled_mulligan と同じ）。
-/// new_policy は試すごとに新しい打ち手を作る（探索 AI はターン内の計画を持つため）
+/// new_policy は試すごとに新しい打ち手を作る（探索 AI はターン内の計画を持つため）。
+/// 先へ進める中の相手のマリガンは opp。None なら、相手がまだなら手札の形のモデル、もう済んでいれば決定化で引き直した手札のまま。
+/// Some なら、相手がもう済んでいても、決定化で引き直した手札からその方法でマリガンし直す
 pub(crate) fn rollout_mulligan(
     real: &GameState,
     legal: &[Action],
     p: PlayerIndex,
-    (n, turns): (usize, i32),
+    (n, turns, opp): (usize, i32, Option<OppMulligan>),
     rng: &Rng,
     new_policy: &dyn Fn() -> RolloutPolicy,
     eval: impl Fn(&GameState, ValuePhase) -> f64,
@@ -311,9 +349,14 @@ pub(crate) fn rollout_mulligan(
     let dets: Vec<(GameState, u32)> = (0..n.max(1))
         .map(|_| {
             let d = determinize(real, p, &mut local, false);
+            let d = match opp {
+                Some(m) => remulligan_opponent(d, p, m),
+                None => d,
+            };
             (d, local.int(1 << 30) as u32)
         })
         .collect();
+    let opp = opp.unwrap_or(OppMulligan::Model);
     let mut best = &legal[0];
     let mut best_v = f64::NEG_INFINITY;
     for a in legal {
@@ -323,7 +366,7 @@ pub(crate) fn rollout_mulligan(
                 let s = try_apply_action(d, a).expect("マリガンの合法手");
                 let mut policy = new_policy();
                 let (s, phase) =
-                    advance_after_mulligan(s, p, turns, &mut Rng::new(*seed), &mut *policy);
+                    advance_after_mulligan(s, p, turns, opp, &mut Rng::new(*seed), &mut *policy);
                 eval(&s, phase)
             })
             .sum();

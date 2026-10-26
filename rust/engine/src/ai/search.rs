@@ -18,7 +18,7 @@ use super::lethal::{
 };
 use super::mulligan::{
     model_mulligan_swap, mulligan_action, rollout_mulligan, sampled_mulligan,
-    weighted_mulligan_swap, RolloutPolicy,
+    weighted_mulligan_swap, OppMulligan, RolloutPolicy,
 };
 use super::think::{Thought, ThoughtCandidate};
 use super::valuenet::{value_net_eval, ValuePhase};
@@ -112,6 +112,12 @@ pub struct SearchOptions {
     pub mulligan_rollout_beam: usize,
     /// 初手にあれば 1 枚目を必ず残すカード（手札の形のモデル・カードごとの表・コストのマリガンの判断の後で直す。2 枚目以降は判断のまま）
     pub mulligan_keep: Vec<crate::data::CardIdx>,
+    /// MulliganMode::Turn1 で先へ進める中の相手のマリガン（mulligan.rs の rollout_mulligan。None なら、相手がまだなら手札の形のモデル、
+    /// もう済んでいれば決定化で引き直した手札のまま）
+    pub mulligan_opp: Option<OppMulligan>,
+    /// MulliganMode::Turn1 で、初手にあれば全部を必ず返すカード（返し方の候補を、それを全部返すものに絞る。比べ用。
+    /// docs/ai-notes.md「鬼呼びの術・ベイルを残しすぎていないか」）
+    pub mulligan_return: Vec<crate::data::CardIdx>,
     pub settle_trades: bool,
     /// 下位互換の味方で同じことができる攻撃を展開せず、合流する相打ちも下位互換の味方で打つ（converging.rs の dominated_attack）
     pub dominance: bool,
@@ -181,6 +187,8 @@ impl Default for SearchOptions {
             mulligan_turns: 3,
             mulligan_rollout_beam: 0,
             mulligan_keep: Vec::new(),
+            mulligan_opp: None,
+            mulligan_return: Vec::new(),
             settle_trades: true,
             dominance: true,
             reuse_plan: true,
@@ -1639,6 +1647,31 @@ fn keep_first_copies(
     swap
 }
 
+/// マリガンの合法手のうち、cards のカードを初手にある分だけ全部返すもの（mulliganReturn。cards が空か初手に無ければ空）
+fn return_all_copies(
+    s: &GameState,
+    p: PlayerIndex,
+    legal: &[Action],
+    cards: &[crate::data::CardIdx],
+) -> Vec<Action> {
+    let must: Vec<Iid> = s.players[p]
+        .hand
+        .iter()
+        .filter(|h| cards.contains(&h.card))
+        .map(|h| h.iid)
+        .collect();
+    if must.is_empty() {
+        return Vec::new();
+    }
+    legal
+        .iter()
+        .filter(
+            |a| matches!(a, Action::Mulligan { swap, .. } if must.iter().all(|i| swap.contains(i))),
+        )
+        .cloned()
+        .collect()
+}
+
 impl Agent for SearchAgent {
     fn think(&mut self, real: &GameState, legal: &[Action], rng: &mut Rng) -> Option<Thought> {
         self.think_with(real, legal, rng, None)
@@ -1673,6 +1706,12 @@ impl Agent for SearchAgent {
                 }
             }
             if opts.mulligan == MulliganMode::Turn1 {
+                let narrowed = return_all_copies(real, p0, legal, &opts.mulligan_return);
+                let legal = if narrowed.is_empty() {
+                    legal
+                } else {
+                    &narrowed[..]
+                };
                 let extra = opts.extra_eval.clone().filter(|_| opts.mulligan_net);
                 let w = &self.w;
                 let default_w = self.default_w.clone();
@@ -1700,7 +1739,11 @@ impl Agent for SearchAgent {
                     real,
                     legal,
                     p0,
-                    (opts.mulligan_samples, opts.mulligan_turns),
+                    (
+                        opts.mulligan_samples,
+                        opts.mulligan_turns,
+                        opts.mulligan_opp,
+                    ),
                     rng,
                     &new_policy,
                     |s, phase| {
