@@ -173,7 +173,7 @@ impl Default for SearchOptions {
             chain_fuse: false,
             score_turn_end: ScoreTurnEnd::All,
             // 引き直した後、3 ターン目の終わりまで貪欲法で進めてから採点する
-            // （docs/ai-notes.md「引き直した後に先へ進めてから採点するマリガン」。手札の形のモデルより +1.6%）
+            // （docs/ai-notes.md「引き直した後に先へ進めてから採点するマリガン」。手札の形のモデルより +1.5%）
             mulligan: MulliganMode::Turn1,
             mulligan_samples: 100,
             mulligan_static: true,
