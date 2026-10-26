@@ -59,7 +59,8 @@ use std::time::Instant;
 /// 深い読みの既定の設定（今の既定から、自分のターンのビームを 4 倍、読み直す最初の手を 2 倍・最初の手ごとの終局面を 3 つ、
 /// 相手の手札の引き直しを 4 倍、相手のターンのビームを 2 倍にしたもの。1 ターンの思考は今の既定の 15〜20 倍ほど）。
 /// 読む深さ（自分のターンのあと相手のターンを 1 回打って評価する）は今の既定と同じで、先までは読まない。
-pub const DEEP_DEFAULT: &str = r#"{"beamWidth":512,"rescoreTop":8,"planCandidates":3,"oppHandSamples":48,"opponentSearch":{"beamWidth":32,"maxDepth":8}}"#;
+/// 自分のターンのビームは、今の既定が幅 512 になった 2026-10-26 に 512 から 2048 に（それまでの記録は 512）。
+pub const DEEP_DEFAULT: &str = r#"{"beamWidth":2048,"rescoreTop":8,"planCandidates":3,"oppHandSamples":48,"opponentSearch":{"beamWidth":32,"maxDepth":8}}"#;
 
 /// 今の AI の点数で読み直す引き直しの数（今の既定の oppHandSamples と同じ）
 const AI_EVAL_SEEDS: u32 = 12;
