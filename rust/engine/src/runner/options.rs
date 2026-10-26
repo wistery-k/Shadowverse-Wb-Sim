@@ -4,9 +4,11 @@
 //! （scripts/valueNetOption.ts）。TypeScript 版とともに消した実験用の項目（exhaustive 等）は、既定の値のときだけ受け付ける。
 
 use crate::ai::aidata::{weights_from, AI_DATA_JSON};
+use crate::ai::mulligan::OppMulligan;
 use crate::ai::rhino::{rhino_pass_lethal, rhino_search_options, RHINO_POTENTIAL};
 use crate::ai::search::{
-    ExtraEval, MulliganMode, OpponentSearch, OwnNextSearch, ScoreTurnEnd, SearchOptions,
+    ExtraEval, MulliganMode, OpponentSearch, OwnNextSearch, RolloutWeights, ScoreTurnEnd,
+    SearchOptions,
 };
 use crate::ai::valuenet::ValueNet;
 use crate::json::Json;
@@ -95,6 +97,24 @@ fn flag(k: &str, v: &Json) -> Result<bool, String> {
     }
 }
 
+/// カード名の配列（mulliganKeep・mulliganReturn）
+fn card_names(k: &str, v: &Json) -> Result<Vec<crate::data::CardIdx>, String> {
+    let Json::Arr(xs) = v else {
+        return Err(format!("\"{k}\" はカード名の配列: {}", v.stringify()));
+    };
+    xs.iter()
+        .map(|x| match x {
+            Json::Str(name) => crate::data::data()
+                .cards
+                .iter()
+                .position(|c| c.name == *name)
+                .map(|i| i as crate::data::CardIdx)
+                .ok_or_else(|| format!("\"{k}\" のカードがありません: {name}")),
+            _ => Err(format!("\"{k}\" はカード名の配列: {}", v.stringify())),
+        })
+        .collect()
+}
+
 /// raw の項目で base を上書きした探索 AI の設定（`{ ...base, ...raw }`）。skip の項目は呼び出し側で扱う。
 /// model は raw の `"extraEval"` が関数（学習した補正）のときの中身
 pub fn search_options(
@@ -130,32 +150,35 @@ pub fn search_options(
             }
             "mulliganSamples" => o.mulligan_samples = count(k, v)?,
             "mulliganTurns" => o.mulligan_turns = count(k, v)? as i32,
-            "mulliganKeep" => {
-                let Json::Arr(xs) = v else {
-                    return Err(format!(
-                        "\"mulliganKeep\" はカード名の配列: {}",
-                        v.stringify()
-                    ));
-                };
-                o.mulligan_keep = xs
-                    .iter()
-                    .map(|x| match x {
-                        Json::Str(name) => crate::data::data()
-                            .cards
-                            .iter()
-                            .position(|c| c.name == *name)
-                            .map(|i| i as crate::data::CardIdx)
-                            .ok_or_else(|| {
-                                format!("\"mulliganKeep\" のカードがありません: {name}")
-                            }),
-                        _ => Err(format!(
-                            "\"mulliganKeep\" はカード名の配列: {}",
+            "mulliganKeep" => o.mulligan_keep = card_names(k, v)?,
+            "mulliganReturn" => o.mulligan_return = card_names(k, v)?,
+            "mulliganRolloutWeights" => {
+                o.mulligan_rollout_weights = match v {
+                    Json::Str(s) if s == "greedy" => RolloutWeights::Greedy,
+                    Json::Str(s) if s == "ramp" => RolloutWeights::Ramp,
+                    Json::Str(s) if s == "search" => RolloutWeights::Search,
+                    _ => {
+                        return Err(format!(
+                            "\"mulliganRolloutWeights\" は greedy / ramp / search: {}",
                             v.stringify()
-                        )),
-                    })
-                    .collect::<Result<_, _>>()?;
+                        ))
+                    }
+                }
             }
             "mulliganRolloutBeam" => o.mulligan_rollout_beam = count(k, v)?,
+            "mulliganOpp" => {
+                o.mulligan_opp = Some(match v {
+                    Json::Str(s) if s == "model" => OppMulligan::Model,
+                    Json::Str(s) if s == "cost" => OppMulligan::Cost,
+                    Json::Str(s) if s == "keep" => OppMulligan::Keep,
+                    _ => {
+                        return Err(format!(
+                            "\"mulliganOpp\" は model / cost / keep: {}",
+                            v.stringify()
+                        ))
+                    }
+                })
+            }
             "lethal" => o.lethal = flag(k, v)?,
             "mulliganStatic" => o.mulligan_static = flag(k, v)?,
             "mulliganNet" => o.mulligan_net = flag(k, v)?,

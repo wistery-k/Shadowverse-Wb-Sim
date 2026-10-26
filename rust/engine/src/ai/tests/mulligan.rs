@@ -3,8 +3,10 @@
 
 use super::*;
 use crate::ai::aidata::MulliganDeckModel;
+use crate::ai::determinize::determinize;
 use crate::ai::mulligan::{
-    default_deck_name_of, hand_features, model_mulligan_swap, model_swap, weighted_swap,
+    default_deck_name_of, hand_features, model_mulligan_swap, model_swap, remulligan_opponent,
+    weighted_swap, OppMulligan,
 };
 use std::collections::HashMap;
 
@@ -143,6 +145,148 @@ fn model_picks_best_predicted_keep() {
     assert_eq!(sorted(swap), sorted(second));
     // 既定の係数のあるデッキなら既定の係数で選ぶ
     assert!(model_mulligan_swap(&s, s.first).is_some());
+}
+
+#[test]
+fn remulligan_opponent_redoes_the_first_players_mulligan() {
+    // 後攻のマリガンの局面で、決定化で引き直した先攻の手札から、先攻にもう一度マリガンさせる（先へ進めるマリガンの mulliganOpp）
+    let s = new_game(deck(DECK), deck(OTHER), 2024);
+    let o = s.first;
+    let p = opponent(o);
+    let keep = legal_actions(&s)
+        .into_iter()
+        .find(|a| matches!(a, Action::Mulligan { swap, .. } if swap.is_empty()))
+        .unwrap();
+    let s = apply(&s, &keep);
+    assert_eq!(acting_player(&s), p);
+    let d = determinize(&s, p, &mut Rng::new(5), false);
+    // Keep なら何もしない
+    let same = remulligan_opponent(d.clone(), p, OppMulligan::Keep);
+    let ids = |x: &GameState| x.players[o].hand.iter().map(|h| h.iid).collect::<Vec<_>>();
+    assert_eq!(ids(&same), ids(&d));
+    // Cost なら、引き直した手札のコスト 3 以下だけが残り、返した分を引く。その後は後攻のマリガンの番
+    let r = remulligan_opponent(d.clone(), p, OppMulligan::Cost);
+    let low: Vec<Iid> = d.players[o]
+        .hand
+        .iter()
+        .filter(|h| card(h.card).cost < 4)
+        .map(|h| h.iid)
+        .collect();
+    let kept: Vec<Iid> = ids(&r)
+        .into_iter()
+        .filter(|i| ids(&d).contains(i))
+        .collect();
+    assert_eq!(sorted(kept), sorted(low));
+    assert_eq!(r.players[o].hand.len(), d.players[o].hand.len());
+    assert!(r.players[o].mulligan_done);
+    assert_eq!(r.phase, Phase::Mulligan);
+    assert_eq!(acting_player(&r), p);
+    let cards = |x: &GameState, q: PlayerIndex| {
+        x.players[q]
+            .hand
+            .iter()
+            .map(|h| (h.iid, h.card))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(cards(&r, p), cards(&d, p));
+    // 先攻でマリガンする局面（相手がまだ）なら何もしない
+    let first = new_game(deck(DECK), deck(OTHER), 2024);
+    let df = determinize(&first, first.first, &mut Rng::new(5), false);
+    let rf = remulligan_opponent(df.clone(), first.first, OppMulligan::Cost);
+    let of = opponent(first.first);
+    assert_eq!(cards(&rf, of), cards(&df, of));
+}
+
+#[test]
+fn turn1_mulligan_with_opponent_modes_is_legal_and_keeps_rng() {
+    // 先へ進める中の相手のマリガンを変えても、先攻・後攻のどちらでも合法な手を選び、試合の乱数を進めない
+    let s = new_game(deck(DECK), deck(OTHER), 99);
+    let keep = legal_actions(&s)
+        .into_iter()
+        .find(|a| matches!(a, Action::Mulligan { swap, .. } if swap.is_empty()))
+        .unwrap();
+    let second = apply(&s, &keep);
+    for state in [&s, &second] {
+        let legal = legal_actions(state);
+        for m in [
+            None,
+            Some(OppMulligan::Model),
+            Some(OppMulligan::Cost),
+            Some(OppMulligan::Keep),
+        ] {
+            let mut agent = crate::ai::search::SearchAgent::new(crate::ai::search::SearchOptions {
+                mulligan_samples: 4,
+                mulligan_opp: m,
+                ..Default::default()
+            });
+            let mut rng = Rng::new(31);
+            let a = agent.choose_action(state, &legal, &mut rng);
+            assert_eq!(rng.state, 31);
+            assert!(legal.contains(&a));
+        }
+    }
+}
+
+#[test]
+fn turn1_mulligan_returns_every_copy_of_listed_cards() {
+    // mulliganReturn のカードは、初手にあれば全部返す（先攻・後攻のどちらでも）
+    let s = new_game(deck(DECK), deck(OTHER), 7);
+    let keep = legal_actions(&s)
+        .into_iter()
+        .find(|a| matches!(a, Action::Mulligan { swap, .. } if swap.is_empty()))
+        .unwrap();
+    let second = apply(&s, &keep);
+    for state in [&s, &second] {
+        let p = acting_player(state);
+        let c = state.players[p].hand[0].card;
+        let copies: Vec<Iid> = state.players[p]
+            .hand
+            .iter()
+            .filter(|h| h.card == c)
+            .map(|h| h.iid)
+            .collect();
+        let legal = legal_actions(state);
+        let mut agent = crate::ai::search::SearchAgent::new(crate::ai::search::SearchOptions {
+            mulligan_samples: 4,
+            mulligan_return: vec![c],
+            ..Default::default()
+        });
+        let a = agent.choose_action(state, &legal, &mut Rng::new(3));
+        let Action::Mulligan { swap, .. } = &a else {
+            panic!("マリガンではない: {a:?}");
+        };
+        assert!(copies.iter().all(|i| swap.contains(i)));
+    }
+}
+
+#[test]
+fn turn1_mulligan_with_rollout_weights_is_legal_and_keeps_rng() {
+    // 先へ進める貪欲法の重みを変えても、先攻・後攻のどちらでも合法な手を選び、試合の乱数を進めない
+    use crate::ai::search::RolloutWeights;
+    let s = new_game(deck(DECK), deck(OTHER), 5);
+    let keep = legal_actions(&s)
+        .into_iter()
+        .find(|a| matches!(a, Action::Mulligan { swap, .. } if swap.is_empty()))
+        .unwrap();
+    let second = apply(&s, &keep);
+    for state in [&s, &second] {
+        let legal = legal_actions(state);
+        for w in [
+            RolloutWeights::Greedy,
+            RolloutWeights::Ramp,
+            RolloutWeights::Search,
+        ] {
+            let mut agent = crate::ai::search::SearchAgent::new(crate::ai::search::SearchOptions {
+                mulligan_samples: 4,
+                mulligan_rollout_weights: w,
+                ..Default::default()
+            });
+            let mut rng = Rng::new(17);
+            let a = agent.choose_action(state, &legal, &mut rng);
+            assert_eq!(rng.state, 17);
+            assert!(legal.contains(&a));
+        }
+    }
 }
 
 fn sample_agent(n: usize) -> crate::ai::search::SearchAgent {

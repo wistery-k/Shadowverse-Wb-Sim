@@ -38,6 +38,9 @@ fn subject_agent(subject: &SearchOptions, rhino: bool) -> Box<dyn Agent> {
         mulligan_turns: subject.mulligan_turns,
         mulligan_rollout_beam: subject.mulligan_rollout_beam,
         mulligan_keep: subject.mulligan_keep.clone(),
+        mulligan_opp: subject.mulligan_opp,
+        mulligan_return: subject.mulligan_return.clone(),
+        mulligan_rollout_weights: subject.mulligan_rollout_weights,
         ..rhino_search_options(RHINO_POTENTIAL, learned.clone())
     };
     let plain = SearchOptions {
