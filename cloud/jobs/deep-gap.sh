@@ -9,8 +9,8 @@
 # 5. （DANGER_CMP > 0 のとき）読み直した手がどれも負けと読めたら終局面を読み足す（dangerRescore DANGER_N）と今の既定の AI の勝率（compare DANGER_CMP 組）
 # 6. まとめ（report.md を最後まで打った結果込みで書き直す）
 #
-# クラウドで: cloud/gcp.sh run deepgap1 cloud/jobs/deep-gap.sh --hours 2 [--env GAMES=800] [--env TOP=150] …
-# PC で（リポジトリの一番上で）: CLOUD_W=~/deep-gap bash cloud/jobs/deep-gap.sh 2>&1 | tee -a ~/deep-gap/job.log
+# PC の Docker コンテナで（既定の場所。リポジトリの一番上で）: mkdir -p ~/svwb-data/deep-gap && CLOUD_W=~/svwb-data/deep-gap bash cloud/jobs/deep-gap.sh 2>&1 | tee -a ~/svwb-data/deep-gap/job.log
+# Google Cloud で（使うたびにユーザーの承認が要る。cloud/README.md）: cloud/gcp.sh run deepgap1 cloud/jobs/deep-gap.sh --hours 2 [--env GAMES=800] [--env TOP=150] …
 # 小さく試す: CLOUD_W=/tmp/dg GAMES=3 TOP=1 RANDOM_N=1 M=2 CMP=1 bash cloud/jobs/deep-gap.sh
 #
 # 途中で止めても、局面集めは済んだ試合、最後まで打つ段は済んだ局面を飛ばして続きから回る。
