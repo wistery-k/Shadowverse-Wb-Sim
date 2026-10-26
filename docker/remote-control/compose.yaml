@@ -1,0 +1,47 @@
+# Claude Code の Remote Control を Docker の中で動かす。使い方は同じフォルダの README.md
+name: svwb-rc
+services:
+  rc:
+    build:
+      context: .
+      args:
+        USER_UID: ${SVWB_UID:-1000}
+        USER_GID: ${SVWB_GID:-1000}
+    image: svwb-rc
+    container_name: svwb-rc
+    # Remote Control のセッション名の頭（svwb-docker-…）になる。ホストで動かすものと見分けるため
+    hostname: svwb-docker
+    init: true
+    # claude remote-control は最初の確認（フォルダの信頼など）に端末が要る。答えを覚えた後も端末があれば困らない
+    tty: true
+    stdin_open: true
+    # ネットワークが 10 分ほど切れると claude remote-control は終わるので、自動で立ち上げ直す
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      # リポジトリ（このファイルの 2 つ上）をコンテナの /workspace に見せる。Claude が触れるのはこことコンテナの中だけ
+      - ../..:/workspace
+      # ログイン情報と設定
+      - claude-config:/home/wk/.claude
+      # Rust のビルド結果はホストと分ける（ホストで作ったものとコンテナで作ったものが混ざらないように）
+      - rust-target:/workspace/rust/target
+      # 自己対戦・モデル・ログなどの置き場所（ホストの ~/svwb-data）を、コンテナでも同じ ~/svwb-data に見せる。
+      # リポジトリの外に置くので git clean などで消えない。無いと起動しないので、先に mkdir -p ~/svwb-data しておく
+      - type: bind
+        source: ${SVWB_DATA:-${HOME}/svwb-data}
+        target: /home/wk/svwb-data
+        bind:
+          create_host_path: false
+    command:
+      - claude
+      - remote-control
+      - --permission-mode
+      - ${CLAUDE_PERMISSION_MODE:-acceptEdits}
+      - --spawn
+      - ${CLAUDE_SPAWN:-same-dir}
+
+volumes:
+  claude-config:
+  rust-target:

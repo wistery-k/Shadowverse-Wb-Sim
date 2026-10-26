@@ -3,6 +3,10 @@
 meta.sh や自己対戦のような重いジョブを、Google Cloud の Spot VM（既定は c3d-highcpu-180、180 スレッド、1 時間 1.55 ドル）で回すためのスクリプト。
 計画はプロジェクトの Claude Doc「クラウドのスポットインスタンスで対戦を回す計画」（2026-10-25）にある。
 
+**Google Cloud を使うには、使うたびにユーザーの承認が要る**（所要時間や費用にかかわらず。CLAUDE.md の 9「実験を回す場所」、2026-10-26）。
+実験を回す既定の場所はユーザーの PC の Docker コンテナ（`docker/remote-control`）で、`cloud/jobs/` のジョブもそこで回せる（下の「PC で回す」）。
+十分速く終わるものは Claude のクラウド環境（スレッド自身の環境）で回してよい。
+
 測った速さ（2026-10-25、共有フォルダの `logs/cloud-bench1`・`logs/cloud-scale1`）:
 
 - c3d-highcpu-180 で、ふるい・確かめの試合（deck-compare）が 0.0165 秒/試合、compare が 0.018 秒/試合。ユーザーの PC の 6〜7 倍で、
@@ -118,7 +122,8 @@ P=<プロジェクト ID> AMOUNT=30USD bash cloud/setup-billing-cap.sh
 
 ## 使い方
 
-対戦を回す前に作業ブランチに push する（`run` は push していないコミットでは止まる）。1 時間を超える見積もりのものは、回す前にユーザーに確かめる。
+対戦を回す前に作業ブランチに push する（`run` は push していないコミットでは止まる）。`run` の前に、所要時間と費用の見積もりを示して
+ユーザーの承認を得る（短いもの・安いものも同じ。PC で回せるものは PC で回す）。
 
 ```sh
 # 速さを測る（最初の試し。15 分ほど）
@@ -150,6 +155,20 @@ cloud/gcp.sh run meta-r5 /mnt/project-files/notes/meta/meta.sh --hours 3 \
   （meta.sh の `[ -f $W/s$r.json ]` や `run` のように）
 - 書きかけのファイルは `*.tmp` に書いてから `mv` する（`*.tmp` は置き場所に写さない）。途中で写った書きかけを、終わったものと取り違えないため
 - 並列数は既定で VM のスレッド数（`THREADS` で変えられる）
+
+## PC で回す
+
+`cloud/jobs/` のジョブは、`CLOUD_W` に作業フォルダを渡せば PC でもそのまま回る（Cloud Storage も VM も使わない）。
+Docker のコンテナ（`docker/remote-control`）では、作業フォルダを `~/svwb-data` の下に置く（ほかの場所はコンテナを作り直すと消える。
+ホストの同じ場所に見える）。リポジトリの一番上で:
+
+```sh
+N=exploit3   # 回の名前
+mkdir -p ~/svwb-data/$N
+CLOUD_W=~/svwb-data/$N bash cloud/jobs/exploit.sh 2>&1 | tee -a ~/svwb-data/$N/job.log
+```
+
+止めても、もう一度流せば終わった段階を飛ばして続きから回る。結果は `npm run pack-run` でまとめて共有フォルダに上げる（`docs/commands.md`「pack-run」）。
 
 ## 手元で試す
 

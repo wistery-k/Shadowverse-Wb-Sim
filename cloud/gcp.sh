@@ -1,5 +1,7 @@
 #!/bin/bash
 # クラウド（Google Cloud の Spot VM）でジョブ（meta.sh 等のシェルスクリプト）を回す（cloud/README.md）。
+# 使うたびにユーザーの承認が要る（所要時間や費用にかかわらず。CLAUDE.md の 9「実験を回す場所」）。実験を回す既定の場所は
+# ユーザーの PC の Docker コンテナ（docker/remote-control）で、ジョブは CLOUD_W=<フォルダ> bash <ジョブ.sh> で PC でも回る。
 #
 #   cloud/gcp.sh run <名前> <ジョブ.sh> [--machine c3d-highcpu-180] [--zones us-central1-a,...] [--hours 4]
 #                    [--input <手元のファイルかフォルダ>=<作業フォルダの中の名前>]... [--env K=V]... [--max-vms 6]

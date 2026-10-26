@@ -36,7 +36,8 @@
 | `npm run svwb` | Rust 版の CLI（下） | `rust/engine/src/main.rs` |
 | `npm run td` | TD 学習のモデルの作成・学習・分析（下） | `scripts/td-main.ts` |
 | `npm run pack-run` | PC で回した 1 回分の出力（自己対戦・モデル・ログ）を、共有フォルダに上げる `.tar.gz` にまとめる（下） | `scripts/pack-run-main.ts` |
-| `cloud/gcp.sh` | ジョブ（meta.sh 等）をクラウドの Spot VM で回す（下） | `cloud/gcp.sh`・`cloud/vm-startup.sh` |
+| `cloud/gcp.sh` | ジョブ（meta.sh 等）をクラウドの Spot VM で回す。使うたびにユーザーの承認が要る（下） | `cloud/gcp.sh`・`cloud/vm-startup.sh` |
+| `docker/remote-control` | Claude Code の Remote Control を Docker のコンテナの中で動かす。実験を回す既定の場所（使い方は本体の README.md） | `docker/remote-control/compose.yaml`・`Dockerfile` |
 
 ## sim
 
@@ -330,6 +331,9 @@ cloud/gcp.sh watch|status|stop|preempt <名前>
 cloud/gcp.sh pull <名前> <行き先>
 cloud/gcp.sh list
 ```
+
+**使うたびにユーザーの承認が要る**（所要時間や費用にかかわらず。CLAUDE.md の 9「実験を回す場所」）。実験を回す既定の場所はユーザーの PC の
+Docker コンテナ（`docker/remote-control`）で、ジョブは `CLOUD_W=<フォルダ> bash <ジョブ.sh>` で PC でも回る（`cloud/README.md`「PC で回す」）。
 
 今のコミット（push してあるもの）のソースとジョブを Cloud Storage に送り、Google Cloud の Spot VM を立てて回す。VM はビルドとゴールデンテストの後に
 ジョブを流し、作業フォルダ（ジョブの中では `CLOUD_W`）を 3 分ごとに Cloud Storage に写す。止められたら `watch` が VM を作り直し、

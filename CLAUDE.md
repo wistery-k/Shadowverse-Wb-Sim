@@ -33,7 +33,13 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
    - 書き足すときは、詳しい記録を `docs/ai-notes/` のいちばん新しいファイルの末尾に節として足し、本体の索引に 1 行足す。既定を変えたら本体の「今の AI」も直す（本体の「書き足し方」）
    - 判断は勝率（探索 AI どうしなら `npm run compare`、同じシードで席とデッキを入れ替えて 200 試合程度）で行う。ランナーは Rust（`npm run compare`・`npm run rhino-compare`・`npm run svwb -- td selfplay`。`rust/README.md`）。予測精度などの代わりの指標が良くても、勝率で確かめるまで採用しない（評価関数の学習は予測精度が上がったのに勝率は下がった）
    - 1 組 20 試合の勝率表は 1 マス ±10% ほどぶれる。小さな差で結論を出さない
+   - **実験を回す場所**（ユーザー確認済み 2026-10-26。費用を抑えるため）:
+     1. 既定は、ユーザーの PC の Docker コンテナ（`docker/remote-control`。Remote Control のセッション `svwb-docker-…`、データは `~/svwb-data` の下）
+     2. Google Cloud（`cloud/gcp.sh` の Spot VM など）は、所要時間や費用にかかわらず、使うたびにユーザーの承認を得てから使う。PC より速いことは承認なしで使う理由にならない
+     3. 十分速く終わるもの（小さく試す・短い確かめなど）は、Claude のクラウド環境（スレッド自身の環境。4 スレッドほどで、PC の 28 スレッドより何倍も遅い）で回してよい
+     - どこで回すときも、回す前に変更を作業ブランチに push し、所要時間を見積もる。見積もりが 1 時間以上なら、回す前にユーザーに確かめる
    - ユーザーの PC で回した自己対戦・モデル・ログは、`npm run pack-run` でまとめたものを共有フォルダ（`/mnt/project-files/`）の `data/selfplay/<名前>/`・`data/models/<名前>/`・`logs/<名前>/` に展開して置く。各回の中身は `logs/<名前>/MANIFEST.md`（`docs/commands.md`「pack-run」）
+   - ユーザーの PC の Docker コンテナ（`docker/remote-control`）で回すときは、自己対戦・モデル・ログ・`pack-run` の出力を `~/svwb-data/<名前>/` の下に置く（ホストの同じ場所に見える。`/workspace` と `~/svwb-data` 以外はコンテナを作り直すと消える）
 
 ## ルールの扱い
 

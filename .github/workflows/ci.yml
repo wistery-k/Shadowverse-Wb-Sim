@@ -6,8 +6,46 @@ on:
     branches-ignore: [main]
 
 jobs:
+  # ドキュメント（*.md と docs/ の下）だけの変更かを調べる。そうなら下の check と rust を飛ばす。
+  # 比べる相手は PR ならマージ先、ブランチへの push なら main との分かれ目（そこからの変更をまとめて見る）。
+  # ワークフローごと paths-ignore で止めると、必須のチェックにしたときに「待ち」のまま残ってマージできないので、
+  # ジョブの if で飛ばす（飛ばしたジョブは成功の扱いになる）。
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 分かれ目を探すのに履歴が要る。ファイルの中身は要らないので取らない
+          fetch-depth: 0
+          filter: blob:none
+      - id: diff
+        env:
+          TARGET: ${{ github.base_ref || 'main' }}
+        run: |
+          code=false
+          if ! files=$(git diff --name-only --no-renames "origin/$TARGET...HEAD"); then
+            echo "origin/$TARGET と比べられないので、すべて調べる"
+            code=true
+          fi
+          while IFS= read -r f; do
+            case "$f" in
+              '' | docs/* | *.md) ;;
+              *)
+                echo "ドキュメント以外の変更: $f"
+                code=true
+                break
+                ;;
+            esac
+          done <<< "$files"
+          if [ "$code" = false ]; then echo "ドキュメントだけの変更なので check と rust を飛ばす"; fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   # 画面・スクリプト（TypeScript）。エンジンと AI は WASM（npm test の前に npm run wasm で作る）
   check:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,6 +61,8 @@ jobs:
 
   # エンジンと AI（rust/）: 書式・lint・単体テストと、決まった試合の結果が保存したものと同じか（rust/engine/tests/golden.rs）
   rust:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
