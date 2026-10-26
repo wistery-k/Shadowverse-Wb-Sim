@@ -4,6 +4,9 @@ Claude Code の Remote Control（`claude remote-control`）を Docker のコン�
 プロジェクトのスレッドから、このコンテナの中で作業させられる。Claude が触れるのは、このリポジトリ（コンテナの中では `/workspace`）と
 コンテナの中だけになる。
 
+AI の実験（自己対戦・勝率比較など）は、既定でこのコンテナで回す（CLAUDE.md の 9「実験を回す場所」）。Google Cloud（`cloud/gcp.sh`）は
+使うたびにユーザーの承認が要り、十分速く終わるものは Claude のクラウド環境で回してよい。
+
 - `Dockerfile`: Node 22・Rust（stable と `wasm32-unknown-unknown`。CI と同じ）・Claude Code（公式のインストーラ）を入れたイメージ
 - `entrypoint.sh`: 起動のたびに `~/svwb-data` の中のフォルダへのリンクを `~` に作る（下の「自己対戦などのデータ」）
 - `compose.yaml`: リポジトリを `/workspace` に、ホストの `~/svwb-data`（自己対戦などの置き場所）をコンテナの `~/svwb-data` に見せ、
