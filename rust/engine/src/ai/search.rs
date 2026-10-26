@@ -184,9 +184,11 @@ impl Default for SearchOptions {
     fn default() -> Self {
         SearchOptions {
             samples: 1,
-            // 32 から 128 に（6400 試合で 52.9%、時間は 1 割ほど増える。docs/ai-notes.md「棋譜の指摘: ビームの幅」）
-            beam_width: 128,
-            max_depth: 8,
+            // 32 から 128 に（6400 試合で 52.9%、時間は 1 割ほど増える。docs/ai-notes.md「棋譜の指摘: ビームの幅」）。
+            // 2026-10-26 に幅 128・深さ 8 から幅 512・深さ 16 に（別のシードの 2000 試合で 51.3%、1 試合の時間は 1.1 倍ほど。
+            // docs/ai-notes.md「人間なら見える手順の取りこぼしを掘る」）
+            beam_width: 512,
+            max_depth: 16,
             rescore_top: 4,
             lethal: true,
             lethal_ward_blocked: GUARDED_LETHAL_OPTIONS.ward_blocked,
@@ -254,10 +256,11 @@ impl Default for SearchOptions {
 impl SearchOptions {
     /// 2026-10-16 より前の既定の読み方（決定化 3 回それぞれで幅 32 のビームを打ち、最初の手ごとに終局面を 3 つまで読み直す。
     /// 読み直した点数にターン末の点数を混ぜない）。
-    /// 人間の記録との比較の相手（search-classic）と TD 学習の自己対戦は、今までと比べられるようこちらを使う
+    /// 人間の記録との比較の相手（search-classic）と TD 学習の自己対戦は、今までと比べられるようこちらを使う（深さも当時の 8）
     pub fn with_classic_sampling(self) -> SearchOptions {
         SearchOptions {
             beam_width: 32,
+            max_depth: 8,
             samples: 3,
             plan_candidates: 3,
             opp_hand_samples: 1,
