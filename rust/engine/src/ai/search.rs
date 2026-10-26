@@ -17,7 +17,8 @@ use super::lethal::{
     GUARDED_LETHAL_OPTIONS,
 };
 use super::mulligan::{
-    model_mulligan_swap, mulligan_action, sampled_mulligan, weighted_mulligan_swap,
+    model_mulligan_swap, mulligan_action, rollout_mulligan, sampled_mulligan,
+    weighted_mulligan_swap, RolloutPolicy,
 };
 use super::think::{Thought, ThoughtCandidate};
 use super::valuenet::{value_net_eval, ValuePhase};
@@ -50,6 +51,10 @@ pub enum MulliganMode {
     Cost,
     /// 返し方ごとに引き直しを mulligan_samples 回試して、評価の平均で選ぶ
     Sample,
+    /// 1 枚も返さない（マリガンの効き目の大きさを測る比べ用）
+    Keep,
+    /// Sample と同じだが、引き直した後に先へ進めてから評価する（mulligan.rs の rollout_mulligan。mulligan_turns・mulligan_rollout_beam）
+    Turn1,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -94,6 +99,10 @@ pub struct SearchOptions {
     /// MulliganMode::Sample で、評価関数（手で決めた部分）と学習した補正のどちらを使うか
     pub mulligan_static: bool,
     pub mulligan_net: bool,
+    /// MulliganMode::Turn1 で、どこまで進めてから評価するか（0 なら自分の 1 ターン目の最初、k なら自分の k ターン目の終わり）
+    pub mulligan_turns: i32,
+    /// MulliganMode::Turn1 で先へ進めるときの手（0 なら貪欲法、1 以上ならその幅のビームの探索）
+    pub mulligan_rollout_beam: usize,
     pub settle_trades: bool,
     /// 下位互換の味方で同じことができる攻撃を展開せず、合流する相打ちも下位互換の味方で打つ（converging.rs の dominated_attack）
     pub dominance: bool,
@@ -158,6 +167,8 @@ impl Default for SearchOptions {
             mulligan_samples: 100,
             mulligan_static: true,
             mulligan_net: true,
+            mulligan_turns: 0,
+            mulligan_rollout_beam: 0,
             settle_trades: true,
             dominance: true,
             reuse_plan: true,
@@ -1620,6 +1631,55 @@ impl Agent for SearchAgent {
                         None => v,
                     }
                 });
+            }
+            if opts.mulligan == MulliganMode::Keep {
+                if let Some(a) = mulligan_action(legal, &[]) {
+                    return a.clone();
+                }
+            }
+            if opts.mulligan == MulliganMode::Turn1 {
+                let extra = opts.extra_eval.clone().filter(|_| opts.mulligan_net);
+                let w = &self.w;
+                let default_w = self.default_w.clone();
+                let beam = opts.mulligan_rollout_beam;
+                // 先へ進めるときの手: 幅 beam のビーム（読み直しは 1 手・相手は貪欲法・リーサル探索なし）か、0 なら貪欲法
+                let rollout = SearchOptions {
+                    beam_width: beam.max(1),
+                    rescore_top: 1,
+                    opponent_search: None,
+                    opp_hand_samples: 1,
+                    lethal: false,
+                    mulligan: MulliganMode::Model,
+                    ..SearchOptions::default()
+                };
+                let new_policy = move || -> RolloutPolicy {
+                    if beam == 0 {
+                        let dw = default_w.clone();
+                        Box::new(move |s, l, r| choose_greedy(s, l, r, false, &dw, false))
+                    } else {
+                        let mut ag = SearchAgent::new(rollout.clone());
+                        Box::new(move |s, l, r| ag.choose_action(s, l, r))
+                    }
+                };
+                return rollout_mulligan(
+                    real,
+                    legal,
+                    p0,
+                    (opts.mulligan_samples, opts.mulligan_turns),
+                    rng,
+                    &new_policy,
+                    |s, phase| {
+                        let v = if opts.mulligan_static {
+                            evaluate_with(s, p0, w)
+                        } else {
+                            0.0
+                        };
+                        match &extra {
+                            Some(f) if s.phase != Phase::Ended => v + f(s, p0, phase),
+                            _ => v,
+                        }
+                    },
+                );
             }
             let model_swap = if opts.mulligan == MulliganMode::Model {
                 model_mulligan_swap(real, p0)

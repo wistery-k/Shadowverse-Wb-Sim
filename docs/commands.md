@@ -334,12 +334,13 @@ Docker コンテナ（`docker/remote-control`）で、ジョブは `CLOUD_W=<フ
 
 JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知らない項目はエラーになる。項目の意味は `rust/engine/src/ai/search.rs` の `SearchOptions`。
 
-- 数: `samples`・`beamWidth`・`maxDepth`・`rescoreTop`・`planCandidates`・`perFirst`・`oppHandSamples`・`dangerRescore`・`mulliganSamples`・`nextLethal`・`beamPp`
+- 数: `samples`・`beamWidth`・`maxDepth`・`rescoreTop`・`planCandidates`・`perFirst`・`oppHandSamples`・`dangerRescore`・`mulliganSamples`・`mulliganTurns`・`mulliganRolloutBeam`・`nextLethal`・`beamPp`
 - 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`
 - `rescoreMix`: 0〜1 の数。上位の手を相手のターンまで読み直した点数に、ターン末の点数をこの割合で混ぜる（既定 0.5。0 で 2026-10-22 より前の読み方）
 - `scoreTurnEnd`: `"none"`・`"terminal"`・`"all"`
-- `mulligan`: `"model"`（既定）・`"weights"`・`"cost"`・`"sample"`
+- `mulligan`: `"model"`（既定）・`"weights"`・`"cost"`・`"sample"`・`"turn1"`（引き直した後、自分の 1 ターン目の最初か `mulliganTurns` ターン目の終わりまで
+  貪欲法か幅 `mulliganRolloutBeam` のビームで進めてから採点する）・`"keep"`（1 枚も返さない。比べ用）
 - `opponentSearch`: `null`（相手のターンを読まない）か `{"beamWidth": …, "maxDepth": …, "extraEval": true|false}`
 - `weights`: `"default"`（基準の重み）か、変えたい項目だけのオブジェクト（`"holdScale"` で hold を何倍にするか）
 - `valueNet`: 学習した補正のファイル名か `false`（補正なし）
