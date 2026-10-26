@@ -5,7 +5,9 @@ Claude Code の Remote Control（`claude remote-control`）を Docker のコン�
 コンテナの中だけになる。
 
 - `Dockerfile`: Node 22・Rust（stable と `wasm32-unknown-unknown`。CI と同じ）・Claude Code（公式のインストーラ）を入れたイメージ
-- `compose.yaml`: リポジトリを `/workspace` に見せ、ログイン情報と設定を名前付きボリュームに残し、`claude remote-control` を常駐させる
+- `entrypoint.sh`: 起動のたびに `~/svwb-data` の中のフォルダへのリンクを `~` に作る（下の「自己対戦などのデータ」）
+- `compose.yaml`: リポジトリを `/workspace` に、ホストの `~/svwb-data`（自己対戦などの置き場所）をコンテナの `~/svwb-data` に見せ、
+  ログイン情報と設定を名前付きボリュームに残し、`claude remote-control` を常駐させる
 
 公式の説明: [Remote Control](https://code.claude.com/docs/en/remote-control)・[ログイン](https://code.claude.com/docs/en/authentication)・
 [dev container](https://code.claude.com/docs/en/devcontainer)（2026-10-26 に確認）
@@ -25,6 +27,7 @@ Claude Code の Remote Control（`claude remote-control`）を Docker のコン�
    ```sh
    printf 'SVWB_UID=%s\nSVWB_GID=%s\n' "$(id -u)" "$(id -g)" > .env
    mkdir -p ../../rust/target   # 無いと Docker が root の持ち物として作ってしまうので、先に作っておく
+   mkdir -p ~/svwb-data          # 自己対戦などの置き場所（下の「自己対戦などのデータ」）。無いとコンテナが起動しない
    docker compose build
    ```
 
@@ -57,6 +60,32 @@ Claude Code の Remote Control（`claude remote-control`）を Docker のコン�
    claude.ai/code やアプリのセッションの一覧に `svwb-docker-…` が出る。プロジェクトのスレッドからも、このコンテナ
    （フォルダ `/workspace`）で作業させられる
 
+## 自己対戦などのデータ（`~/svwb-data`）
+
+ホストの `~/svwb-data` は、コンテナの中でも同じ `~/svwb-data`（`/home/wk/svwb-data`）に見える（コピーではないので、
+どちらで書いても両方から見える）。自己対戦・モデル・ログ・`pack-run` の出力などは、ホストでもコンテナでもここに置く。
+リポジトリの外なので、`git clean` で消えることもない。
+
+コンテナは起動するたびに、`~/svwb-data` の中のフォルダごとに `~` にリンクを作る（`~/td-royal` → `~/svwb-data/td-royal`。
+`entrypoint.sh`）。`/home/wk/td-royal/...` のように書いたスクリプトやメモが、コンテナでもそのまま使える。
+ただし、コンテナの中で新しく作るフォルダは `~/svwb-data` の下に作る。`~/td-new` のように `~` の直下に作ると、
+コンテナを作り直したときに消える（`/workspace` と `~/svwb-data` 以外はすべて消える）。
+
+今まで `~` の直下に置いていたフォルダは、ホストで `~/svwb-data` に移し、元の場所にリンクを残す（ホストのスクリプトもそのまま動く。
+同じディスクの中なら一瞬で終わる。2 回流しても壊れない）。自己対戦を回していないときに流す。
+
+```sh
+mkdir -p ~/svwb-data
+cd ~ && for d in td-* svwb-upload; do   # 移したいフォルダを並べる
+  [ -d "$d" ] && [ ! -L "$d" ] || continue
+  mv "$d" svwb-data/ && ln -s "svwb-data/$d" "$d" && echo "移した: ~/$d"
+done
+cd ~/Shadowverse-Wb-Sim/docker/remote-control && docker compose build && docker compose up -d
+```
+
+最後の行でコンテナを作り直すと、つながる（コンテナが動いている間に `~/svwb-data` に足したフォルダのリンクは、次に起動したときにできる）。
+置き場所を変えたいときは `.env` に `SVWB_DATA=/path/to/data` と書く。
+
 ## ふだんの操作
 
 | したいこと | コマンド |
@@ -76,6 +105,7 @@ Claude Code の Remote Control（`claude remote-control`）を Docker のコン�
 - `CLAUDE_PERMISSION_MODE`: セッションの権限モード。既定は `acceptEdits`（ファイルの編集は聞かずに行い、コマンドは聞く）。
   ほかに `default`・`auto`・`dontAsk`・`plan`・`bypassPermissions`。コンテナの中なので `bypassPermissions` にして確認を無くす手もある
   （ただし `/workspace` とコンテナの中のログイン情報には触れられる。Remote Control でこのモードがそのまま使えるかは試していない）
+- `SVWB_DATA`: 自己対戦などの置き場所（ホストの場所）。既定は `~/svwb-data`
 - `CLAUDE_SPAWN`: 新しいセッションの作り方。既定は `same-dir`（どのセッションも `/workspace` で作業する）。`worktree` にすると
   セッションごとに git の worktree を作る（同時に複数のスレッドが作業しても混ざらないが、worktree ごとに Rust を作り直すので遅い）
 - コミットするなら `GIT_AUTHOR_NAME`・`GIT_AUTHOR_EMAIL`・`GIT_COMMITTER_NAME`・`GIT_COMMITTER_EMAIL`
@@ -89,6 +119,8 @@ Claude Code の Remote Control（`claude remote-control`）を Docker のコン�
   `restart: unless-stopped` で立ち上げ直す
 - ログインには期限がある。期限が近いと起動時に `Your login expires in 3 days` と出る。切れるとセッションが進まなくなるので、ログインし直す
 - アカウントの設定で「信頼できるデバイス」を必須にしていると、ログインから 18 時間たつとセッションを見られなくなる。そのときもログインし直す
+- コンテナの中で `/workspace` と `~/svwb-data` 以外に書いたものは、コンテナを作り直す（`docker compose up -d` で設定が変わったとき、
+  `build` の後など）と消える
 - コンテナには GitHub の認証情報を入れていないので、コンテナからは push できない（コミットまで。push はホストで）
 - Rust のビルド結果（`rust/target`）は、コンテナではボリュームに分けている。ホストで作ったものとは別に作り直す（初回は数分）。
   `node_modules` はホストと同じものを使う

@@ -27,6 +27,13 @@ services:
       - claude-config:/home/wk/.claude
       # Rust のビルド結果はホストと分ける（ホストで作ったものとコンテナで作ったものが混ざらないように）
       - rust-target:/workspace/rust/target
+      # 自己対戦・モデル・ログなどの置き場所（ホストの ~/svwb-data）を、コンテナでも同じ ~/svwb-data に見せる。
+      # リポジトリの外に置くので git clean などで消えない。無いと起動しないので、先に mkdir -p ~/svwb-data しておく
+      - type: bind
+        source: ${SVWB_DATA:-${HOME}/svwb-data}
+        target: /home/wk/svwb-data
+        bind:
+          create_host_path: false
     command:
       - claude
       - remote-control
