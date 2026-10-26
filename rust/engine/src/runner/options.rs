@@ -154,12 +154,12 @@ pub fn search_options(
             "mulliganReturn" => o.mulligan_return = card_names(k, v)?,
             "mulliganRolloutWeights" => {
                 o.mulligan_rollout_weights = match v {
-                    Json::Str(s) if s == "default" => RolloutWeights::Default,
+                    Json::Str(s) if s == "greedy" => RolloutWeights::Greedy,
                     Json::Str(s) if s == "ramp" => RolloutWeights::Ramp,
                     Json::Str(s) if s == "search" => RolloutWeights::Search,
                     _ => {
                         return Err(format!(
-                            "\"mulliganRolloutWeights\" は default / ramp / search: {}",
+                            "\"mulliganRolloutWeights\" は greedy / ramp / search: {}",
                             v.stringify()
                         ))
                     }

@@ -272,7 +272,7 @@ fn turn1_mulligan_with_rollout_weights_is_legal_and_keeps_rng() {
     for state in [&s, &second] {
         let legal = legal_actions(state);
         for w in [
-            RolloutWeights::Default,
+            RolloutWeights::Greedy,
             RolloutWeights::Ramp,
             RolloutWeights::Search,
         ] {

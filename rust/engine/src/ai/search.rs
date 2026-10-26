@@ -60,9 +60,9 @@ pub enum MulliganMode {
 /// MulliganMode::Turn1 で貪欲法で先へ進めるときの重み（`mulliganRolloutWeights`。docs/ai-notes.md「打ち進める手に PP 最大値を見せる」）
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RolloutWeights {
-    /// 既定の重み（貪欲法の AI と同じ。PP 最大値の項 maxPp は 0 なので、竜の啓示を打たない）
-    Default,
-    /// 既定の重みの maxPp だけを探索の重みの値にする
+    /// 貪欲法の AI と同じ既定の重み（PP 最大値の項 maxPp は 0 なので、竜の啓示を打たない。2026-10-26 より前の既定）
+    Greedy,
+    /// 既定の重みの maxPp だけを探索の重みの値にする（既定）
     Ramp,
     /// 探索の重み
     Search,
@@ -205,7 +205,9 @@ impl Default for SearchOptions {
             mulligan_keep: Vec::new(),
             mulligan_opp: None,
             mulligan_return: Vec::new(),
-            mulligan_rollout_weights: RolloutWeights::Default,
+            // 打ち進める貪欲法に PP 最大値を見せる（竜の啓示を打つ。勝率は変わらないが仕組みとして筋が通る。
+            // docs/ai-notes.md「打ち進める手に PP 最大値を見せる」）
+            mulligan_rollout_weights: RolloutWeights::Ramp,
             settle_trades: true,
             dominance: true,
             reuse_plan: true,
@@ -1902,7 +1904,7 @@ impl Agent for SearchAgent {
                 let extra = opts.extra_eval.clone().filter(|_| opts.mulligan_net);
                 let w = &self.w;
                 let default_w = match opts.mulligan_rollout_weights {
-                    RolloutWeights::Default => self.default_w.clone(),
+                    RolloutWeights::Greedy => self.default_w.clone(),
                     RolloutWeights::Ramp => {
                         let mut x = self.default_w.w.clone();
                         x.max_pp = self.w.w.max_pp;
