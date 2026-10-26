@@ -10,7 +10,7 @@ use super::converging::{converging_attacks, dominated_attack, settle_converging_
 use super::determinize::determinize;
 use super::eval::{evaluate_with, EvalWeights};
 use super::exact_lethal::{search_exact_lethal, sure_lethal_options};
-use super::greedy::choose_greedy;
+use super::greedy::{choose_greedy, value_after};
 use super::keys::{hand_eq_noid, visible_eq, TurnOrderSet};
 use super::lethal::{
     find_lethal, search_lethal, LethalOptions, LethalSearch, DEFAULT_LETHAL_OPTIONS,
@@ -110,6 +110,9 @@ pub struct SearchOptions {
     /// passLethal で終局面を選ぶ判定（None なら next_lethal_search）
     pub pass_lethal_search: Option<NextLethalSearch>,
     pub beam_pp: f64,
+    /// 攻撃を後にまとめるビームの幅（attackLater。0 なら使わない）。今のビームに加えて、攻撃以外の手（自分の場が埋まっているときは攻撃も）
+    /// だけで手順を作り、各局面で攻撃を貪欲に（手で作った評価で）済ませた後の点数で並べるビームを打ち、その終局面（攻撃を済ませた局面）も候補にする
+    pub attack_later: usize,
     pub extra_eval: Option<ExtraEval>,
     /// 相手のターンを読むビームの評価に足す項（opponentSearch.extraEval のとき。None なら extra_eval と同じ）。
     /// リノセウス用 AI は、エルフ用の打点の項を除いた学習した補正だけを渡す
@@ -169,6 +172,7 @@ impl Default for SearchOptions {
             pass_lethal: 0,
             pass_lethal_search: None,
             beam_pp: 0.0,
+            attack_later: 0,
             extra_eval: Some(Arc::new(value_net_eval)),
             opp_extra_eval: None,
             weights: None,
@@ -312,6 +316,8 @@ struct Planner<'a> {
     /// 探索を始めた局面（steps の並びの局面は、ここから手を打ち直して作る）
     root: Rc<GameState>,
     steps: Vec<Step>,
+    /// 攻撃を後にまとめるビームの中（自分の場が埋まっていなければ攻撃を展開しない）
+    plays_only: bool,
 }
 
 impl<'a> Planner<'a> {
@@ -421,6 +427,12 @@ impl<'a> Planner<'a> {
     }
 
     fn allowed(&self, s: &GameState, a: &Action) -> bool {
+        if self.plays_only
+            && matches!(a, Action::Attack { .. })
+            && s.players[self.p].board.len() < BOARD_LIMIT
+        {
+            return false;
+        }
         match &self.opts().allow {
             None => true,
             Some(f) => matches!(a, Action::EndTurn) || f(s, a, self.p),
@@ -498,6 +510,148 @@ impl<'a> Planner<'a> {
             return;
         }
         out.push((next, path));
+    }
+
+    /// 攻撃を貪欲に（手で作った評価が上がる攻撃のうち最も上がるものを、上がらなくなるまで）打った局面と並び（attackLater）。
+    /// 攻撃で自分の選択待ちになったら手で作った評価で選ぶ
+    fn settle_attacks(&mut self, s: &Rc<GameState>, path: usize) -> (Rc<GameState>, usize) {
+        let p = self.p;
+        let w = self.env.w;
+        let mut t = s.clone();
+        let mut path = path;
+        for _ in 0..16 {
+            if t.phase == Phase::Ended || t.active != p || t.pending.is_some() {
+                break;
+            }
+            let cur = evaluate_with(&t, p, w);
+            let mut best: Option<(f64, Action)> = None;
+            for a in legal_actions(&t) {
+                if !matches!(a, Action::Attack { .. }) || dominated_attack(&t, &a) {
+                    continue;
+                }
+                let v = value_after(&t, &a, p, w, 0);
+                if best.as_ref().is_none_or(|b| v > b.0) {
+                    best = Some((v, a));
+                }
+            }
+            let Some((v, a)) = best else { break };
+            if v <= cur {
+                break;
+            }
+            t = Rc::new(apply_legal(&t, &a));
+            path = self.push_step(a, Some(path));
+            for _ in 0..8 {
+                if !t.pending.as_ref().is_some_and(|pd| pd.player() == p) {
+                    break;
+                }
+                let mut chosen: Option<(f64, Action)> = None;
+                for c in legal_actions(&t) {
+                    let v = value_after(&t, &c, p, w, 0);
+                    if chosen.as_ref().is_none_or(|b| v > b.0) {
+                        chosen = Some((v, c));
+                    }
+                }
+                let Some((_, c)) = chosen else { break };
+                t = Rc::new(apply_legal(&t, &c));
+                path = self.push_step(c, Some(path));
+            }
+        }
+        (t, path)
+    }
+
+    /// 攻撃を後にまとめるビーム（attackLater）の終局面。攻撃以外の手（自分の場が埋まっているときは攻撃も）で手順を作り、
+    /// 各局面で攻撃を貪欲に済ませた後の点数で並べて幅 attack_later 個を残す。終局面は各局面から攻撃を済ませた局面
+    fn plays_beam_terminals(&mut self, root: &Rc<GameState>) -> Vec<Node> {
+        struct PlayNode {
+            state: Rc<GameState>,
+            first: Action,
+            end: Rc<GameState>,
+            end_path: usize,
+            value: f64,
+        }
+        let p = self.p;
+        let opts = self.opts();
+        let width = opts.attack_later;
+        self.plays_only = true;
+        let mut terminals: Vec<Node> = Vec::new();
+        let mut frontier: Vec<(PlayNode, usize)> = Vec::new();
+        let mut next: Vec<(Rc<GameState>, usize)> = Vec::new();
+        let make = |pl: &mut Self, st: Rc<GameState>, first: Action, path: usize| {
+            let (end, end_path) = pl.settle_attacks(&st, path);
+            let value = pl.score(&end);
+            PlayNode {
+                state: st,
+                first,
+                end,
+                end_path,
+                value,
+            }
+        };
+        // 深さ 1: 攻撃以外のすべての手を展開する
+        for a in self.expand(root) {
+            if matches!(a, Action::EndTurn) || !self.allowed(root, &a) {
+                continue;
+            }
+            next.clear();
+            self.advance(root, &a, None, 0, &mut next);
+            for (st, path) in std::mem::take(&mut next) {
+                let n = make(self, st, a.clone(), path);
+                frontier.push((n, path));
+            }
+        }
+        let mut depth = 1;
+        loop {
+            let mut children: Vec<(PlayNode, usize)> = Vec::new();
+            for (node, path) in std::mem::take(&mut frontier) {
+                let actor = node
+                    .state
+                    .pending
+                    .as_ref()
+                    .map(|pd| pd.player())
+                    .unwrap_or(node.state.active);
+                let expand =
+                    depth < opts.max_depth && node.state.phase != Phase::Ended && actor == p;
+                let st = node.state.clone();
+                let first = node.first.clone();
+                terminals.push(Node {
+                    state: node.end,
+                    first: node.first,
+                    value: node.value,
+                    path: node.end_path,
+                });
+                if !expand {
+                    continue;
+                }
+                for a in self.expand(&st) {
+                    if matches!(a, Action::EndTurn) || !self.allowed(&st, &a) {
+                        continue;
+                    }
+                    next.clear();
+                    self.advance(&st, &a, Some(path), 0, &mut next);
+                    for (ns, np) in std::mem::take(&mut next) {
+                        let n = make(self, ns, first.clone(), np);
+                        children.push((n, np));
+                    }
+                }
+            }
+            if children.is_empty() {
+                break;
+            }
+            children.sort_by(|x, y| by_value_desc(x.0.value, y.0.value));
+            let mut seen = TurnOrderSet::default();
+            for c in children {
+                if frontier.len() >= width {
+                    break;
+                }
+                if opts.dedup && !seen.add(&c.0.state) {
+                    continue;
+                }
+                frontier.push(c);
+            }
+            depth += 1;
+        }
+        self.plays_only = false;
+        terminals
     }
 
     /// 評価の高い順に、同じ局面を除いて width 個まで選ぶ（children は評価の降順）
@@ -635,9 +789,14 @@ fn turn_end_bests<'a>(
         p,
         root: root.clone(),
         steps: Vec::new(),
+        plays_only: false,
     };
     let root_converges = opts.settle_trades && !converging_attacks(root, p).is_empty();
     let mut terminals = pl.beam_terminals(root, root_converges);
+    if opts.attack_later > 0 {
+        let more = pl.plays_beam_terminals(root);
+        terminals.extend(more);
+    }
     if opts.score_turn_end == ScoreTurnEnd::Terminal {
         for t in terminals.iter_mut() {
             t.value = pl.end_score(&t.state);
@@ -1017,6 +1176,7 @@ fn draw_first_steps(
         p,
         root: root.clone(),
         steps: Vec::new(),
+        plays_only: false,
     };
     let root_legal = legal_actions(root);
     let base = pl.end_score(&steps.last()?.1);
@@ -1135,6 +1295,7 @@ fn own_next_value(pl: &Planner, after: &GameState, on: OwnNextSearch) -> f64 {
         own_next: None,
         next_lethal: 0.0,
         pass_lethal: 0,
+        attack_later: 0,
         ..env.opts.clone()
     };
     let next_env = Env {
@@ -1207,6 +1368,7 @@ pub fn simulate_opponent_turn_by_search(
         max_depth: os.map(|o| o.max_depth).unwrap_or(opts.max_depth),
         next_lethal: 0.0,
         opponent_search: None,
+        attack_later: 0,
         ..opts.clone()
     };
     let opp_env = Env {
@@ -1535,6 +1697,7 @@ impl SearchAgent {
             p,
             root: Rc::new(end.clone()),
             steps: Vec::new(),
+            plays_only: false,
         };
         pl.end_score(end)
     }
@@ -1555,6 +1718,7 @@ impl SearchAgent {
             p,
             root: Rc::new(end.clone()),
             steps: Vec::new(),
+            plays_only: false,
         };
         if end.phase == Phase::Ended || seeds.is_empty() {
             return vec![pl.eval_state(end)];

@@ -345,6 +345,7 @@ Docker コンテナ（`docker/remote-control`）で、ジョブは `CLOUD_W=<フ
 JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知らない項目はエラーになる。項目の意味は `rust/engine/src/ai/search.rs` の `SearchOptions`。
 
 - 数: `samples`・`beamWidth`・`maxDepth`・`rescoreTop`・`planCandidates`・`perFirst`・`oppHandSamples`・`dangerRescore`・`mulliganSamples`・`nextLethal`・`beamPp`
+- `attackLater`: 数（既定 0 で使わない）。今のビームに加えて、攻撃以外の手（自分の場が埋まっているときは攻撃も）で手順を作り、攻撃は貪欲に済ませた後の点数で並べるビームを、この幅で打つ（2026-10-26。docs/ai-notes.md「攻撃を後にまとめるビーム」）
 - 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`
 - `rescoreMix`: 0〜1 の数。上位の手を相手のターンまで読み直した点数に、ターン末の点数をこの割合で混ぜる（既定 0.5。0 で 2026-10-22 より前の読み方）
