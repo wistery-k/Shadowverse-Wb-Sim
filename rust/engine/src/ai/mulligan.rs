@@ -2,9 +2,11 @@
 
 use super::aidata::{ai_data, MulliganDeckModel};
 use super::determinize::determinize;
+use super::greedy::cost_mulligan;
+use super::valuenet::ValuePhase;
 use super::Rng;
 use crate::data::{data, CardIdx};
-use crate::game::try_apply_action;
+use crate::game::{acting_player, apply_action, legal_actions, resolve_turn_end, try_apply_action};
 use crate::state::*;
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -235,6 +237,95 @@ pub(crate) fn sampled_mulligan(
         let sum: f64 = dets
             .iter()
             .map(|d| eval(&try_apply_action(d, a).expect("マリガンの合法手")))
+            .sum();
+        if sum > best_v {
+            best_v = sum;
+            best = a;
+        }
+    }
+    best.clone()
+}
+
+/// 手札の形のモデルのマリガン（無ければカードごとの表、それも無ければコスト 4 以上を返す）。2026-10-26 より前の探索 AI の既定で、
+/// 今は rollout_mulligan で打ち進める中のマリガンに使う
+pub(crate) fn default_mulligan_action(s: &GameState, legal: &[Action], p: PlayerIndex) -> Action {
+    model_mulligan_swap(s, p)
+        .or_else(|| weighted_mulligan_swap(s, p))
+        .and_then(|swap| mulligan_action(legal, &swap).cloned())
+        .unwrap_or_else(|| cost_mulligan(s, legal, p))
+}
+
+/// マリガンの後に先へ進めるときの打ち手
+pub type RolloutPolicy = Box<dyn FnMut(&GameState, &[Action], &mut Rng) -> Action>;
+
+/// マリガンを終えた局面から先へ進める。turns が 0 なら p の 1 ターン目の最初（TD 学習の自己対戦が "after" の局面を書き出すのと
+/// 同じ時点）で止めて ValuePhase::After、1 以上なら p の turns ターン目の終わり（ターン終了時の処理を進めた後。探索がターン末を
+/// 採点するのと同じ時点）で止めて ValuePhase::End を返す。まだのマリガンは探索 AI の既定のマリガン、それ以外の手は policy で打つ
+pub(crate) fn advance_after_mulligan(
+    mut s: GameState,
+    p: PlayerIndex,
+    turns: i32,
+    rng: &mut Rng,
+    policy: &mut dyn FnMut(&GameState, &[Action], &mut Rng) -> Action,
+) -> (GameState, ValuePhase) {
+    for _ in 0..10000 {
+        if s.phase == Phase::Ended {
+            break;
+        }
+        let actor = acting_player(&s);
+        let my_main = s.phase == Phase::Main && s.pending.is_none() && s.active == p && actor == p;
+        if turns == 0 && my_main {
+            return (s, ValuePhase::After);
+        }
+        let legal = legal_actions(&s);
+        let a = if s.phase == Phase::Mulligan {
+            default_mulligan_action(&s, &legal, actor)
+        } else {
+            policy(&s, &legal, rng)
+        };
+        if my_main && matches!(a, Action::EndTurn) && s.players[p].turn_count >= turns {
+            let end = resolve_turn_end(&s).unwrap_or(s);
+            return (end, ValuePhase::End);
+        }
+        s = apply_action(&s, &a);
+    }
+    (s, ValuePhase::End)
+}
+
+/// 返し方ごとに引き直しを n 回ずつ試し、先へ進めた局面（advance_after_mulligan）の評価の平均が最も高い返し方を選ぶ
+/// （`mulligan: "turn1"`）。sampled_mulligan は 0 ターン目の局面を採点していて、学習した補正が自己対戦で見たことのない
+/// 局面だった（docs/ai-notes.md「マリガンで返し方ごとに引き直しを試し、評価の平均で選ぶ」）。1 ターン目の最初や
+/// ターン末は自己対戦で学んでいる局面なので、補正の値がそのまま使える。
+/// 並べ方と、その後の手を打つ乱数は、全ての返し方で共通に使う。乱数は rng を進めない（sampled_mulligan と同じ）。
+/// new_policy は試すごとに新しい打ち手を作る（探索 AI はターン内の計画を持つため）
+pub(crate) fn rollout_mulligan(
+    real: &GameState,
+    legal: &[Action],
+    p: PlayerIndex,
+    (n, turns): (usize, i32),
+    rng: &Rng,
+    new_policy: &dyn Fn() -> RolloutPolicy,
+    eval: impl Fn(&GameState, ValuePhase) -> f64,
+) -> Action {
+    let mut local = Rng::new(rng.state ^ 0x6d75_6c6c);
+    let dets: Vec<(GameState, u32)> = (0..n.max(1))
+        .map(|_| {
+            let d = determinize(real, p, &mut local, false);
+            (d, local.int(1 << 30) as u32)
+        })
+        .collect();
+    let mut best = &legal[0];
+    let mut best_v = f64::NEG_INFINITY;
+    for a in legal {
+        let sum: f64 = dets
+            .iter()
+            .map(|(d, seed)| {
+                let s = try_apply_action(d, a).expect("マリガンの合法手");
+                let mut policy = new_policy();
+                let (s, phase) =
+                    advance_after_mulligan(s, p, turns, &mut Rng::new(*seed), &mut *policy);
+                eval(&s, phase)
+            })
             .sum();
         if sum > best_v {
             best_v = sum;

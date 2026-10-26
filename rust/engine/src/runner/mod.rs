@@ -10,6 +10,7 @@ pub mod deep_gap;
 pub mod human_plan;
 pub mod meta;
 pub mod mulligan_compare;
+pub mod mulligan_data;
 pub mod options;
 pub mod parallel;
 pub mod rhino_compare;

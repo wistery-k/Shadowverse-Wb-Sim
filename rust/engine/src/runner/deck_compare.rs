@@ -14,8 +14,9 @@
 //! - AI はどちらの側も今の既定（リノセウスエルフはリノセウス用 AI、他は探索 AI）。`--net` なら、どちらの側も学習した補正をそのファイルのものに替える
 //!   （学び直した補正で、案と元のデッキを比べ直す用。`baseWeights` の無いモデルだけ）。`--netSide subject` なら、替えるのは比べるデッキ（元のデッキと案）の側だけで、
 //!   相手は今の既定のまま（学び直した補正が、そのデッキを今の AI の相手に上手く打てるようになったかを見る用）
-//! - マリガンの学習したモデルはデッキのカードの並びでデフォルトデッキを引くので、案のデッキでは使えず「コスト 4 以上を返す」だけになる。
-//!   そこで案のデッキも元のデッキのモデルでマリガンする（足したカードはモデルの表に無いので役割なし・係数 0）。
+//! - マリガン: 今の既定（`mulligan: "turn1"`。引き直した後に先へ進めてから採点する）は、どのデッキでもそのまま使う。
+//!   既定がデッキごとのモデルを使うもの（`model`・`weights`）のときは、学習したモデルはデッキのカードの並びでデフォルトデッキを引くので、
+//!   案のデッキでは使えず「コスト 4 以上を返す」だけになる。そこで案のデッキも元のデッキのモデルでマリガンする（足したカードはモデルの表に無いので役割なし・係数 0）。
 //!   ファイルから読んだデッキ（とその案）は、元にするモデルが無いので、返し方ごとに引き直しを試して選ぶ（`mulligan: "sample"`）
 //! - 各案の勝率と、元のデッキとの入れ替わり（案で勝ち・元で負け / 元で勝ち・案で負け）、符号検定の z を出す
 //! - 同じシードでも、1 枚の入れ替えで 2〜3 割の試合の勝敗が入れ替わる（AI が自分の山札・相手の手札を並べ直して読むので、
@@ -104,21 +105,24 @@ fn default_agent(deck_name: &str, net: Option<&ExtraEval>) -> Box<dyn Agent> {
     }
 }
 
-/// 比べる側の AI（マリガンの仕方は Entry の mulligan_as）
+/// 比べる側の AI（マリガンの仕方は Entry の mulligan_as）。
+/// 既定のマリガンがデッキごとのモデルを使わない（turn1）ときは、どのデッキでも既定のまま
 pub(crate) fn subject_agent(e: &Entry, net: Option<&ExtraEval>) -> Box<dyn Agent> {
+    let opts = search_options(net);
+    let model = opts.mulligan.needs_deck_model();
     let inner: Box<dyn Agent> = if e.rhino {
         Box::new(rhino_agent(net))
-    } else if e.mulligan_as.is_some() {
-        Box::new(SearchAgent::new(search_options(net)))
+    } else if e.mulligan_as.is_some() || !model {
+        Box::new(SearchAgent::new(opts))
     } else {
         Box::new(SearchAgent::new(SearchOptions {
             mulligan: MulliganMode::Sample,
-            ..search_options(net)
+            ..opts
         }))
     };
     match e.mulligan_as {
-        Some(deck) => Box::new(MulliganAs { inner, deck }),
-        None => inner,
+        Some(deck) if model => Box::new(MulliganAs { inner, deck }),
+        _ => inner,
     }
 }
 
