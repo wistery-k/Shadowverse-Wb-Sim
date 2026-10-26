@@ -10,3 +10,5 @@ rust/target/
 rust/engine/data/
 # エンジンと AI の WASM（npm run wasm で生成）
 src/engine/svwb.wasm
+# docker/remote-control の手元の設定（UID・GID など）
+docker/remote-control/.env
