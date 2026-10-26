@@ -57,6 +57,13 @@ pub enum MulliganMode {
     Turn1,
 }
 
+impl MulliganMode {
+    /// デフォルトデッキごとに推定したモデルか重みを使う（それ以外のデッキでは使えない）
+    pub fn needs_deck_model(self) -> bool {
+        matches!(self, MulliganMode::Model | MulliganMode::Weights)
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct OpponentSearch {
     pub beam_width: usize,
@@ -165,11 +172,13 @@ impl Default for SearchOptions {
             chain: true,
             chain_fuse: false,
             score_turn_end: ScoreTurnEnd::All,
-            mulligan: MulliganMode::Model,
+            // 引き直した後、3 ターン目の終わりまで貪欲法で進めてから採点する
+            // （docs/ai-notes.md「引き直した後に先へ進めてから採点するマリガン」。手札の形のモデルより +1.6%）
+            mulligan: MulliganMode::Turn1,
             mulligan_samples: 100,
             mulligan_static: true,
             mulligan_net: true,
-            mulligan_turns: 0,
+            mulligan_turns: 3,
             mulligan_rollout_beam: 0,
             mulligan_keep: Vec::new(),
             settle_trades: true,

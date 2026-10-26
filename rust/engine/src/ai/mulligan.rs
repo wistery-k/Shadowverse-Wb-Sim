@@ -246,7 +246,8 @@ pub(crate) fn sampled_mulligan(
     best.clone()
 }
 
-/// 探索 AI の既定のマリガン（手札の形のモデル。無ければカードごとの表、それも無ければコスト 4 以上を返す）
+/// 手札の形のモデルのマリガン（無ければカードごとの表、それも無ければコスト 4 以上を返す）。2026-10-26 より前の探索 AI の既定で、
+/// 今は rollout_mulligan で打ち進める中のマリガンに使う
 pub(crate) fn default_mulligan_action(s: &GameState, legal: &[Action], p: PlayerIndex) -> Action {
     model_mulligan_swap(s, p)
         .or_else(|| weighted_mulligan_swap(s, p))

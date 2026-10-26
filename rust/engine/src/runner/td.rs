@@ -418,13 +418,17 @@ fn play_out(
         explore = next;
         v
     };
-    // デフォルトデッキと違うデッキ（--decks）のマリガンは、返し方ごとに引き直しを試して選ぶ（マリガンのモデルはデフォルトデッキしか知らない）
+    // デフォルトデッキと違うデッキ（--decks）では、デッキごとのモデルを使うマリガン（model・weights）の代わりに、
+    // 返し方ごとに引き直しを試して選ぶ（マリガンのモデルはデフォルトデッキしか知らない）
     let agent = |p: PlayerIndex| {
         let mut o = match (learner, &m.frozen) {
             (Some(l), Some(f)) if p != l => f.clone(),
             _ => m.opts.clone(),
         };
-        if state.phase == Phase::Mulligan && default_deck_name_of(&state, p).is_none() {
+        if state.phase == Phase::Mulligan
+            && o.mulligan.needs_deck_model()
+            && default_deck_name_of(&state, p).is_none()
+        {
             o.mulligan = MulliganMode::Sample;
         }
         SearchAgent::new(o)

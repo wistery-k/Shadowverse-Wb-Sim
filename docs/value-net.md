@@ -154,8 +154,9 @@ z（1 つ）── (c + z) / a を S に足す
 ### ほかの所
 
 - リノセウス用 AI（`rhino`）: 同じ補正に、リノセウスの打点の項（`RHINO_POTENTIAL`）を足して使う
-- マリガン: 既定（手札の形のモデル、`mulligan: "model"`）は補正を使わない。返し方ごとに引き直す `mulligan: "sample"`（デフォルトデッキでないデッキを `td selfplay --decks`・`compare --decks` で打つとき）は、
-  引き直した手札の局面を S + 補正（ターン末）で比べる
+- マリガン: 既定（`mulligan: "turn1"`・`mulliganTurns` 3、2026-10-26 から）は、返し方ごとに引き直した後、3 ターン目の自分のターンの終わりまで貪欲法で打ち進めた局面を
+  S + 補正（ターン末）で比べる（`mulliganTurns` 0 なら 1 ターン目の最初の局面を S + 補正（ターンの最初）で）。`mulligan: "sample"` は引き直した直後の局面を S + 補正（ターン末）で比べる。
+  手札の形のモデル（`mulligan: "model"`、2026-10-26 より前の既定）は補正を使わない
 - 補正を使わない AI: `search-classic`、物差し（`yardstick`）、貪欲法
 - 強い相手の物差しは、2026-10-22 の既定（s2b）の写し `rust/engine/yardstick/strong-1-net.json` を使う。既定を学び直しても動かない（[yardstick.md](yardstick.md)）
 - 別の補正で打つ: `compare` 等の設定の JSON に `{"valueNet":"<ファイル>"}`、補正なしは `{"valueNet":false}`（[commands.md](commands.md)）

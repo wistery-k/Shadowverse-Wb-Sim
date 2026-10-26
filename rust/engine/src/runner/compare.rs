@@ -61,10 +61,11 @@ pub fn play_compare_game(
     mirror: bool,
 ) -> (String, bool) {
     let (a_seat, seats, seed) = compare_setup(decks, g, swap, mirror);
-    // デフォルトデッキと違うデッキ（--decks）のマリガンは、返し方ごとに引き直しを試して選ぶ
+    // デフォルトデッキと違うデッキ（--decks）では、デッキごとのモデルを使うマリガン（model・weights）の代わりに、
+    // 返し方ごとに引き直しを試して選ぶ
     let opts = |o: &SearchOptions, d: &Deck| {
         let mut o = o.clone();
-        if !data().decks.iter().any(|x| x.cards == d.cards) {
+        if o.mulligan.needs_deck_model() && !data().decks.iter().any(|x| x.cards == d.cards) {
             o.mulligan = MulliganMode::Sample;
         }
         o
