@@ -13,6 +13,7 @@
 //!   svwb mulligan-data --games 6000 --out d.jsonl  マリガンの残す・返すをコインで決めた試合を書き出す
 //!   svwb human-plan-value --out 結果.jsonl [--m 32] <人間の記録.jsonl>…  人間の手順と AI の手順を同じ局面から打ち比べる（report で集計）
 //!   svwb td selfplay --model m.json --games N [--start S] [--eps 0.1] --out d.jsonl  TD 学習の自己対戦
+//!   svwb deep-gap play|rollout|report …  自己対戦の局面で今の AI の手と深い読みの手を比べ、差の大きい局面を集める（runner/deep_gap.rs）
 //!   svwb yardstick [--opts …] [--games 1000] [--label …] [--record]  固定した相手との勝率（強さの物差し。docs/yardstick.md）
 
 use std::time::Instant;
@@ -158,7 +159,8 @@ fn main() {
         }
         Some(
             cmd @ ("compare" | "rhino-compare" | "deck-compare" | "mulligan-compare"
-            | "mulligan-data" | "td" | "yardstick" | "human-plan-value" | "meta"),
+            | "mulligan-data" | "td" | "yardstick" | "human-plan-value" | "meta"
+            | "deep-gap"),
         ) => {
             let rest = &args[1..];
             let r = match cmd {
@@ -169,6 +171,7 @@ fn main() {
                 "deck-compare" => runner::deck_compare::main(rest),
                 "yardstick" => runner::yardstick::main(rest),
                 "human-plan-value" => runner::human_plan::main(rest),
+                "deep-gap" => runner::deep_gap::main(rest),
                 "meta" => runner::meta::main(rest),
                 _ => runner::td::main(rest),
             };
@@ -178,7 +181,7 @@ fn main() {
             }
         }
         _ => {
-            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | mulligan-data … | td selfplay … | yardstick … | human-plan-value …（rust/README.md）");
+            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | mulligan-data … | td selfplay … | yardstick … | human-plan-value … | deep-gap …（rust/README.md）");
             std::process::exit(2);
         }
     }

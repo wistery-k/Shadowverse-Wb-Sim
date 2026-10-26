@@ -223,6 +223,9 @@ npm run svwb -- mulligan-data --games 6000 [--start 0] [--seed 1] [--flip 0.5] -
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
                 [--sampling classic|default] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
                 [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>']
+npm run svwb -- deep-gap play --out gap.jsonl [--games 100] [--start 0] [--deep '<設定の JSON>'] [--k 4] [--evalSeeds 48] [--turns 1-30]
+npm run svwb -- deep-gap rollout --in gap.jsonl[,…] --out roll.jsonl [--top 200] [--random 200] [--seed 1] [--m 48]
+npm run svwb -- deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 30]
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI。
@@ -239,6 +242,13 @@ npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 
   `--frozen '{}'` で、片方の席（学ぶ側。49 試合ごとに入れ替わる）だけを `--model` の補正で打ち、もう片方を設定の JSON の探索 AI（`'{}'` は今の既定の AI）に固定する。
   ランダムな手・介入は学ぶ側だけ。行に `"learner"` が付き、学習は `td train --seat learner` で学ぶ側の局面だけを読む（狙い撃ちの相手を学ばせる。
   回りを回すジョブは `cloud/jobs/exploit.sh`。docs/ai-notes.md「狙い撃ちする相手を学ばせて死角を探す」）
+- `deep-gap`: 今の既定の AI どうしの自己対戦（`ai-play` と同じ試合）の、自分のターンの最初の局面ごとに、試合のターンと深い読み（`--deep`。既定は
+  ビーム 512・読み直す最初の手 8・最初の手ごとの終局面 3・相手の手札の引き直し 48・相手のターンのビーム 32。読む深さは今の既定と同じで、広く・多く読む）のターンを比べる。
+  食い違った局面は、手番の側から見た決定化を `--k` 通り作って両方に打たせ、深い読みの点数（別の引き直し `--evalSeeds` 通り。引き直しごとに勝率にしてから平均する）で見た勝率の差と、
+  相手のリーサルになった引き直しの割合を書く（実際の試合のターン末どうしだと、途中で引いたカードの当たり外れが混ざるため）。`rollout` は差の大きい `--top` 局面と乱数で選んだ `--random` 局面を、
+  決定化 `--m` 通りずつ両方に打たせて今の AI どうしで最後まで打ち、`report` はまとめ（差の分布・内訳・最後まで打った差との突き合わせ・差の大きい局面の中身）を
+  Markdown で出す。どれも出力に済んだ試合・局面があれば飛ばす。各引数の意味は `rust/engine/src/runner/deep_gap.rs` の先頭。
+  クラウドで回すジョブは `cloud/jobs/deep-gap.sh`（`DANGER_CMP` を付けると `dangerRescore` と今の既定の compare も回す。docs/ai-notes.md「深い読みと食い違う局面を集める」）
 
 ## td
 
@@ -343,6 +353,7 @@ Docker コンテナ（`docker/remote-control`）で、ジョブは `CLOUD_W=<フ
 JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知らない項目はエラーになる。項目の意味は `rust/engine/src/ai/search.rs` の `SearchOptions`。
 
 - 数: `samples`・`beamWidth`・`maxDepth`・`rescoreTop`・`planCandidates`・`perFirst`・`oppHandSamples`・`dangerRescore`・`mulliganSamples`・`mulliganTurns`・`mulliganRolloutBeam`・`nextLethal`・`beamPp`
+- `attackLater`: 数（既定 0 で使わない）。今のビームに加えて、攻撃以外の手（自分の場が埋まっているときは攻撃も）で手順を作り、攻撃は貪欲に済ませた後の点数で並べるビームを、この幅で打つ（2026-10-26。docs/ai-notes.md「攻撃を後にまとめるビーム」）
 - 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`
 - `rescoreMix`: 0〜1 の数。上位の手を相手のターンまで読み直した点数に、ターン末の点数をこの割合で混ぜる（既定 0.5。0 で 2026-10-22 より前の読み方）

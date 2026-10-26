@@ -136,11 +136,11 @@ fn parse_record(line: &str) -> Result<Record, String> {
 }
 
 /// シードに番号を混ぜる（TypeScript 版の mix と同じ）
-fn mix(seed: u32, x: u32) -> u32 {
+pub(crate) fn mix(seed: u32, x: u32) -> u32 {
     next_random(seed ^ x.wrapping_add(1).wrapping_mul(0x9e3779b1)).1
 }
 
-fn is_start_of_turn(s: &GameState) -> bool {
+pub(crate) fn is_start_of_turn(s: &GameState) -> bool {
     s.phase == Phase::Main && s.pending.is_none() && s.stack.is_empty() && s.queue.is_empty()
 }
 
@@ -173,7 +173,7 @@ fn names(s: &GameState, ids: &[Iid], viewer: PlayerIndex) -> String {
 }
 
 /// 手の短い説明（局面 s で打つ前に作る）
-fn step_text(s: &GameState, a: &Action, viewer: PlayerIndex) -> String {
+pub(crate) fn step_text(s: &GameState, a: &Action, viewer: PlayerIndex) -> String {
     let who = if acting_player(s) == viewer {
         ""
     } else {
@@ -411,11 +411,11 @@ fn rollouts(
         .collect()
 }
 
-fn round2(x: f64) -> Value {
+pub(crate) fn round2(x: f64) -> Value {
     json!((x * 100.0).round() / 100.0)
 }
 
-fn summarize_start(s: &GameState, p: PlayerIndex) -> Value {
+pub(crate) fn summarize_start(s: &GameState, p: PlayerIndex) -> Value {
     let (me, opp) = (&s.players[p], &s.players[opponent(p)]);
     json!({
         "hp": me.leader_hp, "oppHp": opp.leader_hp, "maxPp": me.max_pp,
@@ -522,7 +522,7 @@ fn compare_position(pos: &Position, rec: &Record, m: u32) -> Result<Value, Strin
     Ok(row)
 }
 
-fn parse_range(v: &str) -> Result<(i32, i32), String> {
+pub(crate) fn parse_range(v: &str) -> Result<(i32, i32), String> {
     let (a, b) = v
         .split_once('-')
         .ok_or_else(|| format!("範囲は a-b の形で: {v}"))?;
@@ -680,7 +680,7 @@ fn row_key(v: &Value) -> String {
 }
 
 /// 勝った割合（打てなかった回は除く）
-fn win_rate(wins: &Value) -> Option<f64> {
+pub(crate) fn win_rate(wins: &Value) -> Option<f64> {
     let v: Vec<bool> = wins
         .as_array()?
         .iter()
@@ -694,7 +694,7 @@ fn win_rate(wins: &Value) -> Option<f64> {
 }
 
 /// 平均と標準誤差
-fn mean_se(xs: &[f64]) -> (f64, f64) {
+pub(crate) fn mean_se(xs: &[f64]) -> (f64, f64) {
     let n = xs.len() as f64;
     if xs.is_empty() {
         return (f64::NAN, f64::NAN);
@@ -707,7 +707,7 @@ fn mean_se(xs: &[f64]) -> (f64, f64) {
     (mean, (var / n).sqrt())
 }
 
-fn pct(x: f64) -> String {
+pub(crate) fn pct(x: f64) -> String {
     format!("{}%", fixed(x * 100.0, 1))
 }
 
