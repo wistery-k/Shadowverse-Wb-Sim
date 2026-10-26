@@ -2,7 +2,7 @@
 //!
 //!   svwb deep-gap play --out gap.jsonl [--games 100] [--start 0] [--deep '<設定の JSON>'] [--k 4] [--evalSeeds 48] [--turns 1-30]
 //!   svwb deep-gap rollout --in gap.jsonl[,…] --out roll.jsonl [--top 200] [--random 200] [--seed 1] [--m 48]
-//!   svwb deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 30]
+//!   svwb deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 30] [--only <内訳の一部>] [--skipDecks <デッキ名,…>] [--sort gap|rollout] [--listOnly 1]
 //!
 //! **play**: 今の既定の AI どうしの試合 g（`ai_game_setup`。比較用の 7 デッキで、デッキ・席・シードは `svwb ai-play` と同じ）を打ち、
 //! 両方のプレイヤーの自分のターンの最初の局面ごとに、試合で今の AI が実際に打ったターン（ターン終了の直前まで）と、
@@ -26,6 +26,8 @@
 //! （深い読みにも評価の偏りがあるため）。`--random` の局面は差の大きさで選んでいないので、点数と勝率の突き合わせ（当たり方）に使う。
 //!
 //! **report**: まとめ（食い違いの割合、差の分布、差の内訳、最後まで打った勝率と点数の差の突き合わせ、差の大きい局面の中身）を Markdown で出す。
+//! 局面の中身は `--only`（差の内訳の名前の一部。例: `ビームが届かない`）・`--skipDecks`（手番の側のデッキ）で絞り、`--sort` で並べ替える
+//! （既定は、最後まで打った結果があればその差、無ければ差）。`--listOnly 1` はまとめを出さず局面の中身だけを、デッキごとに分けて出す。
 //!
 //! 出力は JSON Lines。play は試合ごとに局面の行と試合の行（`"game": true`、手の列と深い読みの設定つき）を書き、rollout は局面ごとに 1 行書く。
 //! どちらも出力に既にある試合・局面は飛ばす（同じ引数で再開できる）。試合の行の無い試合の局面の行（途中で止めたもの）は、再開のときに消す。
@@ -57,7 +59,8 @@ use std::time::Instant;
 /// 深い読みの既定の設定（今の既定から、自分のターンのビームを 4 倍、読み直す最初の手を 2 倍・最初の手ごとの終局面を 3 つ、
 /// 相手の手札の引き直しを 4 倍、相手のターンのビームを 2 倍にしたもの。1 ターンの思考は今の既定の 15〜20 倍ほど）。
 /// 読む深さ（自分のターンのあと相手のターンを 1 回打って評価する）は今の既定と同じで、先までは読まない。
-pub const DEEP_DEFAULT: &str = r#"{"beamWidth":512,"rescoreTop":8,"planCandidates":3,"oppHandSamples":48,"opponentSearch":{"beamWidth":32,"maxDepth":8}}"#;
+/// 自分のターンのビームは、今の既定が幅 512 になった 2026-10-26 に 512 から 2048 に（それまでの記録は 512）。
+pub const DEEP_DEFAULT: &str = r#"{"beamWidth":2048,"rescoreTop":8,"planCandidates":3,"oppHandSamples":48,"opponentSearch":{"beamWidth":32,"maxDepth":8}}"#;
 
 /// 今の AI の点数で読み直す引き直しの数（今の既定の oppHandSamples と同じ）
 const AI_EVAL_SEEDS: u32 = 12;
@@ -259,11 +262,7 @@ fn describe(s: &GameState, p: PlayerIndex, decks: &[String; 2]) -> Vec<String> {
     let o = opponent(p);
     let (me, op) = (&s.players[p], &s.players[o]);
     let side = |q: PlayerIndex| if s.first == q { "先攻" } else { "後攻" };
-    let hand: Vec<String> = me
-        .hand
-        .iter()
-        .map(|h| format!("{}({})", card(h.card).name, card(h.card).cost + h.cost_mod))
-        .collect();
+    let hand: Vec<String> = me.hand.iter().map(|h| card(h.card).name.clone()).collect();
     let board = |q: PlayerIndex| -> String {
         list_or_none(s.players[q].board.iter().map(board_text).collect())
     };
@@ -316,6 +315,57 @@ fn steps_of(start: &GameState, actions: &[Action], p: PlayerIndex) -> Vec<String
     for a in actions {
         out.push(step_text(&t, a, p));
         t = apply_legal(&t, a);
+    }
+    out
+}
+
+/// 手の列で使ったもの（手札から出したカード・進化・超進化・融合の素材・能力・エクストラPP）の名前。2 つのターンの違いを見せるため
+fn used_of(start: &GameState, actions: &[Action]) -> Vec<String> {
+    let mut t = start.clone();
+    let mut out = Vec::new();
+    let name = |s: &GameState, iid: i32| -> String {
+        s.players
+            .iter()
+            .flat_map(|pl| {
+                pl.hand
+                    .iter()
+                    .map(|h| (h.iid, h.card))
+                    .chain(pl.board.iter().map(|b| (b.iid, b.card)))
+            })
+            .find(|x| x.0 == iid)
+            .map(|x| card(x.1).name.clone())
+            .unwrap_or_else(|| format!("#{iid}"))
+    };
+    for a in actions {
+        match a {
+            Action::Play(i) => out.push(format!("プレイ {}", name(&t, *i))),
+            Action::Evolve(i) => out.push(format!("進化 {}", name(&t, *i))),
+            Action::SuperEvolve(i) => out.push(format!("超進化 {}", name(&t, *i))),
+            Action::Act(i) => out.push(format!("能力 {}", name(&t, *i))),
+            Action::Fuse { materials, .. } => {
+                for m in materials {
+                    out.push(format!("融合 {}", name(&t, *m)));
+                }
+            }
+            Action::ExtraPp => out.push("エクストラPP".into()),
+            _ => {}
+        }
+        t = apply_legal(&t, a);
+    }
+    out
+}
+
+/// 2 つの多重集合の差（a にあって b に無い分）
+fn multiset_minus(a: &[String], b: &[String]) -> Vec<String> {
+    let mut rest: Vec<&String> = b.iter().collect();
+    let mut out = Vec::new();
+    for x in a {
+        match rest.iter().position(|y| *y == x) {
+            Some(k) => {
+                rest.remove(k);
+            }
+            None => out.push(x.clone()),
+        }
     }
     out
 }
@@ -1069,8 +1119,20 @@ fn pm(m: f64, se: f64, f: usize) -> String {
 /// svwb deep-gap report
 fn report(argv: &[String]) -> Result<(), String> {
     let (flags, files) = parse_flags(argv)?;
-    check_flags(&flags, &["rollouts", "top"])?;
+    check_flags(
+        &flags,
+        &["rollouts", "top", "only", "skipDecks", "sort", "listOnly"],
+    )?;
     let top = num_flag(&flags, "top", 30)? as usize;
+    let only = flag(&flags, "only");
+    let skip_decks: Vec<&str> = flag(&flags, "skipDecks")
+        .map(|t| t.split(',').filter(|x| !x.is_empty()).collect())
+        .unwrap_or_default();
+    let sort = flag(&flags, "sort");
+    if !matches!(sort, None | Some("gap") | Some("rollout")) {
+        return Err("--sort は gap か rollout".into());
+    }
+    let list_only = flag(&flags, "listOnly").is_some();
     if files.is_empty() {
         return Err("play の結果（jsonl）を 1 つ以上渡してください".into());
     }
@@ -1091,12 +1153,13 @@ fn report(argv: &[String]) -> Result<(), String> {
         .values()
         .filter_map(|g| g["deep"].as_str())
         .collect();
-    println!("# 今の AI の手と深い読みの手の食い違い（deep-gap）\n");
-    println!(
-        "- 深い読みの設定: {}",
-        deep_texts.into_iter().collect::<Vec<_>>().join(" / ")
-    );
-    println!(
+    if !list_only {
+        println!("# 今の AI の手と深い読みの手の食い違い（deep-gap）\n");
+        println!(
+            "- 深い読みの設定: {}",
+            deep_texts.into_iter().collect::<Vec<_>>().join(" / ")
+        );
+        println!(
         "- 試合 {}、自分のターンの最初の局面 {}、試合のターンと深い読みのターンのターン末が食い違った局面 {}（{}）、1 試合あたり {}",
         data.games.len(),
         rows.len(),
@@ -1104,11 +1167,11 @@ fn report(argv: &[String]) -> Result<(), String> {
         pct(differ.len() as f64 / rows.len().max(1) as f64),
         fixed(differ.len() as f64 / n_games as f64, 1)
     );
-    let gaps: Vec<f64> = differ.iter().map(|v| gap_win(v)).collect();
-    let mut sorted = gaps.clone();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let (gm, gs) = mean_se(&gaps);
-    println!(
+        let gaps: Vec<f64> = differ.iter().map(|v| gap_win(v)).collect();
+        let mut sorted = gaps.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let (gm, gs) = mean_se(&gaps);
+        println!(
         "- 差（引きを並べ直して両方に打たせ、深い読みの点数で見た勝率の差。深い読み − 今の AI、% の数）: 平均 {}、10%点 {}・25%点 {}・中央 {}・75%点 {}・90%点 {}・99%点 {}",
         pm(gm, gs, 2),
         fixed(quantile(&sorted, 0.1), 2),
@@ -1118,196 +1181,206 @@ fn report(argv: &[String]) -> Result<(), String> {
         fixed(quantile(&sorted, 0.9), 2),
         fixed(quantile(&sorted, 0.99), 2)
     );
-    let share = |th: f64| {
-        pct(gaps.iter().filter(|&&x| x >= th).count() as f64 / differ.len().max(1) as f64)
-    };
-    println!(
-        "- 差が 1 以上の局面 {}・3 以上 {}・6 以上 {}・10 以上 {}（食い違った局面のうち）",
-        share(1.0),
-        share(3.0),
-        share(6.0),
-        share(10.0)
-    );
-    let ks: u64 = differ.iter().map(|v| v["k"].as_u64().unwrap_or(0)).sum();
-    let k_same: u64 = differ
-        .iter()
-        .map(|v| v["kSame"].as_u64().unwrap_or(0))
-        .sum();
-    let hidden = differ
-        .iter()
-        .filter(|v| v["ai"]["hidden"] == json!(true) || v["deep"]["hidden"] == json!(true))
-        .count();
-    let real: Vec<(f64, f64)> = differ
-        .iter()
-        .filter_map(|v| Some((v["real"]["gapWin"].as_f64()?, gap_win(v))))
-        .filter(|x| x.0.abs() < 50.0)
-        .collect();
-    println!(
+        let share = |th: f64| {
+            pct(gaps.iter().filter(|&&x| x >= th).count() as f64 / differ.len().max(1) as f64)
+        };
+        println!(
+            "- 差が 1 以上の局面 {}・3 以上 {}・6 以上 {}・10 以上 {}（食い違った局面のうち）",
+            share(1.0),
+            share(3.0),
+            share(6.0),
+            share(10.0)
+        );
+        let ks: u64 = differ.iter().map(|v| v["k"].as_u64().unwrap_or(0)).sum();
+        let k_same: u64 = differ
+            .iter()
+            .map(|v| v["kSame"].as_u64().unwrap_or(0))
+            .sum();
+        let hidden = differ
+            .iter()
+            .filter(|v| v["ai"]["hidden"] == json!(true) || v["deep"]["hidden"] == json!(true))
+            .count();
+        let real: Vec<(f64, f64)> = differ
+            .iter()
+            .filter_map(|v| Some((v["real"]["gapWin"].as_f64()?, gap_win(v))))
+            .filter(|x| x.0.abs() < 50.0)
+            .collect();
+        println!(
         "- 引きを並べ直した {} 回のうち、今の AI と深い読みが同じターン末になった回 {}。試合のターンか深い読みのターンでカードを引いた・乱数を使った局面 {}",
         ks,
         pct(k_same as f64 / ks.max(1) as f64),
         pct(hidden as f64 / differ.len().max(1) as f64)
     );
-    let losses: Vec<(f64, f64)> = differ
-        .iter()
-        .filter_map(|v| Some((v["loss"]["ai"].as_f64()?, v["loss"]["deep"].as_f64()?)))
-        .collect();
-    if !losses.is_empty() {
-        let n = losses.len() as f64;
-        println!(
+        let losses: Vec<(f64, f64)> = differ
+            .iter()
+            .filter_map(|v| Some((v["loss"]["ai"].as_f64()?, v["loss"]["deep"].as_f64()?)))
+            .collect();
+        if !losses.is_empty() {
+            let n = losses.len() as f64;
+            println!(
             "- 相手のターンを読むと相手のリーサルになる引き直しの割合（深い読みの点数の引き直し、食い違った決定化の平均）: 今の AI のターン末 {}・深い読みのターン末 {}。今の AI のほうが多い局面 {}・深い読みのほうが多い局面 {}",
             pct(losses.iter().map(|x| x.0).sum::<f64>() / n),
             pct(losses.iter().map(|x| x.1).sum::<f64>() / n),
             pct(losses.iter().filter(|x| x.0 > x.1 + 1e-9).count() as f64 / n),
             pct(losses.iter().filter(|x| x.1 > x.0 + 1e-9).count() as f64 / n)
         );
-    }
-    println!(
+        }
+        println!(
         "- 実際の試合のターン末どうしの差（後から見た運を含む）の平均 {}、引きを並べ直した差との相関 {}（どちらかのターンで試合が終わった局面を除く）\n",
         fixed(mean_se(&real.iter().map(|x| x.0).collect::<Vec<_>>()).0, 2),
         fixed(correlation(&real), 2)
     );
-    // 表（行の名前ごとの局面の数・食い違い・差の平均・最後まで打った差）
-    let table = |title: &str, key: &dyn Fn(&Value) -> String, all: bool| {
-        let mut groups: BTreeMap<String, (usize, Vec<f64>, Vec<f64>)> = BTreeMap::new();
-        for v in rows {
-            let differs = v["same"] == json!(false);
-            if !all && !differs {
-                continue;
-            }
-            let e = groups.entry(key(v)).or_default();
-            e.0 += 1;
-            if differs {
-                e.1.push(gap_win(v));
-                if let Some(d) = rolls.get(&pos_key(v)).and_then(rollout_diff) {
-                    e.2.push(d);
+        // 表（行の名前ごとの局面の数・食い違い・差の平均・最後まで打った差）
+        let table = |title: &str, key: &dyn Fn(&Value) -> String, all: bool| {
+            let mut groups: BTreeMap<String, (usize, Vec<f64>, Vec<f64>)> = BTreeMap::new();
+            for v in rows {
+                let differs = v["same"] == json!(false);
+                if !all && !differs {
+                    continue;
+                }
+                let e = groups.entry(key(v)).or_default();
+                e.0 += 1;
+                if differs {
+                    e.1.push(gap_win(v));
+                    if let Some(d) = rolls.get(&pos_key(v)).and_then(rollout_diff) {
+                        e.2.push(d);
+                    }
                 }
             }
-        }
-        println!("## {title}\n");
-        println!(
+            println!("## {title}\n");
+            println!(
             "| | 局面 | 食い違い | 差の平均 | 差の合計に占める割合 | 最後まで打った局面 | 最後まで打った差の平均 |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: |"
         );
-        let total: f64 = gaps.iter().filter(|x| x.is_finite()).sum();
-        for (k, (n, gs, rs)) in &groups {
-            let (m, s) = mean_se(gs);
-            let (rm, rse) = mean_se(rs);
-            let sum: f64 = gs.iter().filter(|x| x.is_finite()).sum();
-            println!(
-                "| {k} | {n} | {} | {} | {} | {} | {} |",
-                if all {
-                    pct(gs.len() as f64 / *n as f64)
-                } else {
-                    gs.len().to_string()
-                },
-                pm(m, s, 2),
-                if total.abs() > 1e-9 {
-                    format!("{}%", fixed(sum / total * 100.0, 0))
-                } else {
-                    "-".into()
-                },
-                rs.len(),
-                pm(rm, rse, 1)
-            );
-        }
-        println!();
-    };
-    table(
-        "差の内訳（今の AI が深い読みのターンを選ばなかったのは、どの段階か）",
-        &|v| category(v).to_string(),
-        false,
-    );
-    table(
-        "相手のリーサル（深い読みの引き直しで、相手のターンを読むと負けになる割合）",
-        &|v| loss_kind(v).to_string(),
-        false,
-    );
-    table(
-        "デッキ別（手番の側）",
-        &|v| v["deck"].as_str().unwrap_or("").to_string(),
-        true,
-    );
-    table(
-        "自分のターン別",
-        &|v| format!("{:02}", v["ownTurn"].as_i64().unwrap_or(-1)),
-        true,
-    );
-    // 最後まで打って確かめた局面
-    if !rolls.is_empty() {
-        println!("## 最後まで打って確かめる（今の AI どうしで最後まで打った勝率の差。% の数）\n");
-        for sel in ["random", "top"] {
-            let pairs: Vec<(f64, f64)> = differ
-                .iter()
-                .filter_map(|v| {
-                    let r = rolls.get(&pos_key(v))?;
-                    if r["sel"].as_str() != Some(sel) {
-                        return None;
-                    }
-                    Some((gap_win(v), rollout_diff(r)?))
-                })
-                .collect();
-            if pairs.is_empty() {
-                continue;
-            }
-            let m = rolls
-                .values()
-                .find(|r| r["sel"].as_str() == Some(sel))
-                .and_then(|r| r["m"].as_u64())
-                .unwrap_or(0);
-            let preds: Vec<f64> = pairs.iter().map(|x| x.0).collect();
-            let acts: Vec<f64> = pairs.iter().map(|x| x.1).collect();
-            let (pmn, ps) = mean_se(&preds);
-            let (am, ase) = mean_se(&acts);
-            println!(
-                "### {}（{} 局面、1 局面 {m} 通りずつ）\n",
-                if sel == "random" {
-                    "食い違った局面から乱数で選んだもの（差の大きさで選んでいない）"
-                } else {
-                    "差の大きい順に選んだもの"
-                },
-                pairs.len()
-            );
-            println!(
-                "- 差（深い読みの点数）{}、最後まで打った差 {}、相関 {}",
-                pm(pmn, ps, 2),
-                pm(am, ase, 2),
-                fixed(correlation(&pairs), 2)
-            );
-            if sel == "random" {
-                let per_game = differ.len() as f64 / n_games as f64;
+            let total: f64 = gaps.iter().filter(|x| x.is_finite()).sum();
+            for (k, (n, gs, rs)) in &groups {
+                let (m, s) = mean_se(gs);
+                let (rm, rse) = mean_se(rs);
+                let sum: f64 = gs.iter().filter(|x| x.is_finite()).sum();
                 println!(
+                    "| {k} | {n} | {} | {} | {} | {} | {} |",
+                    if all {
+                        pct(gs.len() as f64 / *n as f64)
+                    } else {
+                        gs.len().to_string()
+                    },
+                    pm(m, s, 2),
+                    if total.abs() > 1e-9 {
+                        format!("{}%", fixed(sum / total * 100.0, 0))
+                    } else {
+                        "-".into()
+                    },
+                    rs.len(),
+                    pm(rm, rse, 1)
+                );
+            }
+            println!();
+        };
+        table(
+            "差の内訳（今の AI が深い読みのターンを選ばなかったのは、どの段階か）",
+            &|v| category(v).to_string(),
+            false,
+        );
+        table(
+            "相手のリーサル（深い読みの引き直しで、相手のターンを読むと負けになる割合）",
+            &|v| loss_kind(v).to_string(),
+            false,
+        );
+        table(
+            "デッキ別（手番の側）",
+            &|v| v["deck"].as_str().unwrap_or("").to_string(),
+            true,
+        );
+        table(
+            "自分のターン別",
+            &|v| format!("{:02}", v["ownTurn"].as_i64().unwrap_or(-1)),
+            true,
+        );
+        // 最後まで打って確かめた局面
+        if !rolls.is_empty() {
+            println!(
+                "## 最後まで打って確かめる（今の AI どうしで最後まで打った勝率の差。% の数）\n"
+            );
+            for sel in ["random", "top"] {
+                let pairs: Vec<(f64, f64)> = differ
+                    .iter()
+                    .filter_map(|v| {
+                        let r = rolls.get(&pos_key(v))?;
+                        if r["sel"].as_str() != Some(sel) {
+                            return None;
+                        }
+                        Some((gap_win(v), rollout_diff(r)?))
+                    })
+                    .collect();
+                if pairs.is_empty() {
+                    continue;
+                }
+                let m = rolls
+                    .values()
+                    .find(|r| r["sel"].as_str() == Some(sel))
+                    .and_then(|r| r["m"].as_u64())
+                    .unwrap_or(0);
+                let preds: Vec<f64> = pairs.iter().map(|x| x.0).collect();
+                let acts: Vec<f64> = pairs.iter().map(|x| x.1).collect();
+                let (pmn, ps) = mean_se(&preds);
+                let (am, ase) = mean_se(&acts);
+                println!(
+                    "### {}（{} 局面、1 局面 {m} 通りずつ）\n",
+                    if sel == "random" {
+                        "食い違った局面から乱数で選んだもの（差の大きさで選んでいない）"
+                    } else {
+                        "差の大きい順に選んだもの"
+                    },
+                    pairs.len()
+                );
+                println!(
+                    "- 差（深い読みの点数）{}、最後まで打った差 {}、相関 {}",
+                    pm(pmn, ps, 2),
+                    pm(am, ase, 2),
+                    fixed(correlation(&pairs), 2)
+                );
+                if sel == "random" {
+                    let per_game = differ.len() as f64 / n_games as f64;
+                    println!(
                     "- 1 試合あたりの目安（食い違い {} 局面 × 最後まで打った差の平均）: {} ポイント。そのターンだけ深い読みのとおりに打てたら、の足し合わせ（続きは今の AI。局面どうしの重なりは無視）",
                     fixed(per_game, 1),
                     pm(am * per_game, ase * per_game, 1)
                 );
+                }
+                let mut groups: BTreeMap<&str, Vec<(f64, f64)>> = BTreeMap::new();
+                for &(x, y) in &pairs {
+                    groups.entry(bin_of(x)).or_default().push((x, y));
+                }
+                println!("\n| 差（深い読みの点数） | 局面 | 差の平均 | 最後まで打った差の平均 | 深い読みのほうが勝ちの多かった局面 |\n| --- | ---: | ---: | ---: | ---: |");
+                for (k, xs) in &groups {
+                    let p: Vec<f64> = xs.iter().map(|x| x.0).collect();
+                    let a: Vec<f64> = xs.iter().map(|x| x.1).collect();
+                    let wins = a.iter().filter(|&&y| y > 0.0).count();
+                    let losses = a.iter().filter(|&&y| y < 0.0).count();
+                    let (am, ase) = mean_se(&a);
+                    println!(
+                        "| {} | {} | {} | {} | {} 勝 {} 敗 |",
+                        &k[3..],
+                        xs.len(),
+                        fixed(mean_se(&p).0, 2),
+                        pm(am, ase, 1),
+                        wins,
+                        losses
+                    );
+                }
+                println!();
             }
-            let mut groups: BTreeMap<&str, Vec<(f64, f64)>> = BTreeMap::new();
-            for &(x, y) in &pairs {
-                groups.entry(bin_of(x)).or_default().push((x, y));
-            }
-            println!("\n| 差（深い読みの点数） | 局面 | 差の平均 | 最後まで打った差の平均 | 深い読みのほうが勝ちの多かった局面 |\n| --- | ---: | ---: | ---: | ---: |");
-            for (k, xs) in &groups {
-                let p: Vec<f64> = xs.iter().map(|x| x.0).collect();
-                let a: Vec<f64> = xs.iter().map(|x| x.1).collect();
-                let wins = a.iter().filter(|&&y| y > 0.0).count();
-                let losses = a.iter().filter(|&&y| y < 0.0).count();
-                let (am, ase) = mean_se(&a);
-                println!(
-                    "| {} | {} | {} | {} | {} 勝 {} 敗 |",
-                    &k[3..],
-                    xs.len(),
-                    fixed(mean_se(&p).0, 2),
-                    pm(am, ase, 1),
-                    wins,
-                    losses
-                );
-            }
-            println!();
         }
-    }
-    // 差の大きい局面
-    let mut ranked: Vec<&&Value> = differ.iter().collect();
-    let by_roll = !rolls.is_empty();
+    } // !list_only
+      // 差の大きい局面
+    let mut ranked: Vec<&&Value> = differ
+        .iter()
+        .filter(|v| only.is_none_or(|o| category(v).contains(o)))
+        .filter(|v| !skip_decks.contains(&v["deck"].as_str().unwrap_or("")))
+        .collect();
+    let by_roll = match sort {
+        Some(k) => k == "rollout",
+        None => !rolls.is_empty(),
+    };
     let key = |v: &Value| -> f64 {
         if by_roll {
             rolls
@@ -1319,20 +1392,92 @@ fn report(argv: &[String]) -> Result<(), String> {
         }
     };
     ranked.sort_by(|a, b| {
-        key(b)
-            .partial_cmp(&key(a))
-            .unwrap_or(std::cmp::Ordering::Equal)
+        let deck = |v: &Value| v["deck"].as_str().unwrap_or("").to_string();
+        let by_deck = if list_only {
+            deck(a).cmp(&deck(b))
+        } else {
+            std::cmp::Ordering::Equal
+        };
+        by_deck
+            .then(
+                key(b)
+                    .partial_cmp(&key(a))
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
             .then(pos_key(a).cmp(&pos_key(b)))
     });
-    println!(
-        "## 差の大きい局面（{}の上位 {top}）\n",
-        if by_roll {
-            "最後まで打った勝率の差"
-        } else {
-            "差"
+    let sort_name = if by_roll {
+        "最後まで打った勝率の差"
+    } else {
+        "差"
+    };
+    if list_only {
+        println!(
+            "# 今の AI の手と深い読みの手の食い違い（deep-gap）の局面{}\n",
+            only.map(|o| format!("（内訳: {o}）")).unwrap_or_default()
+        );
+        if !skip_decks.is_empty() {
+            println!("- 除いたデッキ（手番の側）: {}", skip_decks.join("、"));
         }
-    );
-    for v in ranked.iter().take(top) {
+        println!(
+            "- デッキごとに、{sort_name}の大きい順。差は、引きを並べ直して両方に打たせ、深い読みの点数で見た勝率の差（深い読み − 今の AI、% の数）\n"
+        );
+        let mut counts: BTreeMap<&str, (usize, usize, Vec<f64>)> = BTreeMap::new();
+        for v in &ranked {
+            let e = counts.entry(v["deck"].as_str().unwrap_or("")).or_default();
+            e.0 += 1;
+            if gap_win(v) >= 3.0 {
+                e.1 += 1;
+            }
+            e.2.push(gap_win(v));
+        }
+        println!("| デッキ | 局面 | 差が 3 以上 | 差の平均 |\n| --- | ---: | ---: | ---: |");
+        for (d, (n, big, gs)) in &counts {
+            let (m, se) = mean_se(gs);
+            println!("| {d} | {n} | {big} | {} |", pm(m, se, 2));
+        }
+        println!();
+    } else {
+        println!("## 差の大きい局面（{sort_name}の上位 {top}）\n");
+    }
+    // 使ったものの違い（深い読みだけ、試合のターンだけ。始めの局面を試合の手の列から作り直す）
+    let diff_of = |v: &Value| -> Option<(Vec<String>, Vec<String>)> {
+        let game = data.games.get(&pos_key(v).0)?;
+        let start = rebuild(game, v).ok()?;
+        let ai = used_of(&start, &actions_of(&v["ai"]["actions"]).ok()?);
+        let deep = used_of(&start, &actions_of(&v["deep"]["actions"]).ok()?);
+        Some((multiset_minus(&deep, &ai), multiset_minus(&ai, &deep)))
+    };
+    let roll_diff_text = |v: &Value| {
+        rolls
+            .get(&pos_key(v))
+            .and_then(rollout_diff)
+            .map(|d| fixed(d, 1))
+            .unwrap_or_else(|| "-".into())
+    };
+    let mut last_deck = String::new();
+    for v in ranked.iter().take(if list_only { usize::MAX } else { top }) {
+        let deck = v["deck"].as_str().unwrap_or("");
+        if list_only && deck != last_deck {
+            println!("## {deck}\n");
+            println!("| 局面 | 相手 | 差 | 最後まで打った差 | 深い読みだけ | 試合のターンだけ |\n| --- | --- | ---: | ---: | --- | --- |");
+            for w in ranked.iter().filter(|w| w["deck"].as_str() == Some(deck)) {
+                let (d, a) = diff_of(w).unwrap_or_default();
+                println!(
+                    "| 試合 {} の {} 手目（{} ターン目） | {} | {} | {} | {} | {} |",
+                    w["g"],
+                    w["i"],
+                    w["ownTurn"],
+                    w["oppDeck"].as_str().unwrap_or(""),
+                    fixed(gap_win(w), 1),
+                    roll_diff_text(w),
+                    list_or_none(d),
+                    list_or_none(a)
+                );
+            }
+            println!();
+            last_deck = deck.to_string();
+        }
         let steps = |s: &Value| {
             s["steps"]
                 .as_array()
@@ -1359,7 +1504,7 @@ fn report(argv: &[String]) -> Result<(), String> {
             "### 試合 {} の {} 手目（{} vs {}、自分の {} ターン目）\n",
             v["g"],
             v["i"],
-            v["deck"].as_str().unwrap_or(""),
+            deck,
             v["oppDeck"].as_str().unwrap_or(""),
             v["ownTurn"]
         );
@@ -1393,11 +1538,19 @@ fn report(argv: &[String]) -> Result<(), String> {
             steps(&v["ai"])
         );
         println!(
-            "- **深い読みのターン**（勝率 {}%{}）: {}\n",
+            "- **深い読みのターン**（勝率 {}%{}）: {}",
             v["deep"]["deepWin"],
             loss_text(&v["deep"]),
             steps(&v["deep"])
         );
+        if let Some((d, a)) = diff_of(v) {
+            println!(
+                "- 違い: 深い読みだけ {}／試合のターンだけ {}",
+                list_or_none(d),
+                list_or_none(a)
+            );
+        }
+        println!();
     }
     Ok(())
 }
