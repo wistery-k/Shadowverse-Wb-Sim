@@ -19,7 +19,7 @@ meta.sh や自己対戦のような重いジョブを、Google Cloud の Spot VM
 - `cloud/gcp.sh`: 動かす側（Claude のクラウド環境か、ユーザーの PC）で使う。ソースを包んで送り、VM を立て、見張り、結果を取り出す
 - `cloud/vm-startup.sh`: VM が起動したときに流れる。ツールを入れてビルドし、ゴールデンテストを通してからジョブを流す
 - `cloud/vm-shutdown.sh`: Spot の中断（30 秒前の知らせ）で流れ、作業フォルダの小さいファイルを写す
-- `cloud/jobs/`: ジョブの例（`bench.sh`: 速さを測る。`bench-scale.sh`: 並列の伸びが止まる原因を調べる。`exploit.sh`: 狙い撃ちの相手を学ばせる回り。PC でも回せる）
+- `cloud/jobs/`: ジョブの例（`bench.sh`: 速さを測る。`bench-scale.sh`: 並列の伸びが止まる原因を調べる。`exploit.sh`: 狙い撃ちの相手を学ばせる回り。`deep-gap.sh`: 今の AI の手と深い読みの手が食い違う局面を集める。どちらも PC でも回せる）
 - `cloud/setup-billing-cap.sh`: 月の費用が予算を超えたら課金を外す仕組みを作る（Cloud Shell で一度だけ流す。「費用の上限」）
 
 ## 仕組み
