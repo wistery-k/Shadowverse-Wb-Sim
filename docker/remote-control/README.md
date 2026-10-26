@@ -103,4 +103,4 @@ Claude のクラウド環境の Docker で、イメージを作り（ネット�
 
 - ユーザーが UID 1000 の `wk` になり、`/workspace`・`rust/target`・`~/.claude` に書ける。`.claude.json` も `~/.claude` の中にできる
 - Claude Code 2.1.310 が動き、ログインの前の `claude remote-control` は `You must be logged in to use Remote Control.` で終わる
-- コンテナの中で `npm ci`・`npm run wasm`・`cargo build --release`（約 3 分）が通り、`npm run svwb` が動く
+- コンテナの中で `npm ci`・`npm run wasm`・`cargo build --release`（約 3 分）が通り、`npm run svwb` が動く。`npm run typecheck`・`npm test`（171 件）も通る
