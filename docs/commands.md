@@ -123,8 +123,9 @@ npm run deck-compare -- --deck スペルウィッチ --file my-witch.txt --file 
 
 デッキのカードを入れ替えた案を、元のデッキと同じ試合で比べる（デッキの最適化）。元のデッキと各案は、比較用の 7 デッキのうち自分以外と両方の席で打つ（`--vs` で相手を絞れる）。
 AI はどちらの側も今の既定（リノセウスエルフはリノセウス用 AI、他は探索 AI）。
-マリガンの学習したモデルはデッキのカードの並びで引くので、案のデッキも元のデッキのモデルでマリガンする（足したカードは役割なし・係数 0）。
-ファイルから読んだデッキ（とその案）は元にするモデルが無いので、返し方ごとに引き直しを試して選ぶ（`mulligan: "sample"`。今のモデルとの差は −0.5% ほど）。
+マリガンは今の既定（`mulligan: "turn1"`。引き直した後に先へ進めてから採点する）で、どのデッキでもそのまま使える。
+既定がデッキごとのモデルを使うもの（`model`・`weights`）だったときは、モデルはデッキのカードの並びで引くので、案のデッキも元のデッキのモデルでマリガンし（足したカードは役割なし・係数 0）、
+ファイルから読んだデッキ（とその案）は返し方ごとに引き直しを試して選ぶ（`mulligan: "sample"`）。
 
 | 引数 | 既定 | 意味 |
 |---|---|---|
@@ -165,7 +166,7 @@ AI は deck-compare と同じ（どちらの側も今の既定）。
 | 引数 | 既定 | 意味 |
 |---|---|---|
 | `--out` | 必須 | 書き出す環境のファイル |
-| `--decks デッキ,…` | 比較用の 7 デッキ | 環境のデッキ（デフォルトデッキの名前か、デッキのテキストファイルのパス）。ファイルのデッキは、同じクラスのデフォルトデッキと 30 枚以上同じならそれを元にする（マリガンのモデルとリノセウス用 AI）。元が無ければマリガンは引き直しを試して選ぶ |
+| `--decks デッキ,…` | 比較用の 7 デッキ | 環境のデッキ（デフォルトデッキの名前か、デッキのテキストファイルのパス）。ファイルのデッキは、同じクラスのデフォルトデッキと 30 枚以上同じならそれを元にする（リノセウス用 AI と、デッキごとのモデルを使うマリガン）。元が無ければ、デッキごとのモデルを使うマリガンの代わりに引き直しを試して選ぶ |
 | `--usage` | `class` | 最初の使用率。`class` はクラスごとに 1/クラス数 を、そのクラスのデッキで等分。`uniform` はデッキごとに等分 |
 
 `round`（1 回り。総当たり → 使用率の更新 → 案 → ふるい → 確かめ → 採る）:
@@ -217,13 +218,20 @@ npm run svwb -- compare …                               # npm run compare と�
 npm run svwb -- rhino-compare …                         # npm run rhino-compare と同じ
 npm run svwb -- yardstick …                             # npm run yardstick と同じ
 npm run svwb -- meta …                                  # npm run meta と同じ
-npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mulligan":"sample"}'] [--b '{}']
+npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mulligan":"sample"}'] [--b '{}'] [--decks <デッキ>,…] [--rhino]
+npm run svwb -- mulligan-data --games 6000 [--start 0] [--seed 1] [--flip 0.5] --out d.jsonl
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
                 [--sampling classic|default] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
                 [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>']
 ```
 
-- `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI
+- `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI。
+  `'{}'` は今の既定（`turn1`・3 ターン）。2026-10-26 より前の既定の手札の形のモデルは `'{"mulligan":"model"}'`。
+  `--decks` で自分のデッキを絞る（特定のデッキのカードの残し方を比べる用。相手は 6 デッキのまま）。
+  `--rhino` なら自分のリノセウスエルフをリノセウス用 AI で打つ（A・B はマリガンの項目だけを使う）
+- `mulligan-data`: 両プレイヤーとも初手の各カードの残す・返すをコインで決め（`--flip` が 0.5 未満なら今のマリガンの判断を各カードその確率で反転し）、
+  その後は今の探索 AI で打った試合を 1 試合 1 行で追記する（初手・残したか・先後・勝敗。TypeScript 版の `mulligan-data` と同じ形）。
+  残し方の因果的な効き目の推定と、どんなマリガンの勝率も試合を打たずに推定する（逆確率重み付け）のに使う
 - `td selfplay`: TD 学習の自己対戦。各引数の意味は `rust/engine/src/runner/td.rs` の先頭。
   `--decks` で、比較用の 7 デッキの代わりに並べたデッキ（デフォルトデッキの名前かデッキのテキストファイル）の全組を回す（例: `rust/engine/td-pool/royal-counter/*.txt`）。
   `--ivZone drawn` は、カードを引いた瞬間に手札から抜いて最後まで打つ介入（`td ivcheck` で「（引いたとき）」の行。デッキに 1 枚入れる価値に近い）。
@@ -334,12 +342,14 @@ Docker コンテナ（`docker/remote-control`）で、ジョブは `CLOUD_W=<フ
 
 JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知らない項目はエラーになる。項目の意味は `rust/engine/src/ai/search.rs` の `SearchOptions`。
 
-- 数: `samples`・`beamWidth`・`maxDepth`・`rescoreTop`・`planCandidates`・`perFirst`・`oppHandSamples`・`dangerRescore`・`mulliganSamples`・`nextLethal`・`beamPp`
+- 数: `samples`・`beamWidth`・`maxDepth`・`rescoreTop`・`planCandidates`・`perFirst`・`oppHandSamples`・`dangerRescore`・`mulliganSamples`・`mulliganTurns`・`mulliganRolloutBeam`・`nextLethal`・`beamPp`
 - 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`
 - `rescoreMix`: 0〜1 の数。上位の手を相手のターンまで読み直した点数に、ターン末の点数をこの割合で混ぜる（既定 0.5。0 で 2026-10-22 より前の読み方）
 - `scoreTurnEnd`: `"none"`・`"terminal"`・`"all"`
-- `mulligan`: `"model"`（既定）・`"weights"`・`"cost"`・`"sample"`
+- `mulligan`: `"turn1"`（既定。引き直した後、`mulliganTurns`（既定 3）ターン目の自分のターンの終わりまで、0 なら自分の 1 ターン目の最初まで、
+  貪欲法か幅 `mulliganRolloutBeam` のビームで進めてから採点する）・`"model"`（手札の形のモデル。2026-10-26 より前の既定）・`"weights"`・`"cost"`・`"sample"`・`"keep"`（1 枚も返さない。比べ用）
+- `mulliganKeep`: カード名の配列。初手にあれば 1 枚目を必ず残す（`model`・`weights`・`cost` の判断の後で直す。`turn1` では効かない）
 - `opponentSearch`: `null`（相手のターンを読まない）か `{"beamWidth": …, "maxDepth": …, "extraEval": true|false}`
 - `weights`: `"default"`（基準の重み）か、変えたい項目だけのオブジェクト（`"holdScale"` で hold を何倍にするか）
 - `valueNet`: 学習した補正のファイル名か `false`（補正なし）

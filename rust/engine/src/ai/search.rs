@@ -17,7 +17,8 @@ use super::lethal::{
     GUARDED_LETHAL_OPTIONS,
 };
 use super::mulligan::{
-    model_mulligan_swap, mulligan_action, sampled_mulligan, weighted_mulligan_swap,
+    model_mulligan_swap, mulligan_action, rollout_mulligan, sampled_mulligan,
+    weighted_mulligan_swap, RolloutPolicy,
 };
 use super::think::{Thought, ThoughtCandidate};
 use super::valuenet::{value_net_eval, ValuePhase};
@@ -50,6 +51,17 @@ pub enum MulliganMode {
     Cost,
     /// 返し方ごとに引き直しを mulligan_samples 回試して、評価の平均で選ぶ
     Sample,
+    /// 1 枚も返さない（マリガンの効き目の大きさを測る比べ用）
+    Keep,
+    /// Sample と同じだが、引き直した後に先へ進めてから評価する（mulligan.rs の rollout_mulligan。mulligan_turns・mulligan_rollout_beam）
+    Turn1,
+}
+
+impl MulliganMode {
+    /// デフォルトデッキごとに推定したモデルか重みを使う（それ以外のデッキでは使えない）
+    pub fn needs_deck_model(self) -> bool {
+        matches!(self, MulliganMode::Model | MulliganMode::Weights)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -94,6 +106,12 @@ pub struct SearchOptions {
     /// MulliganMode::Sample で、評価関数（手で決めた部分）と学習した補正のどちらを使うか
     pub mulligan_static: bool,
     pub mulligan_net: bool,
+    /// MulliganMode::Turn1 で、どこまで進めてから評価するか（0 なら自分の 1 ターン目の最初、k なら自分の k ターン目の終わり）
+    pub mulligan_turns: i32,
+    /// MulliganMode::Turn1 で先へ進めるときの手（0 なら貪欲法、1 以上ならその幅のビームの探索）
+    pub mulligan_rollout_beam: usize,
+    /// 初手にあれば 1 枚目を必ず残すカード（手札の形のモデル・カードごとの表・コストのマリガンの判断の後で直す。2 枚目以降は判断のまま）
+    pub mulligan_keep: Vec<crate::data::CardIdx>,
     pub settle_trades: bool,
     /// 下位互換の味方で同じことができる攻撃を展開せず、合流する相打ちも下位互換の味方で打つ（converging.rs の dominated_attack）
     pub dominance: bool,
@@ -154,10 +172,15 @@ impl Default for SearchOptions {
             chain: true,
             chain_fuse: false,
             score_turn_end: ScoreTurnEnd::All,
-            mulligan: MulliganMode::Model,
+            // 引き直した後、3 ターン目の終わりまで貪欲法で進めてから採点する
+            // （docs/ai-notes.md「引き直した後に先へ進めてから採点するマリガン」。手札の形のモデルより +1.5%）
+            mulligan: MulliganMode::Turn1,
             mulligan_samples: 100,
             mulligan_static: true,
             mulligan_net: true,
+            mulligan_turns: 3,
+            mulligan_rollout_beam: 0,
+            mulligan_keep: Vec::new(),
             settle_trades: true,
             dominance: true,
             reuse_plan: true,
@@ -1593,6 +1616,29 @@ fn agreed_length(plans: &[Plan]) -> usize {
     n
 }
 
+/// 返すカード swap のうち、keep のカードの 1 枚目（手札で最初のもの）を残すように直す（mulliganKeep）
+fn keep_first_copies(
+    s: &GameState,
+    p: PlayerIndex,
+    mut swap: Vec<Iid>,
+    keep: &[crate::data::CardIdx],
+) -> Vec<Iid> {
+    for &c in keep {
+        let copies: Vec<Iid> = s.players[p]
+            .hand
+            .iter()
+            .filter(|h| h.card == c)
+            .map(|h| h.iid)
+            .collect();
+        if let Some(&first) = copies.first() {
+            if copies.iter().all(|i| swap.contains(i)) {
+                swap.retain(|&i| i != first);
+            }
+        }
+    }
+    swap
+}
+
 impl Agent for SearchAgent {
     fn think(&mut self, real: &GameState, legal: &[Action], rng: &mut Rng) -> Option<Thought> {
         self.think_with(real, legal, rng, None)
@@ -1621,6 +1667,55 @@ impl Agent for SearchAgent {
                     }
                 });
             }
+            if opts.mulligan == MulliganMode::Keep {
+                if let Some(a) = mulligan_action(legal, &[]) {
+                    return a.clone();
+                }
+            }
+            if opts.mulligan == MulliganMode::Turn1 {
+                let extra = opts.extra_eval.clone().filter(|_| opts.mulligan_net);
+                let w = &self.w;
+                let default_w = self.default_w.clone();
+                let beam = opts.mulligan_rollout_beam;
+                // 先へ進めるときの手: 幅 beam のビーム（読み直しは 1 手・相手は貪欲法・リーサル探索なし）か、0 なら貪欲法
+                let rollout = SearchOptions {
+                    beam_width: beam.max(1),
+                    rescore_top: 1,
+                    opponent_search: None,
+                    opp_hand_samples: 1,
+                    lethal: false,
+                    mulligan: MulliganMode::Model,
+                    ..SearchOptions::default()
+                };
+                let new_policy = move || -> RolloutPolicy {
+                    if beam == 0 {
+                        let dw = default_w.clone();
+                        Box::new(move |s, l, r| choose_greedy(s, l, r, false, &dw, false))
+                    } else {
+                        let mut ag = SearchAgent::new(rollout.clone());
+                        Box::new(move |s, l, r| ag.choose_action(s, l, r))
+                    }
+                };
+                return rollout_mulligan(
+                    real,
+                    legal,
+                    p0,
+                    (opts.mulligan_samples, opts.mulligan_turns),
+                    rng,
+                    &new_policy,
+                    |s, phase| {
+                        let v = if opts.mulligan_static {
+                            evaluate_with(s, p0, w)
+                        } else {
+                            0.0
+                        };
+                        match &extra {
+                            Some(f) if s.phase != Phase::Ended => v + f(s, p0, phase),
+                            _ => v,
+                        }
+                    },
+                );
+            }
             let model_swap = if opts.mulligan == MulliganMode::Model {
                 model_mulligan_swap(real, p0)
             } else {
@@ -1633,6 +1728,19 @@ impl Agent for SearchAgent {
                     None
                 }
             });
+            let swap = match (swap, opts.mulligan_keep.is_empty()) {
+                (Some(swap), false) => Some(keep_first_copies(real, p0, swap, &opts.mulligan_keep)),
+                (None, false) => {
+                    let costs: Vec<Iid> = real.players[p0]
+                        .hand
+                        .iter()
+                        .filter(|h| card(h.card).cost >= 4)
+                        .map(|h| h.iid)
+                        .collect();
+                    Some(keep_first_copies(real, p0, costs, &opts.mulligan_keep))
+                }
+                (swap, true) => swap,
+            };
             if let Some(a) = swap.and_then(|swap| mulligan_action(legal, &swap)) {
                 return a.clone();
             }

@@ -129,6 +129,33 @@ pub fn search_options(
                 o.rescore_mix = x;
             }
             "mulliganSamples" => o.mulligan_samples = count(k, v)?,
+            "mulliganTurns" => o.mulligan_turns = count(k, v)? as i32,
+            "mulliganKeep" => {
+                let Json::Arr(xs) = v else {
+                    return Err(format!(
+                        "\"mulliganKeep\" はカード名の配列: {}",
+                        v.stringify()
+                    ));
+                };
+                o.mulligan_keep = xs
+                    .iter()
+                    .map(|x| match x {
+                        Json::Str(name) => crate::data::data()
+                            .cards
+                            .iter()
+                            .position(|c| c.name == *name)
+                            .map(|i| i as crate::data::CardIdx)
+                            .ok_or_else(|| {
+                                format!("\"mulliganKeep\" のカードがありません: {name}")
+                            }),
+                        _ => Err(format!(
+                            "\"mulliganKeep\" はカード名の配列: {}",
+                            v.stringify()
+                        )),
+                    })
+                    .collect::<Result<_, _>>()?;
+            }
+            "mulliganRolloutBeam" => o.mulligan_rollout_beam = count(k, v)?,
             "lethal" => o.lethal = flag(k, v)?,
             "mulliganStatic" => o.mulligan_static = flag(k, v)?,
             "mulliganNet" => o.mulligan_net = flag(k, v)?,
@@ -171,9 +198,11 @@ pub fn search_options(
                     Json::Str(s) if s == "weights" => MulliganMode::Weights,
                     Json::Str(s) if s == "cost" => MulliganMode::Cost,
                     Json::Str(s) if s == "sample" => MulliganMode::Sample,
+                    Json::Str(s) if s == "turn1" => MulliganMode::Turn1,
+                    Json::Str(s) if s == "keep" => MulliganMode::Keep,
                     _ => {
                         return Err(format!(
-                            "\"mulligan\" は model / weights / cost / sample: {}",
+                            "\"mulligan\" は model / weights / cost / sample / turn1 / keep: {}",
                             v.stringify()
                         ))
                     }
