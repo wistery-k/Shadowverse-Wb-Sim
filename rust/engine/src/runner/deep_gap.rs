@@ -13,7 +13,9 @@
 //!   実際の試合のターン末をそのまま比べると、ターンの途中で引いたカード・乱数の効果の当たり外れ（後から見た運）が差に混ざるため、
 //!   引きを並べ直して平均する。今の AI の側は「今の AI ならこう打つ」の平均なので、今の AI のぶれ（決定化 1 回）で損をする分も入る
 //! - 深い読みの点数: 深い読みの設定で、`--evalSeeds` 通りの相手の手札の引き直し（深い読みが手を選んだのとは別の引き直し）で相手のターンを読み直し、
-//!   探索と同じくターン末の点数を `rescoreMix` の割合で混ぜたもの。勝率は学習した補正の a で σ(a·点数)（`docs/value-net.md`）
+//!   探索と同じくターン末の点数を `rescoreMix` の割合で混ぜたもの。勝率は学習した補正の a で σ(a·点数)（`docs/value-net.md`）を引き直しごとに求めて平均する。
+//!   相手のリーサルがある引き直しは負けの点数（-1e6）になるので、点数を平均してから勝率にすると、48 通りのうち 1 通りでもリーサルがあれば勝率 0% になる
+//!   （最初の版はそうしていた）。相手のリーサルになった引き直しの割合も書く（`loss`・`deepLoss`）
 //! - 実際の試合のターン末どうしの差（`real`）: 深い読みの点数と、今の AI の点数（今の既定の設定、引き直し 12 通り）の両方で。
 //!   どちらかのターンでカードを引いた・乱数を使ったか（`hidden`。後から見た運が混ざる）
 //! - 今の AI のビームの候補（最初の手ごとのターン末の最善）の中での、深い読みの実際のターン末の順位（ビームが届かないのか、読み直しの候補から外れたのか）
@@ -161,28 +163,43 @@ fn play_turn(
     Err("AI がターンを終えません".into())
 }
 
-/// ターン末 1 つの採点（ターン末の点数、相手のターンを読み直した点数、探索が手を選ぶときの点数）
+/// ターン末 1 つの採点（ターン末の点数、相手のターンを読み直した点数、探索が手を選ぶときの点数、勝率、相手の勝ちになった引き直しの割合）
 struct Scored {
     turn_end: Option<f64>,
     read: f64,
     value: f64,
+    /// 引き直しごとの点数（ターン末の点数を混ぜたもの）を勝率にしてからの平均（%）
+    win: f64,
+    /// 相手のターンを読んだら相手の勝ち（リーサル）になった引き直しの割合（0〜1）
+    loss: f64,
 }
 
+/// 負けの点数（-1e6）とみなす下限
+const LOSS_SCORE: f64 = -5e5;
+
 fn score(agent: &SearchAgent, end: &GameState, p: PlayerIndex, seeds: &[u32]) -> Scored {
-    let read = agent.read_value(end, p, seeds);
+    let reads = agent.read_values(end, p, seeds);
+    let n = reads.len() as f64;
+    let read = reads.iter().sum::<f64>() / n;
+    let loss = reads.iter().filter(|&&v| v <= LOSS_SCORE).count() as f64 / n;
     if end.phase == Phase::Ended {
         return Scored {
             turn_end: None,
             read,
             value: read,
+            win: win_pct(read),
+            loss,
         };
     }
     let turn_end = agent.turn_end_value(end, p);
     let m = agent.opts.rescore_mix;
+    let value_of = |r: f64| (1.0 - m) * r + m * turn_end;
     Scored {
         turn_end: Some(turn_end),
         read,
-        value: (1.0 - m) * read + m * turn_end,
+        value: value_of(read),
+        win: reads.iter().map(|&r| win_pct(value_of(r))).sum::<f64>() / n,
+        loss,
     }
 }
 
@@ -320,17 +337,34 @@ fn game_start(g: u32) -> (GameState, [String; 2], u32) {
 
 /// 局面 start（p の自分のターンの最初）から、決定化 k 通りそれぞれで今の AI と深い読みにターンを打たせ、深い読みの点数で採点した
 /// 勝率の差（深い読み − 今の AI、% の数）と点数の差、両方が同じターン末になった回数
+/// 決定化 k 通りでの差
+struct PolicyGap {
+    /// 勝率の差（%）
+    wins: Vec<f64>,
+    /// 点数の差
+    points: Vec<f64>,
+    /// 今の AI と深い読みのターン末の、相手の勝ちになった引き直しの割合
+    loss: Vec<(f64, f64)>,
+    /// 同じターン末になった数
+    same: u32,
+}
+
 fn policy_gap(
     start: &GameState,
     p: PlayerIndex,
     cfg: &PlayConfig,
     deep_agent: &SearchAgent,
     pos_seed: u32,
-) -> Result<(Vec<f64>, Vec<f64>, u32), String> {
+) -> Result<PolicyGap, String> {
     let seeds: Vec<u32> = (0..cfg.eval_seeds)
         .map(|j| mix(pos_seed, 70_000 + j))
         .collect();
-    let (mut wins, mut points, mut same) = (Vec::new(), Vec::new(), 0);
+    let mut r = PolicyGap {
+        wins: Vec::new(),
+        points: Vec::new(),
+        loss: Vec::new(),
+        same: 0,
+    };
     for k in 0..cfg.k {
         let det = determinize(start, p, &mut Rng::new(mix(pos_seed, 60_000 + k)), false);
         let (_, a_end) = play_turn(
@@ -341,17 +375,18 @@ fn policy_gap(
         )?;
         let (_, d_end) = play_turn(&det, p, &cfg.deep, mix(pos_seed, 62_000 + k))?;
         if same_end(&a_end, &d_end) {
-            same += 1;
-            wins.push(0.0);
-            points.push(0.0);
+            r.same += 1;
+            r.wins.push(0.0);
+            r.points.push(0.0);
             continue;
         }
-        let va = score(deep_agent, &a_end, p, &seeds).value;
-        let vd = score(deep_agent, &d_end, p, &seeds).value;
-        wins.push(win_pct(vd) - win_pct(va));
-        points.push(vd - va);
+        let sa = score(deep_agent, &a_end, p, &seeds);
+        let sd = score(deep_agent, &d_end, p, &seeds);
+        r.wins.push(sd.win - sa.win);
+        r.points.push(sd.value - sa.value);
+        r.loss.push((sa.loss, sd.loss));
     }
-    Ok((wins, points, same))
+    Ok(r)
 }
 
 /// 試合 g を今の既定の AI どうしで打ち、自分のターンの最初の局面ごとに深い読みと比べた行と、最後に試合の行を返す
@@ -417,9 +452,10 @@ fn play_game(g: u32, cfg: &PlayConfig) -> Result<Vec<Value>, String> {
                 "turnEnd": a.turn_end.map(round2),
                 "read": round2(a.read), "value": round2(a.value),
                 "deepRead": round2(d.read), "deepValue": round2(d.value),
-                "deepWin": round2(win_pct(d.value)),
+                "deepWin": round2(d.win), "deepLoss": round2(d.loss),
+                "aiWin": round2(a.win), "aiLoss": round2(a.loss),
             });
-            (value, d.value, a.value)
+            (value, d, a)
         };
         let (ai_side, ai_deep, ai_ai) = side(&ai_actions, &ai_end);
         let (deep_side, deep_deep, deep_ai) = side(&deep_actions, &deep_end);
@@ -443,8 +479,8 @@ fn play_game(g: u32, cfg: &PlayConfig) -> Result<Vec<Value>, String> {
             });
         }
         // 決定化 k 通りでの差（後から見た運を除く）
-        let (wins, points, k_same) = policy_gap(start, p, cfg, &deep_agent, pos_seed)?;
-        let (gm, gs) = mean_se(&wins);
+        let pg = policy_gap(start, p, cfg, &deep_agent, pos_seed)?;
+        let (gm, gs) = mean_se(&pg.wins);
         let obj = row.as_object_mut().expect("オブジェクト");
         obj.insert("gapWin".into(), round2(gm));
         obj.insert(
@@ -455,16 +491,27 @@ fn play_game(g: u32, cfg: &PlayConfig) -> Result<Vec<Value>, String> {
                 Value::Null
             },
         );
-        obj.insert("gapPts".into(), round2(mean_se(&points).0));
+        obj.insert("gapPts".into(), round2(mean_se(&pg.points).0));
         obj.insert("k".into(), json!(cfg.k));
-        obj.insert("kSame".into(), json!(k_same));
+        obj.insert("kSame".into(), json!(pg.same));
+        // 食い違った決定化での、相手の勝ちになった引き直しの割合の平均（今の AI のターン末・深い読みのターン末）
+        if !pg.loss.is_empty() {
+            let n = pg.loss.len() as f64;
+            obj.insert(
+                "loss".into(),
+                json!({
+                    "ai": round2(pg.loss.iter().map(|l| l.0).sum::<f64>() / n),
+                    "deep": round2(pg.loss.iter().map(|l| l.1).sum::<f64>() / n),
+                }),
+            );
+        }
         obj.insert(
             "real".into(),
             json!({
-                "gapWin": round2(win_pct(deep_deep) - win_pct(ai_deep)),
-                "gap": round2(deep_deep - ai_deep),
-                "aiGapWin": round2(win_pct(deep_ai) - win_pct(ai_ai)),
-                "aiGap": round2(deep_ai - ai_ai),
+                "gapWin": round2(deep_deep.win - ai_deep.win),
+                "gap": round2(deep_deep.value - ai_deep.value),
+                "aiGapWin": round2(deep_ai.win - ai_ai.win),
+                "aiGap": round2(deep_ai.value - ai_ai.value),
             }),
         );
         obj.insert("start".into(), summarize_start(start, p));
@@ -950,6 +997,17 @@ fn category(v: &Value) -> &'static str {
     "今の AI の点数では今の AI のターンが上（深く読むと逆転）"
 }
 
+/// 食い違った局面の、相手のリーサル（深い読みの引き直しで相手のターンを読むと負けになる割合）の分け方
+fn loss_kind(v: &Value) -> &'static str {
+    match (v["loss"]["ai"].as_f64(), v["loss"]["deep"].as_f64()) {
+        (Some(a), Some(d)) if a > d + 1e-9 => "今の AI のターン末のほうが相手のリーサルが多い",
+        (Some(a), Some(d)) if d > a + 1e-9 => "深い読みのターン末のほうが相手のリーサルが多い",
+        (Some(a), Some(_)) if a > 0.0 => "同じだけある",
+        (Some(_), Some(_)) => "どちらにも無い",
+        _ => "測っていない（決定化が全部同じターン末か、古い出力）",
+    }
+}
+
 /// 最後まで打った勝率の差（深い読み − 今の AI、% の数）。どちらかが 1 回も打てなければ None
 fn rollout_diff(r: &Value) -> Option<f64> {
     Some((win_rate(&r["deep"])? - win_rate(&r["ai"])?) * 100.0)
@@ -1089,6 +1147,20 @@ fn report(argv: &[String]) -> Result<(), String> {
         pct(k_same as f64 / ks.max(1) as f64),
         pct(hidden as f64 / differ.len().max(1) as f64)
     );
+    let losses: Vec<(f64, f64)> = differ
+        .iter()
+        .filter_map(|v| Some((v["loss"]["ai"].as_f64()?, v["loss"]["deep"].as_f64()?)))
+        .collect();
+    if !losses.is_empty() {
+        let n = losses.len() as f64;
+        println!(
+            "- 相手のターンを読むと相手のリーサルになる引き直しの割合（深い読みの点数の引き直し、食い違った決定化の平均）: 今の AI のターン末 {}・深い読みのターン末 {}。今の AI のほうが多い局面 {}・深い読みのほうが多い局面 {}",
+            pct(losses.iter().map(|x| x.0).sum::<f64>() / n),
+            pct(losses.iter().map(|x| x.1).sum::<f64>() / n),
+            pct(losses.iter().filter(|x| x.0 > x.1 + 1e-9).count() as f64 / n),
+            pct(losses.iter().filter(|x| x.1 > x.0 + 1e-9).count() as f64 / n)
+        );
+    }
     println!(
         "- 実際の試合のターン末どうしの差（後から見た運を含む）の平均 {}、引きを並べ直した差との相関 {}（どちらかのターンで試合が終わった局面を除く）\n",
         fixed(mean_se(&real.iter().map(|x| x.0).collect::<Vec<_>>()).0, 2),
@@ -1142,6 +1214,11 @@ fn report(argv: &[String]) -> Result<(), String> {
     table(
         "差の内訳（今の AI が深い読みのターンを選ばなかったのは、どの段階か）",
         &|v| category(v).to_string(),
+        false,
+    );
+    table(
+        "相手のリーサル（深い読みの引き直しで、相手のターンを読むと負けになる割合）",
+        &|v| loss_kind(v).to_string(),
         false,
     );
     table(
@@ -1303,14 +1380,20 @@ fn report(argv: &[String]) -> Result<(), String> {
                 println!("- {}", line.as_str().unwrap_or(""));
             }
         }
+        let loss_text = |s: &Value| match s["deepLoss"].as_f64() {
+            Some(l) if l > 0.0 => format!("、相手のリーサル {}", pct(l)),
+            _ => String::new(),
+        };
         println!(
-            "- **試合のターン**（深い読みの点数で勝率 {}%）: {}",
+            "- **試合のターン**（深い読みの点数で勝率 {}%{}）: {}",
             v["ai"]["deepWin"],
+            loss_text(&v["ai"]),
             steps(&v["ai"])
         );
         println!(
-            "- **深い読みのターン**（勝率 {}%）: {}\n",
+            "- **深い読みのターン**（勝率 {}%{}）: {}\n",
             v["deep"]["deepWin"],
+            loss_text(&v["deep"]),
             steps(&v["deep"])
         );
     }
@@ -1399,14 +1482,29 @@ mod tests {
             .map(|k| mix(pos_seed, 10_000 + k))
             .collect();
         let deep_agent = SearchAgent::new(cfg.deep.clone());
-        assert_eq!(
-            round2(score(&deep_agent, &deep_end, p, &seeds).value),
-            v["deep"]["deepValue"]
-        );
+        let sc = score(&deep_agent, &deep_end, p, &seeds);
+        assert_eq!(round2(sc.value), v["deep"]["deepValue"]);
+        assert_eq!(round2(sc.win), v["deep"]["deepWin"]);
+        assert_eq!(round2(sc.loss), v["deep"]["deepLoss"]);
+        // 勝率は引き直しごとの点数を勝率にしてからの平均。読み直した点数は引き直しごとの点数の平均
+        let reads = deep_agent.read_values(&deep_end, p, &seeds);
+        assert_eq!(reads.len(), seeds.len());
+        let mean = reads.iter().sum::<f64>() / reads.len() as f64;
+        assert!((mean - sc.read).abs() < 1e-9);
+        assert!((deep_agent.read_value(&deep_end, p, &seeds) - sc.read).abs() < 1e-9);
+        let m = deep_agent.opts.rescore_mix;
+        let te = sc.turn_end.unwrap();
+        let win = reads
+            .iter()
+            .map(|&r| win_pct((1.0 - m) * r + m * te))
+            .sum::<f64>()
+            / reads.len() as f64;
+        assert!((win - sc.win).abs() < 1e-9);
         // 引きを並べ直した差も、同じシードなら同じ
-        let (wins, _, same) = policy_gap(&start, p, &cfg, &deep_agent, pos_seed).unwrap();
-        assert_eq!(round2(mean_se(&wins).0), v["gapWin"]);
-        assert_eq!(json!(same), v["kSame"]);
+        let pg = policy_gap(&start, p, &cfg, &deep_agent, pos_seed).unwrap();
+        assert_eq!(round2(mean_se(&pg.wins).0), v["gapWin"]);
+        assert_eq!(json!(pg.same), v["kSame"]);
+        assert_eq!(pg.loss.len() as u32 + pg.same, cfg.k);
         // 最後まで打つ: m 回分、同じシードなら同じ結果
         let r1 = rollouts(&start, p, &cfg.deep, 2, 5);
         assert_eq!(r1.0.len(), 2);

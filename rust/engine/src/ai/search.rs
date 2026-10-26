@@ -1542,6 +1542,13 @@ impl SearchAgent {
     /// p のターン末の局面 end から相手のターンを読んだ後の点数（plan_turn の読み直しと同じ。
     /// 引き直しは seeds ごとに 1 回で、同じ seeds なら局面が違っても同じ乱数を使う）
     pub fn read_value(&self, end: &GameState, p: PlayerIndex, seeds: &[u32]) -> f64 {
+        let values = self.read_values(end, p, seeds);
+        values.iter().sum::<f64>() / values.len() as f64
+    }
+
+    /// read_value の、引き直し（seeds）ごとの点数（試合が終わった局面か seeds が空なら、その局面の点数 1 つ）。
+    /// 相手のリーサルがある引き直しは負けの点数（-1e6）になるので、勝率にしてから平均したいときに使う（runner/deep_gap.rs）
+    pub fn read_values(&self, end: &GameState, p: PlayerIndex, seeds: &[u32]) -> Vec<f64> {
         let env = self.env();
         let pl = Planner {
             env: &env,
@@ -1550,17 +1557,19 @@ impl SearchAgent {
             steps: Vec::new(),
         };
         if end.phase == Phase::Ended || seeds.is_empty() {
-            return pl.eval_state(end);
+            return vec![pl.eval_state(end)];
         }
         let settled = pl.settle(end);
         let base = settled.as_ref().unwrap_or(end);
-        let mut sum = 0.0;
-        for &seed in seeds {
-            let mut r = Rng::new(seed);
-            let d = determinize(base, p, &mut r, self.opts.peek_opp_hand);
-            sum += read_once(&pl, &d, &mut r).0;
-        }
-        sum / seeds.len() as f64 - pl.leftover(end)
+        let leftover = pl.leftover(end);
+        seeds
+            .iter()
+            .map(|&seed| {
+                let mut r = Rng::new(seed);
+                let d = determinize(base, p, &mut r, self.opts.peek_opp_hand);
+                read_once(&pl, &d, &mut r).0 - leftover
+            })
+            .collect()
     }
 
     /// 局面 root で p が打てる並びの、最初の手ごとにターン末の点数が最も高い終局面とその点数（ビームの候補。root を決定化せずに読む）
