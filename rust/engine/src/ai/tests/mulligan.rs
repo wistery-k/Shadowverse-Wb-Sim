@@ -259,6 +259,36 @@ fn turn1_mulligan_returns_every_copy_of_listed_cards() {
     }
 }
 
+#[test]
+fn turn1_mulligan_with_rollout_weights_is_legal_and_keeps_rng() {
+    // 先へ進める貪欲法の重みを変えても、先攻・後攻のどちらでも合法な手を選び、試合の乱数を進めない
+    use crate::ai::search::RolloutWeights;
+    let s = new_game(deck(DECK), deck(OTHER), 5);
+    let keep = legal_actions(&s)
+        .into_iter()
+        .find(|a| matches!(a, Action::Mulligan { swap, .. } if swap.is_empty()))
+        .unwrap();
+    let second = apply(&s, &keep);
+    for state in [&s, &second] {
+        let legal = legal_actions(state);
+        for w in [
+            RolloutWeights::Default,
+            RolloutWeights::Ramp,
+            RolloutWeights::Search,
+        ] {
+            let mut agent = crate::ai::search::SearchAgent::new(crate::ai::search::SearchOptions {
+                mulligan_samples: 4,
+                mulligan_rollout_weights: w,
+                ..Default::default()
+            });
+            let mut rng = Rng::new(17);
+            let a = agent.choose_action(state, &legal, &mut rng);
+            assert_eq!(rng.state, 17);
+            assert!(legal.contains(&a));
+        }
+    }
+}
+
 fn sample_agent(n: usize) -> crate::ai::search::SearchAgent {
     crate::ai::search::SearchAgent::new(crate::ai::search::SearchOptions {
         mulligan: crate::ai::search::MulliganMode::Sample,

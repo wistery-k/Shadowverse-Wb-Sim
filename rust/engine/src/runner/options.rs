@@ -7,7 +7,8 @@ use crate::ai::aidata::{weights_from, AI_DATA_JSON};
 use crate::ai::mulligan::OppMulligan;
 use crate::ai::rhino::{rhino_pass_lethal, rhino_search_options, RHINO_POTENTIAL};
 use crate::ai::search::{
-    ExtraEval, MulliganMode, OpponentSearch, OwnNextSearch, ScoreTurnEnd, SearchOptions,
+    ExtraEval, MulliganMode, OpponentSearch, OwnNextSearch, RolloutWeights, ScoreTurnEnd,
+    SearchOptions,
 };
 use crate::ai::valuenet::ValueNet;
 use crate::json::Json;
@@ -151,6 +152,19 @@ pub fn search_options(
             "mulliganTurns" => o.mulligan_turns = count(k, v)? as i32,
             "mulliganKeep" => o.mulligan_keep = card_names(k, v)?,
             "mulliganReturn" => o.mulligan_return = card_names(k, v)?,
+            "mulliganRolloutWeights" => {
+                o.mulligan_rollout_weights = match v {
+                    Json::Str(s) if s == "default" => RolloutWeights::Default,
+                    Json::Str(s) if s == "ramp" => RolloutWeights::Ramp,
+                    Json::Str(s) if s == "search" => RolloutWeights::Search,
+                    _ => {
+                        return Err(format!(
+                            "\"mulliganRolloutWeights\" は default / ramp / search: {}",
+                            v.stringify()
+                        ))
+                    }
+                }
+            }
             "mulliganRolloutBeam" => o.mulligan_rollout_beam = count(k, v)?,
             "mulliganOpp" => {
                 o.mulligan_opp = Some(match v {

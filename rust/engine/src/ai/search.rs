@@ -57,6 +57,17 @@ pub enum MulliganMode {
     Turn1,
 }
 
+/// MulliganMode::Turn1 で貪欲法で先へ進めるときの重み（`mulliganRolloutWeights`。docs/ai-notes.md「打ち進める手に PP 最大値を見せる」）
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RolloutWeights {
+    /// 既定の重み（貪欲法の AI と同じ。PP 最大値の項 maxPp は 0 なので、竜の啓示を打たない）
+    Default,
+    /// 既定の重みの maxPp だけを探索の重みの値にする
+    Ramp,
+    /// 探索の重み
+    Search,
+}
+
 impl MulliganMode {
     /// デフォルトデッキごとに推定したモデルか重みを使う（それ以外のデッキでは使えない）
     pub fn needs_deck_model(self) -> bool {
@@ -118,6 +129,8 @@ pub struct SearchOptions {
     /// MulliganMode::Turn1 で、初手にあれば全部を必ず返すカード（返し方の候補を、それを全部返すものに絞る。比べ用。
     /// docs/ai-notes.md「鬼呼びの術・ベイルを残しすぎていないか」）
     pub mulligan_return: Vec<crate::data::CardIdx>,
+    /// MulliganMode::Turn1 で貪欲法（mulligan_rollout_beam 0）で先へ進めるときの重み
+    pub mulligan_rollout_weights: RolloutWeights,
     pub settle_trades: bool,
     /// 下位互換の味方で同じことができる攻撃を展開せず、合流する相打ちも下位互換の味方で打つ（converging.rs の dominated_attack）
     pub dominance: bool,
@@ -192,6 +205,7 @@ impl Default for SearchOptions {
             mulligan_keep: Vec::new(),
             mulligan_opp: None,
             mulligan_return: Vec::new(),
+            mulligan_rollout_weights: RolloutWeights::Default,
             settle_trades: true,
             dominance: true,
             reuse_plan: true,
@@ -1887,7 +1901,15 @@ impl Agent for SearchAgent {
                 };
                 let extra = opts.extra_eval.clone().filter(|_| opts.mulligan_net);
                 let w = &self.w;
-                let default_w = self.default_w.clone();
+                let default_w = match opts.mulligan_rollout_weights {
+                    RolloutWeights::Default => self.default_w.clone(),
+                    RolloutWeights::Ramp => {
+                        let mut x = self.default_w.w.clone();
+                        x.max_pp = self.w.w.max_pp;
+                        EvalWeights::new(x)
+                    }
+                    RolloutWeights::Search => self.w.clone(),
+                };
                 let beam = opts.mulligan_rollout_beam;
                 // 先へ進めるときの手: 幅 beam のビーム（読み直しは 1 手・相手は貪欲法・リーサル探索なし）か、0 なら貪欲法
                 let rollout = SearchOptions {

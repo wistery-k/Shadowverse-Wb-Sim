@@ -23,7 +23,9 @@ use super::options::{compare_options, model_eval};
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
 use crate::ai::aidata::{weights_from, Weights};
-use crate::ai::search::{MulliganMode, OpponentSearch, ScoreTurnEnd, SearchAgent, SearchOptions};
+use crate::ai::search::{
+    MulliganMode, OpponentSearch, RolloutWeights, ScoreTurnEnd, SearchAgent, SearchOptions,
+};
 use crate::ai::valuenet::ValueNet;
 use crate::ai::Agent;
 use crate::canonical::{action_canon, fnv};
@@ -73,6 +75,7 @@ pub fn reference_options() -> SearchOptions {
         mulligan_keep: Vec::new(),
         mulligan_opp: None,
         mulligan_return: Vec::new(),
+        mulligan_rollout_weights: RolloutWeights::Default,
         settle_trades: true,
         dominance: true,
         reuse_plan: true,
@@ -152,6 +155,7 @@ pub fn strong_reference_options() -> SearchOptions {
         mulligan_keep: Vec::new(),
         mulligan_opp: None,
         mulligan_return: Vec::new(),
+        mulligan_rollout_weights: RolloutWeights::Default,
         settle_trades: true,
         dominance: true,
         reuse_plan: true,
