@@ -5,6 +5,7 @@ Claude Code の Remote Control（`claude remote-control`）を Docker のコン�
 コンテナの中だけになる。
 
 - `Dockerfile`: Node 22・Rust（stable と `wasm32-unknown-unknown`。CI と同じ）・Claude Code（公式のインストーラ）を入れたイメージ
+- `entrypoint.sh`: 起動のたびに `~/svwb-data` の中のフォルダへのリンクを `~` に作る（下の「自己対戦などのデータ」）
 - `compose.yaml`: リポジトリを `/workspace` に、ホストの `~/svwb-data`（自己対戦などの置き場所）をコンテナの `~/svwb-data` に見せ、
   ログイン情報と設定を名前付きボリュームに残し、`claude remote-control` を常駐させる
 
@@ -61,21 +62,28 @@ Claude Code の Remote Control（`claude remote-control`）を Docker のコン�
 
 ## 自己対戦などのデータ（`~/svwb-data`）
 
-ホストの `~/svwb-data` は、コンテナの中でも同じ `~/svwb-data`（`/home/wk/svwb-data`）に見える。自己対戦・モデル・ログ・
-`pack-run` の出力などは、ホストでもコンテナでもここに置く。コンテナの中で `/workspace` と `~/svwb-data` 以外に書いたもの
-（`~/td-royal` など）は、コンテナを作り直すと消える。リポジトリの外なので、`git clean` で消えることもない。
+ホストの `~/svwb-data` は、コンテナの中でも同じ `~/svwb-data`（`/home/wk/svwb-data`）に見える（コピーではないので、
+どちらで書いても両方から見える）。自己対戦・モデル・ログ・`pack-run` の出力などは、ホストでもコンテナでもここに置く。
+リポジトリの外なので、`git clean` で消えることもない。
 
-今まで `~` の直下に置いていたフォルダは、ホストで `~/svwb-data` に移す（同じディスクの中なら一瞬で終わる）。
-その後 `docker compose up -d` でコンテナを作り直すと、つながる。
+コンテナは起動するたびに、`~/svwb-data` の中のフォルダごとに `~` にリンクを作る（`~/td-royal` → `~/svwb-data/td-royal`。
+`entrypoint.sh`）。`/home/wk/td-royal/...` のように書いたスクリプトやメモが、コンテナでもそのまま使える。
+ただし、コンテナの中で新しく作るフォルダは `~/svwb-data` の下に作る。`~/td-new` のように `~` の直下に作ると、
+コンテナを作り直したときに消える（`/workspace` と `~/svwb-data` 以外はすべて消える）。
+
+今まで `~` の直下に置いていたフォルダは、ホストで `~/svwb-data` に移し、元の場所にリンクを残す（ホストのスクリプトもそのまま動く。
+同じディスクの中なら一瞬で終わる。2 回流しても壊れない）。自己対戦を回していないときに流す。
 
 ```sh
 mkdir -p ~/svwb-data
-cd ~ && mv td-royal td-round6 svwb-upload ~/svwb-data/   # 移したいフォルダを並べる
-cd ~/Shadowverse-Wb-Sim/docker/remote-control && docker compose up -d
+cd ~ && for d in td-* svwb-upload; do   # 移したいフォルダを並べる
+  [ -d "$d" ] && [ ! -L "$d" ] || continue
+  mv "$d" svwb-data/ && ln -s "svwb-data/$d" "$d" && echo "移した: ~/$d"
+done
+cd ~/Shadowverse-Wb-Sim/docker/remote-control && docker compose build && docker compose up -d
 ```
 
-ホストで今までの場所のままでも使いたいなら、`ln -s ~/svwb-data/td-royal ~/td-royal` のようにリンクを残す。
-フォルダの中のスクリプト（`.sh`）が `~/td-royal` のような場所を書いていたら、コンテナでは `~/svwb-data/td-royal` に直す。
+最後の行でコンテナを作り直すと、つながる（コンテナが動いている間に `~/svwb-data` に足したフォルダのリンクは、次に起動したときにできる）。
 置き場所を変えたいときは `.env` に `SVWB_DATA=/path/to/data` と書く。
 
 ## ふだんの操作

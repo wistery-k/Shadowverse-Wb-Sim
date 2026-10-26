@@ -36,4 +36,8 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
 ENV CLAUDE_CONFIG_DIR=/home/$USERNAME/.claude
 
 WORKDIR /workspace
+
+# 起動のたびに ~/svwb-data の中のフォルダへのリンクを ~ に作ってから、コマンドを流す（entrypoint.sh）
+COPY --chmod=755 entrypoint.sh /usr/local/bin/svwb-entrypoint
+ENTRYPOINT ["/usr/local/bin/svwb-entrypoint"]
 CMD ["claude", "remote-control"]
