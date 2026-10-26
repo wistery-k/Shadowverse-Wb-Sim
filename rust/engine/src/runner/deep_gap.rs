@@ -1273,10 +1273,11 @@ fn report(argv: &[String]) -> Result<(), String> {
                 fixed(correlation(&pairs), 2)
             );
             if sel == "random" {
+                let per_game = differ.len() as f64 / n_games as f64;
                 println!(
-                    "- 1 試合あたりの目安（食い違い {} 局面 × 最後まで打った差の平均）: {} ポイント。深い読みのとおりに打てたら、の大きさ（局面どうしの重なりは無視）",
-                    fixed(differ.len() as f64 / n_games as f64, 1),
-                    fixed(am * differ.len() as f64 / n_games as f64, 1)
+                    "- 1 試合あたりの目安（食い違い {} 局面 × 最後まで打った差の平均）: {} ポイント。そのターンだけ深い読みのとおりに打てたら、の足し合わせ（続きは今の AI。局面どうしの重なりは無視）",
+                    fixed(per_game, 1),
+                    pm(am * per_game, ase * per_game, 1)
                 );
             }
             let mut groups: BTreeMap<&str, Vec<(f64, f64)>> = BTreeMap::new();
