@@ -28,13 +28,14 @@ use super::deep_gap::{
 };
 use super::fixed;
 use super::human_plan::{is_start_of_turn, mean_se, mix};
+use super::options::compare_options;
 use super::parallel::parallel_map;
 use crate::ai::determinize::determinize;
 use crate::ai::exact_lethal::reset_exact_lethal_cache;
 use crate::ai::lethal::reset_lethal;
 use crate::ai::search::{Allow, SearchAgent, SearchOptions};
 use crate::ai::{Agent, Rng};
-use crate::data::{data, CardIdx};
+use crate::data::{data, CardIdx, BARRIER};
 use crate::game::{acting_player, apply_legal, create_game, legal_actions};
 use crate::json::Json;
 use crate::state::{leader_id, opponent, Action, Evolve, GameState, Phase, PlayerIndex};
@@ -63,6 +64,8 @@ enum Step {
     Act(&'static str),
     /// 選択待ちで、相手の場のカード（None なら相手のリーダー）1 枚を選ぶ
     Choose(Option<&'static str>),
+    /// 選択待ちで、モードを選ぶ（0 から数える）
+    Mode(usize),
 }
 
 /// 候補のターン
@@ -100,6 +103,10 @@ struct Put {
     /// このターンに出たばかり（攻撃できない）
     fresh: bool,
     evolve: Evolve,
+    /// 土の印の数（土の印のアミュレット）
+    sigils: Option<i32>,
+    /// バリアを持つ
+    barrier: bool,
 }
 
 const fn put(name: &'static str) -> Put {
@@ -108,6 +115,8 @@ const fn put(name: &'static str) -> Put {
         stats: None,
         fresh: false,
         evolve: Evolve::None,
+        sigils: None,
+        barrier: false,
     }
 }
 
@@ -134,6 +143,12 @@ struct Edit {
     my_hand: Vec<HandSpec>,
     my_board: Vec<Put>,
     opp_board: Vec<Put>,
+    /// 相手の手札（空なら自己対戦のまま）
+    opp_hand: Vec<HandSpec>,
+    /// 相手の PP 最大値・EP・SEP
+    opp_max_pp: Option<i32>,
+    opp_ep: Option<i32>,
+    opp_sep: Option<i32>,
 }
 
 struct Scenario {
@@ -147,6 +162,8 @@ struct Scenario {
     seed: u32,
     /// 自分のターン数（このターンの最初まで打つ）
     turn: i32,
+    /// 自分が先攻か（None ならどちらでも）
+    first: Option<bool>,
     edit: fn() -> Edit,
     cands: fn() -> Vec<Cand>,
 }
@@ -160,6 +177,7 @@ const SCENARIOS: &[Scenario] = &[
         decks: ["疾走ドラゴン", "アマリアロイヤル"],
         seed: 11,
         turn: 9,
+        first: None,
         edit: || Edit {
             my_hp: Some(18),
             opp_hp: Some(14),
@@ -174,6 +192,7 @@ const SCENARIOS: &[Scenario] = &[
             ],
             my_board: vec![put("猛撃のドラゴンウォーリアー")],
             opp_board: vec![put("王断の天宮・スタチウム"), put("スティールナイト")],
+            ..Edit::default()
         },
         cands: || {
             vec![
@@ -204,6 +223,7 @@ const SCENARIOS: &[Scenario] = &[
         decks: ["リノセウスエルフ", "ミッドレンジナイトメア"],
         seed: 21,
         turn: 7,
+        first: None,
         edit: || Edit {
             my_hp: Some(20),
             opp_hp: Some(6),
@@ -220,6 +240,7 @@ const SCENARIOS: &[Scenario] = &[
             ],
             my_board: vec![],
             opp_board: vec![put("辣腕の死神・ミーノ"), put("燃え盛る魔剣・オルトロス")],
+            ..Edit::default()
         },
         cands: || {
             vec![
@@ -240,6 +261,7 @@ const SCENARIOS: &[Scenario] = &[
         decks: ["疾走ドラゴン", "アマリアロイヤル"],
         seed: 11,
         turn: 9,
+        first: None,
         edit: || Edit {
             my_hp: Some(18),
             opp_hp: Some(14),
@@ -254,6 +276,7 @@ const SCENARIOS: &[Scenario] = &[
             ],
             my_board: vec![put("猛撃のドラゴンウォーリアー")],
             opp_board: vec![put("レヴィオンアックス・ジェノ"), put("スティールナイト")],
+            ..Edit::default()
         },
         cands: || {
             vec![
@@ -288,6 +311,7 @@ const SCENARIOS: &[Scenario] = &[
         decks: ["リノセウスエルフ", "ミッドレンジナイトメア"],
         seed: 21,
         turn: 7,
+        first: None,
         edit: || Edit {
             my_hp: Some(20),
             opp_hp: Some(6),
@@ -309,6 +333,7 @@ const SCENARIOS: &[Scenario] = &[
                 put("スケルトン"),
                 put("スケルトン"),
             ],
+            ..Edit::default()
         },
         cands: || {
             vec![
@@ -329,6 +354,7 @@ const SCENARIOS: &[Scenario] = &[
         decks: ["スペルウィッチ", "アマリアロイヤル"],
         seed: 31,
         turn: 9,
+        first: None,
         edit: || Edit {
             my_hp: Some(18),
             opp_hp: Some(10),
@@ -354,6 +380,7 @@ const SCENARIOS: &[Scenario] = &[
                 put("スティールナイト"),
                 put("スティールナイト"),
             ],
+            ..Edit::default()
         },
         cands: || {
             vec![
@@ -381,6 +408,7 @@ const SCENARIOS: &[Scenario] = &[
         decks: ["アマリアロイヤル", "ミッドレンジナイトメア"],
         seed: 41,
         turn: 8,
+        first: None,
         edit: || Edit {
             my_hp: Some(18),
             opp_hp: Some(12),
@@ -399,6 +427,7 @@ const SCENARIOS: &[Scenario] = &[
                 put("悪辣のレッサーマミー"),
                 put("辣腕の死神・ミーノ"),
             ],
+            ..Edit::default()
         },
         cands: || {
             vec![
@@ -425,6 +454,7 @@ const SCENARIOS: &[Scenario] = &[
         decks: ["アマリアロイヤル", "AFネメシス"],
         seed: 51,
         turn: 7,
+        first: None,
         edit: || Edit {
             my_hp: Some(18),
             opp_hp: Some(15),
@@ -439,6 +469,7 @@ const SCENARIOS: &[Scenario] = &[
             ],
             my_board: vec![put("異端の侍"), put("ナイト"), put("スティールナイト")],
             opp_board: vec![put("アンストッパブルガンナー")],
+            ..Edit::default()
         },
         cands: || {
             vec![
@@ -465,6 +496,7 @@ const SCENARIOS: &[Scenario] = &[
         decks: ["スペルウィッチ", "アマリアロイヤル"],
         seed: 61,
         turn: 5,
+        first: None,
         edit: || Edit {
             my_hp: Some(18),
             opp_hp: Some(17),
@@ -480,6 +512,7 @@ const SCENARIOS: &[Scenario] = &[
             ],
             my_board: vec![],
             opp_board: vec![put("ナイト"), put("スティールナイト"), put("異端の侍")],
+            ..Edit::default()
         },
         cands: || {
             vec![
@@ -510,6 +543,7 @@ const SCENARIOS: &[Scenario] = &[
         decks: ["リノセウスエルフ", "AFネメシス"],
         seed: 71,
         turn: 4,
+        first: None,
         edit: || Edit {
             my_hp: Some(18),
             opp_hp: Some(19),
@@ -526,6 +560,7 @@ const SCENARIOS: &[Scenario] = &[
             ],
             my_board: vec![],
             opp_board: vec![put("マリオネットランサー"), put("ビビッドインベンター・イリス")],
+            ..Edit::default()
         },
         cands: || {
             vec![
@@ -552,6 +587,7 @@ const SCENARIOS: &[Scenario] = &[
         decks: ["疾走ドラゴン", "アマリアロイヤル"],
         seed: 81,
         turn: 6,
+        first: None,
         edit: || Edit {
             my_hp: Some(18),
             opp_hp: Some(13),
@@ -567,6 +603,7 @@ const SCENARIOS: &[Scenario] = &[
             ],
             my_board: vec![],
             opp_board: vec![put("スティールナイト"), put("王断の天宮・スタチウム")],
+            ..Edit::default()
         },
         cands: || {
             vec![
@@ -593,6 +630,7 @@ const SCENARIOS: &[Scenario] = &[
         decks: ["ミッドレンジナイトメア", "スペルウィッチ"],
         seed: 91,
         turn: 7,
+        first: None,
         edit: || Edit {
             my_hp: Some(16),
             opp_hp: Some(12),
@@ -608,6 +646,7 @@ const SCENARIOS: &[Scenario] = &[
             ],
             my_board: vec![put("燃え盛る魔剣・オルトロス")],
             opp_board: vec![put("アドラブルティーチャー・ミラ"), put("魔法の薬剤師・ペネロピー")],
+            ..Edit::default()
         },
         cands: || {
             vec![
@@ -627,6 +666,121 @@ const SCENARIOS: &[Scenario] = &[
                     name: "control",
                     desc: "顔を攻撃しない（蛇神の怒りの顔は攻撃ではないので打てる。残りは AI）",
                     no_face: true,
+                    ..Cand::default()
+                },
+            ]
+        },
+    },
+    Scenario {
+        name: "witch-riko-wait",
+        title: "スペルウィッチ: 理光の証明（全体 4）を次のターンまで我慢する（ユーザーの案）",
+        note: "先攻 3 ターン目、PP 3。土の印 3 の大地の魔片がある。相手（ロイヤル）の場はルミナスランサー 1/2 とナイト 1/1 だけ。今打つと 2 体しか取れない。待てば相手が並べた後に打てる",
+        decks: ["スペルウィッチ", "アマリアロイヤル"],
+        seed: 101,
+        turn: 3,
+        first: Some(true),
+        edit: || Edit {
+            my_hp: Some(20),
+            opp_hp: Some(20),
+            max_pp: Some(3),
+            ep: None,
+            sep: None,
+            my_hand: vec![
+                hand("五行の果て・クオン"),
+                hand("マナリアフレンズ・アン＆グレア"),
+                hand("理光の証明"),
+                hand("五行の果て・クオン"),
+                hand("マナリアフレンズ・アン＆グレア"),
+            ],
+            my_board: vec![Put {
+                sigils: Some(3),
+                ..put("大地の魔片")
+            }],
+            opp_board: vec![put("勇猛のルミナスランサー"), put("ナイト")],
+            ..Edit::default()
+        },
+        cands: || {
+            vec![
+                ai_cand(),
+                Cand {
+                    name: "wait",
+                    desc: "理光の証明をプレイしない（残りは AI）",
+                    no_play: vec!["理光の証明"],
+                    ..Cand::default()
+                },
+                Cand {
+                    name: "riko-now",
+                    desc: "理光の証明を全体 4 ダメージで打つ（残りは AI）",
+                    prefix: vec![Step::Play("理光の証明"), Step::Mode(2)],
+                    ..Cand::default()
+                },
+            ]
+        },
+    },
+    Scenario {
+        name: "witch-kuon-pass",
+        title: "スペルウィッチ: 次のターンに確定で勝てるので何もせずターンを終える（ユーザーの案）",
+        note: "先攻 9 ターン目、PP 9、SEP 1。土の印 8。相手 HP 8 で場は超進化エミリア 7/7・バリアの御者・バリアのワルツで 3 面。\
+               次のターンにクオン（エンハンス 10）で貴人 10/10 を出し、クオンの超進化で疾走を付ければ勝ち。\
+               相手の回復はオリヴィエの 2 点まで、場が埋まっているので守護も 1 面まで。今クオンを超進化すると SEP がなくなり、\
+               相手の場を減らすと守護が並ぶ",
+        decks: ["スペルウィッチ", "アマリアロイヤル"],
+        seed: 101,
+        turn: 9,
+        first: Some(true),
+        edit: || Edit {
+            my_hp: Some(18),
+            opp_hp: Some(8),
+            max_pp: Some(9),
+            ep: Some(0),
+            sep: Some(1),
+            my_hand: vec![
+                hand("アドラブルティーチャー・ミラ"),
+                hand("アドラブルティーチャー・ミラ"),
+                hand("理光の証明"),
+                hand("五行の果て・クオン"),
+            ],
+            my_board: vec![Put {
+                sigils: Some(8),
+                ..put("大地の魔片")
+            }],
+            opp_board: vec![
+                Put {
+                    evolve: Evolve::SuperEvolved,
+                    ..put("白銀の騎士団長・エミリア")
+                },
+                Put {
+                    barrier: true,
+                    ..put("王家の御者")
+                },
+                Put {
+                    barrier: true,
+                    ..put("サイレントスナイパー・ワルツ")
+                },
+            ],
+            opp_hand: vec![
+                hand("勇壮の堕天使・オリヴィエ"),
+                hand("レヴィオンアックス・ジェノ"),
+                hand("白銀の騎士団長・エミリア"),
+                hand("卓越のルミナスメイジ"),
+            ],
+            opp_max_pp: Some(8),
+            opp_ep: Some(0),
+            opp_sep: Some(0),
+        },
+        cands: || {
+            vec![
+                ai_cand(),
+                Cand {
+                    name: "pass",
+                    desc: "カードをプレイせず、進化もしない（大地の魔片のアクトは AI 任せ）",
+                    no_play: vec![
+                        "アドラブルティーチャー・ミラ",
+                        "理光の証明",
+                        "五行の果て・クオン",
+                    ],
+                    no_evolve: true,
+                    no_super: true,
                     ..Cand::default()
                 },
             ]
@@ -653,10 +807,18 @@ fn deck_cards(name: &str) -> Result<Vec<CardIdx>, String> {
 }
 
 /// 今の AI どうしの自己対戦を、席 0 の turn ターン目の最初まで打つ（途中で試合が終われば None）
-fn self_play_to(decks: [&[CardIdx]; 2], seed: u32, turn: i32) -> Option<GameState> {
+fn self_play_to(
+    decks: [&[CardIdx]; 2],
+    seed: u32,
+    turn: i32,
+    first: Option<bool>,
+) -> Option<GameState> {
     reset_lethal();
     reset_exact_lethal_cache();
     let mut s = create_game(decks, seed);
+    if first.is_some_and(|f| f != (s.first == ME)) {
+        return None;
+    }
     let mut agents = [
         SearchAgent::new(SearchOptions::default()),
         SearchAgent::new(SearchOptions::default()),
@@ -720,7 +882,35 @@ fn place(s: &mut GameState, q: PlayerIndex, b: &Put) -> Result<(), String> {
             x.max_defense = x.max_defense.max(d);
         }
     }
+    if b.sigils.is_some() {
+        x.sigils = b.sigils;
+    }
+    if b.barrier {
+        x.keywords = x.keywords.with(BARRIER);
+    }
     s.players[q].board.make_mut().push(x);
+    Ok(())
+}
+
+/// 手札: 今の手札を山札に戻し、書いたカードを（山札にあれば山札から抜いて）入れる
+fn set_hand(s: &mut GameState, p: PlayerIndex, hand: &[HandSpec]) -> Result<(), String> {
+    let old: Vec<_> = s.players[p].hand.iter().cloned().collect();
+    s.players[p].hand.make_mut().clear();
+    for h in old {
+        s.return_to_deck(p, h);
+    }
+    for hs in hand {
+        let c = card_id(hs.name)?;
+        take_from_deck(s, p, c);
+        let mut h = s.new_hand_card(c, None);
+        if hs.boosts > 0 {
+            h.boosts = hs.boosts;
+            if let Some(x) = h.x {
+                h.x = Some(x + hs.boosts);
+            }
+        }
+        s.players[p].hand.make_mut().push(h);
+    }
     Ok(())
 }
 
@@ -729,8 +919,8 @@ fn build(sc: &Scenario) -> Result<GameState, String> {
     let d0 = deck_cards(sc.decks[0])?;
     let d1 = deck_cards(sc.decks[1])?;
     let mut base = None;
-    for k in 0..20 {
-        if let Some(s) = self_play_to([&d0, &d1], sc.seed + k * 1000, sc.turn) {
+    for k in 0..40 {
+        if let Some(s) = self_play_to([&d0, &d1], sc.seed + k * 1000, sc.turn, sc.first) {
             base = Some(s);
             break;
         }
@@ -754,23 +944,19 @@ fn build(sc: &Scenario) -> Result<GameState, String> {
     if let Some(v) = e.sep {
         s.players[ME].sep = v;
     }
-    // 手札: 今の手札を山札に戻し、書いたカードを（山札にあれば山札から抜いて）入れる
-    let old: Vec<_> = s.players[ME].hand.iter().cloned().collect();
-    s.players[ME].hand.make_mut().clear();
-    for h in old {
-        s.return_to_deck(ME, h);
+    if let Some(v) = e.opp_max_pp {
+        s.players[o].max_pp = v;
+        s.players[o].pp = s.players[o].pp.min(v);
     }
-    for hs in &e.my_hand {
-        let c = card_id(hs.name)?;
-        take_from_deck(&mut s, ME, c);
-        let mut h = s.new_hand_card(c, None);
-        if hs.boosts > 0 {
-            h.boosts = hs.boosts;
-            if let Some(x) = h.x {
-                h.x = Some(x + hs.boosts);
-            }
-        }
-        s.players[ME].hand.make_mut().push(h);
+    if let Some(v) = e.opp_ep {
+        s.players[o].ep = v;
+    }
+    if let Some(v) = e.opp_sep {
+        s.players[o].sep = v;
+    }
+    set_hand(&mut s, ME, &e.my_hand)?;
+    if !e.opp_hand.is_empty() {
+        set_hand(&mut s, o, &e.opp_hand)?;
     }
     s.players[ME].board.make_mut().clear();
     for b in &e.my_board {
@@ -872,6 +1058,7 @@ fn resolve(s: &GameState, p: PlayerIndex, step: &Step, legal: &[Action]) -> Resu
                 .map(|b| Action::Act(b.iid))
                 .find(|a| legal.contains(a))
         }
+        Step::Mode(i) => Some(Action::Mode(i)).filter(|a| legal.contains(a)),
         Step::Choose(t) => {
             let targets: Vec<i32> = match t {
                 None => vec![leader_id(opponent(p))],
@@ -899,12 +1086,17 @@ fn play_cand(
     p: PlayerIndex,
     c: &Cand,
     seed: u32,
+    agent_opts: Option<&str>,
 ) -> Result<(Vec<Action>, GameState), String> {
     reset_lethal();
     reset_exact_lethal_cache();
+    let base = match agent_opts {
+        Some(t) => compare_options(t)?,
+        None => SearchOptions::default(),
+    };
     let opts = SearchOptions {
         allow: allow_of(c)?,
-        ..SearchOptions::default()
+        ..base
     };
     let mut agent = SearchAgent::new(opts);
     let mut rng = Rng::new(seed);
@@ -919,7 +1111,7 @@ fn play_cand(
             return Err("ターンの途中で相手の手番になりました".into());
         }
         let legal = legal_actions(&t);
-        let next_is_choose = matches!(c.prefix.get(k), Some(Step::Choose(_)));
+        let next_is_choose = matches!(c.prefix.get(k), Some(Step::Choose(_) | Step::Mode(_)));
         let a = if k < c.prefix.len() && (t.pending.is_none() != next_is_choose) {
             let a = resolve(&t, p, &c.prefix[k], &legal)?;
             k += 1;
@@ -945,6 +1137,8 @@ struct RunConfig {
     twos: u32,
     next_beam: usize,
     seed: u32,
+    /// 候補のターンを打つ AI の設定（compare の設定の JSON。None なら既定）
+    opts: Option<String>,
 }
 
 /// 局面 sc の r 通り目（決定化 1 つ）で、候補ごとにターンを打ち、点数と最後まで打った勝ち負けを書く
@@ -963,7 +1157,7 @@ fn run_one(sc: &Scenario, state_text: &str, r: u32, cfg: &RunConfig) -> Result<V
     let mut ends: Vec<Option<GameState>> = Vec::new();
     for c in (sc.cands)() {
         let res = catch_unwind(AssertUnwindSafe(|| {
-            play_cand(&det, p, &c, mix(base_seed, 200 + r))
+            play_cand(&det, p, &c, mix(base_seed, 200 + r), cfg.opts.as_deref())
         }))
         .unwrap_or_else(|_| Err("途中で止まりました（panic）".into()));
         let (actions, end) = match res {
@@ -1115,7 +1309,9 @@ fn run(argv: &[String]) -> Result<(), String> {
     }
     check_flags(
         &flags,
-        &["out", "only", "m", "reads", "twos", "nextBeam", "seed"],
+        &[
+            "out", "only", "m", "reads", "twos", "nextBeam", "seed", "opts",
+        ],
     )?;
     let out = flag(&flags, "out").ok_or("--out を渡してください")?;
     let cfg = RunConfig {
@@ -1124,7 +1320,11 @@ fn run(argv: &[String]) -> Result<(), String> {
         twos: num_flag(&flags, "twos", 2)?.max(1),
         next_beam: num_flag(&flags, "nextBeam", 256)?.max(1) as usize,
         seed: num_flag(&flags, "seed", 1)?,
+        opts: flag(&flags, "opts").map(str::to_string),
     };
+    if let Some(t) = &cfg.opts {
+        compare_options(t)?;
+    }
     let scs = pick(flag(&flags, "only"))?;
     // 局面は先に作って JSON にしておく（局面はスレッドをまたげないため）
     let t0 = Instant::now();
@@ -1165,7 +1365,7 @@ fn run(argv: &[String]) -> Result<(), String> {
     }
     let mut file = open_append(out)?;
     let header = json!({
-        "config": {"m": cfg.m, "reads": cfg.reads, "twos": cfg.twos, "nextBeam": cfg.next_beam, "seed": cfg.seed},
+        "config": {"m": cfg.m, "reads": cfg.reads, "twos": cfg.twos, "nextBeam": cfg.next_beam, "seed": cfg.seed, "opts": cfg.opts},
         "scenarios": texts.iter().map(|(sc, t)| json!({"s": sc.name, "state": t})).collect::<Vec<_>>(),
     });
     if done.is_empty() {
@@ -1409,7 +1609,7 @@ fn trace(argv: &[String]) -> Result<(), String> {
     if !rest.is_empty() {
         return Err(format!("不明な引数: {}", rest.join(" ")));
     }
-    check_flags(&flags, &["only", "cand", "r", "seed"])?;
+    check_flags(&flags, &["only", "cand", "r", "seed", "opts"])?;
     let sc = pick(flag(&flags, "only"))?
         .into_iter()
         .next()
@@ -1425,7 +1625,7 @@ fn trace(argv: &[String]) -> Result<(), String> {
     let p = ME;
     let base_seed = mix(seed, sc.seed);
     let det = determinize(&start, p, &mut Rng::new(mix(base_seed, 100 + r)), false);
-    let (actions, end) = play_cand(&det, p, &c, mix(base_seed, 200 + r))?;
+    let (actions, end) = play_cand(&det, p, &c, mix(base_seed, 200 + r), flag(&flags, "opts"))?;
     println!("## 候補 {}（決定化 {r}）", c.name);
     for t in steps_of(&det, &actions, p) {
         println!("- {t}");
