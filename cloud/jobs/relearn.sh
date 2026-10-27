@@ -4,6 +4,8 @@
 # 学習データに出なかった入力を 0 にして（td prune）、学んでいないカードの行を属性の分で埋め（td attr --keepA 0）、
 # 今の既定の AI と打ち比べる（compare。選ぶのに使う試合と、確かめの試合）。強い相手・弱い相手の物差しとリノセウス用 AI も測る。
 # 打ち方・学び方は今までの学び直しの手順（docs/ai-notes.md の「今の AI」の「補正を学び直すときの手順」）と同じ。
+# 学習の出発点の評価 S は 0（BASE=zero、td train --base zero。手で作った評価を使わず補正だけで点数を付ける。2026-10-27 のユーザー判断、
+# docs/ai-notes.md「評価関数の手作りの項を外す」）。今までどおり S ありで学ぶなら BASE=search。
 #
 # PC で（既定。リポジトリの一番上で。Docker のコンテナでは ~/svwb-data の下に置く）:
 #   mkdir -p ~/svwb-data/td-relearn7 && CLOUD_W=~/svwb-data/td-relearn7 bash cloud/jobs/relearn.sh 2>&1 | tee -a ~/svwb-data/td-relearn7/relearn.log
@@ -28,6 +30,7 @@ IV=${IV:-3}                    # 介入の数（今までの学び直しの手�
 SP_EXTRA=${SP_EXTRA:-}         # td selfplay に足す引数（打つ手を変えないもの。例: --sDefault 1）
 LR=${LR:-0.0003}
 EPOCHS=${EPOCHS:-3}
+BASE=${BASE:-zero}             # 学習の出発点の評価 S（td train --base。zero・default・search）
 CMP=${CMP:-3000}               # 今の既定の AI との比べの組の数（試合はその 2 倍）。g0 から
 CMP2=${CMP2:-3000}             # 確かめの組の数。g$CMP から（選ぶのに使っていない試合）
 YS=${YS:-1000}                 # 物差しの組の数（強い相手・弱い相手。試合はその 2 倍）
@@ -79,10 +82,10 @@ if [ ! -f "$MPA" ]; then
   if [ ! -f "$M" ]; then
     restore
     npm run -s td -- train --model "$W/net0.json" --data "$DATA" --out "$M.tmp" \
-      --epochs "$EPOCHS" --lr "$LR" --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 > "$W/$NAME-train.log" 2>&1
+      --epochs "$EPOCHS" --lr "$LR" --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base "$BASE" > "$W/$NAME-train.log" 2>&1
     mv "$M.tmp" "$M"
   fi
-  echo "== 学習 $NAME $(date '+%m-%d %H:%M')"; grep -hE "^(学習前|エポック|確かめ用|補正)" "$W/$NAME-train.log" | cut -c1-240
+  echo "== 学習 $NAME $(date '+%m-%d %H:%M')"; grep -hE "^(出発点|学習前|エポック|確かめ用|補正)" "$W/$NAME-train.log" | cut -c1-240
 
   # 3. 学習データに出なかった入力を 0 にし（td prune）、学んでいないカードの行を属性の分で埋める（td attr --keepA 0、λ 3）
   if [ ! -f "$MP" ]; then
@@ -124,7 +127,7 @@ echo "== 今の既定 rhino"; tail -n 4 "$W/cur-rhino.log"
 # まとめ
 pct() { grep -m 1 -oE '[0-9]+/[0-9]+ = [0-9.]+%' "$1" || true; }
 {
-  echo "# 補正の学び直し（$NAME、出発点 $NET0、自己対戦 $G 試合・g$SEED0〜）"
+  echo "# 補正の学び直し（$NAME、出発点 $NET0、S は --base $BASE、自己対戦 $G 試合・g$SEED0〜）"
   echo
   echo "| 判定 | 勝率 |"
   echo "| --- | ---: |"

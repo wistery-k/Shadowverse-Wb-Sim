@@ -417,6 +417,8 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
   形は `weights` と同じ。書かなければ `weights` と同じ（今までどおり）。自分の評価だけを変えて、読みの中の相手の打ち方は変えないときに `"search"` を渡す
   （例: `'{"weights":"default","policyWeights":"search"}'`）。`baseWeights` のあるモデルを `valueNet` で使うと、書かなければ `"search"` になる
 - `valueNet`: 学習した補正のファイル名か `false`（補正なし）。モデルに `baseWeights` があれば、自分の評価の重みを探索の既定の重みにそれを重ねたものにする
-  （`weights` がオブジェクトならさらに重ね、文字列ならそちらを使う）
+  （`weights` がオブジェクトならさらに重ね、文字列ならそちらを使う）。
+  設定を書かないとき（`{}`）は既定の補正（`data/value-net.json`）を使い、重みもその `baseWeights` に合わせる（S = 0 の補正を既定にしたときは自分の評価が 0、方策は探索の既定の重み）。
+  `valueNet` で補正を替えた・外したときは、既定の補正の `baseWeights` は使わない
 
 例: `'{"lethal":false,"beamWidth":16,"weights":{"myHand":0.8}}'`

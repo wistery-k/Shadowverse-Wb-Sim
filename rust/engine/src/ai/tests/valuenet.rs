@@ -493,3 +493,64 @@ fn base_weights_model_keeps_policy_weights() {
     assert!(compare_options(r#"{"weights":"nope"}"#).is_err());
     let _ = std::fs::remove_file(&path);
 }
+
+#[test]
+fn search_weights_follow_net_base_weights() {
+    // 探索の自分の評価の重みは補正の出発点の重み（baseWeights）に合わせ、読みの中の相手などの方策は探索の既定の重みのまま。
+    // S = 0 の補正（baseWeights が全部 0）を既定にしても、探索は補正だけで点数を付ける（docs/ai-notes.md「評価関数の手作りの項を外す」）
+    use crate::ai::valuenet::base_weight_options;
+    use crate::json::Json;
+    use crate::runner::options::{search_options, zero_weights_json};
+    let search = &ai_data().search_weights;
+    let (w, pw) = base_weight_options(&serde_json::Map::new()).expect("空");
+    assert!(w.is_none() && pw.is_none());
+    let serde_json::Value::Object(zero) = zero_weights_json().to_value() else {
+        panic!("重みはオブジェクト");
+    };
+    let (w, pw) = base_weight_options(&zero).expect("全部 0");
+    let (w, pw) = (w.expect("重み"), pw.expect("方策の重み"));
+    assert_eq!(
+        (w.my_hp, w.attack, w.my_hand, w.max_pp),
+        (0.0, 0.0, 0.0, 0.0)
+    );
+    assert_eq!(
+        (pw.my_hand, pw.max_pp, pw.sep),
+        (search.my_hand, search.max_pp, search.sep)
+    );
+    // 今の既定の補正に baseWeights が無ければ、既定の設定は探索の既定の重み（None）
+    assert_eq!(
+        default_value_net().base_weights.is_empty(),
+        SearchOptions::default().weights.is_none()
+    );
+    // S = 0 の補正が既定のときの設定を作り、補正を替えた・外した（"extraEval"）ときは、その重みを使わないことを確かめる
+    let zero_default = SearchOptions {
+        weights: Some(w.clone()),
+        policy_weights: Some(pw.clone()),
+        ..SearchOptions::default()
+    };
+    let kept = search_options(
+        &Json::parse("{}").expect("JSON"),
+        None,
+        zero_default.clone(),
+        &[],
+    )
+    .expect("設定");
+    assert_eq!(kept.weights.expect("重み").my_hp, 0.0);
+    let off = search_options(
+        &Json::parse(r#"{"extraEval":null}"#).expect("JSON"),
+        None,
+        zero_default.clone(),
+        &[],
+    )
+    .expect("設定");
+    assert!(off.extra_eval.is_none() && off.weights.is_none() && off.policy_weights.is_none());
+    // 替えた補正の重み（apply_value_net が書く "weights"）は入る
+    let raw = format!(
+        r#"{{"extraEval":null,"weights":{}}}"#,
+        zero_weights_json().stringify()
+    );
+    let own =
+        search_options(&Json::parse(&raw).expect("JSON"), None, zero_default, &[]).expect("設定");
+    assert_eq!(own.weights.expect("重み").my_hp, 0.0);
+    assert!(own.policy_weights.is_none());
+}
