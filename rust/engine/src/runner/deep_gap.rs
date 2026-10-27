@@ -90,7 +90,7 @@ fn actions_of(v: &Value) -> Result<Vec<Action>, String> {
 }
 
 /// 2 つのターン末が同じか（どちらかで試合が終わったなら、両方が終わって勝者が同じか）
-fn same_end(a: &GameState, b: &GameState) -> bool {
+pub(crate) fn same_end(a: &GameState, b: &GameState) -> bool {
     let (ea, eb) = (a.phase == Phase::Ended, b.phase == Phase::Ended);
     if ea || eb {
         ea && eb && a.winner == b.winner
@@ -208,7 +208,7 @@ fn score(agent: &SearchAgent, end: &GameState, p: PlayerIndex, seeds: &[u32]) ->
 }
 
 /// 点数を勝率（%）にする（σ(a·点数)。a は学習した補正のもの）
-fn win_pct(v: f64) -> f64 {
+pub(crate) fn win_pct(v: f64) -> f64 {
     let a = ai_data().value_net.a;
     100.0 / (1.0 + (-a * v).exp())
 }
@@ -258,7 +258,7 @@ fn list_or_none(v: Vec<String>) -> String {
 }
 
 /// 局面の説明（手番の側 p から見える情報だけ。相手の手札は枚数だけ）
-fn describe(s: &GameState, p: PlayerIndex, decks: &[String; 2]) -> Vec<String> {
+pub(crate) fn describe(s: &GameState, p: PlayerIndex, decks: &[String; 2]) -> Vec<String> {
     let o = opponent(p);
     let (me, op) = (&s.players[p], &s.players[o]);
     let side = |q: PlayerIndex| if s.first == q { "先攻" } else { "後攻" };
@@ -309,7 +309,7 @@ fn describe(s: &GameState, p: PlayerIndex, decks: &[String; 2]) -> Vec<String> {
     ]
 }
 
-fn steps_of(start: &GameState, actions: &[Action], p: PlayerIndex) -> Vec<String> {
+pub(crate) fn steps_of(start: &GameState, actions: &[Action], p: PlayerIndex) -> Vec<String> {
     let mut t = start.clone();
     let mut out = Vec::new();
     for a in actions {
@@ -320,7 +320,7 @@ fn steps_of(start: &GameState, actions: &[Action], p: PlayerIndex) -> Vec<String
 }
 
 /// 手の列で使ったもの（手札から出したカード・進化・超進化・融合の素材・能力・エクストラPP）の名前。2 つのターンの違いを見せるため
-fn used_of(start: &GameState, actions: &[Action]) -> Vec<String> {
+pub(crate) fn used_of(start: &GameState, actions: &[Action]) -> Vec<String> {
     let mut t = start.clone();
     let mut out = Vec::new();
     let name = |s: &GameState, iid: i32| -> String {
@@ -356,7 +356,7 @@ fn used_of(start: &GameState, actions: &[Action]) -> Vec<String> {
 }
 
 /// 2 つの多重集合の差（a にあって b に無い分）
-fn multiset_minus(a: &[String], b: &[String]) -> Vec<String> {
+pub(crate) fn multiset_minus(a: &[String], b: &[String]) -> Vec<String> {
     let mut rest: Vec<&String> = b.iter().collect();
     let mut out = Vec::new();
     for x in a {
@@ -582,10 +582,10 @@ fn play_game(g: u32, cfg: &PlayConfig) -> Result<Vec<Value>, String> {
 }
 
 /// (名前, 値) の列
-type Flags = Vec<(String, String)>;
+pub(crate) type Flags = Vec<(String, String)>;
 
 /// 引数を (名前, 値) の列と、それ以外にする。--名前 値 の形だけ
-fn parse_flags(argv: &[String]) -> Result<(Flags, Vec<String>), String> {
+pub(crate) fn parse_flags(argv: &[String]) -> Result<(Flags, Vec<String>), String> {
     let mut flags = Vec::new();
     let mut rest = Vec::new();
     let mut i = 0;
@@ -605,7 +605,7 @@ fn parse_flags(argv: &[String]) -> Result<(Flags, Vec<String>), String> {
     Ok((flags, rest))
 }
 
-fn flag<'a>(flags: &'a [(String, String)], k: &str) -> Option<&'a str> {
+pub(crate) fn flag<'a>(flags: &'a [(String, String)], k: &str) -> Option<&'a str> {
     flags
         .iter()
         .rev()
@@ -613,7 +613,7 @@ fn flag<'a>(flags: &'a [(String, String)], k: &str) -> Option<&'a str> {
         .map(|(_, v)| v.as_str())
 }
 
-fn num_flag(flags: &[(String, String)], k: &str, def: u32) -> Result<u32, String> {
+pub(crate) fn num_flag(flags: &[(String, String)], k: &str, def: u32) -> Result<u32, String> {
     match flag(flags, k) {
         None => Ok(def),
         Some(v) => v
@@ -622,7 +622,7 @@ fn num_flag(flags: &[(String, String)], k: &str, def: u32) -> Result<u32, String
     }
 }
 
-fn check_flags(flags: &[(String, String)], known: &[&str]) -> Result<(), String> {
+pub(crate) fn check_flags(flags: &[(String, String)], known: &[&str]) -> Result<(), String> {
     for (k, _) in flags {
         if !known.contains(&k.as_str()) {
             return Err(format!("不明な引数: --{k}"));
@@ -632,7 +632,7 @@ fn check_flags(flags: &[(String, String)], known: &[&str]) -> Result<(), String>
 }
 
 /// JSON Lines を読む。最後の行が書きかけ（クラウドの作業フォルダの写しが書いている途中を写したもの等）なら、その行だけ飛ばす
-fn read_rows(path: &str) -> Result<Vec<Value>, String> {
+pub(crate) fn read_rows(path: &str) -> Result<Vec<Value>, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path} を読めません: {e}"))?;
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     let mut rows = Vec::with_capacity(lines.len());
@@ -649,11 +649,11 @@ fn read_rows(path: &str) -> Result<Vec<Value>, String> {
 }
 
 /// ファイルが空か、改行で終わっているか（書きかけの行が無いか）
-fn ends_cleanly(path: &str) -> bool {
+pub(crate) fn ends_cleanly(path: &str) -> bool {
     std::fs::read(path).map_or(true, |b| b.is_empty() || b.ends_with(b"\n"))
 }
 
-fn open_append(path: &str) -> Result<std::fs::File, String> {
+pub(crate) fn open_append(path: &str) -> Result<std::fs::File, String> {
     std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -845,7 +845,7 @@ fn apply_all(s: &GameState, actions: &[Action]) -> GameState {
 }
 
 /// ターン末 end（p のターン終了の前）からターンを終え、今の AI どうしで最後まで打って p が勝ったか（途中で止まれば None）
-fn finish(end: &GameState, p: PlayerIndex, seed: u32) -> Option<bool> {
+pub(crate) fn finish(end: &GameState, p: PlayerIndex, seed: u32) -> Option<bool> {
     if end.phase == Phase::Ended {
         return Some(end.winner == Some(p));
     }

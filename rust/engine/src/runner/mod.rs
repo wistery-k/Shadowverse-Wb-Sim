@@ -16,6 +16,7 @@ pub mod parallel;
 pub mod profile;
 pub mod rhino_compare;
 pub mod td;
+pub mod two_turn;
 pub mod yardstick;
 
 use crate::data::{data, Deck};
