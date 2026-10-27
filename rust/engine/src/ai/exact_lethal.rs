@@ -107,6 +107,9 @@ fn granted_id(a: &'static crate::data::Ability) -> u32 {
 /// 以前は文字列だったが、作るのが遅かった（全探索の時間の半分ほど）。同じと見なす局面は文字列のときと同じ
 pub type LethalKey = Vec<i32>;
 
+/// キーを作るときに先に確保する長さ（たいていの局面のキーはこれに収まり、伸ばし直さずに済む）
+const KEY_CAPACITY: usize = 256;
+
 #[inline]
 fn push_opt(k: &mut LethalKey, v: Option<i32>) {
     match v {
@@ -125,18 +128,40 @@ fn push_kw(k: &mut LethalKey, kw: crate::data::Kw) {
     k.push((seq >> 32) as u32 as i32);
 }
 
+/// キーを作るときに使い回す領域（キーを作るたびにメモリを確保しないため）
+#[derive(Default)]
+struct KeyScratch {
+    cards: Vec<CardIdx>,
+    buf: LethalKey,
+    ranges: Vec<(usize, usize)>,
+}
+
+thread_local! {
+    static SCRATCH: RefCell<KeyScratch> = RefCell::new(KeyScratch::default());
+}
+
 fn push_sorted_cards(k: &mut LethalKey, cards: impl Iterator<Item = CardIdx>) {
-    let mut v: Vec<CardIdx> = cards.collect();
+    let mut v = SCRATCH.with(|s| std::mem::take(&mut s.borrow_mut().cards));
+    v.clear();
+    v.extend(cards);
     v.sort_unstable();
     k.push(v.len() as i32);
     k.extend(v.iter().map(|&c| c as i32));
+    SCRATCH.with(|s| s.borrow_mut().cards = v);
 }
 
 /// 「自分のターンごとに1回」の記録（TypeScript 版は能力の添字の文字列をキーにした記録で、JSON では添字の小さい順）
 fn used_once_key(out: &mut LethalKey, used: &[(u8, i32)]) {
+    out.push(used.len() as i32);
+    if used.len() <= 1 {
+        for &(i, t) in used {
+            out.push(i as i32);
+            out.push(t);
+        }
+        return;
+    }
     let mut v = used.to_vec();
     v.sort_unstable_by_key(|e| e.0);
-    out.push(v.len() as i32);
     for (i, t) in v {
         out.push(i as i32);
         out.push(t);
@@ -197,8 +222,12 @@ fn board_key(k: &mut LethalKey, c: &OnBoard, ignore_exhausted_stats: bool) {
 
 /// items のキーを順番によらない形で足す（各キーを並べ替えて、個数と長さ付きで並べる）
 fn push_unordered<T>(k: &mut LethalKey, items: &[T], key: impl Fn(&mut LethalKey, &T)) {
-    let mut buf: LethalKey = Vec::new();
-    let mut ranges: Vec<(usize, usize)> = Vec::with_capacity(items.len());
+    let (mut buf, mut ranges) = SCRATCH.with(|s| {
+        let mut s = s.borrow_mut();
+        (std::mem::take(&mut s.buf), std::mem::take(&mut s.ranges))
+    });
+    buf.clear();
+    ranges.clear();
     for it in items {
         let start = buf.len();
         key(&mut buf, it);
@@ -206,10 +235,15 @@ fn push_unordered<T>(k: &mut LethalKey, items: &[T], key: impl Fn(&mut LethalKey
     }
     ranges.sort_unstable_by(|a, b| buf[a.0..a.1].cmp(&buf[b.0..b.1]));
     k.push(ranges.len() as i32);
-    for (a, b) in ranges {
+    for &(a, b) in &ranges {
         k.push((b - a) as i32);
         k.extend_from_slice(&buf[a..b]);
     }
+    SCRATCH.with(|s| {
+        let mut s = s.borrow_mut();
+        s.buf = buf;
+        s.ranges = ranges;
+    });
 }
 
 /// 相手（opponent）は体力と手札の中身を含めない。
@@ -341,7 +375,8 @@ pub fn varies_with_random(s: &GameState, a: &Action, next: &GameState, p: Player
             Phase::Main => 1,
             Phase::Ended => 2,
         };
-        let mut k = vec![x.players[opp].leader_hp, phase];
+        let mut k = Vec::with_capacity(KEY_CAPACITY);
+        k.extend([x.players[opp].leader_hp, phase]);
         lethal_key(&mut k, x, opp, false);
         k
     };
@@ -465,7 +500,8 @@ impl Dfs<'_> {
         let key = if is_transient(s) {
             None
         } else {
-            let mut k = self.prefix.clone();
+            let mut k = Vec::with_capacity(self.prefix.len() + KEY_CAPACITY);
+            k.extend_from_slice(&self.prefix);
             let n = if self.opts.max_play.is_some() {
                 played
             } else {

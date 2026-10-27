@@ -239,12 +239,11 @@ fn flat(p: &Profile) -> BTreeMap<Sec, [u64; 3]> {
 }
 
 /// 思考の直下の処理の分け方（デッキごとの内訳の表の列）
-const TOP: [(Sec, &str); 5] = [
+const TOP: [(Sec, &str); 4] = [
     (Sec::Mulligan, "マリガン"),
     (Sec::Lethal, "リーサル探索"),
     (Sec::Beam, "自分のターンのビーム"),
     (Sec::Rescore, "読み直し（相手のターン）"),
-    (Sec::Determinize, "決定化"),
 ];
 
 fn deck_breakdown(p: &Profile) -> (u64, Vec<u64>, u64) {
@@ -536,7 +535,7 @@ fn table_header(decks: &[String]) -> String {
     .map(String::from)
     .collect();
     cols.extend(decks.iter().map(|d| short_name(d).to_string()));
-    cols.extend(TOP[..4].iter().map(|(_, l)| l.to_string()));
+    cols.extend(TOP.iter().map(|(_, l)| l.to_string()));
     format!("| {} |\n|{}", cols.join(" | "), " --- |".repeat(cols.len()))
 }
 
@@ -580,11 +579,11 @@ fn record_row(sm: &Summary, date: &str, commit: &str, label: &str) -> String {
     }
     if sm.profiled {
         let (total, parts, _) = deck_breakdown(&sm.all.prof);
-        for x in parts.iter().take(4) {
+        for x in &parts {
             cells.push(pct(*x, total));
         }
     } else {
-        cells.extend(std::iter::repeat_n("-".to_string(), 4));
+        cells.extend(std::iter::repeat_n("-".to_string(), TOP.len()));
     }
     format!("| {} |", cells.join(" | "))
 }
