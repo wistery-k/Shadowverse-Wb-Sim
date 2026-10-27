@@ -8,7 +8,7 @@ use crate::ai::mulligan::OppMulligan;
 use crate::ai::rhino::{rhino_pass_lethal, rhino_search_options, RHINO_POTENTIAL};
 use crate::ai::search::{
     ExtraEval, MulliganMode, OpponentSearch, OwnNextSearch, RolloutWeights, ScoreTurnEnd,
-    SearchOptions,
+    SearchOptions, TwoTurnGate,
 };
 use crate::ai::valuenet::ValueNet;
 use crate::json::Json;
@@ -299,6 +299,33 @@ pub fn search_options(
                     _ => {
                         return Err(format!(
                             "\"ownNext\" は null かオブジェクト: {}",
+                            v.stringify()
+                        ))
+                    }
+                }
+            }
+            "twoTurnGate" => {
+                o.two_turn_gate = match v {
+                    Json::Null => None,
+                    Json::Obj(_) => Some(TwoTurnGate {
+                        beam_width: match v.get("beamWidth") {
+                            None => 16,
+                            Some(x) => count("twoTurnGate.beamWidth", x)?,
+                        },
+                        max_depth: match v.get("maxDepth") {
+                            None => 8,
+                            Some(x) => count("twoTurnGate.maxDepth", x)?,
+                        },
+                        threshold: number(
+                            "twoTurnGate.threshold",
+                            v.get("threshold").ok_or(
+                                "\"twoTurnGate\" には threshold（勝率の差、ポイント）を書きます",
+                            )?,
+                        )?,
+                    }),
+                    _ => {
+                        return Err(format!(
+                            "\"twoTurnGate\" は null かオブジェクト: {}",
                             v.stringify()
                         ))
                     }

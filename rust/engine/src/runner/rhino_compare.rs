@@ -13,7 +13,9 @@ use super::{compare_decks, fixed, seconds_since, Tally};
 use crate::ai::exact_lethal::exact_lethal_counts;
 use crate::ai::registry::search_classic_options;
 use crate::ai::rhino::RhinoAgent;
-use crate::ai::search::{SearchAgent, SearchOptions};
+use crate::ai::search::{
+    reset_two_turn_gate_counts, two_turn_gate_counts, SearchAgent, SearchOptions,
+};
 use crate::ai::Agent;
 use crate::data::{data, Deck};
 use crate::json::Json;
@@ -78,6 +80,8 @@ struct Outcome {
     jeanne: u32,
     jeanne_tokens: u32,
     exact_found: u32,
+    /// twoTurnGate を確かめた回数と、手を変えた回数（使わない設定なら 0）
+    gate: (u32, u32),
 }
 
 struct Given {
@@ -176,6 +180,7 @@ fn play_one(
     let seed = seed_base + t.g * 13 + t.seat as u32;
     let mut a = agent.create();
     let mut o = SearchAgent::new(opp_options.clone());
+    reset_two_turn_gate_counts();
     let decks = if t.seat == 0 {
         [&me.cards[..], &opp.cards[..]]
     } else {
@@ -230,6 +235,7 @@ fn play_one(
         jeanne,
         jeanne_tokens,
         exact_found: exact_lethal_counts().1,
+        gate: two_turn_gate_counts(),
     }
 }
 
@@ -392,6 +398,16 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         exact.len(),
         exact.iter().filter(|r| r.won).count()
     );
+    let gate_seen: u32 = results.iter().map(|r| r.gate.0).sum();
+    if gate_seen > 0 {
+        let changed: Vec<&Outcome> = results.iter().filter(|r| r.gate.1 > 0).collect();
+        println!(
+            "2 ターン読みで手を変えた回数 {}（確かめた {gate_seen}）、手を変えた試合 {}/{n}（そのうち勝ち {}）",
+            results.iter().map(|r| r.gate.1).sum::<u32>(),
+            changed.len(),
+            changed.iter().filter(|r| r.won).count()
+        );
+    }
     if let Some(given) = &given {
         let human_wins = given.iter().filter(|m| m.won == Some(true)).count();
         println!(
@@ -425,6 +441,14 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                 ("won".into(), Json::Bool(r.won)),
                 ("exactFound".into(), Json::Num(r.exact_found as f64)),
             ]);
+            let line = match line {
+                Json::Obj(mut v) if r.gate.0 > 0 => {
+                    v.push(("gateSeen".into(), Json::Num(r.gate.0 as f64)));
+                    v.push(("gateFired".into(), Json::Num(r.gate.1 as f64)));
+                    Json::Obj(v)
+                }
+                x => x,
+            };
             text.push_str(&line.stringify());
             text.push('\n');
         }

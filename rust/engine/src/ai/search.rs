@@ -28,6 +28,7 @@ use crate::game::{
 };
 use crate::prof::{self, Sec};
 use crate::state::*;
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -93,6 +94,31 @@ pub struct OwnNextSearch {
     pub mix: f64,
     /// 次のターン末で止めず、その後の相手のターンも読んでから採点する（相手の応手を読まない楽観を消す。2 ターン読み）
     pub reply: bool,
+}
+
+/// 読み直す上位の手それぞれで 2 ターン読み（ownNext の reply と同じ読み）もして、2 ターン読みの勝率で 1 位の手が、
+/// 今の点数で 1 位の手より threshold ポイント以上高いときだけ、その手に変える（twoTurnGate、実験用）。
+/// 2 ターン読みは読み直しの乱数とは別に進めるので、手を変えなかったターンは今の AI と同じに進む
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TwoTurnGate {
+    pub beam_width: usize,
+    pub max_depth: usize,
+    /// 勝率（%）の差のしきい値
+    pub threshold: f64,
+}
+
+thread_local! {
+    /// twoTurnGate を確かめた回数と、手を変えた回数（実験の集計用。スレッドごと）
+    static TWO_TURN_GATE_COUNTS: Cell<(u32, u32)> = const { Cell::new((0, 0)) };
+}
+
+/// twoTurnGate を確かめた回数と、手を変えた回数（このスレッドで、前に reset_two_turn_gate_counts を呼んでから）
+pub fn two_turn_gate_counts() -> (u32, u32) {
+    TWO_TURN_GATE_COUNTS.with(|c| c.get())
+}
+
+pub fn reset_two_turn_gate_counts() {
+    TWO_TURN_GATE_COUNTS.with(|c| c.set((0, 0)));
 }
 
 /// 探索 AI の設定（search.ts の SearchOptions。exhaustive 等の実験用の項目のうち既定で使わないものは省く）
@@ -166,6 +192,7 @@ pub struct SearchOptions {
     pub weights: Option<Arc<Weights>>,
     pub opponent_search: Option<OpponentSearch>,
     pub own_next: Option<OwnNextSearch>,
+    pub two_turn_gate: Option<TwoTurnGate>,
     pub opp_hand_samples: usize,
     /// oppHandSamples で引き直す相手の手札を、読み直すどの終局面でも同じ並びにする（手どうしの差のぶれを減らす）
     pub opp_hand_common: bool,
@@ -242,6 +269,7 @@ impl Default for SearchOptions {
                 extra_eval: false,
             }),
             own_next: None,
+            two_turn_gate: None,
             opp_hand_samples: 12,
             opp_hand_common: true,
             peek_opp_hand: false,
@@ -1047,11 +1075,24 @@ pub fn plan_turn_traced(
     let mut rescored: Vec<usize> = Vec::new();
     let tracing = trace.is_some();
     let mut reads: Vec<(Action, ScoreParts)> = Vec::new();
+    // twoTurnGate: 最初の手ごとの 2 ターン読みの勝率（%）
+    let mut twos: Vec<(Action, f64)> = Vec::new();
+    let gate = opts.two_turn_gate;
     let rescore_node = |i: usize,
                         rng: &mut Rng,
                         result: &mut Vec<(Action, Plan)>,
-                        reads: &mut Vec<(Action, ScoreParts)>| {
+                        reads: &mut Vec<(Action, ScoreParts)>,
+                        twos: &mut Vec<(Action, f64)>| {
         let node = &terminals[i];
+        // twoTurnGate の 2 ターン読みの勝率の合計（読んだ後の局面ごと。乱数は呼んだ側の乱数を写したもので、呼んだ側の乱数は進めない）
+        let mut two_sum = 0.0;
+        let mut two_of = |after: &GameState, rng: &Rng| {
+            if let Some(g) = gate {
+                let mut r = Rng { state: rng.state };
+                let v = two_turn_value(&pl, after, g, &mut r) - pl.leftover(&node.state);
+                two_sum += win_pct(v);
+            }
+        };
         // 読み直した局面の手で作った評価と評価に足す項の合計（trace のときだけ求める）
         let mut parts = (0.0, 0.0);
         // 読み直した局面（record_reads のときだけ残す）
@@ -1070,10 +1111,15 @@ pub fn plan_turn_traced(
             if tracing {
                 parts = pl.parts(&node.state, ValuePhase::End);
             }
-            (pl.eval_state(&node.state), 1)
+            let v = pl.eval_state(&node.state);
+            if gate.is_some() {
+                two_sum += win_pct(v);
+            }
+            (v, 1)
         } else if opts.opp_hand_samples <= 1 {
             let settled = pl.settle(&node.state);
             let (v, after) = read_once(&pl, settled.as_ref().unwrap_or(&node.state), rng);
+            two_of(&after, rng);
             add(after);
             (v - pl.leftover(&node.state), 1)
         } else {
@@ -1089,6 +1135,7 @@ pub fn plan_turn_traced(
                     }
                     let (v, after) = read_once(&pl, &d, &mut r);
                     sum += v;
+                    two_of(&after, &r);
                     add(after);
                 }
             } else {
@@ -1096,6 +1143,7 @@ pub fn plan_turn_traced(
                     let d = determinize(base, p, rng, opts.peek_opp_hand);
                     let (v, after) = read_once(&pl, &d, rng);
                     sum += v;
+                    two_of(&after, rng);
                     add(after);
                 }
             }
@@ -1126,6 +1174,13 @@ pub fn plan_turn_traced(
                 Some(e) => e.1 = plan,
                 None => result.push((node.first.clone(), plan)),
             }
+            if gate.is_some() {
+                let two = two_sum / n as f64;
+                match twos.iter_mut().find(|(k, _)| *k == node.first) {
+                    Some(e) => e.1 = two,
+                    None => twos.push((node.first.clone(), two)),
+                }
+            }
             if tracing {
                 let sp = ScoreParts {
                     total: read_value,
@@ -1141,7 +1196,7 @@ pub fn plan_turn_traced(
     };
     for best in ranked {
         for i in candidates_of(best) {
-            rescore_node(i, rng, &mut result, &mut reads);
+            rescore_node(i, rng, &mut result, &mut reads, &mut twos);
             rescored.push(i);
         }
     }
@@ -1177,7 +1232,7 @@ pub fn plan_turn_traced(
                 if !pass_turn(base, p).is_some_and(|next| f(&next, p)) {
                     continue;
                 }
-                rescore_node(i, rng, &mut result, &mut reads);
+                rescore_node(i, rng, &mut result, &mut reads, &mut twos);
                 rescored.push(i);
                 added.push(t.first.clone());
                 n += 1;
@@ -1200,14 +1255,70 @@ pub fn plan_turn_traced(
             if rescored.contains(&i) || !seen.add(&terminals[i].state) {
                 continue;
             }
-            rescore_node(i, rng, &mut result, &mut reads);
+            rescore_node(i, rng, &mut result, &mut reads, &mut twos);
             n += 1;
         }
+    }
+    if let Some(g) = gate {
+        apply_two_turn_gate(&mut result, &twos, g.threshold);
     }
     if let Some(tr) = trace {
         tr.reads = reads;
     }
     result
+}
+
+/// twoTurnGate: 今の点数で 1 位の手（同点は先のもの。choose_action と同じ）より、2 ターン読みの勝率で
+/// threshold ポイント以上高い手があれば、その中で 2 ターン読みの 1 位の手の点数を今の 1 位の少し上にする
+fn apply_two_turn_gate(result: &mut [(Action, Plan)], twos: &[(Action, f64)], threshold: f64) {
+    let mut a: Option<usize> = None;
+    for (i, (_, plan)) in result.iter().enumerate() {
+        if a.is_none_or(|j| plan.value > result[j].1.value) {
+            a = Some(i);
+        }
+    }
+    let Some(a) = a else { return };
+    let two_of = |k: &Action| twos.iter().find(|(x, _)| x == k).map(|x| x.1);
+    let Some(two_a) = two_of(&result[a].0) else {
+        return;
+    };
+    TWO_TURN_GATE_COUNTS.with(|c| c.set((c.get().0 + 1, c.get().1)));
+    let mut b: Option<(usize, f64)> = None;
+    for (i, (k, _)) in result.iter().enumerate() {
+        if let Some(t) = two_of(k) {
+            if b.is_none_or(|(_, bt)| t > bt) {
+                b = Some((i, t));
+            }
+        }
+    }
+    if let Some((b, two_b)) = b {
+        if b != a && two_b - two_a >= threshold {
+            result[b].1.value = result[a].1.value + 1.0;
+            TWO_TURN_GATE_COUNTS.with(|c| c.set((c.get().0, c.get().1 + 1)));
+        }
+    }
+}
+
+/// 点数を勝率（%）にする（σ(a·点数)。a は学習した補正のもの）
+fn win_pct(v: f64) -> f64 {
+    let a = ai_data().value_net.a;
+    100.0 / (1.0 + (-a * v).exp())
+}
+
+/// twoTurnGate の 2 ターン読み: 相手のターンを読んだ後の局面 after から、自分の次のターンを幅 g.beam_width のビームで打ち、
+/// その後の相手のターンも読んだ点数（ownNext の reply と同じ。自分の手番に戻っていなければ after の点数）
+fn two_turn_value(pl: &Planner, after: &GameState, g: TwoTurnGate, rng: &mut Rng) -> f64 {
+    if after.phase != Phase::Ended && after.active == pl.p && after.pending.is_none() {
+        let on = OwnNextSearch {
+            beam_width: g.beam_width,
+            max_depth: g.max_depth,
+            mix: 1.0,
+            reply: true,
+        };
+        own_next_value(pl, after, on, rng)
+    } else {
+        pl.eval_after(after)
+    }
 }
 
 /// このターンに山札から引いて手札に残っている p のカード（root の山札にあったもの。条件付きで引いたもの・公開されたものは除く）を、
@@ -1412,6 +1523,7 @@ fn own_next_value(pl: &Planner, after: &GameState, on: OwnNextSearch, rng: &mut 
         max_depth: on.max_depth,
         opponent_search: None,
         own_next: None,
+        two_turn_gate: None,
         next_lethal: 0.0,
         pass_lethal: 0,
         attack_later: 0,
