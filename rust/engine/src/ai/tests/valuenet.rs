@@ -449,3 +449,47 @@ fn imagined_input() {
         net.eval(&s, 0, ValuePhase::After)
     );
 }
+
+#[test]
+fn base_weights_model_keeps_policy_weights() {
+    // 出発点の重みを変えたモデル（baseWeights）を compare の設定で使うと、自分の評価だけがその重みになり、
+    // 読みの中の相手の重み（policyWeights）は探索の既定の重みのまま（docs/ai-notes.md「評価関数の手作りの項を外す」）
+    use crate::runner::options::{compare_options, zero_weights_json};
+    let m = model(2, |i| (i % 7) as f64 / 10.0, 0.5);
+    let zero = zero_weights_json().to_value();
+    let json = serde_json::json!({
+        "kind": m.kind, "version": m.version, "vocab": m.vocab, "zones": m.zones, "scalars": m.scalars,
+        "hidden": m.hidden, "w1": m.w1, "b1": m.b1, "w2": m.w2, "b2": m.b2, "a": m.a, "c": m.c, "baseWeights": zero
+    });
+    let path = std::env::temp_dir().join(format!("svwb-base-weights-{}.json", std::process::id()));
+    std::fs::write(&path, json.to_string()).expect("モデルを書く");
+    let path = path.to_str().expect("パス").replace('\\', "/");
+    let search = &ai_data().search_weights;
+    let o = compare_options(&format!(r#"{{"valueNet":"{path}"}}"#)).expect("設定");
+    let w = o.weights.as_ref().expect("重み");
+    assert_eq!(
+        (w.my_hp, w.attack, w.my_hand, w.max_pp),
+        (0.0, 0.0, 0.0, 0.0)
+    );
+    let pw = o.policy_weights.as_ref().expect("方策の重み");
+    assert_eq!(
+        (pw.my_hand, pw.max_pp, pw.sep),
+        (search.my_hand, search.max_pp, search.sep)
+    );
+    assert!(o.extra_eval.is_some());
+    // policyWeights を書けばそちら
+    let o = compare_options(&format!(
+        r#"{{"valueNet":"{path}","policyWeights":"default"}}"#
+    ))
+    .expect("設定");
+    assert_eq!(o.policy_weights.expect("方策の重み").max_pp, 0.0);
+    // 補正のファイルなしなら、weights の文字列の指定で基準の重み・全部 0 にし、方策の重みは書かなければ無い（weights と同じ）
+    let o = compare_options(r#"{"weights":"zero"}"#).expect("設定");
+    assert_eq!(o.weights.expect("重み").my_hp, 0.0);
+    assert!(o.policy_weights.is_none());
+    let o = compare_options(r#"{"weights":"default","policyWeights":"search"}"#).expect("設定");
+    assert_eq!(o.weights.expect("重み").max_pp, 0.0);
+    assert_eq!(o.policy_weights.expect("方策の重み").max_pp, search.max_pp);
+    assert!(compare_options(r#"{"weights":"nope"}"#).is_err());
+    let _ = std::fs::remove_file(&path);
+}

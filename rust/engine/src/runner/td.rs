@@ -1,6 +1,6 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--sampling classic|default] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--sampling classic|default] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] --out d0.jsonl
 //!
 //! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・幅 128、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
 //! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
@@ -56,6 +56,10 @@
 //! 付与された能力、アミュレットのカウントダウン等。形は scripts/valueNet.ts の BoardCard）。学習の入力に直す前の値なので、
 //! 入力の形を変えても自己対戦を作り直さずに学び直せる。--board 0 なら書かない（試合と他の項目は同じ）。
 //! docs/ai-notes.md「自己対戦に場のカードの属性も書き出す」
+//!
+//! --sDefault 1 なら、各局面に基準の重み（DEFAULT_WEIGHTS。探索用に足した項の無い重み）での手で作った評価も書く（"sd"）。打つ手は変わらない。
+//! `npm run td -- train --base default` で、S の代わりにこれを出発点の評価にして補正を学ぶ（手で作った項を外した補正を、同じ自己対戦から学ぶ。
+//! docs/ai-notes.md「評価関数の手作りの項を外す」）
 //!
 //! --check 1 なら、各局面にモデルの補正の値（評価の点数の単位）も書く（"z"）。`npm run td -- check` で、学習側（scripts/valueNet.ts）が
 //! "x" と "b" から出す補正が探索の補正と同じかを確かめる（場のカードのネットワークを変えたとき用）。
@@ -125,6 +129,8 @@ struct Model {
     board: bool,
     /// 局面にモデルの補正の値も書く（--check。学習側の計算が探索と同じかを npm run td -- check で確かめる）
     check: bool,
+    /// 局面に基準の重み（DEFAULT_WEIGHTS）での手で作った評価も書く（--sDefault。"sd"。打つ手は変わらない）
+    s_default: Option<EvalWeights>,
     /// ターン末の後に書く想像の局面の数（--imagined）
     imagined: usize,
     /// 固定した相手の設定（--frozen）。あれば、学ぶ側でない席はこの設定で打つ
@@ -135,6 +141,12 @@ fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Mo
     let weights = weights_with(&ai_data().search_weights_raw, &net.base_weights)?;
     let opts = SearchOptions {
         weights: Some(Arc::new(weights.clone())),
+        // 出発点の重みを変えたモデルでも、読みの中の相手は探索 AI の既定の重みで打つ（options.rs の apply_value_net と同じ）
+        policy_weights: if net.base_weights.is_empty() {
+            None
+        } else {
+            Some(Arc::new(ai_data().search_weights.clone()))
+        },
         extra_eval: if net.is_zero() {
             None
         } else {
@@ -160,6 +172,7 @@ fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Mo
         w: EvalWeights::new(weights),
         board: false,
         check: false,
+        s_default: None,
         imagined: 0,
         frozen: None,
     })
@@ -183,7 +196,7 @@ struct Summary {
     learner: Option<PlayerIndex>,
 }
 
-/// 局面 1 つ（{"ph":…,"s":…,"x":[…],"v":[…]}、ランダムに打った局面は "ex":1、board なら場のカードの属性 "b" も）。
+/// 局面 1 つ（{"ph":…,"s":…,"x":[…],"v":[…]}、ランダムに打った局面は "ex":1、board なら場のカードの属性 "b"、--sDefault なら基準の重みの評価 "sd" も）。
 /// ph は 0: ターン末、1: 自分のターンの最初、2: 探索が相手のターンを読んだ後の想像の局面（--imagined）
 fn write_sample(
     out: &mut String,
@@ -196,7 +209,7 @@ fn write_sample(
 ) {
     let x = m.net.encode(s, p, phase);
     out.push_str(&format!(
-        "{{\"ph\":{},\"s\":{},\"x\":[",
+        "{{\"ph\":{},\"s\":{}",
         match phase {
             ValuePhase::End => 0,
             ValuePhase::After => 1,
@@ -204,6 +217,13 @@ fn write_sample(
         },
         js_num(round_precision(evaluate_with(s, p, &m.w), 6))
     ));
+    if let Some(w) = &m.s_default {
+        out.push_str(&format!(
+            ",\"sd\":{}",
+            js_num(round_precision(evaluate_with(s, p, w), 6))
+        ));
+    }
+    out.push_str(",\"x\":[");
     for (i, (k, _)) in x.iter().enumerate() {
         if i > 0 {
             out.push(',');
@@ -968,6 +988,11 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
         "0" => false,
         "1" => true,
         x => return Err(format!("--check は 0 か 1: {x}")),
+    };
+    m.s_default = match arg(args, "sDefault").unwrap_or("0") {
+        "0" => None,
+        "1" => Some(EvalWeights::new(ai_data().default_weights.clone())),
+        x => return Err(format!("--sDefault は 0 か 1: {x}")),
     };
     // 固定した相手（--frozen）。想像の局面を書くなら、固定した側も読んだ局面を残す（打つ手は変わらない）
     if let Some(text) = arg(args, "frozen") {
