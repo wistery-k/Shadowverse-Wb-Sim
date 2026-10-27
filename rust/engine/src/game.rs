@@ -231,6 +231,7 @@ fn end_turn_cleanup(s: &mut GameState) {
 
 /// 手番のプレイヤーがここでターンを終えたときの、ターン終了時の処理だけを行った局面（AI 用）
 pub fn resolve_turn_end(prev: &GameState) -> Option<GameState> {
+    let _p = crate::prof::scope(crate::prof::Sec::TurnEnd);
     if prev.phase != Phase::Main
         || prev.pending.is_some()
         || !prev.stack.is_empty()
@@ -606,6 +607,7 @@ fn subsets(items: &[Iid], size: Option<usize>) -> Vec<Vec<Iid>> {
 // ---- 合法手 ----
 
 pub fn legal_actions(s: &GameState) -> Vec<Action> {
+    let _p = crate::prof::scope(crate::prof::Sec::Legal);
     if s.phase == Phase::Ended {
         return Vec::new();
     }
@@ -801,7 +803,11 @@ pub fn try_apply_action(prev: &GameState, action: &Action) -> Option<GameState> 
 
 /// 打てると確かめた手を打つ
 pub fn apply_legal(prev: &GameState, action: &Action) -> GameState {
-    let mut s = prev.clone();
+    let _p = crate::prof::scope(crate::prof::Sec::Apply);
+    let mut s = {
+        let _c = crate::prof::scope(crate::prof::Sec::Clone);
+        prev.clone()
+    };
     apply_in_place(&mut s, action);
     s
 }

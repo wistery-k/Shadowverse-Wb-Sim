@@ -394,6 +394,7 @@ fn jeanne_countdowns(s: &GameState, p: PlayerIndex) -> Vec<i32> {
 
 /// プレイヤー p から見た盤面の評価値（大きいほど p に有利）
 pub fn evaluate_with(s: &GameState, p: PlayerIndex, ew: &EvalWeights) -> f64 {
+    let _p = crate::prof::scope(crate::prof::Sec::Eval);
     if s.phase == Phase::Ended {
         return if s.winner == Some(p) { 1e6 } else { -1e6 };
     }

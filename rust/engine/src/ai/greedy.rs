@@ -117,6 +117,7 @@ pub fn choose_greedy(
     w: &EvalWeights,
     fuse_follow_up: bool,
 ) -> Action {
+    let _p = crate::prof::scope(crate::prof::Sec::Greedy);
     let first = &legal[0];
     if let Action::Mulligan { player, .. } = first {
         return cost_mulligan(real, legal, *player);

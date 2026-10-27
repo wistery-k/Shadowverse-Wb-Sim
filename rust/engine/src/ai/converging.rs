@@ -332,6 +332,7 @@ pub fn settle_converging_trades_with(
     p: PlayerIndex,
     cheapest: bool,
 ) -> Option<GameState> {
+    let _p = crate::prof::scope(crate::prof::Sec::Settle);
     let mut cur: Option<GameState> = None;
     for _ in 0..7 {
         let base = cur.as_ref().unwrap_or(s);

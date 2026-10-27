@@ -16,6 +16,7 @@ pub mod game;
 pub mod golden;
 pub mod jsnum;
 pub mod json;
+pub mod prof;
 pub mod runner;
 pub mod sim;
 pub mod state;

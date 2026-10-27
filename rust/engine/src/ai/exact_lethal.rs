@@ -592,6 +592,7 @@ pub fn search_exact_lethal(
     p: PlayerIndex,
     opts: &ExactLethalOptions,
 ) -> Option<Vec<Action>> {
+    let _p = crate::prof::scope(crate::prof::Sec::LethalExact);
     if root.phase != Phase::Main || actor_of(root) != p {
         return None;
     }

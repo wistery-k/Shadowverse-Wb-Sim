@@ -33,6 +33,7 @@
 | `npm run deck-compare` | デッキのカードを入れ替えた案と元のデッキの勝率（下） | `rust/engine/src/runner/deck_compare.rs` |
 | `npm run meta` | 環境（デッキと使用率）のアジャスト合戦を 1 回りずつ回す（下） | `rust/engine/src/runner/meta.rs` |
 | `npm run yardstick` | 固定した相手との勝率（強さの物差し。下） | `rust/engine/src/runner/yardstick.rs` |
+| `npm run profile` | デッキごとの 1 試合の時間と、思考の処理ごとの時間の内訳（下） | `scripts/profile.mjs`・`rust/engine/src/runner/profile.rs` |
 | `npm run svwb` | Rust 版の CLI（下） | `rust/engine/src/main.rs` |
 | `npm run td` | TD 学習のモデルの作成・学習・分析（下） | `scripts/td-main.ts` |
 | `npm run pack-run` | PC で回した 1 回分の出力（自己対戦・モデル・ログ）を、共有フォルダに上げる `.tar.gz` にまとめる（下） | `scripts/pack-run-main.ts` |
@@ -207,6 +208,28 @@ npm run yardstick -- fingerprint [--ref classic|strong]
 `strong`（2026-10-22 の既定の探索 AI。組の 2 試合は `compare` の既定と同じく同じシードで、その日の既定の AI はちょうど 50%）。
 `--record` で `docs/yardstick.md` のその相手の表に 1 行足す（`--label` が要る）。`fingerprint` は相手が変わっていないかの確認用。
 
+## profile
+
+```sh
+npm run profile -- [--games 49] [--start 0] [--opts '<設定>'] [--rhino] [--out <場所>] [--time-only] [--label 名前 --record]
+npm run svwb -- profile [--games 49] [--start 0] [--opts '<設定>'] [--rhino] [--json 結果.json] [--baseline 前の結果.json] [--report 報告.md] [--label 名前] [--record]
+```
+
+探索 AI どうしの対戦の速さ（`docs/profile.md`）。`compare` と同じデッキの組で席とデッキを入れ替えた 2 試合ずつ（`--games 49` で 7×7 の組を 2 回ずつ、98 試合）を、
+両方の席を同じ設定（`--opts`、既定 `{}` は今の既定）で打ち、デッキごとの 1 試合の思考の時間と、思考の処理ごとの時間の内訳を Markdown で出す。
+
+| 引数 | 既定 | 意味 |
+|---|---|---|
+| `--games N` | 49 | 試合番号の数（試合はその 2 倍） |
+| `--opts '<設定>'` | `{}` | 両方の席の探索 AI の設定（`compare` の設定と同じ形） |
+| `--rhino` | なし | リノセウスエルフはリノセウス用 AI で打つ |
+| `--out 場所`（npm run profile） | `rust/target/profile-report` | `time.json`（測らないビルド）・`sections.json`（測るビルド）・`report.md` を置く場所 |
+| `--time-only`（npm run profile） | なし | 測らないビルドだけで回す（内訳なし） |
+| `--baseline 前.json`（svwb profile） | なし | 前の実行の `--json`。同じ試合になったかを確かめ（違えばエラー）、思考の時間の比を出す。測るビルドなら時間の表はこちらの値を使う |
+| `--label 名前 --record` | なし | `docs/profile.md` の表に 1 行足す |
+
+内訳は `--features profile` でビルドしたときだけ測る（`rust/engine/src/prof.rs`）。`npm run profile` は測らないビルドと測るビルド（`rust/target/profile`）を続けて回す。
+
 ## svwb（Rust 版の CLI）
 
 ```sh
@@ -217,6 +240,7 @@ npm run svwb -- ai-play [試合数 14] [最初の試合 0] [search|rhino|rhino-l
 npm run svwb -- compare …                               # npm run compare と同じ
 npm run svwb -- rhino-compare …                         # npm run rhino-compare と同じ
 npm run svwb -- yardstick …                             # npm run yardstick と同じ
+npm run svwb -- profile …                               # デッキごとの 1 試合の時間（内訳は npm run profile か --features profile のビルド。上の「profile」）
 npm run svwb -- meta …                                  # npm run meta と同じ
 npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mulligan":"sample"}'] [--b '{}'] [--decks <デッキ>,…] [--rhino]
 npm run svwb -- mulligan-data --games 6000 [--start 0] [--seed 1] [--flip 0.5] --out d.jsonl

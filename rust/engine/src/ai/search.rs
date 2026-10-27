@@ -26,6 +26,7 @@ use super::{Agent, Rng};
 use crate::game::{
     acting_player, apply_legal, is_legal, legal_actions, resolve_turn_end, try_apply_action,
 };
+use crate::prof::{self, Sec};
 use crate::state::*;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -390,6 +391,7 @@ impl<'a> Planner<'a> {
     /// （探索中のすべての局面を残すとメモリを多く使って遅くなるので、並びには手だけを残している）。
     /// 最初のターン終了は打たずに root の局面のまま（beam_terminals と同じ）
     fn steps_of(&self, path: usize) -> Vec<(Action, Rc<GameState>)> {
+        let _p = prof::scope(Sec::StepsOf);
         let mut order = Vec::new();
         let mut cur = Some(path);
         while let Some(i) = cur {
@@ -475,6 +477,7 @@ impl<'a> Planner<'a> {
     }
 
     fn score(&self, s: &GameState) -> f64 {
+        let _p = prof::scope(Sec::Score);
         if self.opts().score_turn_end == ScoreTurnEnd::All {
             return self.end_score(s);
         }
@@ -496,6 +499,7 @@ impl<'a> Planner<'a> {
     }
 
     fn expand(&self, s: &GameState) -> Vec<Action> {
+        let _p = prof::scope(Sec::Expand);
         let mut legal = legal_actions(s);
         if self.opts().dominance {
             legal.retain(|a| !dominated_attack(s, a));
@@ -861,6 +865,7 @@ impl<'a> Planner<'a> {
                     }
                 }
             }
+            let _p = prof::scope(Sec::Select);
             if opts.beam_pp != 0.0 {
                 let key = |n: &Node| n.value + opts.beam_pp * n.state.players[p].pp as f64;
                 children.sort_by(|x, y| by_value_desc(key(x), key(y)));
@@ -888,6 +893,7 @@ fn turn_end_bests<'a>(
     p: PlayerIndex,
     env: &'a Env<'a>,
 ) -> (Planner<'a>, Vec<Node>, Vec<(Action, usize)>) {
+    let _p = prof::scope(Sec::Beam);
     let opts = env.opts;
     let mut pl = Planner {
         env,
@@ -904,6 +910,7 @@ fn turn_end_bests<'a>(
     }
     if opts.score_turn_end == ScoreTurnEnd::Terminal {
         for t in terminals.iter_mut() {
+            let _p = prof::scope(Sec::Score);
             t.value = pl.end_score(&t.state);
         }
     }
@@ -999,6 +1006,7 @@ pub fn plan_turn_traced(
             })
             .collect();
     }
+    let _p = prof::scope(Sec::Rescore);
     let mut ranked: Vec<usize> = best_by_first.iter().map(|(_, i)| *i).collect();
     ranked.sort_by(|&x, &y| by_value_desc(terminals[x].value, terminals[y].value));
     ranked.truncate(opts.rescore_top);
@@ -1360,10 +1368,13 @@ pub fn pass_turn(s: &GameState, p: PlayerIndex) -> Option<GameState> {
 fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng) -> (f64, GameState) {
     let env = pl.env;
     let p = pl.p;
-    let after = if env.opts.opponent_search.is_some() {
-        simulate_opponent_turn_by_search(start, p, rng, env)
-    } else {
-        simulate_opponent_turn(start, p, rng, env.policy_w, env.opts.opp_fuse)
+    let after = {
+        let _p = prof::scope(Sec::OppTurn);
+        if env.opts.opponent_search.is_some() {
+            simulate_opponent_turn_by_search(start, p, rng, env)
+        } else {
+            simulate_opponent_turn(start, p, rng, env.policy_w, env.opts.opp_fuse)
+        }
     };
     let mut v = match env.opts.own_next {
         Some(on) if after.phase != Phase::Ended && after.active == p && after.pending.is_none() => {
@@ -1933,6 +1944,7 @@ impl Agent for SearchAgent {
         }
         let opts = &self.opts;
         if matches!(first, Action::Mulligan { .. }) {
+            let _p = prof::scope(Sec::Mulligan);
             let p0 = acting_player(real);
             if opts.mulligan == MulliganMode::Sample {
                 let extra = opts.extra_eval.clone().filter(|_| opts.mulligan_net);
