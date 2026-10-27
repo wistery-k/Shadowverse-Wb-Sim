@@ -1,15 +1,16 @@
 name: 速さの計測
 
-# main が更新されるたびに、探索 AI どうしの対戦の速さ（デッキごとの 1 試合の時間と処理ごとの内訳）を測り、
-# 報告をジョブサマリーに出す（npm run profile。docs/profile.md）。ドキュメントだけの変更では回さない。
+# 週に 1 回（月曜 3 時ごろ、日本時間）、main の探索 AI どうしの対戦の速さ（デッキごとの 1 試合の時間と処理ごとの内訳）を測り、
+# 報告をジョブサマリーに出す（npm run profile。docs/profile.md）。
+# GitHub は、リポジトリに 60 日動きがないと決まった時刻の実行を止める（Actions タブから再び有効にできる）。
 # 手動実行（Actions タブの Run workflow）では試合数と探索 AI の設定を変えられる。
 # GitHub のランナーは CPU が毎回同じとは限らないので、時間は報告の先頭の CPU が同じものどうしで比べる。
 # docs/profile.md の表には足さない（足すのは手元で npm run profile -- --label 名前 --record）。
 
 on:
-  push:
-    branches: [main]
-    paths-ignore: ["docs/**", "**/*.md"]
+  schedule:
+    # 日曜 18:00 UTC（GitHub の混み具合で遅れることがある）
+    - cron: "0 18 * * 0"
   workflow_dispatch:
     inputs:
       games:
