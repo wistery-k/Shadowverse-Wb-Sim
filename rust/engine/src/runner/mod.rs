@@ -1,4 +1,4 @@
-//! 実験のランナー（TypeScript 版 scripts/ の compare・rhino-compare・td selfplay の移植と、強さの物差し yardstick）。
+//! 実験のランナー（TypeScript 版 scripts/ の compare・rhino-compare・td selfplay の移植と、強さの物差し yardstick、速さの計測 profile）。
 //!
 //! 試合の組み方・シード・画面への出力・書き出すファイル（JSON Lines）は TypeScript 版と同じにしてある。
 //! td selfplay の書き出したファイルは、そのまま `npm run td -- train` に渡せる。
@@ -13,6 +13,7 @@ pub mod mulligan_compare;
 pub mod mulligan_data;
 pub mod options;
 pub mod parallel;
+pub mod profile;
 pub mod rhino_compare;
 pub mod td;
 pub mod yardstick;

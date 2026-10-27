@@ -343,6 +343,7 @@ pub fn search_lethal(
     p: PlayerIndex,
     opts: &LethalOptions,
 ) -> Option<Vec<Action>> {
+    let _p = crate::prof::scope(crate::prof::Sec::LethalBeam);
     for w in opts.scorings {
         if w.setup && !root.players[p].hand.iter().any(has_storm) {
             continue;
@@ -427,6 +428,7 @@ pub fn find_lethal(
     opts: &LethalOptions,
     search: Option<LethalSearch>,
 ) -> Option<Action> {
+    let _p = crate::prof::scope(crate::prof::Sec::Lethal);
     let legal = legal_actions(real);
     let cont = CURRENT.with(|c| {
         let mut c = c.borrow_mut();

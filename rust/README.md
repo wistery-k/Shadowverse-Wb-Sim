@@ -56,7 +56,11 @@ npm run svwb -- golden write           # 保存し直す
 npm run svwb -- dump 12 34 [--random-decks] [--json]   # ランダムな試合 12 の手番 34 の正規化した文字列（--json なら局面の JSON）
 npm run svwb -- bench 2000                              # 速さの計測
 npm run svwb -- ai-play 14 0 search                     # AI どうしの試合の時間を測る（試合数・最初の試合・AI の種類 search|rhino|rhino-lethal）
+npm run profile                                         # デッキごとの 1 試合の時間と、思考の処理ごとの時間の内訳（docs/profile.md）
 ```
+
+処理ごとの時間の内訳は、`--features profile` でビルドしたときだけ測る（`engine/src/prof.rs`。測りたい処理を `prof::scope` で囲む。
+付けないビルドでは何もしない）。`npm run profile`（`scripts/profile.mjs`）が、測らないビルドで時間を、測るビルド（`target/profile` に作る）で内訳を取る。
 
 ### 実験のランナー
 
@@ -91,7 +95,8 @@ npm run yardstick -- --opts '{}' --games 1000 --label 名前 --record    # 固�
 - `engine/src/effects.rs`: 能力の解釈と解決スタック
 - `engine/src/game.rs`: 対戦の生成・合法手・行動の適用
 - `engine/src/golden.rs`・`canonical.rs`・`sim.rs`・`main.rs`: ゴールデンテスト・計測・CLI
-- `engine/src/runner/`: 実験のランナー（compare・rhino-compare・deck-compare・meta・mulligan-compare・td selfplay・yardstick・human-plan-value・deep-gap）。`parallel.rs`（並列実行）、`options.rs`（設定の JSON）、
+- `engine/src/prof.rs`: 処理ごとの時間の計測（`--features profile` のときだけ働く。`svwb profile`）
+- `engine/src/runner/`: 実験のランナー（compare・rhino-compare・deck-compare・meta・mulligan-compare・td selfplay・yardstick・human-plan-value・deep-gap・profile）。`parallel.rs`（並列実行）、`options.rs`（設定の JSON）、
   `json.rs`（項目の順番を保つ JSON）、`jsnum.rs`（JavaScript の `Number#toString`・`toPrecision`・`toFixed` と同じ数の書き方）
 - `engine/src/ai/`: AI。`registry.rs`（選べる AI の一覧）、`search.rs`（ターン単位のビームサーチ・相手のターンの読み）、`eval.rs`（評価関数）、
   `valuenet.rs`（学習した補正の推論。形・入力・学習は `docs/value-net.md`）、`lethal.rs`（リーサル探索）、`lethal_hint.rs`（対戦画面の「リーサル」表示）、`determinize.rs`、

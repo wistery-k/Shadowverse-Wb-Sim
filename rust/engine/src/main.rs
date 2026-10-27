@@ -15,6 +15,7 @@
 //!   svwb td selfplay --model m.json --games N [--start S] [--eps 0.1] --out d.jsonl  TD 学習の自己対戦
 //!   svwb deep-gap play|rollout|report …  自己対戦の局面で今の AI の手と深い読みの手を比べ、差の大きい局面を集める（runner/deep_gap.rs）
 //!   svwb yardstick [--opts …] [--games 1000] [--label …] [--record]  固定した相手との勝率（強さの物差し。docs/yardstick.md）
+//!   svwb profile [--games 49] [--opts …] [--json …] [--baseline …] [--report …]  デッキごとの 1 試合の時間と処理ごとの内訳（docs/profile.md。内訳は --features profile のビルドだけ）
 
 use std::time::Instant;
 use svwb_engine::golden::{ai_game, step_canon, SETS};
@@ -160,7 +161,7 @@ fn main() {
         Some(
             cmd @ ("compare" | "rhino-compare" | "deck-compare" | "mulligan-compare"
             | "mulligan-data" | "td" | "yardstick" | "human-plan-value" | "meta"
-            | "deep-gap"),
+            | "deep-gap" | "profile"),
         ) => {
             let rest = &args[1..];
             let r = match cmd {
@@ -173,6 +174,7 @@ fn main() {
                 "human-plan-value" => runner::human_plan::main(rest),
                 "deep-gap" => runner::deep_gap::main(rest),
                 "meta" => runner::meta::main(rest),
+                "profile" => runner::profile::main(rest),
                 _ => runner::td::main(rest),
             };
             if let Err(e) = r {
@@ -181,7 +183,7 @@ fn main() {
             }
         }
         _ => {
-            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | mulligan-data … | td selfplay … | yardstick … | human-plan-value … | deep-gap …（rust/README.md）");
+            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | mulligan-data … | td selfplay … | yardstick … | human-plan-value … | deep-gap … | profile …（rust/README.md）");
             std::process::exit(2);
         }
     }

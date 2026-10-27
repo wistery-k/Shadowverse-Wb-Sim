@@ -394,6 +394,7 @@ impl ValueNet {
 
     /// 探索の extraEval（評価の点数の単位の補正。valueNetExtraEval）
     pub fn eval(&self, s: &GameState, p: PlayerIndex, phase: ValuePhase) -> f64 {
+        let _p = crate::prof::scope(crate::prof::Sec::ValueNet);
         if s.phase == Phase::Ended {
             return 0.0;
         }

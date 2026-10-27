@@ -397,6 +397,7 @@ pub struct TurnOrderSet(EqSet<Rc<GameState>>);
 
 impl TurnOrderSet {
     pub fn add(&mut self, s: &Rc<GameState>) -> bool {
+        let _p = crate::prof::scope(crate::prof::Sec::SameState);
         let h = turn_order_hash(s);
         self.0.add(s.clone(), h, |a, b| turn_order_eq(a, b))
     }

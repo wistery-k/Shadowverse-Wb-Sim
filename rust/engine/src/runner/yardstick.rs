@@ -277,7 +277,7 @@ pub fn fingerprint() -> String {
 }
 
 /// 表の列に使うデッキの短い名前
-fn short_name(deck: &str) -> &str {
+pub(crate) fn short_name(deck: &str) -> &str {
     const CLASSES: [&str; 7] = [
         "エルフ",
         "ロイヤル",
@@ -299,7 +299,7 @@ fn doc_path() -> String {
 }
 
 /// コマンドの標準出力の 1 行目（失敗したら None）
-fn command_line(cmd: &str, args: &[&str]) -> Option<String> {
+pub(crate) fn command_line(cmd: &str, args: &[&str]) -> Option<String> {
     let out = std::process::Command::new(cmd)
         .args(args)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
@@ -314,6 +314,11 @@ fn command_line(cmd: &str, args: &[&str]) -> Option<String> {
 
 /// 今のコミット（コミットしていない変更があれば末尾に "+"。記録の表の変更は数えない）
 fn commit_label() -> String {
+    commit_label_excluding("docs/yardstick.md")
+}
+
+/// 今のコミット（コミットしていない変更があれば末尾に "+"。記録の表 doc（リポジトリの根からの道）の変更は数えない）
+pub(crate) fn commit_label_excluding(doc: &str) -> String {
     let head = command_line("git", &["rev-parse", "--short=7", "HEAD"]).unwrap_or("?".into());
     let dirty = std::process::Command::new("git")
         .args([
@@ -322,7 +327,7 @@ fn commit_label() -> String {
             "--untracked-files=no",
             "--",
             ":/",
-            ":(exclude,top)docs/yardstick.md",
+            &format!(":(exclude,top){doc}"),
         ])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()

@@ -20,3 +20,5 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 [features]
 # 差分テストで実行された効果の種類を数える（svwb coverage）
 coverage = []
+# 処理ごとの時間を測る（svwb profile。src/prof.rs）
+profile = []

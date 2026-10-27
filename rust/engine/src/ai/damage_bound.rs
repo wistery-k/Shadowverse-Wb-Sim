@@ -1348,6 +1348,7 @@ pub fn damage_bound(s: &GameState, p: PlayerIndex, draws: bool) -> Option<i32> {
 
 /// damage_bound と同じ。見積もれないときはその理由（調べる用）
 pub fn damage_bound_or_reason(s: &GameState, p: PlayerIndex, draws: bool) -> Result<i32, Why> {
+    let _p = crate::prof::scope(crate::prof::Sec::DamageBound);
     if s.phase != Phase::Main || s.active != p {
         return Err(("not main", None));
     }

@@ -54,6 +54,7 @@ pub fn determinize(
     rng: &mut Rng,
     peek_opp_hand: bool,
 ) -> GameState {
+    let _p = crate::prof::scope(crate::prof::Sec::Determinize);
     let mut s = state.clone();
     let o = opponent(viewer);
     rng.shuffle(s.players[viewer].deck.make_mut());
