@@ -92,6 +92,7 @@ pub fn reference_options() -> SearchOptions {
         extra_eval: None,
         opp_extra_eval: None,
         weights: Some(Arc::new(reference_weights())),
+        policy_weights: None,
         opponent_search: None,
         own_next: None,
         opp_hand_samples: 1,
@@ -173,6 +174,7 @@ pub fn strong_reference_options() -> SearchOptions {
         extra_eval: Some(model_eval(strong_net())),
         opp_extra_eval: None,
         weights: Some(Arc::new(reference_weights())),
+        policy_weights: None,
         opponent_search: Some(OpponentSearch {
             beam_width: 16,
             max_depth: 8,

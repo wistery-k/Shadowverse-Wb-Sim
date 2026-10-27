@@ -7,7 +7,8 @@
 #                    [--input <手元のファイルかフォルダ>=<作業フォルダの中の名前>]... [--env K=V]... [--max-vms 6]
 #                    [--no-golden] [--no-watch] [--allow-unpushed]
 #       今のコミットのソース・ジョブ・入力を置き場所に送り、VM を立てて、終わるまで見張る
-#   cloud/gcp.sh watch <名前> [--extend <時間>]   終わるまで見張る。VM が消えていて終わっていなければ作り直す
+#   cloud/gcp.sh watch <名前> [--extend <時間> | [--zones <ゾーン,...>] [--machine <種類>]]   終わるまで見張る。VM が消えていて終わっていなければ作り直す
+#                                                 （--zones・--machine は作り直しに試すゾーン・マシンを替える。空きが無いとき）
 #   cloud/gcp.sh status <名前>                    VM と、作業フォルダのログの最後
 #   cloud/gcp.sh pull <名前> <行き先のフォルダ>   作業フォルダを手元に写す
 #   cloud/gcp.sh stop <名前>                      VM を消して見張りも止める（STOPPED を書く。watch で再開できる）
@@ -316,6 +317,18 @@ cmd_watch() {
     DEADLINE=$((DEADLINE + $(awk "BEGIN{print int($2 * 3600)}")))
     st_put_text run.env "MACHINE=$MACHINE ZONES=$ZONES MAXVMS=$MAXVMS GOLDEN=$GOLDEN RUST=$RUST NODE=$NODE DEADLINE=$DEADLINE"
     say "上限を $(date -d "@$DEADLINE" '+%m-%d %H:%M') まで延ばしました"
+  elif [ "${1:-}" = --zones ] || [ "${1:-}" = --machine ]; then
+    # どのゾーンにも空きが無いとき、作り直しに試すゾーン・マシンを替える（別の地域は、そこにそのマシンのクォータがあれば立つ）
+    load_run
+    while [ $# -gt 0 ]; do
+      case $1 in
+        --zones) ZONES=${2:?--zones にゾーンを並べる}; shift 2 ;;
+        --machine) MACHINE=${2:?--machine にマシンの種類}; shift 2 ;;
+        *) die "watch に使えない引数: $1" ;;
+      esac
+    done
+    st_put_text run.env "MACHINE=$MACHINE ZONES=$ZONES MAXVMS=$MAXVMS GOLDEN=$GOLDEN RUST=$RUST NODE=$NODE DEADLINE=$DEADLINE"
+    say "作り直しに試すのを $MACHINE・$ZONES にしました"
   fi
   st_rm STOPPED
   watch_loop

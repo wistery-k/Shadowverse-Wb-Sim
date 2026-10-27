@@ -26,7 +26,12 @@
 //     このモデルの学習には "b" のある自己対戦（td selfplay の既定）が要る
 //   npm run td -- check --model m.json --data d.jsonl
 //     td selfplay --check 1 で書いた "z"（探索の補正）と、このファイルの計算で "x"・"b" から出した補正を比べる（"x" は 4 桁に丸めてあるので少しずれる）
-//   npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001] [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--v1Only 0] [--best 0]  [--bestOn end,after] [--seat both]
+//   npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001] [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--v1Only 0] [--best 0]  [--bestOn end,after] [--seat both] [--base default|zero|search]
+//     --base default なら、出発点の評価 S を基準の重み DEFAULT_WEIGHTS のもの（自己対戦の "sd"。svwb td selfplay --sDefault 1 で書く）にして学び、
+//     書き出すモデルの baseWeights を基準の重みにする（探索はこのモデルで、自分の評価だけを基準の重みにして打つ。読みの中の相手は探索の既定の重みのまま）。
+//     --base zero なら S を 0 にする（手で作った評価を使わず、補正だけで点数を付ける）。--base search なら探索の既定の重み（baseWeights なし）。
+//     省略すると元のモデルの baseWeights のまま。train 以外（eval・ivcheck・attrcheck）も、モデルの baseWeights に合わせて "s"・"sd"・0 を読む。
+//     docs/ai-notes.md「評価関数の手作りの項を外す」
 //     --best 1 なら、確かめ用の局面の勝敗の交差エントロピーが一番小さかったエポック（学習前も含む）の重みを書き出す（途中で止めるのと同じ）。
 //     --cmpWeight w（既定 0）なら、td selfplay --cmp の打ち比べ（同じ局面からの並びごとに最後まで打った勝率）も学ぶ:
 //     同じ局面の並びどうしで、予測した勝つ確率の平均からのずれが、測った勝率の平均からのずれに合うように（二乗誤差 × w。--cmpBatch 局面ずつ）。
@@ -85,6 +90,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { ALL_CARDS, ALL_CRESTS } from "../src/cards";
 import { attributeMatrix, attributeNames, attributeRow, choleskyFactor, choleskySolve, normalEquations, ridgePenalty, ridgeSolve, rowCanOccur, sparseRows } from "./cardAttrs";
 import { nextRandom, type PlayerIndex } from "../src/engine";
+import { DEFAULT_WEIGHTS } from "../src/ai/data";
 import {
   baseInputSize,
   BOARD_FEATURES,
@@ -118,6 +124,40 @@ import {
  * countdownDecay・sevoReserve: アミュレット疾走ビショップ、lastWordsSummon: ミッドレンジナイトメア
  */
 const STRIPPED: Record<string, unknown> = { maxPp: 0, hold: {}, fusionSet: 0, boostCard: 0, boost: 0, kuonReserve: 0, countdownDecay: 0, sevoReserve: 0, lastWordsSummon: 0 };
+
+/**
+ * train --base default の baseWeights: 基準の重み DEFAULT_WEIGHTS の全部の項目（探索の重みに重ねると基準の重みになる）。
+ * 探索用に足した項（maxPp・fusionSet・kuonReserve・evoReserve・sevoReserve・lastWords・lastWordsSummon・boost・countdownDecay・doomed・hold 等）を外し、
+ * 体力・場・手札等の基本の項だけを残す。docs/ai-notes.md「評価関数の手作りの項を外す」
+ */
+const DEFAULT_BASE: Record<string, unknown> = { ...DEFAULT_WEIGHTS, hold: {} };
+/** train --base zero の baseWeights: 全部の項目が 0（手で作った評価を使わず、補正だけで点数を付ける） */
+const ZERO_BASE: Record<string, unknown> = Object.fromEntries(Object.entries(DEFAULT_WEIGHTS).map(([k, v]) => [k, typeof v === "number" ? 0 : {}]));
+
+/** 2 つの重みの JSON が同じ項目・同じ値か */
+function sameWeights(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  const ka = Object.keys(a).sort(), kb = Object.keys(b).sort();
+  return ka.join() === kb.join() && ka.every((k) => JSON.stringify(a[k]) === JSON.stringify(b[k]));
+}
+
+/**
+ * 学習・予測で使う出発点の評価 S をどこから読むか（モデルの baseWeights で決まる）。
+ * 基準の重みのモデルは自己対戦の "sd"（svwb td selfplay --sDefault 1）、全部 0 のモデルは 0、ほかは "s"（自己対戦のモデルの重みでの S）
+ */
+function sSourceOf(baseWeights: Record<string, unknown>): "s" | "sd" | "zero" {
+  if (sameWeights(baseWeights, ZERO_BASE)) return "zero";
+  if (sameWeights(baseWeights, DEFAULT_BASE)) return "sd";
+  return "s";
+}
+
+/** d の S を、モデルの出発点の評価（sSourceOf）に差し替えたもの */
+function withBase<T extends { s: Float64Array; sd: Float64Array }>(d: T, baseWeights: Record<string, unknown>): T {
+  const src = sSourceOf(baseWeights);
+  if (src === "s") return d;
+  if (src === "zero") return { ...d, s: new Float64Array(d.s.length) };
+  if (d.sd.some((x) => Number.isNaN(x))) throw new Error('出発点が基準の重み（baseWeights が DEFAULT_WEIGHTS）のモデルには、"sd" のある自己対戦（svwb td selfplay --sDefault 1）が要ります');
+  return { ...d, s: d.sd };
+}
 
 export async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
@@ -325,6 +365,8 @@ interface Sample {
   ph: 0 | 1 | 2;
   /** 出発点の評価の点数 S */
   s: number;
+  /** 基準の重み DEFAULT_WEIGHTS での S（svwb td selfplay --sDefault 1 のときだけ。出発点が基準の重みのモデルの学習で使う） */
+  sd?: number;
   x: number[];
   v: number[];
   /** この局面からランダムに打った（学習に使わない） */
@@ -381,6 +423,8 @@ interface Dataset {
   idx: Int32Array;
   val: Float32Array;
   s: Float64Array;
+  /** 基準の重みでの S（"sd"。無い局面は NaN）。withBase で s と差し替える */
+  sd: Float64Array;
   /** 局面 i の次の局面（同じプレイヤーの。最後なら -1） */
   next: Int32Array;
   /** 局面 i を打ったプレイヤーの勝敗（1: 勝ち） */
@@ -535,7 +579,7 @@ function seatFilter(args: Args): SeatFilter | undefined {
 
 function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: number) => boolean, board?: CompiledBoard, opts: LoadOptions = {}): Dataset {
   const imaginedWeight = opts.imaginedWeight ?? 1;
-  const off = new Grow(i32), idx = new Grow(i32), val = new Grow(f32), s = new Grow(f64), next = new Grow(i32), outcome = new Grow(f64);
+  const off = new Grow(i32), idx = new Grow(i32), val = new Grow(f32), s = new Grow(f64), sd = new Grow(f64), next = new Grow(i32), outcome = new Grow(f64);
   const cards = board ? new BoardGrow(board) : null;
   const explored = new Grow(u8), hold = new Grow(u8), phase = new Grow(u8), weight = new Grow(f64), anchor = new Grow(i32), game = new Grow(i32);
   off.push(0);
@@ -574,6 +618,7 @@ function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: num
           off.push(idx.length);
           cards?.add(x.b);
           s.push(x.s);
+          sd.push(x.sd ?? NaN);
           next.push(-1);
           game.push(games);
           outcome.push(r.winner === p ? 1 : 0);
@@ -610,6 +655,7 @@ function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: num
     idx: idx.done(),
     val: val.done(),
     s: s.done(),
+    sd: sd.done(),
     next: next.done(),
     outcome: outcome.done(),
     explored: explored.done(),
@@ -907,6 +953,12 @@ function train(args: Args): number {
   );
   const cmpWeight = numArg(args, "cmpWeight", 0);
   const cmpBatch = numArg(args, "cmpBatch", 16);
+  // --base default|zero|search: 出発点の評価（書き出すモデルの baseWeights）を変えて学ぶ。省略すると元のモデルのまま
+  const baseArg = args.get("base");
+  const baseWeights =
+    baseArg === undefined ? model.baseWeights : baseArg === "default" ? DEFAULT_BASE : baseArg === "zero" ? ZERO_BASE : baseArg === "search" ? {} : null;
+  if (baseWeights === null) throw new Error(`--base は default・zero・search: ${baseArg}`);
+  if (cmpWeight > 0 && sSourceOf(baseWeights) !== "s") throw new Error("--cmpWeight は出発点を変えたモデル（--base default・zero）には未対応");
 
   const t0 = Date.now();
   // --v1Only 1: 場の攻撃力・体力等を足す前の入力（VALUE_ZONES_V1・VALUE_SCALARS_V1）だけで学ぶ（足した入力の効き目を分ける対照）
@@ -924,7 +976,8 @@ function train(args: Args): number {
   const skipGame = excludeGames(model, args.get("exclude"));
   // --seat learner: td selfplay --frozen の学ぶ側の局面だけで学ぶ（狙い撃ちの相手を学ばせる）
   const useSeat = seatFilter(args);
-  const d = loadData(files, holdout, ivWeight, keep, compiled0.board, { imaginedWeight, ivRes, ...(skipGame ? { skipGame } : {}), ...(useSeat ? { useSeat } : {}) });
+  const d = withBase(loadData(files, holdout, ivWeight, keep, compiled0.board, { imaginedWeight, ivRes, ...(skipGame ? { skipGame } : {}), ...(useSeat ? { useSeat } : {}) }), baseWeights);
+  if (baseArg !== undefined) console.log(`出発点の評価: ${baseArg}（S は ${({ s: '"s"', sd: '"sd"', zero: "0" } as const)[sSourceOf(baseWeights)]}）`);
   const n = d.s.length;
   const nImagined = d.anchor.reduce((x, a) => x + (a >= 0 ? 1 : 0), 0);
   console.log(
@@ -1303,6 +1356,7 @@ function train(args: Args): number {
   materialize(true);
   const outModel: ValueNetModel = {
     ...model,
+    baseWeights,
     w1: Array.from(effW1 ?? params.subarray(0, oB1), (x) => round(x, 6)),
     b1: Array.from(params.subarray(oB1, oB1 + H), (x) => round(x, 6)),
     ...(L > 1 ? { layers: current().layers.map((l) => ({ w: Array.from(l.w, (x) => round(x, 6)), b: Array.from(l.b, (x) => round(x, 6)) })) } : {}),
@@ -1574,7 +1628,7 @@ function evalModels(args: Args): number {
   const rows = cards === undefined ? null : rowsOfCards(first, cards.split(",").map((x) => vocabIndexOf(first, x.trim())));
   const hasCard = new Uint8Array(d.s.length);
   if (rows) for (let i = 0; i < d.s.length; i++) for (let q = d.off[i]!; q < d.off[i + 1]!; q++) if (rows.has(d.idx[q]!)) hasCard[i] = 1;
-  const preds = models.map((m) => predictAll(m.net, d));
+  const preds = models.map((m) => predictAll(m.net, withBase(d, m.net.model.baseWeights)));
   const subsets: [string, (i: number) => boolean][] = [
     ["end・after", (i) => d.phase[i] !== 2],
     ["imagined", (i) => d.phase[i] === 2],
@@ -1762,7 +1816,7 @@ function attrcheck(args: Args): number {
   const K = basis.K;
   const lambdas = (args.get("ridge") ?? "3").split(",").map(Number);
   const n0 = numArg(args, "n0", 0), minN = numArg(args, "min", 300), per = numArg(args, "per", 3000);
-  const d = loadData(need(args, "data").split(","), 0, 0, undefined, net.board);
+  const d = withBase(loadData(need(args, "data").split(","), 0, 0, undefined, net.board), model.baseWeights);
   // 行が現れた局面の数と、カードごとの局面
   const counts = new Float64Array(ZV);
   const byCard: number[][] = Array.from({ length: V }, () => []);
@@ -1893,7 +1947,7 @@ function attrcheck(args: Args): number {
 function ivcheck(args: Args): number {
   const model = loadValueNet(need(args, "model"));
   const net = compileValueNet(model);
-  const loaded = loadData(need(args, "data").split(","), numArg(args, "holdout", 0), 1, undefined, net.board);
+  const loaded = withBase(loadData(need(args, "data").split(","), numArg(args, "holdout", 0), 1, undefined, net.board), model.baseWeights);
   const v = predictAll(net, loaded);
   const holdoutOnly = numArg(args, "holdout", 0) > 0;
   const opp = args.get("opp");
