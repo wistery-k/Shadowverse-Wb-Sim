@@ -2143,6 +2143,7 @@ impl SearchAgent {
         let next_env = Env {
             opts: &opts,
             w: &self.w,
+            opp_w: &self.opp_w,
             policy_w: &self.policy_w,
         };
         let root = Rc::new(after.clone());
