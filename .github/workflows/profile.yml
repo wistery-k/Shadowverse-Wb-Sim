@@ -1,0 +1,54 @@
+name: 速さの計測
+
+# main が更新されるたびに、探索 AI どうしの対戦の速さ（デッキごとの 1 試合の時間と処理ごとの内訳）を測り、
+# 報告をジョブサマリーに出す（npm run profile。docs/profile.md）。ドキュメントだけの変更では回さない。
+# 手動実行（Actions タブの Run workflow）では試合数と探索 AI の設定を変えられる。
+# GitHub のランナーは CPU が毎回同じとは限らないので、時間は報告の先頭の CPU が同じものどうしで比べる。
+# docs/profile.md の表には足さない（足すのは手元で npm run profile -- --label 名前 --record）。
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["docs/**", "**/*.md"]
+  workflow_dispatch:
+    inputs:
+      games:
+        description: 試合番号の数（1 つで席とデッキを入れ替えた 2 試合。49 で 7 デッキの総当たりを 2 回ずつ）
+        default: "49"
+      opts:
+        description: 探索 AI の設定（JSON。compare の設定と同じ形。{} で今の既定）
+        default: "{}"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: profile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 測る
+        env:
+          GAMES: ${{ inputs.games || '49' }}
+          OPTS: ${{ inputs.opts || '{}' }}
+        run: npm run -s profile -- --games "$GAMES" --opts "$OPTS" --out profile-report > /dev/null
+      - name: 報告をジョブサマリーに出す
+        if: always()
+        run: |
+          if [ -f profile-report/report.md ]; then cat profile-report/report.md >> "$GITHUB_STEP_SUMMARY"; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: profile-report
+          path: profile-report
+          retention-days: 30
