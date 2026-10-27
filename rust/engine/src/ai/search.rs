@@ -91,6 +91,8 @@ pub struct OwnNextSearch {
     pub max_depth: usize,
     /// 次のターン末の点数を混ぜる割合（1 なら次のターン末の点数だけ、0.5 なら相手のターンの後の点数と半分ずつ）
     pub mix: f64,
+    /// 次のターン末で止めず、その後の相手のターンも読んでから採点する（相手の応手を読まない楽観を消す。2 ターン読み）
+    pub reply: bool,
 }
 
 /// 探索 AI の設定（search.ts の SearchOptions。exhaustive 等の実験用の項目のうち既定で使わないものは省く）
@@ -1378,7 +1380,7 @@ fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng) -> (f64, GameState)
     };
     let mut v = match env.opts.own_next {
         Some(on) if after.phase != Phase::Ended && after.active == p && after.pending.is_none() => {
-            let next = own_next_value(pl, &after, on);
+            let next = own_next_value(pl, &after, on, rng);
             if on.mix >= 1.0 {
                 next
             } else {
@@ -1401,8 +1403,9 @@ fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng) -> (f64, GameState)
     (v, after)
 }
 
-/// 自分の次のターンの始めの局面 after から、自分のターンをビームサーチで打った最善のターン末の点数（ownNext）
-fn own_next_value(pl: &Planner, after: &GameState, on: OwnNextSearch) -> f64 {
+/// 自分の次のターンの始めの局面 after から、自分のターンをビームサーチで打った最善のターン末の点数（ownNext）。
+/// on.reply なら、その最善の並びの後の相手のターンも読んだ点数
+fn own_next_value(pl: &Planner, after: &GameState, on: OwnNextSearch, rng: &mut Rng) -> f64 {
     let env = pl.env;
     let opts = SearchOptions {
         beam_width: on.beam_width,
@@ -1421,7 +1424,30 @@ fn own_next_value(pl: &Planner, after: &GameState, on: OwnNextSearch) -> f64 {
         policy_w: env.policy_w,
     };
     let root = Rc::new(after.clone());
-    best_plan_value(&root, pl.p, &next_env).unwrap_or_else(|| pl.eval_after(after))
+    if !on.reply {
+        return best_plan_value(&root, pl.p, &next_env).unwrap_or_else(|| pl.eval_after(after));
+    }
+    let Some((_, last)) = best_plan_last(&root, pl.p, &next_env) else {
+        return pl.eval_after(after);
+    };
+    let pl2 = Planner {
+        env: &next_env,
+        p: pl.p,
+        root,
+        steps: Vec::new(),
+        plays_only: false,
+    };
+    if last.phase == Phase::Ended {
+        return pl2.eval_state(&last);
+    }
+    let settled = pl2.settle(&last);
+    let base = settled.as_ref().unwrap_or(&last);
+    let after2 = if env.opts.opponent_search.is_some() {
+        simulate_opponent_turn_by_search(base, pl.p, rng, env)
+    } else {
+        simulate_opponent_turn(base, pl.p, rng, env.policy_w, env.opts.opp_fuse)
+    };
+    pl.eval_after(&after2) - pl2.leftover(&last)
 }
 
 /// 自分のターンを終え、相手のターン（と、その途中の選択）を貪欲法で進め、自分の手番に戻った局面を返す

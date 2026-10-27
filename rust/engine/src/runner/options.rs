@@ -291,6 +291,10 @@ pub fn search_options(
                                 ))
                             }
                         },
+                        reply: match v.get("reply") {
+                            None => false,
+                            Some(x) => flag("ownNext.reply", x)?,
+                        },
                     }),
                     _ => {
                         return Err(format!(
