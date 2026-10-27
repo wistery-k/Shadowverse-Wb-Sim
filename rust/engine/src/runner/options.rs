@@ -136,6 +136,12 @@ pub fn search_options(
         return Err("設定はオブジェクトの JSON で渡します".into());
     };
     let mut o = base;
+    // 補正を既定から替えた・外した（"extraEval"。"valueNet" から作る）ときは、評価の重みを既定の補正の出発点の重みから
+    // 探索 AI の既定の重みに戻す。替えた補正の出発点の重みは、apply_value_net が "weights"・"policyWeights" に書いて下で入る
+    if raw.get("extraEval").is_some() {
+        o.weights = None;
+        o.policy_weights = None;
+    }
     for (k, v) in items {
         let k = k.as_str();
         if skip.contains(&k) {
@@ -467,9 +473,18 @@ pub fn rhino_options(
     if let Some(v) = raw.get("passLethalWard") {
         search.pass_lethal_search = Some(rhino_pass_lethal(number("passLethalWard", v)? as i32));
     }
-    let plain = SearchOptions {
-        extra_eval: learned,
-        ..SearchOptions::default()
+    // 補正を替えた・外したときは、エルフの手番と同じ評価の重みにする（既定の補正の出発点の重みは使わない）
+    let plain = match raw.get("extraEval") {
+        None => SearchOptions {
+            extra_eval: learned,
+            ..SearchOptions::default()
+        },
+        Some(_) => SearchOptions {
+            extra_eval: learned,
+            weights: search.weights.clone(),
+            policy_weights: search.policy_weights.clone(),
+            ..SearchOptions::default()
+        },
     };
     Ok((search, plain))
 }

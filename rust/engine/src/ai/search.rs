@@ -21,7 +21,7 @@ use super::mulligan::{
     weighted_mulligan_swap, OppMulligan, RolloutPolicy,
 };
 use super::think::{Thought, ThoughtCandidate};
-use super::valuenet::{value_net_eval, ValuePhase};
+use super::valuenet::{default_net_weights, value_net_eval, ValuePhase};
 use super::{Agent, Rng};
 use crate::game::{
     acting_player, apply_legal, is_legal, legal_actions, resolve_turn_end, try_apply_action,
@@ -187,6 +187,8 @@ pub struct SearchOptions {
 
 impl Default for SearchOptions {
     fn default() -> Self {
+        // 自分の評価の重みと方策の重みは、既定の補正の出発点の重み（baseWeights）に合わせる（空なら None、探索 AI の既定の重み）
+        let (weights, policy_weights) = default_net_weights();
         SearchOptions {
             samples: 1,
             // 32 から 128 に（6400 試合で 52.9%、時間は 1 割ほど増える。docs/ai-notes.md「棋譜の指摘: ビームの幅」）。
@@ -235,8 +237,8 @@ impl Default for SearchOptions {
             per_plan: 0,
             extra_eval: Some(Arc::new(value_net_eval)),
             opp_extra_eval: None,
-            weights: None,
-            policy_weights: None,
+            weights,
+            policy_weights,
             // 相手のターンを読むビームの幅は 4 から 16 に（6400 試合で 51.9%、物差しは 78.0% → 79.8%。
             // docs/ai-notes.md「相手のターンを読むビームの幅を 16 に」）
             opponent_search: Some(OpponentSearch {

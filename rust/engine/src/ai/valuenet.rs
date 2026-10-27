@@ -1,12 +1,12 @@
 //! 学習した評価の補正（src/ai/valueNet.ts の encodeState・forwardValueNet・valueNetExtraEval）。
 
-use super::aidata::{ai_data, RawValueNet, RawValueNetBoard};
+use super::aidata::{ai_data, weights_with, RawValueNet, RawValueNetBoard, Weights};
 use crate::data::{data, Ability, Kw, AMBUSH, BANE, BARRIER, KEYWORD_NAMES, WARD};
 use crate::state::*;
 use crate::state_json::ability_json_texts;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 /// カード・クレストごとの入力の種類。モデルはこの並びの部分列を持つ（足す前のモデルも読める）。
 /// 後ろの 4 つは場のフォロワーの攻撃力・体力（カードごとの合計を 5 で割る）。カードの枚数だけでは、
@@ -464,14 +464,37 @@ impl ValueNet {
 /// 探索 AI の既定の補正（data/value-net.json）
 pub fn default_value_net() -> &'static ValueNet {
     static NET: OnceLock<ValueNet> = OnceLock::new();
-    NET.get_or_init(|| {
-        let net = ValueNet::new(ai_data().value_net.clone()).expect("data/value-net.json");
-        assert!(
-            net.base_weights.is_empty(),
-            "data/value-net.json は baseWeights なしのモデルの想定です"
-        );
-        net
+    NET.get_or_init(|| ValueNet::new(ai_data().value_net.clone()).expect("data/value-net.json"))
+}
+
+/// 探索の自分の評価の重みと、手を選ぶ方策の重み（SearchOptions の weights・policy_weights）
+pub type BaseWeightOptions = (Option<Arc<Weights>>, Option<Arc<Weights>>);
+
+/// モデルの出発点の重み（baseWeights）に合わせた探索の重み。baseWeights が空なら (None, None)（探索 AI の既定の重み）。
+/// 空でなければ、自分の評価を「探索 AI の既定の重みに baseWeights を重ねたもの」にし、読みの中の相手などの方策は
+/// 探索 AI の既定の重みのまま（runner/options.rs の apply_value_net と同じ。docs/ai-notes.md「評価関数の手作りの項を外す」）
+pub fn base_weight_options(
+    base: &serde_json::Map<String, serde_json::Value>,
+) -> Result<BaseWeightOptions, String> {
+    if base.is_empty() {
+        return Ok((None, None));
+    }
+    let ad = ai_data();
+    Ok((
+        Some(Arc::new(weights_with(&ad.search_weights_raw, base)?)),
+        Some(Arc::new(ad.search_weights.clone())),
+    ))
+}
+
+/// 既定の補正（data/value-net.json）の出発点の重みに合わせた探索の重み（SearchOptions::default() が使う）。
+/// 2026-10-27 から補正は S = 0（baseWeights が全部 0）で学び直すので、それを既定にしても探索が補正だけで点数を付けるようにする
+pub fn default_net_weights() -> BaseWeightOptions {
+    static W: OnceLock<BaseWeightOptions> = OnceLock::new();
+    W.get_or_init(|| {
+        base_weight_options(&default_value_net().base_weights)
+            .expect("data/value-net.json の baseWeights")
     })
+    .clone()
 }
 
 /// 疎な入力（添字と値。TypeScript 版の Map と同じく、最初に現れた順）

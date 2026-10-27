@@ -23,6 +23,9 @@ pub const AGENTS: [(&str, &str); 8] = [
 pub fn search_classic_options() -> SearchOptions {
     SearchOptions {
         extra_eval: None,
+        // 補正が無いので、既定の補正の出発点の重みでなく探索 AI の既定の重みで評価する
+        weights: None,
+        policy_weights: None,
         opponent_search: None,
         // 人間との比較・rhino-compare の相手が変わらないよう、リーサル探索は前のまま
         lethal_ward_blocked: 0.0,

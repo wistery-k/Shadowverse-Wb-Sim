@@ -79,20 +79,29 @@ struct Task {
 fn search_options(net: Option<&ExtraEval>) -> SearchOptions {
     let mut o = SearchOptions::default();
     if let Some(n) = net {
-        o.extra_eval = Some(n.clone());
+        with_net(&mut o, n);
     }
     o
+}
+
+/// 学習した補正を net（`--net`。baseWeights の無いモデルだけ受け付ける）に替え、評価の重みを探索 AI の既定の重みにする
+/// （既定の補正の出発点の重みは使わない）
+fn with_net(o: &mut SearchOptions, net: &ExtraEval) {
+    o.extra_eval = Some(net.clone());
+    o.weights = None;
+    o.policy_weights = None;
 }
 
 /// リノセウス用 AI の既定（RhinoAgent::new(true)）。net があれば学習した補正をそれに替える
 fn rhino_agent(net: Option<&ExtraEval>) -> RhinoAgent {
     match net {
         None => RhinoAgent::new(true),
-        Some(n) => RhinoAgent::with_options(
-            true,
-            rhino_search_options(RHINO_POTENTIAL, Some(n.clone())),
-            search_options(Some(n)),
-        ),
+        Some(n) => {
+            let mut search = rhino_search_options(RHINO_POTENTIAL, Some(n.clone()));
+            search.weights = None;
+            search.policy_weights = None;
+            RhinoAgent::with_options(true, search, search_options(Some(n)))
+        }
     }
 }
 
