@@ -45,55 +45,62 @@ sha256sum "$W/net0.json"
 NC=$(( (G + CHUNK - 1) / CHUNK ))
 M=$W/$NAME.json; MP=$W/${NAME}p.json; MPA=$W/${NAME}pa.json
 
-# 1. 自己対戦（両方の席が NET0 の今の既定の探索 AI。ランダムな手・介入・想像の局面は今までの学び直しと同じ）
-files=()
-for i in $(seq 0 $((NC - 1))); do
-  f=$W/s$i.jsonl
-  files+=("$f.tmp")
-  [ -f "$f.gz" ] && continue
-  n=$(( G - CHUNK * i < CHUNK ? G - CHUNK * i : CHUNK ))
-  # shellcheck disable=SC2086
-  $B td selfplay --model "$W/net0.json" --games "$n" --start $((SEED0 + CHUNK * i)) \
-    --eps 0.1 --opp beam --sampling default --iv "$IV" --ivZone both --imagined 2 $SP_EXTRA --out "$f.tmp" > "$f.log" 2>&1
-  gzip -c "$f.tmp" > "$f.gz.tmp"
-  mv "$f.gz.tmp" "$f.gz"
-  echo "== 自己対戦 s$i $(date '+%m-%d %H:%M')"; grep -E "試合、局面" "$f.log" | sed 's|^.*: ||'
-done
-if [ "${STOP_AFTER:-}" = selfplay ]; then
-  # 自己対戦だけクラウドで作り、学習と判定は PC で回すとき。s<i>.jsonl.gz を PC の同じ作業フォルダに置いて流し直すと、続きから回る
-  echo "== 自己対戦まで（STOP_AFTER=selfplay）"
-  echo DONE "$(date '+%m-%d %H:%M')"
-  exit 0
-fi
-restore() {
-  for f in "${files[@]}"; do
-    [ -f "$f" ] || { gunzip -c "${f%.tmp}.gz" > "$f.u.tmp"; mv "$f.u.tmp" "$f"; }
-  done
-}
-DATA=$(IFS=,; echo "${files[*]}")
-
-# 2. NET0 から学び直す
-if [ ! -f "$M" ]; then
-  restore
-  npm run -s td -- train --model "$W/net0.json" --data "$DATA" --out "$M.tmp" \
-    --epochs "$EPOCHS" --lr "$LR" --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 > "$W/$NAME-train.log" 2>&1
-  mv "$M.tmp" "$M"
-fi
-echo "== 学習 $NAME $(date '+%m-%d %H:%M')"; grep -hE "^(学習前|エポック|確かめ用|補正)" "$W/$NAME-train.log" | cut -c1-240
-
-# 3. 学習データに出なかった入力を 0 にし（td prune）、学んでいないカードの行を属性の分で埋める（td attr --keepA 0、λ 3）
-if [ ! -f "$MP" ]; then
-  restore
-  npm run -s td -- prune --model "$M" --data "$DATA" --out "$MP.tmp" > "$W/$NAME-prune.log" 2>&1
-  mv "$MP.tmp" "$MP"
-fi
-[ -n "$KEEP" ] || rm -f "${files[@]}"
+# 判定する補正（${NAME}pa.json）が作業フォルダにあれば、自己対戦・学習・間引き・埋めは飛ばして判定だけ回す
+# （学習を別の場所で回して、判定だけ PC で回すとき）
 if [ ! -f "$MPA" ]; then
-  npm run -s td -- attr --model "$MP" --out "$MPA.tmp" --keepA 0 > "$W/$NAME-attr.log" 2>&1
-  mv "$MPA.tmp" "$MPA"
+  # 1. 自己対戦（両方の席が NET0 の今の既定の探索 AI。ランダムな手・介入・想像の局面は今までの学び直しと同じ）
+  files=()
+  for i in $(seq 0 $((NC - 1))); do
+    f=$W/s$i.jsonl
+    files+=("$f.tmp")
+    [ -f "$f.gz" ] && continue
+    n=$(( G - CHUNK * i < CHUNK ? G - CHUNK * i : CHUNK ))
+    # shellcheck disable=SC2086
+    $B td selfplay --model "$W/net0.json" --games "$n" --start $((SEED0 + CHUNK * i)) \
+      --eps 0.1 --opp beam --sampling default --iv "$IV" --ivZone both --imagined 2 $SP_EXTRA --out "$f.tmp" > "$f.log" 2>&1
+    gzip -c "$f.tmp" > "$f.gz.tmp"
+    mv "$f.gz.tmp" "$f.gz"
+    echo "== 自己対戦 s$i $(date '+%m-%d %H:%M')"; grep -E "試合、局面" "$f.log" | sed 's|^.*: ||'
+  done
+  if [ "${STOP_AFTER:-}" = selfplay ]; then
+    # 自己対戦だけクラウドで作り、学習と判定は PC で回すとき。s<i>.jsonl.gz を PC の同じ作業フォルダに置いて流し直すと、続きから回る
+    echo "== 自己対戦まで（STOP_AFTER=selfplay）"
+    echo DONE "$(date '+%m-%d %H:%M')"
+    exit 0
+  fi
+  restore() {
+    for f in "${files[@]}"; do
+      [ -f "$f" ] || { gunzip -c "${f%.tmp}.gz" > "$f.u.tmp"; mv "$f.u.tmp" "$f"; }
+    done
+  }
+  DATA=$(IFS=,; echo "${files[*]}")
+
+  # 2. NET0 から学び直す
+  if [ ! -f "$M" ]; then
+    restore
+    npm run -s td -- train --model "$W/net0.json" --data "$DATA" --out "$M.tmp" \
+      --epochs "$EPOCHS" --lr "$LR" --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 > "$W/$NAME-train.log" 2>&1
+    mv "$M.tmp" "$M"
+  fi
+  echo "== 学習 $NAME $(date '+%m-%d %H:%M')"; grep -hE "^(学習前|エポック|確かめ用|補正)" "$W/$NAME-train.log" | cut -c1-240
+
+  # 3. 学習データに出なかった入力を 0 にし（td prune）、学んでいないカードの行を属性の分で埋める（td attr --keepA 0、λ 3）
+  if [ ! -f "$MP" ]; then
+    restore
+    npm run -s td -- prune --model "$M" --data "$DATA" --out "$MP.tmp" > "$W/$NAME-prune.log" 2>&1
+    mv "$MP.tmp" "$MP"
+  fi
+  [ -n "$KEEP" ] || rm -f "${files[@]}"
+  if [ ! -f "$MPA" ]; then
+    npm run -s td -- attr --model "$MP" --out "$MPA.tmp" --keepA 0 > "$W/$NAME-attr.log" 2>&1
+    mv "$MPA.tmp" "$MPA"
+  fi
+  cat "$W/$NAME-prune.log" "$W/$NAME-attr.log"
+  sha256sum "$M" "$MP" "$MPA"
+else
+  echo "== $MPA があるので、判定から回す"
+  sha256sum "$MPA"
 fi
-cat "$W/$NAME-prune.log" "$W/$NAME-attr.log"
-sha256sum "$M" "$MP" "$MPA"
 
 # 4. 判定（ログが空でなければ飛ばす）
 run() { # run <ログ> <コマンド…>
