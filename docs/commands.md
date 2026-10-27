@@ -250,6 +250,10 @@ npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 
 npm run svwb -- deep-gap play --out gap.jsonl [--games 100] [--start 0] [--deep '<設定の JSON>'] [--k 4] [--evalSeeds 48] [--turns 1-30]
 npm run svwb -- deep-gap rollout --in gap.jsonl[,…] --out roll.jsonl [--top 200] [--random 200] [--seed 1] [--m 48]
 npm run svwb -- deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 30] [--only <内訳の一部>] [--skipDecks <デッキ>,…] [--sort gap|rollout] [--listOnly 1]
+npm run svwb -- two-turn show [--only <局面>,…] [--sandbox <フォルダ>]
+npm run svwb -- two-turn run --out tt.jsonl [--only <局面>,…] [--m 64] [--reads 4] [--twos 2] [--nextBeam 256] [--seed 1] [--opts '<設定の JSON>']
+npm run svwb -- two-turn report tt.jsonl… [--only <局面>,…]
+npm run svwb -- two-turn trace --only <局面> --cand <候補> [--r 0] [--seed 1] [--opts '<設定の JSON>']
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI。
@@ -275,6 +279,11 @@ npm run svwb -- deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 
   `report` の局面の中身は、`--only`（内訳の名前の一部。例: `ビームが届かない`）・`--skipDecks`（手番の側のデッキ）で絞れる。`--listOnly 1` はまとめを出さず、
   デッキごとに 1 行 1 局面の表（両方のターンで使ったものの違いつき）と各局面の中身だけを出す（一覧の例: 共有フォルダの `notes/beam-miss/beam-miss.md`）
   クラウドで回すジョブは `cloud/jobs/deep-gap.sh`（`DANGER_CMP` を付けると `dangerRescore` と今の既定の compare も回す。docs/ai-notes.md「深い読みと食い違う局面を集める」）
+- `two-turn`: 2 ターン以上の計画が効きそうな、手で作った局面（`rust/engine/src/runner/two_turn.rs` の `SCENARIOS` に書いたものだけ。外から局面を入れる口はない）で、
+  今の AI と計画の候補（最初の何手かを決める・カードを出さない 等を付けた AI）を打ち比べる。`show` は局面と候補、`run` は相手の手札・山札の決定化 `--m` 通りごとに全候補を打ち、
+  AI の点数・読み直し・次の自分のターン末（幅 `--nextBeam`）・2 ターン読み・次のターンのリーサル・最後まで打った勝ち負けを 1 行ずつ追記する（済んだものは飛ばす）。
+  `report` は今の AI との対の差を Markdown で出す。`trace` は 1 通りの候補のターンと、その後の試合を全部出す。`--opts` は候補のターンを打つ AI の設定（compare の設定と同じ形）。
+  docs/ai-notes.md「2 ターン以上の計画が効きそうな局面を手で作って比べる」
 
 ## td
 

@@ -1,6 +1,6 @@
 //! 2 ターン以上の計画が効きそうな局面を手で作り、候補のターンごとに「今の AI の点数」「2 ターン先まで読んだ点数」「最後まで打った勝率」を比べる（2026-10-27）。
 //!
-//!   svwb two-turn show [--only <名前,…>]
+//!   svwb two-turn show [--only <名前,…>] [--sandbox <フォルダ>]
 //!   svwb two-turn run --out t.jsonl [--only <名前,…>] [--m 64] [--reads 4] [--twos 2] [--nextBeam 256] [--seed 1]
 //!   svwb two-turn report t.jsonl… [--only <名前,…>]
 //!
@@ -125,10 +125,16 @@ const fn put(name: &'static str) -> Put {
 struct HandSpec {
     name: &'static str,
     boosts: i32,
+    /// コストの増減（スペルブーストでコストが下がるカードは自分で書く）
+    cost_mod: i32,
 }
 
 const fn hand(name: &'static str) -> HandSpec {
-    HandSpec { name, boosts: 0 }
+    HandSpec {
+        name,
+        boosts: 0,
+        cost_mod: 0,
+    }
 }
 
 /// 局面の書き換え（None の項目は自己対戦のまま）
@@ -138,6 +144,8 @@ struct Edit {
     opp_hp: Option<i32>,
     /// 自分の PP 最大値（PP も同じ値にする）
     max_pp: Option<i32>,
+    /// 自分の今の PP（max_pp の後に書く）
+    pp: Option<i32>,
     ep: Option<i32>,
     sep: Option<i32>,
     my_hand: Vec<HandSpec>,
@@ -145,6 +153,8 @@ struct Edit {
     opp_board: Vec<Put>,
     /// 相手の手札（空なら自己対戦のまま）
     opp_hand: Vec<HandSpec>,
+    /// 相手の手札の枚数（多い分を山札に戻す）
+    opp_hand_count: Option<usize>,
     /// 相手の PP 最大値・EP・SEP
     opp_max_pp: Option<i32>,
     opp_ep: Option<i32>,
@@ -366,10 +376,12 @@ const SCENARIOS: &[Scenario] = &[
                 HandSpec {
                     name: "マナリアの学徒・ウィリアム",
                     boosts: 3,
+                    cost_mod: 0,
                 },
                 HandSpec {
                     name: "ストームブラスト",
                     boosts: 2,
+                    cost_mod: 0,
                 },
                 hand("知恵の輝き"),
                 hand("熾天使の福音"),
@@ -732,6 +744,7 @@ const SCENARIOS: &[Scenario] = &[
             my_hp: Some(18),
             opp_hp: Some(8),
             max_pp: Some(9),
+            pp: None,
             ep: Some(0),
             sep: Some(1),
             my_hand: vec![
@@ -767,6 +780,7 @@ const SCENARIOS: &[Scenario] = &[
             opp_max_pp: Some(8),
             opp_ep: Some(0),
             opp_sep: Some(0),
+            opp_hand_count: None,
         },
         cands: || {
             vec![
@@ -781,6 +795,116 @@ const SCENARIOS: &[Scenario] = &[
                     ],
                     no_evolve: true,
                     no_super: true,
+                    ..Cand::default()
+                },
+            ]
+        },
+    },
+    Scenario {
+        name: "witch-od-hold",
+        title: "スペルウィッチ: オーバーディメンションを温存し、次のターンにサタン → オーバーディメンション（ユーザーの案）",
+        note: "先攻 9 ターン目、PP 0/9、SEP 1、体力 13。手札はコスト 0 のオーバーディメンション（スペルブースト 19）とサタン。\
+               相手（ロイヤル、体力 20、PP 9）の場は御者・ジェノ 2 体・ルミナスメイジ・ルミナスランサー。今打てば 5 枚引いて PP 9 で動ける。\
+               温存すれば次のターンにサタンでアポカリプスデッキにしてから打てる",
+        decks: ["スペルウィッチ", "アマリアロイヤル"],
+        seed: 101,
+        turn: 9,
+        first: Some(true),
+        edit: || Edit {
+            my_hp: Some(13),
+            opp_hp: Some(20),
+            max_pp: Some(9),
+            pp: Some(0),
+            ep: Some(0),
+            sep: Some(1),
+            my_hand: vec![
+                HandSpec {
+                    name: "オーバーディメンション",
+                    boosts: 19,
+                    cost_mod: -18,
+                },
+                hand("最果ての罪・サタン"),
+            ],
+            my_board: vec![],
+            opp_board: vec![
+                put("王家の御者"),
+                put("レヴィオンアックス・ジェノ"),
+                put("卓越のルミナスメイジ"),
+                put("レヴィオンアックス・ジェノ"),
+                put("勇猛のルミナスランサー"),
+            ],
+            opp_max_pp: Some(9),
+            opp_ep: Some(0),
+            opp_sep: Some(1),
+            opp_hand_count: Some(5),
+            ..Edit::default()
+        },
+        cands: || {
+            vec![
+                ai_cand(),
+                Cand {
+                    name: "hold",
+                    desc: "オーバーディメンションを打たない（次のターンにサタン → オーバーディメンション）",
+                    no_play: vec!["オーバーディメンション"],
+                    ..Cand::default()
+                },
+                Cand {
+                    name: "od-now",
+                    desc: "オーバーディメンションを今打つ（残りは AI）",
+                    prefix: vec![Step::Play("オーバーディメンション")],
+                    ..Cand::default()
+                },
+            ]
+        },
+    },
+    Scenario {
+        name: "witch-od-hold-safe",
+        title: "スペルウィッチ: オーバーディメンションを温存する（相手の場にジェノがない形）",
+        note: "witch-od-hold から相手のジェノ 2 体を除き、温存しても次の相手のターンに倒されない形にしたもの",
+        decks: ["スペルウィッチ", "アマリアロイヤル"],
+        seed: 101,
+        turn: 9,
+        first: Some(true),
+        edit: || Edit {
+            my_hp: Some(13),
+            opp_hp: Some(20),
+            max_pp: Some(9),
+            pp: Some(0),
+            ep: Some(0),
+            sep: Some(1),
+            my_hand: vec![
+                HandSpec {
+                    name: "オーバーディメンション",
+                    boosts: 19,
+                    cost_mod: -18,
+                },
+                hand("最果ての罪・サタン"),
+            ],
+            my_board: vec![],
+            opp_board: vec![
+                put("王家の御者"),
+                put("卓越のルミナスメイジ"),
+                put("勇猛のルミナスランサー"),
+            ],
+            opp_max_pp: Some(9),
+            opp_ep: Some(0),
+            opp_sep: Some(1),
+            opp_hand_count: Some(5),
+            ..Edit::default()
+        },
+        cands: || {
+            vec![
+                ai_cand(),
+                Cand {
+                    name: "hold",
+                    desc: "オーバーディメンションを打たない（次のターンにサタン → オーバーディメンション）",
+                    no_play: vec!["オーバーディメンション"],
+                    ..Cand::default()
+                },
+                Cand {
+                    name: "od-now",
+                    desc: "オーバーディメンションを今打つ（残りは AI）",
+                    prefix: vec![Step::Play("オーバーディメンション")],
                     ..Cand::default()
                 },
             ]
@@ -909,6 +1033,7 @@ fn set_hand(s: &mut GameState, p: PlayerIndex, hand: &[HandSpec]) -> Result<(), 
                 h.x = Some(x + hs.boosts);
             }
         }
+        h.cost_mod = hs.cost_mod;
         s.players[p].hand.make_mut().push(h);
     }
     Ok(())
@@ -938,6 +1063,9 @@ fn build(sc: &Scenario) -> Result<GameState, String> {
         s.players[ME].max_pp = v;
         s.players[ME].pp = v;
     }
+    if let Some(v) = e.pp {
+        s.players[ME].pp = v;
+    }
     if let Some(v) = e.ep {
         s.players[ME].ep = v;
     }
@@ -957,6 +1085,12 @@ fn build(sc: &Scenario) -> Result<GameState, String> {
     set_hand(&mut s, ME, &e.my_hand)?;
     if !e.opp_hand.is_empty() {
         set_hand(&mut s, o, &e.opp_hand)?;
+    }
+    if let Some(n) = e.opp_hand_count {
+        while s.players[o].hand.len() > n {
+            let h = s.players[o].hand.make_mut().pop().expect("手札");
+            s.return_to_deck(o, h);
+        }
     }
     s.players[ME].board.make_mut().clear();
     for b in &e.my_board {
@@ -1290,11 +1424,22 @@ fn show(argv: &[String]) -> Result<(), String> {
     if !rest.is_empty() {
         return Err(format!("不明な引数: {}", rest.join(" ")));
     }
-    check_flags(&flags, &["only"])?;
+    check_flags(&flags, &["only", "sandbox"])?;
+    let dir = flag(&flags, "sandbox");
     for sc in pick(flag(&flags, "only"))? {
         let s = build(sc)?;
         for l in scenario_text(sc, &s) {
             println!("{l}");
+        }
+        if let Some(d) = dir {
+            // サンドボックス（開発サーバーだけ）の「局面を読み込む」に貼れる形
+            let path = format!("{d}/{}.json", sc.name);
+            let text = format!(
+                "{{\"format\":\"svwb-sandbox\",\"version\":1,\"state\":{}}}\n",
+                state_to_json(&s).stringify()
+            );
+            std::fs::write(&path, text).map_err(|e| format!("{path} に書けません: {e}"))?;
+            println!("- サンドボックス用: {path}");
         }
         println!();
     }
