@@ -234,3 +234,29 @@ fn record_reads_does_not_change_moves() {
     }
     assert!(seen > 0);
 }
+
+#[test]
+fn policy_weights_equal_to_weights_change_nothing() {
+    // 方策の重み（policyWeights）を自分の評価の重みと同じにしても、打つ手は変わらない（書かなければ weights と同じ重みを使う）
+    let run = |policy: Option<std::sync::Arc<crate::ai::aidata::Weights>>| {
+        let mut search = SearchAgent::new(SearchOptions {
+            beam_width: 32,
+            max_depth: 8,
+            opp_hand_samples: 3,
+            policy_weights: policy,
+            ..SearchOptions::default()
+        });
+        let mut greedy = greedy_base();
+        fresh();
+        let mut actions = Vec::new();
+        play_match(
+            &mut [&mut search, &mut greedy],
+            [deck_at(0), deck_at(1)],
+            3,
+            |_, a| actions.push(a.clone()),
+        );
+        actions
+    };
+    let same = std::sync::Arc::new(crate::ai::aidata::ai_data().search_weights.clone());
+    assert_eq!(run(None), run(Some(same)));
+}

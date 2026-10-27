@@ -246,7 +246,7 @@ npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mul
 npm run svwb -- mulligan-data --games 6000 [--start 0] [--seed 1] [--flip 0.5] --out d.jsonl
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
                 [--sampling classic|default] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
-                [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>']
+                [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>']
 npm run svwb -- deep-gap play --out gap.jsonl [--games 100] [--start 0] [--deep '<設定の JSON>'] [--k 4] [--evalSeeds 48] [--turns 1-30]
 npm run svwb -- deep-gap rollout --in gap.jsonl[,…] --out roll.jsonl [--top 200] [--random 200] [--seed 1] [--m 48]
 npm run svwb -- deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 30] [--only <内訳の一部>] [--skipDecks <デッキ>,…] [--sort gap|rollout] [--listOnly 1]
@@ -265,7 +265,9 @@ npm run svwb -- deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 
   `--vs <デッキ>` で、どの試合も片方をそのデッキにし、もう片方（挑戦する側）だけ並べたデッキを回して、介入も挑戦する側だけにする（特定の相手との試合でのカードの価値を測る用）。
   `--frozen '{}'` で、片方の席（学ぶ側。49 試合ごとに入れ替わる）だけを `--model` の補正で打ち、もう片方を設定の JSON の探索 AI（`'{}'` は今の既定の AI）に固定する。
   ランダムな手・介入は学ぶ側だけ。行に `"learner"` が付き、学習は `td train --seat learner` で学ぶ側の局面だけを読む（狙い撃ちの相手を学ばせる。
-  回りを回すジョブは `cloud/jobs/exploit.sh`。docs/ai-notes.md「狙い撃ちする相手を学ばせて死角を探す」）
+  回りを回すジョブは `cloud/jobs/exploit.sh`。docs/ai-notes.md「狙い撃ちする相手を学ばせて死角を探す」）。
+  `--sDefault 1` で、各局面に基準の重み（DEFAULT_WEIGHTS）での手で作った評価も書く（`"sd"`。打つ手は変わらない）。`td train --base default` がこれを読む
+  （手で作った項を外した補正を、同じ自己対戦から学ぶ。docs/ai-notes.md「評価関数の手作りの項を外す」）
 - `deep-gap`: 今の既定の AI どうしの自己対戦（`ai-play` と同じ試合）の、自分のターンの最初の局面ごとに、試合のターンと深い読み（`--deep`。既定は
   ビーム 2048（今の既定が幅 512 になる 2026-10-26 までは 512）・読み直す最初の手 8・最初の手ごとの終局面 3・相手の手札の引き直し 48・相手のターンのビーム 32。読む深さは今の既定と同じで、広く・多く読む）のターンを比べる。
   食い違った局面は、手番の側から見た決定化を `--k` 通り作って両方に打たせ、深い読みの点数（別の引き直し `--evalSeeds` 通り。引き直しごとに勝率にしてから平均する）で見た勝率の差と、
@@ -286,7 +288,7 @@ npm run td -- board --model m.json --out b0.json [--layers 32,16] [--seed 1]
 npm run td -- check --model m.json --data d.jsonl
 npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001]
                 [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--v1Only 0] [--best 0] [--cmpWeight 0] [--cmpBatch 16]
-                [--seat learner|frozen|both]
+                [--seat learner|frozen|both] [--base default|zero|search]
 npm run td -- ivcheck --model m1.json --data d0.jsonl[,d1.jsonl] [--holdout 0] [--opp <デッキ名>] [--min 30]
 npm run td -- prune --model m4.json --data d0.jsonl,d1.jsonl,… --out data/value-net.json [--seat both]
 npm run td -- probe --model m1.json --data d0.jsonl [--per 2000]
@@ -295,6 +297,10 @@ npm run td -- eval --model a.json,b.json --data d.jsonl [--cards <カード名,�
 
 自己対戦（`selfplay`）は Rust 版（`npm run svwb -- td selfplay`）で行う。各引数の意味は `scripts/td-main.ts` の先頭。
 `--seat learner` は `td selfplay --frozen` の自己対戦の学ぶ側の席の局面だけを、`--seat frozen` は固定した相手の席の局面だけを読む（既定 both は両方）。
+`train --base default` は出発点の評価 S を基準の重みのもの（自己対戦の `"sd"`。`td selfplay --sDefault 1` で書く）に、`--base zero` は 0 にして学び、
+書き出すモデルの `baseWeights` をその重みにする（`--base search` は探索の既定の重み。省略すると元のモデルのまま）。
+そのモデルを `"valueNet"` で使うと、自分の評価だけをその重みにし、読みの中の相手は探索の既定の重みで打つ（下の `policyWeights`）。
+`eval`・`ivcheck`・`attrcheck` も、モデルの `baseWeights` に合わせて `"s"`・`"sd"`・0 を読む。
 
 ## pack-run（PC で回した結果をクラウドから見られるようにする）
 
@@ -396,7 +402,12 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
   `"greedy"`（貪欲法の既定の重みのまま。PP 最大値の項が 0 なので竜の啓示を打たない。2026-10-26 より前の既定）・`"search"`（探索の重み）。
   `mulliganRolloutBeam` が 1 以上なら効かない（ビームは探索の重みで打つ）
 - `opponentSearch`: `null`（相手のターンを読まない）か `{"beamWidth": …, "maxDepth": …, "extraEval": true|false}`
-- `weights`: `"default"`（基準の重み）か、変えたい項目だけのオブジェクト（`"holdScale"` で hold を何倍にするか）
-- `valueNet`: 学習した補正のファイル名か `false`（補正なし）
+- `weights`: 自分の評価の重み。`"default"`（基準の重み）・`"search"`（探索の既定の重み）・`"zero"`（全部 0。手で作った評価を使わず補正だけで点数を付ける）か、
+  変えたい項目だけのオブジェクト（`"holdScale"` で hold を何倍にするか）
+- `policyWeights`: 手を選ぶ方策として使う重み（読みの中の相手のビームの評価、相手のターン・選択待ちを打つ貪欲法の自壊の倍率、マリガンの打ち進めの PP 最大値）。
+  形は `weights` と同じ。書かなければ `weights` と同じ（今までどおり）。自分の評価だけを変えて、読みの中の相手の打ち方は変えないときに `"search"` を渡す
+  （例: `'{"weights":"default","policyWeights":"search"}'`）。`baseWeights` のあるモデルを `valueNet` で使うと、書かなければ `"search"` になる
+- `valueNet`: 学習した補正のファイル名か `false`（補正なし）。モデルに `baseWeights` があれば、自分の評価の重みを探索の既定の重みにそれを重ねたものにする
+  （`weights` がオブジェクトならさらに重ね、文字列ならそちらを使う）
 
 例: `'{"lethal":false,"beamWidth":16,"weights":{"myHand":0.8}}'`

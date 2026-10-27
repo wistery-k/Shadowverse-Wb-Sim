@@ -63,8 +63,17 @@ pub fn apply_value_net(mut raw: Json) -> Result<(Json, Option<ExtraEval>), Strin
                 .unwrap_or(Json::Obj(Vec::new()));
             let extra = match raw.get("weights") {
                 Some(w @ Json::Obj(_)) => w.clone(),
+                // "default"・"search"・"zero" は全部の項目を持つので、モデルの出発点の重みより優先する
+                Some(w @ Json::Str(_)) => resolve_weights("weights", Some(w))?.expect("重み"),
                 _ => Json::Obj(Vec::new()),
             };
+            // 出発点の重みを変えたモデル（baseWeights がある）は、自分の評価だけをその重みにし、読みの中の相手は
+            // 探索 AI の既定の重みのまま打つ（"policyWeights" を書けばそちら。docs/ai-notes.md「評価関数の手作りの項を外す」）
+            if !matches!(&base, Json::Obj(items) if items.is_empty())
+                && raw.get("policyWeights").is_none()
+            {
+                raw.set("policyWeights", search_weights_json().clone());
+            }
             raw.set(
                 "weights",
                 search_weights_json().spread(&base).spread(&extra),
@@ -311,18 +320,23 @@ pub fn search_options(
                         ),
                     }
             }
-            "weights" => {
-                o.weights = match v {
+            "weights" | "policyWeights" => {
+                let w = match v {
                     Json::Obj(_) => Some(Arc::new(weights_from(match v.to_value() {
                         serde_json::Value::Object(m) => m,
                         _ => unreachable!(),
                     })?)),
                     _ => {
                         return Err(format!(
-                            "Rust 版では \"weights\" に {} は使えません",
+                            "Rust 版では \"{k}\" に {} は使えません",
                             v.stringify()
                         ))
                     }
+                };
+                if k == "weights" {
+                    o.weights = w;
+                } else {
+                    o.policy_weights = w;
                 }
             }
             // TypeScript 版とともに消した実験用の項目（既定の値なら何もしない）
@@ -346,8 +360,27 @@ pub fn search_options(
 /// "weights": "default" で基準の重み、オブジェクトなら SEARCH_WEIGHTS のその項目だけを変える（"holdScale" は hold を何倍にするか）
 pub fn compare_options(text: &str) -> Result<SearchOptions, String> {
     let (mut raw, model) = apply_value_net(Json::parse(text)?)?;
-    match raw.get("weights") {
-        Some(Json::Str(s)) if s == "default" => raw.set("weights", default_weights_json().clone()),
+    for key in ["weights", "policyWeights"] {
+        if let Some(w) = resolve_weights(key, raw.get(key))? {
+            raw.set(key, w);
+        }
+    }
+    search_options(&raw, model.as_ref(), SearchOptions::default(), &[])
+}
+
+/// compare の "weights"・"policyWeights" の値を、全部の項目のある重みの JSON にする（直さなくてよければ None）。
+/// "default" は基準の重み DEFAULT_WEIGHTS、"search" は探索 AI の既定 SEARCH_WEIGHTS、"zero" は全部 0（手で作った評価を使わない。
+/// 試合が終わった局面の勝ち負けの点だけが残る）。オブジェクトなら SEARCH_WEIGHTS のその項目だけを変える（"holdScale" は hold を何倍にするか）
+fn resolve_weights(key: &str, v: Option<&Json>) -> Result<Option<Json>, String> {
+    Ok(match v {
+        Some(Json::Str(s)) if s == "default" => Some(default_weights_json().clone()),
+        Some(Json::Str(s)) if s == "search" => Some(search_weights_json().clone()),
+        Some(Json::Str(s)) if s == "zero" => Some(zero_weights_json()),
+        Some(Json::Str(s)) => {
+            return Err(format!(
+                "\"{key}\" は \"default\"・\"search\"・\"zero\" かオブジェクト: {s}"
+            ))
+        }
         Some(w @ Json::Obj(_)) => {
             let mut rest = w.clone();
             let scale = match rest.take("holdScale") {
@@ -363,22 +396,42 @@ pub fn compare_options(text: &str) -> Result<SearchOptions, String> {
                 ),
                 _ => panic!("SEARCH_WEIGHTS に hold がありません"),
             };
-            let merged = search_weights_json()
-                .spread(&Json::Obj(vec![("hold".into(), hold)]))
-                .spread(&rest);
-            raw.set("weights", merged);
+            Some(
+                search_weights_json()
+                    .spread(&Json::Obj(vec![("hold".into(), hold)]))
+                    .spread(&rest),
+            )
         }
-        _ => {}
-    }
-    search_options(&raw, model.as_ref(), SearchOptions::default(), &[])
+        _ => None,
+    })
 }
 
-/// rhino-compare の --opts（"weights" のオブジェクトは SEARCH_WEIGHTS に重ねる）。表示用の JSON と学習した補正
+/// 全部の項目が 0 の重み（hold は空。"weights": "zero"）。手で作った評価は、試合が終わった局面の勝ち負けの点（±1e6）だけになる
+pub fn zero_weights_json() -> Json {
+    match search_weights_json() {
+        Json::Obj(items) => Json::Obj(
+            items
+                .iter()
+                .map(|(k, v)| {
+                    let z = match v {
+                        Json::Obj(_) => Json::Obj(Vec::new()),
+                        _ => Json::Num(0.0),
+                    };
+                    (k.clone(), z)
+                })
+                .collect(),
+        ),
+        _ => panic!("SEARCH_WEIGHTS がオブジェクトではありません"),
+    }
+}
+
+/// rhino-compare の --opts（"weights"・"policyWeights" は compare と同じ。オブジェクトは SEARCH_WEIGHTS に重ねる）。表示用の JSON と学習した補正
 pub fn rhino_compare_options(text: &str) -> Result<(Json, Option<ExtraEval>), String> {
     let (mut raw, model) = apply_value_net(Json::parse(text)?)?;
-    if let Some(w @ Json::Obj(_)) = raw.get("weights") {
-        let merged = search_weights_json().spread(w);
-        raw.set("weights", merged);
+    for key in ["weights", "policyWeights"] {
+        if let Some(w) = resolve_weights(key, raw.get(key))? {
+            raw.set(key, w);
+        }
     }
     Ok((raw, model))
 }

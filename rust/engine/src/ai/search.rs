@@ -162,6 +162,10 @@ pub struct SearchOptions {
     pub opp_extra_eval: Option<ExtraEval>,
     /// 評価関数の重み（None なら探索 AI の既定 SEARCH_WEIGHTS）
     pub weights: Option<Arc<Weights>>,
+    /// 手を選ぶ方策として使う評価の重み（None なら weights と同じ）。読みの中の相手のビームの評価、相手のターン・選択待ちを打つ貪欲法の
+    /// 自壊の倍率（doomed）、マリガンの打ち進めの PP 最大値（mulliganRolloutWeights の ramp）に使う。自分の評価（weights）だけを変えて、
+    /// 読みの中の相手の打ち方は変えないときに渡す（docs/ai-notes.md「評価関数の手作りの項を外す」）
+    pub policy_weights: Option<Arc<Weights>>,
     pub opponent_search: Option<OpponentSearch>,
     pub own_next: Option<OwnNextSearch>,
     pub opp_hand_samples: usize,
@@ -232,6 +236,7 @@ impl Default for SearchOptions {
             extra_eval: Some(Arc::new(value_net_eval)),
             opp_extra_eval: None,
             weights: None,
+            policy_weights: None,
             // 相手のターンを読むビームの幅は 4 から 16 に（6400 試合で 51.9%、物差しは 78.0% → 79.8%。
             // docs/ai-notes.md「相手のターンを読むビームの幅を 16 に」）
             opponent_search: Some(OpponentSearch {
@@ -303,10 +308,12 @@ pub struct PlanTrace {
     pub reads: Vec<(Action, ScoreParts)>,
 }
 
-/// 探索で使う重み（評価関数の重みと、相手の手番の貪欲法の重み）
+/// 探索で使う重み（評価関数の重みと、読みの中の相手のビームの重みと、相手の手番の貪欲法の重み）
 pub struct Env<'a> {
     pub opts: &'a SearchOptions,
     pub w: &'a EvalWeights,
+    /// 読みの中の相手のビームの評価の重み（SearchOptions.policy_weights。無ければ w と同じ）
+    pub opp_w: &'a EvalWeights,
     pub policy_w: &'a EvalWeights,
 }
 
@@ -1418,6 +1425,7 @@ fn own_next_value(pl: &Planner, after: &GameState, on: OwnNextSearch) -> f64 {
     let next_env = Env {
         opts: &opts,
         w: env.w,
+        opp_w: env.opp_w,
         policy_w: env.policy_w,
     };
     let root = Rc::new(after.clone());
@@ -1489,9 +1497,11 @@ pub fn simulate_opponent_turn_by_search(
         per_plan: 0,
         ..opts.clone()
     };
+    // 読みの中の相手は、自分の評価の重みでなく方策の重み（policy_weights。既定は同じ）で打つ
     let opp_env = Env {
         opts: &opp_opts,
-        w: env.w,
+        w: env.opp_w,
+        opp_w: env.opp_w,
         policy_w: env.policy_w,
     };
     let mut s: Option<GameState> = Some(state.clone());
@@ -1561,6 +1571,8 @@ struct Total {
 pub struct SearchAgent {
     pub opts: SearchOptions,
     w: EvalWeights,
+    /// 読みの中の相手のビームの重み（opts.policy_weights。無ければ w と同じ）
+    opp_w: EvalWeights,
     policy_w: EvalWeights,
     default_w: EvalWeights,
     plans: [Option<PlanState>; 2],
@@ -1577,11 +1589,16 @@ impl SearchAgent {
                 .unwrap_or(&ad.search_weights)
                 .clone(),
         );
+        let opp_w = match &opts.policy_weights {
+            Some(x) => EvalWeights::new((**x).clone()),
+            None => w.clone(),
+        };
         let mut pw = ad.default_weights.clone();
-        pw.doomed = w.w.doomed;
+        pw.doomed = opp_w.w.doomed;
         SearchAgent {
             opts,
             w,
+            opp_w,
             policy_w: EvalWeights::new(pw),
             default_w: EvalWeights::new(ad.default_weights.clone()),
             plans: [None, None],
@@ -1648,6 +1665,7 @@ impl SearchAgent {
         let env = Env {
             opts,
             w: &self.w,
+            opp_w: &self.opp_w,
             policy_w: &self.policy_w,
         };
         /// 最初の手ごとの読み直しの集計（choose_action の Total と同じ）
@@ -1785,6 +1803,7 @@ impl SearchAgent {
         let env = Env {
             opts: &self.opts,
             w: &self.w,
+            opp_w: &self.opp_w,
             policy_w: &self.policy_w,
         };
         let root = Rc::new(root.clone());
@@ -1803,6 +1822,7 @@ impl SearchAgent {
         Env {
             opts: &self.opts,
             w: &self.w,
+            opp_w: &self.opp_w,
             policy_w: &self.policy_w,
         }
     }
@@ -1979,10 +1999,10 @@ impl Agent for SearchAgent {
                     RolloutWeights::Greedy => self.default_w.clone(),
                     RolloutWeights::Ramp => {
                         let mut x = self.default_w.w.clone();
-                        x.max_pp = self.w.w.max_pp;
+                        x.max_pp = self.opp_w.w.max_pp;
                         EvalWeights::new(x)
                     }
-                    RolloutWeights::Search => self.w.clone(),
+                    RolloutWeights::Search => self.opp_w.clone(),
                 };
                 let beam = opts.mulligan_rollout_beam;
                 // 先へ進めるときの手: 幅 beam のビーム（読み直しは 1 手・相手は貪欲法・リーサル探索なし）か、0 なら貪欲法
@@ -2086,6 +2106,7 @@ impl Agent for SearchAgent {
         let env = Env {
             opts,
             w: &self.w,
+            opp_w: &self.opp_w,
             policy_w: &self.policy_w,
         };
         let mut totals: Vec<Total> = Vec::new();
