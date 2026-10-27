@@ -320,7 +320,7 @@ pub(crate) fn steps_of(start: &GameState, actions: &[Action], p: PlayerIndex) ->
 }
 
 /// 手の列で使ったもの（手札から出したカード・進化・超進化・融合の素材・能力・エクストラPP）の名前。2 つのターンの違いを見せるため
-fn used_of(start: &GameState, actions: &[Action]) -> Vec<String> {
+pub(crate) fn used_of(start: &GameState, actions: &[Action]) -> Vec<String> {
     let mut t = start.clone();
     let mut out = Vec::new();
     let name = |s: &GameState, iid: i32| -> String {
@@ -356,7 +356,7 @@ fn used_of(start: &GameState, actions: &[Action]) -> Vec<String> {
 }
 
 /// 2 つの多重集合の差（a にあって b に無い分）
-fn multiset_minus(a: &[String], b: &[String]) -> Vec<String> {
+pub(crate) fn multiset_minus(a: &[String], b: &[String]) -> Vec<String> {
     let mut rest: Vec<&String> = b.iter().collect();
     let mut out = Vec::new();
     for x in a {

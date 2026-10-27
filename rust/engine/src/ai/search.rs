@@ -28,7 +28,7 @@ use crate::game::{
 };
 use crate::prof::{self, Sec};
 use crate::state::*;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -119,6 +119,32 @@ pub fn two_turn_gate_counts() -> (u32, u32) {
 
 pub fn reset_two_turn_gate_counts() {
     TWO_TURN_GATE_COUNTS.with(|c| c.set((0, 0)));
+}
+
+/// twoTurnGate で手を変えた場面（実験の集計用。record_two_turn_gate(true) のときだけ残す）
+pub struct GateEvent {
+    /// 手を選んだ局面（手番の側から見た決定化。相手の手札・山札の中身は想像）
+    pub root: Rc<GameState>,
+    pub p: PlayerIndex,
+    /// 今の点数で 1 位の手（A）と、変えた先の手（B）: 並び・点数・2 ターン読みの勝率（%）
+    pub a: (Vec<Action>, f64, f64),
+    pub b: (Vec<Action>, f64, f64),
+}
+
+thread_local! {
+    static GATE_RECORD: Cell<bool> = const { Cell::new(false) };
+    static GATE_EVENTS: RefCell<Vec<GateEvent>> = const { RefCell::new(Vec::new()) };
+}
+
+/// このスレッドで、twoTurnGate で手を変えた場面を残すか（残したものは捨てる）
+pub fn record_two_turn_gate(on: bool) {
+    GATE_RECORD.with(|c| c.set(on));
+    GATE_EVENTS.with(|e| e.borrow_mut().clear());
+}
+
+/// 残した場面を取り出す
+pub fn take_two_turn_gate_events() -> Vec<GateEvent> {
+    GATE_EVENTS.with(|e| std::mem::take(&mut *e.borrow_mut()))
 }
 
 /// 探索 AI の設定（search.ts の SearchOptions。exhaustive 等の実験用の項目のうち既定で使わないものは省く）
@@ -1260,7 +1286,7 @@ pub fn plan_turn_traced(
         }
     }
     if let Some(g) = gate {
-        apply_two_turn_gate(&mut result, &twos, g.threshold);
+        apply_two_turn_gate(&mut result, &twos, g.threshold, root, p);
     }
     if let Some(tr) = trace {
         tr.reads = reads;
@@ -1270,7 +1296,13 @@ pub fn plan_turn_traced(
 
 /// twoTurnGate: 今の点数で 1 位の手（同点は先のもの。choose_action と同じ）より、2 ターン読みの勝率で
 /// threshold ポイント以上高い手があれば、その中で 2 ターン読みの 1 位の手の点数を今の 1 位の少し上にする
-fn apply_two_turn_gate(result: &mut [(Action, Plan)], twos: &[(Action, f64)], threshold: f64) {
+fn apply_two_turn_gate(
+    result: &mut [(Action, Plan)],
+    twos: &[(Action, f64)],
+    threshold: f64,
+    root: &Rc<GameState>,
+    p: PlayerIndex,
+) {
     let mut a: Option<usize> = None;
     for (i, (_, plan)) in result.iter().enumerate() {
         if a.is_none_or(|j| plan.value > result[j].1.value) {
@@ -1293,6 +1325,16 @@ fn apply_two_turn_gate(result: &mut [(Action, Plan)], twos: &[(Action, f64)], th
     }
     if let Some((b, two_b)) = b {
         if b != a && two_b - two_a >= threshold {
+            if GATE_RECORD.with(|c| c.get()) {
+                let line = |x: &Plan| x.steps.iter().map(|s| s.0.clone()).collect::<Vec<_>>();
+                let ev = GateEvent {
+                    root: root.clone(),
+                    p,
+                    a: (line(&result[a].1), result[a].1.value, two_a),
+                    b: (line(&result[b].1), result[b].1.value, two_b),
+                };
+                GATE_EVENTS.with(|e| e.borrow_mut().push(ev));
+            }
             result[b].1.value = result[a].1.value + 1.0;
             TWO_TURN_GATE_COUNTS.with(|c| c.set((c.get().0, c.get().1 + 1)));
         }
