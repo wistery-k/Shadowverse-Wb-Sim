@@ -127,6 +127,8 @@ struct HandSpec {
     boosts: i32,
     /// コストの増減（スペルブーストでコストが下がるカードは自分で書く）
     cost_mod: i32,
+    /// 相手にも中身が分かっている（相手の手札なら、決定化で並べ直さない）
+    revealed: bool,
 }
 
 const fn hand(name: &'static str) -> HandSpec {
@@ -134,6 +136,7 @@ const fn hand(name: &'static str) -> HandSpec {
         name,
         boosts: 0,
         cost_mod: 0,
+        revealed: false,
     }
 }
 
@@ -374,14 +377,12 @@ const SCENARIOS: &[Scenario] = &[
             my_hand: vec![
                 hand("五行の果て・クオン"),
                 HandSpec {
-                    name: "マナリアの学徒・ウィリアム",
                     boosts: 3,
-                    cost_mod: 0,
+                    ..hand("マナリアの学徒・ウィリアム")
                 },
                 HandSpec {
-                    name: "ストームブラスト",
                     boosts: 2,
-                    cost_mod: 0,
+                    ..hand("ストームブラスト")
                 },
                 hand("知恵の輝き"),
                 hand("熾天使の福音"),
@@ -730,6 +731,113 @@ const SCENARIOS: &[Scenario] = &[
         },
     },
     Scenario {
+        name: "witch-riko-user",
+        title: "スペルウィッチ: 理光の証明を我慢する（ユーザーのサンドボックスの局面。相手の手札も同じ）",
+        note: "witch-riko-wait と同じ盤面・自分の手札で、相手の手札をユーザーの局面（スタチウム 2・ジェノ・ルミナスランサー 2・ミリタリードッグ）にしたもの。決定化で並べ直すので、相手の手札は見えない",
+        decks: ["スペルウィッチ", "アマリアロイヤル"],
+        seed: 101,
+        turn: 3,
+        first: Some(true),
+        edit: || Edit {
+            my_hp: Some(20),
+            opp_hp: Some(20),
+            max_pp: Some(3),
+            my_hand: vec![
+                hand("五行の果て・クオン"),
+                hand("マナリアフレンズ・アン＆グレア"),
+                hand("理光の証明"),
+                hand("五行の果て・クオン"),
+                hand("マナリアフレンズ・アン＆グレア"),
+            ],
+            my_board: vec![Put {
+                sigils: Some(3),
+                ..put("大地の魔片")
+            }],
+            opp_board: vec![put("勇猛のルミナスランサー"), put("ナイト")],
+            opp_hand: vec![
+                hand("王断の天宮・スタチウム"),
+                hand("レヴィオンアックス・ジェノ"),
+                hand("王断の天宮・スタチウム"),
+                hand("勇猛のルミナスランサー"),
+                hand("勇猛のルミナスランサー"),
+                hand("ミリタリードッグ"),
+            ],
+            ..Edit::default()
+        },
+        cands: || {
+            vec![
+                ai_cand(),
+                Cand {
+                    name: "wait",
+                    desc: "理光の証明をプレイしない（残りは AI）",
+                    no_play: vec!["理光の証明"],
+                    ..Cand::default()
+                },
+                Cand {
+                    name: "riko-now",
+                    desc: "理光の証明を全体 4 ダメージで打つ（残りは AI）",
+                    prefix: vec![Step::Play("理光の証明"), Step::Mode(2)],
+                    ..Cand::default()
+                },
+            ]
+        },
+    },
+    Scenario {
+        name: "witch-riko-statium",
+        title: "スペルウィッチ: 理光の証明を我慢する（相手の手札のスタチウム 1 枚を公開）",
+        note: "witch-riko-user で、相手の手札のスタチウム 1 枚を公開したもの（決定化で並べ直さない）。ユーザーのブラウザの打ち比べでは、ターン終了が +16±7%",
+        decks: ["スペルウィッチ", "アマリアロイヤル"],
+        seed: 101,
+        turn: 3,
+        first: Some(true),
+        edit: || Edit {
+            my_hp: Some(20),
+            opp_hp: Some(20),
+            max_pp: Some(3),
+            my_hand: vec![
+                hand("五行の果て・クオン"),
+                hand("マナリアフレンズ・アン＆グレア"),
+                hand("理光の証明"),
+                hand("五行の果て・クオン"),
+                hand("マナリアフレンズ・アン＆グレア"),
+            ],
+            my_board: vec![Put {
+                sigils: Some(3),
+                ..put("大地の魔片")
+            }],
+            opp_board: vec![put("勇猛のルミナスランサー"), put("ナイト")],
+            opp_hand: vec![
+                hand("王断の天宮・スタチウム"),
+                hand("レヴィオンアックス・ジェノ"),
+                HandSpec {
+                    revealed: true,
+                    ..hand("王断の天宮・スタチウム")
+                },
+                hand("勇猛のルミナスランサー"),
+                hand("勇猛のルミナスランサー"),
+                hand("ミリタリードッグ"),
+            ],
+            ..Edit::default()
+        },
+        cands: || {
+            vec![
+                ai_cand(),
+                Cand {
+                    name: "wait",
+                    desc: "理光の証明をプレイしない（残りは AI）",
+                    no_play: vec!["理光の証明"],
+                    ..Cand::default()
+                },
+                Cand {
+                    name: "riko-now",
+                    desc: "理光の証明を全体 4 ダメージで打つ（残りは AI）",
+                    prefix: vec![Step::Play("理光の証明"), Step::Mode(2)],
+                    ..Cand::default()
+                },
+            ]
+        },
+    },
+    Scenario {
         name: "witch-kuon-pass",
         title: "スペルウィッチ: 次のターンに確定で勝てるので何もせずターンを終える（ユーザーの案）",
         note: "先攻 9 ターン目、PP 9、SEP 1。土の印 8。相手 HP 8 で場は超進化エミリア 7/7・バリアの御者・バリアのワルツで 3 面。\
@@ -803,9 +911,9 @@ const SCENARIOS: &[Scenario] = &[
     Scenario {
         name: "witch-od-hold",
         title: "スペルウィッチ: オーバーディメンションを温存し、次のターンにサタン → オーバーディメンション（ユーザーの案）",
-        note: "先攻 9 ターン目、PP 0/9、SEP 1、体力 13。手札はコスト 0 のオーバーディメンション（スペルブースト 19）とサタン。\
-               相手（ロイヤル、体力 20、PP 9）の場は御者・ジェノ 2 体・ルミナスメイジ・ルミナスランサー。今打てば 5 枚引いて PP 9 で動ける。\
-               温存すれば次のターンにサタンでアポカリプスデッキにしてから打てる",
+        note: "先攻 9 ターン目、PP 0/9、SEP 1、体力 13。手札はコスト 0 のオーバーディメンション（スペルブースト 19）とサタン。自分の場は空。\
+               相手（ロイヤル、体力 20、PP 9）の場は空で、手札は御者・ジェノ 2・ルミナスメイジ・ルミナスランサーの 5 枚（決定化で並べ直す）。\
+               今打てば 5 枚引いて PP 9 で動ける。温存すれば次のターンにサタンでアポカリプスデッキにしてから打てる",
         decks: ["スペルウィッチ", "アマリアロイヤル"],
         seed: 101,
         turn: 9,
@@ -819,77 +927,24 @@ const SCENARIOS: &[Scenario] = &[
             sep: Some(1),
             my_hand: vec![
                 HandSpec {
-                    name: "オーバーディメンション",
                     boosts: 19,
                     cost_mod: -18,
+                    ..hand("オーバーディメンション")
                 },
                 hand("最果ての罪・サタン"),
             ],
             my_board: vec![],
-            opp_board: vec![
-                put("王家の御者"),
-                put("レヴィオンアックス・ジェノ"),
-                put("卓越のルミナスメイジ"),
-                put("レヴィオンアックス・ジェノ"),
-                put("勇猛のルミナスランサー"),
+            opp_board: vec![],
+            opp_hand: vec![
+                hand("王家の御者"),
+                hand("レヴィオンアックス・ジェノ"),
+                hand("卓越のルミナスメイジ"),
+                hand("レヴィオンアックス・ジェノ"),
+                hand("勇猛のルミナスランサー"),
             ],
             opp_max_pp: Some(9),
             opp_ep: Some(0),
             opp_sep: Some(1),
-            opp_hand_count: Some(5),
-            ..Edit::default()
-        },
-        cands: || {
-            vec![
-                ai_cand(),
-                Cand {
-                    name: "hold",
-                    desc: "オーバーディメンションを打たない（次のターンにサタン → オーバーディメンション）",
-                    no_play: vec!["オーバーディメンション"],
-                    ..Cand::default()
-                },
-                Cand {
-                    name: "od-now",
-                    desc: "オーバーディメンションを今打つ（残りは AI）",
-                    prefix: vec![Step::Play("オーバーディメンション")],
-                    ..Cand::default()
-                },
-            ]
-        },
-    },
-    Scenario {
-        name: "witch-od-hold-safe",
-        title: "スペルウィッチ: オーバーディメンションを温存する（相手の場にジェノがない形）",
-        note: "witch-od-hold から相手のジェノ 2 体を除き、温存しても次の相手のターンに倒されない形にしたもの",
-        decks: ["スペルウィッチ", "アマリアロイヤル"],
-        seed: 101,
-        turn: 9,
-        first: Some(true),
-        edit: || Edit {
-            my_hp: Some(13),
-            opp_hp: Some(20),
-            max_pp: Some(9),
-            pp: Some(0),
-            ep: Some(0),
-            sep: Some(1),
-            my_hand: vec![
-                HandSpec {
-                    name: "オーバーディメンション",
-                    boosts: 19,
-                    cost_mod: -18,
-                },
-                hand("最果ての罪・サタン"),
-            ],
-            my_board: vec![],
-            opp_board: vec![
-                put("王家の御者"),
-                put("卓越のルミナスメイジ"),
-                put("勇猛のルミナスランサー"),
-            ],
-            opp_max_pp: Some(9),
-            opp_ep: Some(0),
-            opp_sep: Some(1),
-            opp_hand_count: Some(5),
             ..Edit::default()
         },
         cands: || {
@@ -1034,6 +1089,7 @@ fn set_hand(s: &mut GameState, p: PlayerIndex, hand: &[HandSpec]) -> Result<(), 
             }
         }
         h.cost_mod = hs.cost_mod;
+        h.revealed = hs.revealed;
         s.players[p].hand.make_mut().push(h);
     }
     Ok(())
