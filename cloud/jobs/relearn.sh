@@ -8,6 +8,8 @@
 # PC で（既定。リポジトリの一番上で。Docker のコンテナでは ~/svwb-data の下に置く）:
 #   mkdir -p ~/svwb-data/td-relearn7 && CLOUD_W=~/svwb-data/td-relearn7 bash cloud/jobs/relearn.sh 2>&1 | tee -a ~/svwb-data/td-relearn7/relearn.log
 # クラウドで（使うたびにユーザーの承認が要る）: cloud/gcp.sh run relearn7 cloud/jobs/relearn.sh --hours 4
+# 自己対戦だけクラウドで: cloud/gcp.sh run relearn7 cloud/jobs/relearn.sh --hours 3 --env STOP_AFTER=selfplay
+#   → 作業フォルダの s<i>.jsonl.gz を PC の作業フォルダに写し、PC で上の形で流す（自己対戦は飛ばして学習から回る）
 # 小さく試す: CLOUD_W=/tmp/rl G=40 CHUNK=20 CMP=10 CMP2=10 YS=10 RHINO=2 bash cloud/jobs/relearn.sh
 #
 # 途中で止めても、終わった段階（自己対戦の CHUNK 試合ごと・学習・間引き・埋め・比べごと）は飛ばして続きから回る。
@@ -56,6 +58,12 @@ for i in $(seq 0 $((NC - 1))); do
   mv "$f.gz.tmp" "$f.gz"
   echo "== 自己対戦 s$i $(date '+%m-%d %H:%M')"; grep -E "試合、局面" "$f.log" | sed 's|^.*: ||'
 done
+if [ "${STOP_AFTER:-}" = selfplay ]; then
+  # 自己対戦だけクラウドで作り、学習と判定は PC で回すとき。s<i>.jsonl.gz を PC の同じ作業フォルダに置いて流し直すと、続きから回る
+  echo "== 自己対戦まで（STOP_AFTER=selfplay）"
+  echo DONE "$(date '+%m-%d %H:%M')"
+  exit 0
+fi
 restore() {
   for f in "${files[@]}"; do
     [ -f "$f" ] || { gunzip -c "${f%.tmp}.gz" > "$f.u.tmp"; mv "$f.u.tmp" "$f"; }
