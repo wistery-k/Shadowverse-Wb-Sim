@@ -1797,6 +1797,19 @@ impl SearchAgent {
     }
 }
 
+/// SearchAgent::two_turn_read の結果（引き直し 1 つ分）
+#[derive(Clone, Copy, Debug)]
+pub struct TwoTurnRead {
+    /// 相手のターンを読んだ後の点数（今の AI の読み直しの引き直し 1 つ分と同じ）
+    pub read: f64,
+    /// 続く自分の次のターンを打ったターン末の点数（ownNext と同じ形。リーサルなら勝ちの点数）
+    pub own: f64,
+    /// さらに相手の次のターンを読んだ後の点数（リーサルなら勝ちの点数）
+    pub two: f64,
+    /// 自分の次のターンにリーサルがあった
+    pub next_lethal: bool,
+}
+
 /// 探索の外から、探索と同じ点数で局面を採点する（人間の手順と比べる runner/human_plan.rs が使う。打つ手は変えない）
 impl SearchAgent {
     fn env(&self) -> Env<'_> {
@@ -1852,6 +1865,121 @@ impl SearchAgent {
                 read_once(&pl, &d, &mut r).0 - leftover
             })
             .collect()
+    }
+
+    /// p のターン末の局面 end から 2 ターン先まで読んだ点数（測るための道具。runner/two_turn.rs。打つ手は変わらない）。
+    /// 引き直し（seed）1 つで、相手のターンを読み直しと同じく打ち（read）、続く自分の次のターンを、リーサルがあればそれを、
+    /// 無ければ幅 next_beam のビームでターン末の点数が最も高い並びを打ち（own はそのターン末の点数。ownNext と同じ形）、
+    /// さらに相手の次のターンを読んだ後の局面を採点する（two）。読みの中の相手は読み直しと同じ（相手のターンのビーム）
+    pub fn two_turn_read(
+        &self,
+        end: &GameState,
+        p: PlayerIndex,
+        seed: u32,
+        next_beam: usize,
+    ) -> TwoTurnRead {
+        let env = self.env();
+        let pl = Planner {
+            env: &env,
+            p,
+            root: Rc::new(end.clone()),
+            steps: Vec::new(),
+            plays_only: false,
+        };
+        let same = |v: f64| TwoTurnRead {
+            read: v,
+            own: v,
+            two: v,
+            next_lethal: false,
+        };
+        if end.phase == Phase::Ended {
+            return same(pl.eval_state(end));
+        }
+        let settled = pl.settle(end);
+        let base = settled.as_ref().unwrap_or(end);
+        let leftover = pl.leftover(end);
+        let mut r = Rng::new(seed);
+        let d = determinize(base, p, &mut r, self.opts.peek_opp_hand);
+        let (v, after) = read_once(&pl, &d, &mut r);
+        let read = v - leftover;
+        if after.phase == Phase::Ended || after.active != p || after.pending.is_some() {
+            return same(read);
+        }
+        // 自分の次のターン（相手の手札は読みの中で引き直したまま）
+        let lo = LethalOptions {
+            ward_blocked: self.opts.lethal_ward_blocked,
+            expand_choices: self.opts.lethal_expand_choices,
+            ..DEFAULT_LETHAL_OPTIONS
+        };
+        let lethal = self.opts.lethal
+            && (search_lethal(&after, p, &lo).is_some()
+                || (self.opts.lethal_exact_states > 0
+                    && search_exact_lethal(
+                        &after,
+                        p,
+                        &sure_lethal_options(self.opts.lethal_exact_states),
+                    )
+                    .is_some()));
+        if lethal {
+            return TwoTurnRead {
+                read,
+                own: 1e6,
+                two: 1e6,
+                next_lethal: true,
+            };
+        }
+        let opts = SearchOptions {
+            beam_width: next_beam,
+            allow: None,
+            own_next: None,
+            next_lethal: 0.0,
+            pass_lethal: 0,
+            attack_later: 0,
+            per_plan: 0,
+            ..self.opts.clone()
+        };
+        let next_env = Env {
+            opts: &opts,
+            w: &self.w,
+            policy_w: &self.policy_w,
+        };
+        let root = Rc::new(after.clone());
+        let Some((_, last)) = best_plan_last(&root, p, &next_env) else {
+            let v = pl.eval_after(&after);
+            return TwoTurnRead {
+                read,
+                own: v,
+                two: v,
+                next_lethal: false,
+            };
+        };
+        let pl2 = Planner {
+            env: &next_env,
+            p,
+            root,
+            steps: Vec::new(),
+            plays_only: false,
+        };
+        if last.phase == Phase::Ended {
+            let v = pl2.eval_state(&last);
+            return TwoTurnRead {
+                read,
+                own: v,
+                two: v,
+                next_lethal: false,
+            };
+        }
+        let own = pl2.end_score(&last);
+        let settled2 = pl2.settle(&last);
+        let base2 = settled2.as_ref().unwrap_or(&last);
+        let after2 = simulate_opponent_turn_by_search(base2, p, &mut r, &env);
+        let two = pl.eval_after(&after2) - pl2.leftover(&last);
+        TwoTurnRead {
+            read,
+            own,
+            two,
+            next_lethal: false,
+        }
     }
 
     /// 局面 root で p が打てる並びの、最初の手ごとにターン末の点数が最も高い終局面とその点数（ビームの候補。root を決定化せずに読む）
