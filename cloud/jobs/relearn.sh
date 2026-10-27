@@ -15,7 +15,8 @@
 # 途中で止めても、終わった段階（自己対戦の CHUNK 試合ごと・学習・間引き・埋め・比べごと）は飛ばして続きから回る。
 # 自己対戦は CHUNK 試合ごとに s<i>.jsonl.gz に残す。学習・間引きに読むのは gzip する前の s<i>.jsonl.tmp
 # （.tmp はクラウドの作業フォルダの写しに入らない。止められて作り直された VM では .gz から戻す）で、間引きが終わったら消す（KEEP=1 なら残す）。
-# 結果は $W/relearn.md。PC（CLOUD_W が ~/svwb-data の下）なら最後に pack-run でまとめる（PACK=0 でしない）。
+# 結果は $W/relearn.md。PC（CLOUD_W が ~/svwb-data の下）なら最後に pack-run でモデルとログだけを ~/svwb-data/upload/ にまとめる
+# （共有フォルダに上げる用。自己対戦は大きいので入れない。PACK=0 でしない）。
 set -euo pipefail
 W=${CLOUD_W:?}
 G=${G:-60000}                  # 自己対戦の試合数（介入の試合は別に数える）
@@ -135,6 +136,6 @@ pct() { grep -m 1 -oE '[0-9]+/[0-9]+ = [0-9.]+%' "$1" || true; }
 cat "$W/relearn.md"
 case "$W" in
   */svwb-data/*) [ "$PACK" = 0 ] || npm run -s pack-run -- "$W" --name "$(basename "$W")" --note '強くなった探索の棋譜で補正を学び直す（relearn.sh）' \
-    --out "$HOME/svwb-data/upload" --exclude 'net0.json' --force ;;
+    --out "$HOME/svwb-data/upload" --exclude 'net0.json' --only models,logs --force ;;
 esac
 echo DONE "$(date '+%m-%d %H:%M')"
