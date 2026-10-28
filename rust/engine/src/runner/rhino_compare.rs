@@ -20,9 +20,10 @@ use crate::ai::search::{
 };
 use crate::ai::Agent;
 use crate::data::{data, Deck};
+use crate::game::{acting_player, legal_actions, try_apply_action};
 use crate::json::Json;
 use crate::sim::play_match;
-use crate::state::{card, Action};
+use crate::state::{card, Action, GameState, Phase};
 use std::time::Instant;
 
 /// 比べるデッキ（src/sim/humanCompare.ts の SUBJECTS）: id、デッキ名、既定の AI、シードの基準
@@ -86,6 +87,9 @@ struct Outcome {
     gate: (u32, u32),
     /// twoTurnGate で手を変えた場面（局面の説明・今の 1 位の手・変えた先の手）
     gate_events: Vec<Json>,
+    /// 比べるデッキが打ったカードを引く手（自分の山札が減る手）の数と、そのうち後ドロー
+    /// （そのターンの最初の局面でも打てたのに、ほかの手の後で打った）の数
+    draws: (u32, u32),
 }
 
 struct Given {
@@ -194,7 +198,36 @@ fn play_one(
     let mut aria_turn: Option<i32> = None;
     let (mut jeanne, mut jeanne_tokens) = (0, 0);
     let seat = t.seat;
-    let visit = |s: &crate::state::GameState, act: &Action| {
+    // 後ドローの集計（自分のターンの最初の局面・そのターンにほかの手を打ったか）
+    let mut draws = (0u32, 0u32);
+    let mut turn_start: Option<(i32, GameState)> = None;
+    let mut acted = false;
+    let visit = |s: &GameState, act: &Action| {
+        if s.phase == Phase::Main
+            && s.active == seat
+            && acting_player(s) == seat
+            && !matches!(act, Action::EndTurn)
+        {
+            let turn = s.players[seat].turn_count;
+            if turn_start.as_ref().is_none_or(|(k, _)| *k != turn) {
+                turn_start = Some((turn, s.clone()));
+                acted = false;
+            }
+            let drew = try_apply_action(s, act)
+                .is_some_and(|n| n.players[seat].deck.len() < s.players[seat].deck.len());
+            if drew {
+                draws.0 += 1;
+                if acted
+                    && turn_start
+                        .as_ref()
+                        .is_some_and(|(_, t0)| legal_actions(t0).contains(act))
+                {
+                    draws.1 += 1;
+                }
+            } else if !matches!(act, Action::Choose(_) | Action::Mode(_)) {
+                acted = true;
+            }
+        }
         let Action::Play(iid) = act else { return };
         if s.active != seat || s.pending.is_some() {
             return;
@@ -242,6 +275,7 @@ fn play_one(
         exact_found: exact_lethal_counts().1,
         gate: two_turn_gate_counts(),
         gate_events: gate_events_json(subject.1, &t.deck, seat),
+        draws,
     }
 }
 
@@ -438,6 +472,12 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         "全探索でリーサルを見つけた試合 {}/{n}（そのうち勝ち {}）",
         exact.len(),
         exact.iter().filter(|r| r.won).count()
+    );
+    let drawn: u32 = results.iter().map(|r| r.draws.0).sum();
+    let late: u32 = results.iter().map(|r| r.draws.1).sum();
+    println!(
+        "カードを引く手 {drawn} 回、そのうち後ドロー（ターンの最初から打てたのに、ほかの手の後で打った） {late} 回（{}%）",
+        fixed(late as f64 / drawn.max(1) as f64 * 100.0, 1)
     );
     let gate_seen: u32 = results.iter().map(|r| r.gate.0).sum();
     if gate_seen > 0 {
