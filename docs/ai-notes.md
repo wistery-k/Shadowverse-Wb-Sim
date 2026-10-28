@@ -67,7 +67,7 @@ AI の改善で試したことと結果。同じ実験を繰り返さないた�
   `rhino-compare` の相手（今までの記録と比べるため）
 - **物差し**（`yardstick`）: 凍結した search-classic（`rust/engine/src/runner/yardstick.rs`）。web の「人間との比較」の相手
 - **貪欲法**（`greedy`）: 1 手読み。クラスごとに調整した重み（`data/ai-weights.json`）。`greedy-base` は基準の重み
-- **強さ**（`docs/yardstick.md`、2026-10-27）: 物差し 3（補正なしの凍結した探索）に 82.0%、強い相手の物差し 2（2026-10-22 の既定を凍結したもの）に 54.2%
+- **強さ**（`docs/yardstick.md`、2026-10-28）: 物差し 3（補正なしの凍結した探索）に 82.4%、強い相手の物差し 2（2026-10-22 の既定を凍結したもの）に 55.2%
 - **補正を学び直すときの手順**（ここ数回のもの）: 自己対戦 `svwb td selfplay --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2`（資源の介入 `--ivRes` は使わない）、
   学習 `--epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined`、その後 `td prune` と `td attr --keepA 0`（λ 3）。
   2026-10-27 から、学習は `--base zero`（手で作った評価 S を 0 にし、補正だけで点数を付ける。ユーザー判断。S ありと同じ強さだった。「評価関数の手作りの項を外す」）。
