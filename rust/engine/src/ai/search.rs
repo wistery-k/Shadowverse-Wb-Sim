@@ -129,8 +129,8 @@ pub struct DrawSplit {
     pub class: Option<ClassId>,
 }
 
-/// 既定の drawSplit（2026-10-28 から）: スペルウィッチのときだけ、区切る手が引く手なら一番上のカードを種類ごとに全部試し、残りを幅 32 で組み直す
-/// （docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）
+/// 既定の drawSplit: 区切る手が引く手なら一番上のカードを種類ごとに全部試し、残りを幅 32 で組み直す。
+/// 2026-10-28 にスペルウィッチだけで使い始め、同じ日にどのクラスでも使うようにした（docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）
 pub const DEFAULT_DRAW_SPLIT: DrawSplit = DrawSplit {
     samples: 4,
     beam_width: 32,
@@ -138,7 +138,7 @@ pub const DEFAULT_DRAW_SPLIT: DrawSplit = DrawSplit {
     root_draws: 2,
     stratify: false,
     enumerate: true,
-    class: Some(ClassId::Witch),
+    class: None,
 };
 
 thread_local! {

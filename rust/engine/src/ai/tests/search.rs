@@ -222,7 +222,11 @@ fn record_reads_does_not_change_moves() {
         assert_eq!(a, b);
         assert!(plain.take_reads(p).is_empty());
         let reads = rec.take_reads(p);
-        assert!(reads.len() <= SearchOptions::default().opp_hand_samples);
+        // 読むのは相手の手札の引き直しごと。drawSplit で山札の一番上を種類ごとに試すときは、種類のほうが多ければ種類ごとに 1 回
+        let mut kinds: Vec<_> = state.players[p].deck.iter().map(|r| r.card).collect();
+        kinds.sort_unstable();
+        kinds.dedup();
+        assert!(reads.len() <= SearchOptions::default().opp_hand_samples.max(kinds.len()));
         for r in &reads {
             assert!(
                 r.phase == Phase::Ended
