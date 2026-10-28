@@ -107,6 +107,18 @@ pub struct TwoTurnGate {
     pub threshold: f64,
 }
 
+/// 読み直す並びに、自分の山札から引く手かランダムな手（引くカード・ランダムの結果が決定化で決まっている手）があれば、その手の直前で区切り、
+/// 山札の順番と局面の乱数を samples 通り作り直して、その手を打った後の残りをビーム（幅 beam_width・深さ max_depth）で組み直し、
+/// それぞれ相手のターンを読んで平均する（drawSplit、実験用。docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）。
+/// 今打てる引く手が読み直す上位の手に無ければ、ターン末の点数の高い順に root_draws 個まで候補に足す
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DrawSplit {
+    pub samples: usize,
+    pub beam_width: usize,
+    pub max_depth: usize,
+    pub root_draws: usize,
+}
+
 thread_local! {
     /// twoTurnGate を確かめた回数と、手を変えた回数（実験の集計用。スレッドごと）
     static TWO_TURN_GATE_COUNTS: Cell<(u32, u32)> = const { Cell::new((0, 0)) };
@@ -236,6 +248,8 @@ pub struct SearchOptions {
     pub resample_draws: bool,
     /// 選んだ並びの途中でカードを引く手を、先に打っても並びの残りが打てて点数が下がらなければ先に打つ（引いたカードを見てから残りを決める）
     pub draw_first: bool,
+    /// 読み直す並びを引く手・ランダムな手の直前で区切り、引きを作り直して平均する（DrawSplit。None なら使わない）
+    pub draw_split: Option<DrawSplit>,
     /// 選んだ並びの、相手のターンを読んだ後の想像の局面を残す（SearchAgent::take_reads。TD 学習の自己対戦の --imagined 用。打つ手は変わらない）
     pub record_reads: bool,
 }
@@ -312,6 +326,7 @@ impl Default for SearchOptions {
             reuse_agree: false,
             resample_draws: false,
             draw_first: false,
+            draw_split: None,
             record_reads: false,
         }
     }
@@ -337,6 +352,9 @@ impl SearchOptions {
 
 /// 相手のターンを読んだ後の点数がこれ以下なら、その並びは相手のターンで負ける（dangerRescore）
 const DANGER: f64 = -1e5;
+
+/// 並び（各手と、その手を打った後の局面）
+type Steps = Vec<(Action, Rc<GameState>)>;
 
 /// 1 つのサンプルで、最初の手の評価値と、その手から始まる最善の並び（各手を打った後の局面つき）
 #[derive(Clone)]
@@ -1075,6 +1093,24 @@ pub fn plan_turn_traced(
     let mut ranked: Vec<usize> = best_by_first.iter().map(|(_, i)| *i).collect();
     ranked.sort_by(|&x, &y| by_value_desc(terminals[x].value, terminals[y].value));
     ranked.truncate(opts.rescore_top);
+    // drawSplit: 今打てる引く手（先に引く手）が上位に無ければ、ターン末の点数の高い順に足す
+    // （同じ局面をまとめると、先に引く並びの終局面が後で引く並びの側に数えられて、先に引く手の点数が下がるため）
+    if let Some(ds) = opts.draw_split {
+        let mut more: Vec<usize> = best_by_first
+            .iter()
+            .map(|(_, i)| *i)
+            .filter(|i| !ranked.contains(i))
+            .filter(|&i| {
+                let t = &terminals[i];
+                !matches!(t.first, Action::EndTurn)
+                    && try_apply_action(root, &t.first)
+                        .is_some_and(|after| is_chance_step(root, &after, p))
+            })
+            .collect();
+        more.sort_by(|&x, &y| by_value_desc(terminals[x].value, terminals[y].value));
+        more.truncate(ds.root_draws);
+        ranked.extend(more);
+    }
 
     let candidates_of = |best: usize| -> Vec<usize> {
         if !opts.reuse_plan || opts.plan_candidates <= 1 {
@@ -1106,6 +1142,25 @@ pub fn plan_turn_traced(
     } else {
         Vec::new()
     };
+    // drawSplit: 引きを作り直す乱数（どの並びでも同じ）と、組み直すビームの設定
+    let split_seeds: Vec<u32> = match opts.draw_split {
+        Some(ds) => (0..ds.samples.max(1))
+            .map(|_| rng.int(u32::MAX as usize) as u32)
+            .collect(),
+        None => Vec::new(),
+    };
+    let split_opts: Option<SearchOptions> = opts.draw_split.map(|ds| SearchOptions {
+        beam_width: ds.beam_width,
+        max_depth: ds.max_depth,
+        draw_split: None,
+        ..opts.clone()
+    });
+    let split_env: Option<Env> = split_opts.as_ref().map(|o| Env {
+        opts: o,
+        w: env.w,
+        opp_w: env.opp_w,
+        policy_w: env.policy_w,
+    });
     let mut result: Vec<(Action, Plan)> = Vec::new();
     let mut rescored: Vec<usize> = Vec::new();
     let tracing = trace.is_some();
@@ -1142,7 +1197,76 @@ pub fn plan_turn_traced(
                 afters.push(Rc::new(after));
             }
         };
-        let (value, n) = if node.state.phase == Phase::Ended {
+        // drawSplit: 並びの中で最初に引く手・ランダムな手（その手の添字と、並び）
+        let split_at: Option<(usize, Steps)> = match &split_env {
+            Some(_) => {
+                let steps = pl.steps_of(node.path);
+                first_chance_step(root, &steps, p).map(|c| (c, steps))
+            }
+            None => None,
+        };
+        // 選ぶときに混ぜるターン末の点数（drawSplit で区切ったときは、作り直した引きごとのターン末の点数の平均）
+        let mut turn_end = node.value;
+        let split = match (&split_at, &split_env) {
+            (Some((c, steps)), Some(senv)) => {
+                let before: &GameState = if *c == 0 { root } else { &steps[*c - 1].1 };
+                let a = &steps[*c].0;
+                let k = split_seeds.len();
+                let mut read_sum = 0.0;
+                let mut reads = 0usize;
+                let mut te_sum = 0.0;
+                let mut te_n = 0usize;
+                for (j, &seed) in split_seeds.iter().enumerate() {
+                    let mut r = Rng::new(seed);
+                    let mut s = before.clone();
+                    reshuffle_own(&mut s, p, &mut r);
+                    let Some(s1) = try_apply_action(&s, a) else {
+                        continue;
+                    };
+                    let (end, te) = split_turn_end(&pl, Rc::new(s1), senv);
+                    te_sum += te;
+                    te_n += 1;
+                    if end.phase == Phase::Ended {
+                        let v = pl.eval_state(&end);
+                        read_sum += v;
+                        reads += 1;
+                        two_of(&end, &r);
+                        add((*end).clone());
+                        continue;
+                    }
+                    let settled = pl.settle(&end);
+                    let base = settled.as_ref().unwrap_or(&end);
+                    let left = pl.leftover(&end);
+                    // 相手の手札の引き直しは、どの並びでも同じもの（oppHandCommon）を引きの数で分けて使う
+                    let mine: Vec<u32> = if common_seeds.len() >= k {
+                        common_seeds.iter().skip(j).step_by(k).copied().collect()
+                    } else if !common_seeds.is_empty() {
+                        vec![common_seeds[j % common_seeds.len()]]
+                    } else {
+                        vec![r.int(u32::MAX as usize) as u32]
+                    };
+                    for seed2 in mine {
+                        let mut r2 = Rng::new(seed2);
+                        let d = determinize(base, p, &mut r2, opts.peek_opp_hand);
+                        let (v, after) = read_once(&pl, &d, &mut r2);
+                        read_sum += v - left;
+                        reads += 1;
+                        two_of(&after, &r2);
+                        add(after);
+                    }
+                }
+                if te_n > 0 && reads > 0 {
+                    turn_end = te_sum / te_n as f64;
+                    Some((read_sum / reads as f64, reads))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        let (value, n) = if let Some(x) = split {
+            x
+        } else if node.state.phase == Phase::Ended {
             if tracing {
                 parts = pl.parts(&node.state, ValuePhase::End);
             }
@@ -1190,7 +1314,7 @@ pub fn plan_turn_traced(
         // 選ぶときの値は、読み直した点数にターン末の点数を混ぜたもの（考えの表示の内訳は読み直した点数のまま）
         let read_value = value;
         let value = if opts.rescore_mix > 0.0 && node.state.phase != Phase::Ended {
-            (1.0 - opts.rescore_mix) * value + opts.rescore_mix * node.value
+            (1.0 - opts.rescore_mix) * value + opts.rescore_mix * turn_end
         } else {
             value
         };
@@ -1199,10 +1323,18 @@ pub fn plan_turn_traced(
             Some((_, cur)) => value > cur.value,
         };
         if replace {
+            // drawSplit で区切ったときは、引く手までの並び（その先は引いたカードを見て考え直す）
+            let steps = match split_at {
+                Some((c, mut steps)) if split.is_some() => {
+                    steps.truncate(c + 1);
+                    steps
+                }
+                _ => pl.steps_of(node.path),
+            };
             let plan = Plan {
                 action: node.first.clone(),
                 value,
-                steps: pl.steps_of(node.path),
+                steps,
                 reads: afters,
             };
             match result.iter_mut().find(|(k, _)| *k == node.first) {
@@ -1369,6 +1501,65 @@ fn two_turn_value(pl: &Planner, after: &GameState, g: TwoTurnGate, rng: &mut Rng
         own_next_value(pl, after, on, rng)
     } else {
         pl.eval_after(after)
+    }
+}
+
+/// before から手を打って after になったとき、その手の結果が自分の山札の順番か局面の乱数に依りうるか（drawSplit で並びを区切る手）。
+/// 自分の山札の枚数が変わったか（引く・山札に戻す・山札から出す）、局面の乱数が進んだか（ランダムな対象・山札を混ぜる）で見る
+pub(crate) fn is_chance_step(before: &GameState, after: &GameState, p: PlayerIndex) -> bool {
+    before.players[p].deck.len() != after.players[p].deck.len() || before.rng != after.rng
+}
+
+/// root からの並び steps のうち、最初に引く手・ランダムな手の添字
+pub(crate) fn first_chance_step(
+    root: &GameState,
+    steps: &[(Action, Rc<GameState>)],
+    p: PlayerIndex,
+) -> Option<usize> {
+    let mut prev: &GameState = root;
+    for (j, (a, st)) in steps.iter().enumerate() {
+        if matches!(a, Action::EndTurn) {
+            return None;
+        }
+        if is_chance_step(prev, st, p) {
+            return Some(j);
+        }
+        prev = st;
+    }
+    None
+}
+
+/// p の山札の順番と局面の乱数を作り直す（drawSplit。相手の手札・山札はそのまま。相手の分は読み直しで引き直す）。
+/// 並べ直す前に iid の順にそろえるので、結果は山札の中身と rng だけで決まる（決定化で上に来たカードによらない）
+pub(crate) fn reshuffle_own(s: &mut GameState, p: PlayerIndex, rng: &mut Rng) {
+    let deck = s.players[p].deck.make_mut();
+    deck.sort_by_key(|r| r.iid);
+    rng.shuffle(deck);
+    let a = rng.int(1 << 30) as f64;
+    let b = rng.int(4) as f64;
+    s.rng = (a * 4.0 + b).floor() as u32;
+}
+
+/// drawSplit で引きを作り直した局面 start から、ターン末までを env のビームで組み直した最善の終局面と、そのターン末の点数。
+/// 試合が終わった・p の手番でない局面は、そのまま採点する
+fn split_turn_end(pl: &Planner, start: Rc<GameState>, env: &Env) -> (Rc<GameState>, f64) {
+    if start.phase == Phase::Ended || acting_player(&start) != pl.p {
+        let v = pl.score(&start);
+        return (start, v);
+    }
+    let (_, terminals, _) = turn_end_bests(&start, pl.p, env);
+    let mut best: Option<&Node> = None;
+    for t in &terminals {
+        if best.is_none_or(|b| t.value > b.value) {
+            best = Some(t);
+        }
+    }
+    match best {
+        Some(b) => (b.state.clone(), b.value),
+        None => {
+            let v = pl.score(&start);
+            (start, v)
+        }
     }
 }
 

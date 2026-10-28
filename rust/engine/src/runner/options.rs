@@ -7,8 +7,8 @@ use crate::ai::aidata::{weights_from, AI_DATA_JSON};
 use crate::ai::mulligan::OppMulligan;
 use crate::ai::rhino::{rhino_pass_lethal, rhino_search_options, RHINO_POTENTIAL};
 use crate::ai::search::{
-    ExtraEval, MulliganMode, OpponentSearch, OwnNextSearch, RolloutWeights, ScoreTurnEnd,
-    SearchOptions, TwoTurnGate,
+    DrawSplit, ExtraEval, MulliganMode, OpponentSearch, OwnNextSearch, RolloutWeights,
+    ScoreTurnEnd, SearchOptions, TwoTurnGate,
 };
 use crate::ai::valuenet::ValueNet;
 use crate::json::Json;
@@ -314,6 +314,31 @@ pub fn search_options(
                     _ => {
                         return Err(format!(
                             "\"ownNext\" は null かオブジェクト: {}",
+                            v.stringify()
+                        ))
+                    }
+                }
+            }
+            "drawSplit" => {
+                o.draw_split = match v {
+                    Json::Null => None,
+                    Json::Obj(_) => {
+                        let opt = |name: &str, def: usize| -> Result<usize, String> {
+                            match v.get(name) {
+                                None => Ok(def),
+                                Some(x) => count(&format!("drawSplit.{name}"), x),
+                            }
+                        };
+                        Some(DrawSplit {
+                            samples: opt("samples", 4)?,
+                            beam_width: opt("beamWidth", 128)?,
+                            max_depth: opt("maxDepth", 16)?,
+                            root_draws: opt("rootDraws", 2)?,
+                        })
+                    }
+                    _ => {
+                        return Err(format!(
+                            "\"drawSplit\" は null かオブジェクト: {}",
                             v.stringify()
                         ))
                     }
