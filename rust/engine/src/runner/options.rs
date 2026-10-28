@@ -323,8 +323,14 @@ pub fn search_options(
                 o.draw_split = match v {
                     Json::Null => None,
                     Json::Obj(fields) => {
-                        const KEYS: [&str; 5] =
-                            ["samples", "beamWidth", "maxDepth", "rootDraws", "stratify"];
+                        const KEYS: [&str; 6] = [
+                            "samples",
+                            "beamWidth",
+                            "maxDepth",
+                            "rootDraws",
+                            "stratify",
+                            "enumerate",
+                        ];
                         if let Some((k, _)) =
                             fields.iter().find(|(k, _)| !KEYS.contains(&k.as_str()))
                         {
@@ -344,6 +350,10 @@ pub fn search_options(
                             stratify: match v.get("stratify") {
                                 None => false,
                                 Some(x) => flag("drawSplit.stratify", x)?,
+                            },
+                            enumerate: match v.get("enumerate") {
+                                None => false,
+                                Some(x) => flag("drawSplit.enumerate", x)?,
                             },
                         })
                     }

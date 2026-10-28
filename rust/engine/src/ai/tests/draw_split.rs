@@ -27,6 +27,7 @@ fn split_options() -> SearchOptions {
             max_depth: 8,
             root_draws: 2,
             stratify: false,
+            enumerate: false,
         }),
         ..SearchOptions::default()
     }
@@ -118,6 +119,12 @@ fn split_value_does_not_depend_on_the_drawn_card() {
             .expect("知恵の輝きの点数")
     };
     assert_eq!(value(split_options(), &s), value(split_options(), &t));
+    // 一番上のカードを種類ごとに全部試すときも同じ
+    let mut o = split_options();
+    if let Some(ds) = o.draw_split.as_mut() {
+        ds.enumerate = true;
+    }
+    assert_eq!(value(o.clone(), &s), value(o, &t));
 }
 
 #[test]

@@ -121,6 +121,9 @@ pub struct DrawSplit {
     /// 山札の一番上のカードを層別に選ぶ（山札をカードの種類・カードの順に並べ、乱数で決めた位置から等間隔に samples 枚選んで、それぞれの作り直しの一番上に置く。
     /// 1 枚ごとの一番上に来る確率は変わらず、samples 通りが山札の構成に散らばる）
     pub stratify: bool,
+    /// 区切る手が自分の山札の枚数を変える手なら、samples 通りの代わりに、山札の一番上のカードを山札にある種類ごとに全部試し、
+    /// その種類の枚数の割合で重みを付けて平均する（2 枚目からは乱数で並べ直したまま）。1 枚引く手なら、引きの平均が正確になる
+    pub enumerate: bool,
 }
 
 thread_local! {
@@ -1158,6 +1161,11 @@ pub fn plan_turn_traced(
         Some(ds) if ds.stratify => Some(rng.int(1 << 30) as f64 / (1u32 << 30) as f64),
         _ => None,
     };
+    // enumerate: 一番上のカードの種類ごとに山札の残りを並べ直す乱数の元（種類ごとに決まるので、どの並びでも同じ種類なら同じ並べ直し）
+    let enum_seed: Option<u32> = match opts.draw_split {
+        Some(ds) if ds.enumerate => Some(rng.int(u32::MAX as usize) as u32),
+        _ => None,
+    };
     let split_opts: Option<SearchOptions> = opts.draw_split.map(|ds| SearchOptions {
         beam_width: ds.beam_width,
         max_depth: ds.max_depth,
@@ -1220,27 +1228,62 @@ pub fn plan_turn_traced(
             (Some((c, steps)), Some(senv)) => {
                 let before: &GameState = if *c == 0 { root } else { &steps[*c - 1].1 };
                 let a = &steps[*c].0;
-                let k = split_seeds.len();
+                let deck = &before.players[p].deck;
+                let draws = steps[*c].1.players[p].deck.len() != deck.len();
+                // 作り直す引き（乱数の種、一番上に置くカードの種類、重み）
+                let samples: Vec<(u32, Option<CardIdx>, f64)> = match enum_seed {
+                    Some(base) if draws && !deck.is_empty() => {
+                        let mut kinds: Vec<(CardIdx, usize)> = Vec::new();
+                        for r in deck.iter() {
+                            match kinds.iter_mut().find(|(x, _)| *x == r.card) {
+                                Some(e) => e.1 += 1,
+                                None => kinds.push((r.card, 1)),
+                            }
+                        }
+                        kinds.sort_by_key(|(x, _)| *x);
+                        let n = deck.len() as f64;
+                        kinds
+                            .into_iter()
+                            .map(|(x, m)| {
+                                (
+                                    base ^ (x as u32).wrapping_mul(0x9E37_79B1),
+                                    Some(x),
+                                    m as f64 / n,
+                                )
+                            })
+                            .collect()
+                    }
+                    _ => split_seeds
+                        .iter()
+                        .map(|&seed| (seed, None, 1.0 / split_seeds.len() as f64))
+                        .collect(),
+                };
+                let k = samples.len();
+                // 読んだ点数・ターン末の点数の重み付きの和と、重みの和
                 let mut read_sum = 0.0;
+                let mut read_w = 0.0;
                 let mut reads = 0usize;
                 let mut te_sum = 0.0;
-                let mut te_n = 0usize;
-                for (j, &seed) in split_seeds.iter().enumerate() {
+                let mut te_w = 0.0;
+                for (j, &(seed, top, w)) in samples.iter().enumerate() {
                     let mut r = Rng::new(seed);
                     let mut s = before.clone();
                     reshuffle_own(&mut s, p, &mut r);
-                    if let Some(u) = split_offset {
+                    if let Some(x) = top {
+                        put_on_top(&mut s, p, x);
+                    } else if let Some(u) = split_offset {
                         stratify_top(&mut s, p, (u + j as f64) / k as f64);
                     }
                     let Some(s1) = try_apply_action(&s, a) else {
                         continue;
                     };
                     let (end, te) = split_turn_end(&pl, Rc::new(s1), senv);
-                    te_sum += te;
-                    te_n += 1;
+                    te_sum += w * te;
+                    te_w += w;
                     if end.phase == Phase::Ended {
                         let v = pl.eval_state(&end);
-                        read_sum += v;
+                        read_sum += w * v;
+                        read_w += w;
                         reads += 1;
                         two_of(&end, &r);
                         add((*end).clone());
@@ -1257,19 +1300,21 @@ pub fn plan_turn_traced(
                     } else {
                         vec![r.int(u32::MAX as usize) as u32]
                     };
+                    let wr = w / mine.len().max(1) as f64;
                     for seed2 in mine {
                         let mut r2 = Rng::new(seed2);
                         let d = determinize(base, p, &mut r2, opts.peek_opp_hand);
                         let (v, after) = read_once(&pl, &d, &mut r2);
-                        read_sum += v - left;
+                        read_sum += wr * (v - left);
+                        read_w += wr;
                         reads += 1;
                         two_of(&after, &r2);
                         add(after);
                     }
                 }
-                if te_n > 0 && reads > 0 {
-                    turn_end = te_sum / te_n as f64;
-                    Some((read_sum / reads as f64, reads))
+                if te_w > 0.0 && read_w > 0.0 {
+                    turn_end = te_sum / te_w;
+                    Some((read_sum / read_w, reads))
                 } else {
                     None
                 }
@@ -1569,6 +1614,15 @@ pub(crate) fn stratify_top(s: &mut GameState, p: PlayerIndex, x: f64) {
     let i = ((x * sorted.len() as f64).floor() as usize).min(sorted.len() - 1);
     let pick = sorted[i].iid;
     if let Some(at) = deck.iter().position(|r| r.iid == pick) {
+        let c = deck.remove(at);
+        deck.insert(0, c);
+    }
+}
+
+/// p の山札にある種類 x のカードを 1 枚、山札の一番上に置く（drawSplit の enumerate）
+pub(crate) fn put_on_top(s: &mut GameState, p: PlayerIndex, x: CardIdx) {
+    let deck = s.players[p].deck.make_mut();
+    if let Some(at) = deck.iter().position(|r| r.card == x) {
         let c = deck.remove(at);
         deck.insert(0, c);
     }
