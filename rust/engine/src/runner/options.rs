@@ -204,7 +204,6 @@ pub fn search_options(
             "chainFuse" => o.chain_fuse = flag(k, v)?,
             "deferFuse" => o.defer_fuse = flag(k, v)?,
             "deferFuseKeepSet" => o.defer_fuse_keep_set = flag(k, v)?,
-            "fuseUse" => o.fuse_use = flag(k, v)?,
             "settleTrades" => o.settle_trades = flag(k, v)?,
             "dominance" => o.dominance = flag(k, v)?,
             "reusePlan" => o.reuse_plan = flag(k, v)?,
