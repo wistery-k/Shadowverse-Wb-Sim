@@ -202,6 +202,11 @@ pub struct SearchOptions {
     pub chain_fuse: bool,
     /// 次のターン以降に回せる融合（作ったカードをこのターンに使わない融合）をした並びを、ターン末の候補にしない（Planner::needless_fuse）
     pub defer_fuse: bool,
+    /// deferFuse で、手で作った評価が上がる融合（手札の α・β・γ の種類が増える。fusionSet）は回さない（2 版目。比べ用）
+    pub defer_fuse_keep_set: bool,
+    /// 融合は、作ったカードを使う手（出す・次の融合の融合先や素材にする・選ぶ・コピーする）とまとめてだけ展開する（手札が上限なら融合だけの手も残す）。
+    /// 使わない融合の並びがビームの枠を埋めないように（Planner::advance）
+    pub fuse_use: bool,
     pub score_turn_end: ScoreTurnEnd,
     pub mulligan: MulliganMode,
     /// MulliganMode::Sample で、返し方ごとに引き直しを試す回数
@@ -302,6 +307,8 @@ impl Default for SearchOptions {
             chain_fuse: false,
             // 使わない融合を次のターン以降に回す（docs/ai-notes.md「使わない融合を次のターン以降に回す」）
             defer_fuse: true,
+            defer_fuse_keep_set: false,
+            fuse_use: true,
             score_turn_end: ScoreTurnEnd::All,
             // 引き直した後、3 ターン目の終わりまで貪欲法で進めてから採点する
             // （docs/ai-notes.md「引き直した後に先へ進めてから採点するマリガン」。手札の形のモデルより +1.5%）
@@ -373,6 +380,7 @@ impl SearchOptions {
             rescore_mix: 0.0,
             draw_split: None,
             defer_fuse: false,
+            fuse_use: false,
             ..self
         }
     }
@@ -528,8 +536,7 @@ impl<'a> Planner<'a> {
     /// 自分の手札のほかは同じ局面になる（作ったカードをコピーしていない・融合で誘発した能力が無い 等）融合のこと。
     /// 融合は PP を使わず、変身したカードはそのターンにもう一度融合できるので、使うターンに融合しても同じことができ、
     /// 素材のまま残せば別のカードを作る選択肢も残る（アタックとキャッスルのどちらを作るか 等）。
-    /// ただし、その融合をしないと手札が上限になる（次のターンの最初に引くカードが溢れる）ものと、
-    /// 手で作った評価が上がる（手札の α・β・γ の種類が増える。fusionSet。Ω に向けて何ターンかかけてそろえる）ものは回さない
+    /// ただし、その融合をしないと手札が上限になる（次のターンの最初に引くカードが溢れる）ものは回さない
     fn needless_fuse(&self, t: &Node) -> bool {
         let _p = prof::scope(Sec::DeferFuse);
         let p = self.p;
@@ -587,9 +594,11 @@ impl<'a> Planner<'a> {
                     None => continue 'fuse,
                 }
             }
-            // 手で作った評価が上がる融合は回さない（手札の点数は融合で作るカードの hold で素材の枚数分になっているので、上がるのは fusionSet の分）
+            // deferFuseKeepSet: 手で作った評価が上がる融合は回さない（手札の点数は融合で作るカードの hold で素材の枚数分になっているので、上がるのは fusionSet の分）
             let w = self.env.w;
-            if evaluate_with(end, p, w) > evaluate_with(&s, p, w) + 1e-9 {
+            if self.opts().defer_fuse_keep_set
+                && evaluate_with(end, p, w) > evaluate_with(&s, p, w) + 1e-9
+            {
                 continue;
             }
             s.players[p].hand = hand.clone();
@@ -598,6 +607,42 @@ impl<'a> Planner<'a> {
             }
         }
         false
+    }
+
+    /// 融合で作ったカード host（融合した後の局面 before、融合の手は並びの fuse_path）を、局面 st（並びの at）までに使ったか（fuseUse）。
+    /// 出した・素材にした（手札に無い）、選ぶ手で選んだ、そのカードのコピーが場に増えた（選ぶ候補が少なく、選ぶ手を打たずに選ばれたとき）
+    fn fused_card_used(
+        &self,
+        before: &GameState,
+        host: Iid,
+        st: &GameState,
+        at: usize,
+        fuse_path: usize,
+    ) -> bool {
+        let p = self.p;
+        let Some(h) = st.players[p].hand.iter().find(|h| h.iid == host) else {
+            return true;
+        };
+        let mut cur = Some(at);
+        while let Some(i) = cur {
+            if i == fuse_path {
+                break;
+            }
+            if let Action::Choose(v) = &self.steps[i].action {
+                if v.contains(&host) {
+                    return true;
+                }
+            }
+            cur = self.steps[i].prev;
+        }
+        let copies = |g: &GameState| {
+            g.players[p]
+                .board
+                .iter()
+                .filter(|c| c.card == h.card)
+                .count()
+        };
+        copies(st) > copies(before)
     }
 
     /// ターンを終える局面（合流する相打ちを打った後）。変わらなければ None
@@ -729,6 +774,39 @@ impl<'a> Planner<'a> {
                 out.push((next, path));
             }
             return;
+        }
+        if let (true, Action::Fuse { host, .. }) = (opts.fuse_use, a) {
+            if next.pending.is_none() && next.active == p {
+                let host = *host;
+                // 手札が上限なら、融合だけで止める局面も残す（このターンに加わるカード・次のターンに引くカードが溢れないように）
+                if s.players[p].hand.len() >= HAND_LIMIT {
+                    out.push((next.clone(), path));
+                }
+                // 作ったカードを使う手まで続ける。続く融合は、作ったカードを融合先か素材にするものだけ
+                let mut more: Vec<(Rc<GameState>, usize)> = Vec::new();
+                for c in self.expand(&next) {
+                    if matches!(c, Action::EndTurn) || !self.allowed(&next, &c) {
+                        continue;
+                    }
+                    if let Action::Fuse {
+                        host: h2,
+                        materials: m2,
+                    } = &c
+                    {
+                        if *h2 != host && !m2.contains(&host) {
+                            continue;
+                        }
+                    }
+                    more.clear();
+                    self.advance(&next, &c, Some(path), depth + 1, &mut more);
+                    for (st, pth) in more.drain(..) {
+                        if self.fused_card_used(&next, host, &st, pth, path) {
+                            out.push((st, pth));
+                        }
+                    }
+                }
+                return;
+            }
         }
         if opts.chain_fuse
             && matches!(a, Action::Fuse { .. })
