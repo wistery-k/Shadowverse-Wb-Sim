@@ -28,6 +28,7 @@
 | `npm run sim` | デフォルトデッキの総当たり（下） | `scripts/simulate-main.ts` |
 | `npm run sim-report` | `sim --json` の結果を Markdown の表にする（下） | `scripts/sim-report-main.ts` |
 | `npm run game` | 1 試合だけ打って行動の列を表示する（下） | `scripts/game-main.ts` |
+| `npm run think-at` | 記録した試合の局面で、AI の考え（最初の手ごとの並びと点数）を出す（下） | `scripts/think-at-main.ts` |
 | `npm run compare` | 探索 AI の設定 A と B の勝率（下） | `rust/engine/src/runner/compare.rs` |
 | `npm run rhino-compare` 等 | デッキ 1 つと他の 6 デッキの勝率（下） | `rust/engine/src/runner/rhino_compare.rs` |
 | `npm run deck-compare` | デッキのカードを入れ替えた案と元のデッキの勝率（下） | `rust/engine/src/runner/deck_compare.rs` |
@@ -84,6 +85,23 @@ npm run game -- --seed S --p0 AI --p0-deck デッキ --p1 AI --p1-deck デッキ
 | `--json ファイル` | シード・AI・デッキ・勝者・行動の列を書き出す |
 
 リプレイ画面の「再現に必要な情報」に、この形のコマンドが出る。
+
+## think-at
+
+```sh
+npm run think-at -- --json 試合.json --at N [--agent AI] [--rng 1,2,3]
+```
+
+`npm run game -- … --json 試合.json` で書き出した試合の、N 手目の行動の前の局面（`game` の表示の N 番目の手を打つ前）で、AI の考え（リプレイ画面の「AI の考え」と同じもの）を出す。
+最初の手ごとに、選ぶときの値・相手のターンを読み直した点数・ターン末の点数（それぞれ手で作った評価 eval と学習した補正 extra の内訳）と、ターン末までの並びを出す。
+AI はその場で考え直すので、試合の中で前の手で決めた並びを使い回した手とは違うことがある。
+
+| 引数 | 意味 |
+|---|---|
+| `--json ファイル` | `game --json` の出力（必須） |
+| `--at N` | 何手目の前の局面か（必須） |
+| `--agent AI` | 考える AI（既定はその席で打った AI） |
+| `--rng 1,2,3` | AI の乱数（並べた数だけ考える。既定 1） |
 
 ## compare
 
@@ -406,6 +424,8 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
 - `perPlan`: 数（既定 0 で使わない）。ビームの各深さで、同じ「手の組」（手札から出したカード・進化・超進化・能力・エクストラPP の組。攻撃・融合・選ぶ手は数えない）の局面をまずこの数まで残し、余った枠を点数の順に埋める。攻撃先・融合の素材だけが違う並びが枠を埋めて、別のカードを使う手順が切られるのを防ぐ（2026-10-26。docs/ai-notes.md「手の組ごとにビームの枠を設ける」）
 - 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`
+- `deferFuse`: 真偽（既定 true、2026-10-28）。そのターンに使わない融合（作ったカードがターン末まで手札に残り、その融合を除いて打ち直しても手札のほかが同じになるもの）をした並びを、
+  ターン末の候補にしない。融合しないと手札が上限（9 枚）になるなら残す。search-classic と物差しでは使わない（docs/ai-notes.md「使わない融合を次のターン以降に回す」）
 - `drawSplit`: `null`（使わない）か `{"samples": 4, "beamWidth": 128, "maxDepth": 16, "rootDraws": 2}`（書かない項目はこの値。`{}` でも使う）。
   既定は `{"enumerate": true, "beamWidth": 32}`（`DEFAULT_DRAW_SPLIT`。2026-10-28 にスペルウィッチだけで使い始め、同じ日にどのクラスでも使うようにした。`'{}'` の探索 AI はこれを使い、`{"drawSplit":{}}` は別の設定になる）。
   読み直す並びを、自分の山札から引く手・ランダムな手の直前で区切り、山札の順番と局面の乱数を `samples` 通り作り直して、その手を打った後の残りを幅 `beamWidth`・深さ `maxDepth` のビームで組み直し、

@@ -9,6 +9,7 @@ mod attack_later;
 mod beam;
 mod converging;
 mod damage_bound;
+mod defer_fuse;
 mod determinize;
 mod dominance;
 mod doomed;

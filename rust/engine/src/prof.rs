@@ -42,6 +42,8 @@ pub enum Sec {
     SameState,
     /// 並びを打ち直して局面を作る（Planner::steps_of）
     StepsOf,
+    /// 次のターン以降に回せる融合をした並びかの判定（Planner::needless_fuse。deferFuse）
+    DeferFuse,
     /// 合流する相打ちを打ち尽くす（settle_converging_trades_with）
     Settle,
     /// ターン終了時の処理を進める（resolve_turn_end）
@@ -78,6 +80,7 @@ impl Sec {
             Sec::Select => "幅まで絞る",
             Sec::SameState => "同じ局面の判定",
             Sec::StepsOf => "並びの打ち直し",
+            Sec::DeferFuse => "使わない融合の判定",
             Sec::Settle => "合流する相打ち",
             Sec::TurnEnd => "ターン終了時の処理",
             Sec::Eval => "手で作った評価",
@@ -107,6 +110,7 @@ impl Sec {
             Sec::Select => "select",
             Sec::SameState => "sameState",
             Sec::StepsOf => "stepsOf",
+            Sec::DeferFuse => "deferFuse",
             Sec::Settle => "settle",
             Sec::TurnEnd => "turnEnd",
             Sec::Eval => "eval",

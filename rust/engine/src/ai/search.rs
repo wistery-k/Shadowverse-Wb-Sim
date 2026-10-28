@@ -528,8 +528,10 @@ impl<'a> Planner<'a> {
     /// 自分の手札のほかは同じ局面になる（作ったカードをコピーしていない・融合で誘発した能力が無い 等）融合のこと。
     /// 融合は PP を使わず、変身したカードはそのターンにもう一度融合できるので、使うターンに融合しても同じことができ、
     /// 素材のまま残せば別のカードを作る選択肢も残る（アタックとキャッスルのどちらを作るか 等）。
-    /// ただし、その融合をしないと手札が上限になる（次のターンの最初に引くカードが溢れる）なら回せないものとする
+    /// ただし、その融合をしないと手札が上限になる（次のターンの最初に引くカードが溢れる）ものと、
+    /// 手で作った評価が上がる（手札の α・β・γ の種類が増える。fusionSet。Ω に向けて何ターンかかけてそろえる）ものは回さない
     fn needless_fuse(&self, t: &Node) -> bool {
+        let _p = prof::scope(Sec::DeferFuse);
         let p = self.p;
         let end = &t.state;
         if end.phase == Phase::Ended {
@@ -555,7 +557,22 @@ impl<'a> Planner<'a> {
         }
         order.reverse();
         'fuse: for (k, &i) in order.iter().enumerate() {
-            if !deferrable(&self.steps[i].action) {
+            let a = &self.steps[i].action;
+            if !deferrable(a) {
+                continue;
+            }
+            // 後の手で作ったカードを選んでいれば使っている（打ち直さなくても分かる）
+            let Action::Fuse { host, .. } = a else {
+                continue;
+            };
+            if order[k + 1..].iter().any(|&j| match &self.steps[j].action {
+                Action::Choose(v) => v.contains(host),
+                Action::Fuse { materials, .. } => materials.contains(host),
+                Action::Play(x) | Action::Evolve(x) | Action::SuperEvolve(x) | Action::Act(x) => {
+                    x == host
+                }
+                _ => false,
+            }) {
                 continue;
             }
             // その融合だけを除いて打ち直す（打てない手があれば、作ったカードを使っている）
@@ -569,6 +586,11 @@ impl<'a> Planner<'a> {
                     Some(next) => s = next,
                     None => continue 'fuse,
                 }
+            }
+            // 手で作った評価が上がる融合は回さない（手札の点数は融合で作るカードの hold で素材の枚数分になっているので、上がるのは fusionSet の分）
+            let w = self.env.w;
+            if evaluate_with(end, p, w) > evaluate_with(&s, p, w) + 1e-9 {
+                continue;
             }
             s.players[p].hand = hand.clone();
             if state_eq(&s, end) {
@@ -1092,8 +1114,9 @@ fn turn_end_bests<'a>(
         }
     }
     if opts.defer_fuse {
-        // 次のターン以降に回せる融合をした終局面は選ばず、同じ最初の手の次に点数の高い終局面にする（無ければその最初の手を外す）。
-        // 調べるのは選ぶ候補だけ（並びを打ち直すので、全部の終局面では調べない）
+        // 次のターン以降に回せる融合をした終局面は選ばず、同じ最初の手の次に点数の高い終局面にする（無ければその最初の手を外す。
+        // 全部外れるなら外さない）。調べるのは選ぶ候補だけ（並びを打ち直すので、全部の終局面では調べない）
+        let all = best_by_first.clone();
         best_by_first.retain_mut(|(k, i)| {
             if !pl.needless_fuse(&terminals[*i]) {
                 return true;
@@ -1110,6 +1133,9 @@ fn turn_end_bests<'a>(
                 None => false,
             }
         });
+        if best_by_first.is_empty() {
+            best_by_first = all;
+        }
     }
     (pl, terminals, best_by_first)
 }

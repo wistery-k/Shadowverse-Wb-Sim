@@ -90,7 +90,37 @@ struct Outcome {
     /// 比べるデッキが打ったカードを引く手（自分の山札が減る手）の数と、そのうち後ドロー
     /// （そのターンの最初の局面でも打てたのに、ほかの手の後で打った）の数
     draws: (u32, u32),
+    /// 比べるデッキの融合のまわり（AfStats）
+    af: AfStats,
 }
+
+/// 比べるデッキの融合のまわりの数（docs/ai-notes.md「使わない融合を次のターン以降に回す」）
+#[derive(Clone, Copy, Default)]
+struct AfStats {
+    /// 自分のターン
+    turns: u32,
+    /// 融合した回数
+    fuses: u32,
+    /// そのターンに融合して作ったカードを手札に残してターンを終えた回数（作ったカードの数）
+    unused: u32,
+    /// ターン終了時の手札のコアの枚数の合計
+    cores: u32,
+    /// ターン終了時の手札が上限（9 枚）だった回数
+    full: u32,
+    /// アタック・キャッスル、デストロイアーティファクト α・β・γ、イクシードアーティファクトΩを出した回数
+    played: [u32; 3],
+    /// デストロイアーティファクトを最初に出した自分のターンの合計と、出した試合の数
+    first_destroy: (u32, u32),
+}
+
+const CORES: [&str; 2] = ["フューチャー・コア", "パスト・コア"];
+const ARTIFACTS: [&str; 2] = ["アタックアーティファクト", "キャッスルアーティファクト"];
+const DESTROYS: [&str; 3] = [
+    "デストロイアーティファクトα",
+    "デストロイアーティファクトβ",
+    "デストロイアーティファクトγ",
+];
+const OMEGA: &str = "イクシードアーティファクトΩ";
 
 struct Given {
     deck: String,
@@ -202,7 +232,44 @@ fn play_one(
     let mut draws = (0u32, 0u32);
     let mut turn_start: Option<(i32, GameState)> = None;
     let mut acted = false;
+    let mut af = AfStats::default();
+    // このターンに融合して作ったカード（iid）
+    let mut fused: Vec<crate::state::Iid> = Vec::new();
     let visit = |s: &GameState, act: &Action| {
+        if s.active == seat && acting_player(s) == seat && s.phase == Phase::Main {
+            match act {
+                Action::Fuse { host, .. } => {
+                    af.fuses += 1;
+                    fused.push(*host);
+                }
+                Action::EndTurn => {
+                    let hand = &s.players[seat].hand;
+                    af.turns += 1;
+                    af.unused += fused
+                        .iter()
+                        .filter(|x| hand.iter().any(|h| h.iid == **x))
+                        .count() as u32;
+                    af.cores += hand
+                        .iter()
+                        .filter(|h| CORES.contains(&card(h.card).name.as_str()))
+                        .count() as u32;
+                    af.full += (hand.len() >= crate::state::HAND_LIMIT) as u32;
+                    fused.clear();
+                }
+                Action::Play(iid) => match hand_name(s, seat, *iid) {
+                    Some(n) if ARTIFACTS.contains(&n) => af.played[0] += 1,
+                    Some(n) if DESTROYS.contains(&n) => {
+                        af.played[1] += 1;
+                        if af.first_destroy.1 == 0 {
+                            af.first_destroy = (s.players[seat].turn_count as u32, 1);
+                        }
+                    }
+                    Some(OMEGA) => af.played[2] += 1,
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
         if s.phase == Phase::Main
             && s.active == seat
             && acting_player(s) == seat
@@ -276,6 +343,7 @@ fn play_one(
         gate: two_turn_gate_counts(),
         gate_events: gate_events_json(subject.1, &t.deck, seat),
         draws,
+        af,
     }
 }
 
@@ -467,6 +535,27 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         );
     }
     println!("{}", per_deck.line());
+    if subject.0 == "af" {
+        let sum = |f: &dyn Fn(&AfStats) -> u32| results.iter().map(|r| f(&r.af)).sum::<u32>();
+        let turns = sum(&|a| a.turns).max(1) as f64;
+        let destroyed = sum(&|a| a.first_destroy.1);
+        println!(
+            "融合 {}（1 ターン {}）、作ったカードを手札に残して終えた {}、ターン終了時の手札のコア 平均 {} 枚・手札が上限 {} ターン、\
+             出した: アタック・キャッスル {}・デストロイ {}・Ω {}、デストロイを出した試合 {destroyed}/{n}（最初に出した自分のターン 平均 {}）",
+            sum(&|a| a.fuses),
+            fixed(sum(&|a| a.fuses) as f64 / turns, 2),
+            sum(&|a| a.unused),
+            fixed(sum(&|a| a.cores) as f64 / turns, 2),
+            sum(&|a| a.full),
+            sum(&|a| a.played[0]),
+            sum(&|a| a.played[1]),
+            sum(&|a| a.played[2]),
+            fixed(
+                sum(&|a| a.first_destroy.0) as f64 / destroyed.max(1) as f64,
+                2
+            )
+        );
+    }
     let exact: Vec<&Outcome> = results.iter().filter(|r| r.exact_found > 0).collect();
     println!(
         "全探索でリーサルを見つけた試合 {}/{n}（そのうち勝ち {}）",
