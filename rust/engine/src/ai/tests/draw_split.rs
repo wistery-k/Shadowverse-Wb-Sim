@@ -28,6 +28,7 @@ fn split_options() -> SearchOptions {
             root_draws: 2,
             stratify: false,
             enumerate: false,
+            class: None,
         }),
         ..SearchOptions::default()
     }

@@ -11,6 +11,7 @@ use crate::ai::search::{
     ScoreTurnEnd, SearchOptions, TwoTurnGate,
 };
 use crate::ai::valuenet::ValueNet;
+use crate::data::ClassId;
 use crate::json::Json;
 use std::sync::{Arc, OnceLock};
 
@@ -323,13 +324,14 @@ pub fn search_options(
                 o.draw_split = match v {
                     Json::Null => None,
                     Json::Obj(fields) => {
-                        const KEYS: [&str; 6] = [
+                        const KEYS: [&str; 7] = [
                             "samples",
                             "beamWidth",
                             "maxDepth",
                             "rootDraws",
                             "stratify",
                             "enumerate",
+                            "class",
                         ];
                         if let Some((k, _)) =
                             fields.iter().find(|(k, _)| !KEYS.contains(&k.as_str()))
@@ -354,6 +356,23 @@ pub fn search_options(
                             enumerate: match v.get("enumerate") {
                                 None => false,
                                 Some(x) => flag("drawSplit.enumerate", x)?,
+                            },
+                            class: match v.get("class") {
+                                None | Some(Json::Null) => None,
+                                Some(Json::Str(name)) => Some(
+                                    ClassId::ALL
+                                        .into_iter()
+                                        .find(|c| c.name() == name)
+                                        .ok_or_else(|| {
+                                            format!("drawSplit.class が違います: {name}")
+                                        })?,
+                                ),
+                                Some(x) => {
+                                    return Err(format!(
+                                        "drawSplit.class はクラスの名前（\"witch\" 等）: {}",
+                                        x.stringify()
+                                    ))
+                                }
                             },
                         })
                     }

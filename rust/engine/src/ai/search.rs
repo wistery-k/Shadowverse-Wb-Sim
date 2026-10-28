@@ -20,10 +20,11 @@ use super::mulligan::{
     model_mulligan_swap, mulligan_action, rollout_mulligan, sampled_mulligan,
     weighted_mulligan_swap, OppMulligan, RolloutPolicy,
 };
+use super::rhino::deck_class_of;
 use super::think::{Thought, ThoughtCandidate};
 use super::valuenet::{default_net_weights, value_net_eval, ValuePhase};
 use super::{Agent, Rng};
-use crate::data::{CardIdx, CardType};
+use crate::data::{CardIdx, CardType, ClassId};
 use crate::game::{
     acting_player, apply_legal, is_legal, legal_actions, resolve_turn_end, try_apply_action,
 };
@@ -110,7 +111,7 @@ pub struct TwoTurnGate {
 
 /// 読み直す並びに、自分の山札から引く手かランダムな手（引くカード・ランダムの結果が決定化で決まっている手）があれば、その手の直前で区切り、
 /// 山札の順番と局面の乱数を samples 通り作り直して、その手を打った後の残りをビーム（幅 beam_width・深さ max_depth）で組み直し、
-/// それぞれ相手のターンを読んで平均する（drawSplit、実験用。docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）。
+/// それぞれ相手のターンを読んで平均する（drawSplit。docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）。
 /// 今打てる引く手が読み直す上位の手に無ければ、ターン末の点数の高い順に root_draws 個まで候補に足す
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DrawSplit {
@@ -124,7 +125,21 @@ pub struct DrawSplit {
     /// 区切る手が自分の山札の枚数を変える手なら、samples 通りの代わりに、山札の一番上のカードを山札にある種類ごとに全部試し、
     /// その種類の枚数の割合で重みを付けて平均する（2 枚目からは乱数で並べ直したまま）。1 枚引く手なら、引きの平均が正確になる
     pub enumerate: bool,
+    /// 自分のデッキがこのクラスのときだけ使う（None ならどのクラスでも使う）
+    pub class: Option<ClassId>,
 }
+
+/// 既定の drawSplit（2026-10-28 から）: スペルウィッチのときだけ、区切る手が引く手なら一番上のカードを種類ごとに全部試し、残りを幅 32 で組み直す
+/// （docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）
+pub const DEFAULT_DRAW_SPLIT: DrawSplit = DrawSplit {
+    samples: 4,
+    beam_width: 32,
+    max_depth: 16,
+    root_draws: 2,
+    stratify: false,
+    enumerate: true,
+    class: Some(ClassId::Witch),
+};
 
 thread_local! {
     /// twoTurnGate を確かめた回数と、手を変えた回数（実験の集計用。スレッドごと）
@@ -255,7 +270,7 @@ pub struct SearchOptions {
     pub resample_draws: bool,
     /// 選んだ並びの途中でカードを引く手を、先に打っても並びの残りが打てて点数が下がらなければ先に打つ（引いたカードを見てから残りを決める）
     pub draw_first: bool,
-    /// 読み直す並びを引く手・ランダムな手の直前で区切り、引きを作り直して平均する（DrawSplit。None なら使わない）
+    /// 読み直す並びを引く手・ランダムな手の直前で区切り、引きを作り直して平均する（DrawSplit。None なら使わない。既定は DEFAULT_DRAW_SPLIT）
     pub draw_split: Option<DrawSplit>,
     /// 選んだ並びの、相手のターンを読んだ後の想像の局面を残す（SearchAgent::take_reads。TD 学習の自己対戦の --imagined 用。打つ手は変わらない）
     pub record_reads: bool,
@@ -333,7 +348,7 @@ impl Default for SearchOptions {
             reuse_agree: false,
             resample_draws: false,
             draw_first: false,
-            draw_split: None,
+            draw_split: Some(DEFAULT_DRAW_SPLIT),
             record_reads: false,
         }
     }
@@ -352,6 +367,7 @@ impl SearchOptions {
             opp_hand_samples: 1,
             opp_hand_common: false,
             rescore_mix: 0.0,
+            draw_split: None,
             ..self
         }
     }
@@ -1066,6 +1082,10 @@ pub fn plan_turn_traced(
     mut trace: Option<&mut PlanTrace>,
 ) -> Vec<(Action, Plan)> {
     let opts = env.opts;
+    // drawSplit（自分のデッキのクラスを指定していれば、そのクラスのときだけ）
+    let draw_split = opts
+        .draw_split
+        .filter(|ds| ds.class.is_none_or(|c| deck_class_of(root, p) == c));
     // 最初の手ごとに最善の終局面を残し、上位を相手のターンまで読んで評価し直す
     let (pl, terminals, best_by_first) = turn_end_bests(root, p, env);
     if let Some(tr) = trace.as_deref_mut() {
@@ -1102,7 +1122,7 @@ pub fn plan_turn_traced(
     ranked.truncate(opts.rescore_top);
     // drawSplit: 今打てる引く手（先に引く手）が上位に無ければ、ターン末の点数の高い順に足す
     // （同じ局面をまとめると、先に引く並びの終局面が後で引く並びの側に数えられて、先に引く手の点数が下がるため）
-    if let Some(ds) = opts.draw_split {
+    if let Some(ds) = draw_split {
         let mut more: Vec<usize> = best_by_first
             .iter()
             .map(|(_, i)| *i)
@@ -1150,23 +1170,23 @@ pub fn plan_turn_traced(
         Vec::new()
     };
     // drawSplit: 引きを作り直す乱数（どの並びでも同じ）と、組み直すビームの設定
-    let split_seeds: Vec<u32> = match opts.draw_split {
+    let split_seeds: Vec<u32> = match draw_split {
         Some(ds) => (0..ds.samples.max(1))
             .map(|_| rng.int(u32::MAX as usize) as u32)
             .collect(),
         None => Vec::new(),
     };
     // stratify: 層別に選ぶ位置のずれ（0 以上 1 未満。どの並びでも同じ）
-    let split_offset: Option<f64> = match opts.draw_split {
+    let split_offset: Option<f64> = match draw_split {
         Some(ds) if ds.stratify => Some(rng.int(1 << 30) as f64 / (1u32 << 30) as f64),
         _ => None,
     };
     // enumerate: 一番上のカードの種類ごとに山札の残りを並べ直す乱数の元（種類ごとに決まるので、どの並びでも同じ種類なら同じ並べ直し）
-    let enum_seed: Option<u32> = match opts.draw_split {
+    let enum_seed: Option<u32> = match draw_split {
         Some(ds) if ds.enumerate => Some(rng.int(u32::MAX as usize) as u32),
         _ => None,
     };
-    let split_opts: Option<SearchOptions> = opts.draw_split.map(|ds| SearchOptions {
+    let split_opts: Option<SearchOptions> = draw_split.map(|ds| SearchOptions {
         beam_width: ds.beam_width,
         max_depth: ds.max_depth,
         draw_split: None,
@@ -2603,6 +2623,7 @@ impl Agent for SearchAgent {
                     opp_hand_samples: 1,
                     lethal: false,
                     mulligan: MulliganMode::Model,
+                    draw_split: None,
                     ..SearchOptions::default()
                 };
                 let new_policy = move || -> RolloutPolicy {

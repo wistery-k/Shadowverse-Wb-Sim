@@ -268,6 +268,18 @@ pub enum ClassId {
 }
 
 impl ClassId {
+    /// 全部のクラス
+    pub const ALL: [ClassId; 8] = [
+        ClassId::Neutral,
+        ClassId::Elf,
+        ClassId::Royal,
+        ClassId::Witch,
+        ClassId::Dragon,
+        ClassId::Nightmare,
+        ClassId::Bishop,
+        ClassId::Nemesis,
+    ];
+
     pub fn name(self) -> &'static str {
         match self {
             ClassId::Neutral => "neutral",
