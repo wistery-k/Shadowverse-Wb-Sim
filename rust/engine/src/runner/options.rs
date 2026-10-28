@@ -322,7 +322,14 @@ pub fn search_options(
             "drawSplit" => {
                 o.draw_split = match v {
                     Json::Null => None,
-                    Json::Obj(_) => {
+                    Json::Obj(fields) => {
+                        const KEYS: [&str; 5] =
+                            ["samples", "beamWidth", "maxDepth", "rootDraws", "stratify"];
+                        if let Some((k, _)) =
+                            fields.iter().find(|(k, _)| !KEYS.contains(&k.as_str()))
+                        {
+                            return Err(format!("drawSplit の知らない項目: {k}"));
+                        }
                         let opt = |name: &str, def: usize| -> Result<usize, String> {
                             match v.get(name) {
                                 None => Ok(def),
@@ -334,6 +341,10 @@ pub fn search_options(
                             beam_width: opt("beamWidth", 128)?,
                             max_depth: opt("maxDepth", 16)?,
                             root_draws: opt("rootDraws", 2)?,
+                            stratify: match v.get("stratify") {
+                                None => false,
+                                Some(x) => flag("drawSplit.stratify", x)?,
+                            },
                         })
                     }
                     _ => {

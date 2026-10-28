@@ -23,6 +23,7 @@ use super::mulligan::{
 use super::think::{Thought, ThoughtCandidate};
 use super::valuenet::{default_net_weights, value_net_eval, ValuePhase};
 use super::{Agent, Rng};
+use crate::data::{CardIdx, CardType};
 use crate::game::{
     acting_player, apply_legal, is_legal, legal_actions, resolve_turn_end, try_apply_action,
 };
@@ -117,6 +118,9 @@ pub struct DrawSplit {
     pub beam_width: usize,
     pub max_depth: usize,
     pub root_draws: usize,
+    /// 山札の一番上のカードを層別に選ぶ（山札をカードの種類・カードの順に並べ、乱数で決めた位置から等間隔に samples 枚選んで、それぞれの作り直しの一番上に置く。
+    /// 1 枚ごとの一番上に来る確率は変わらず、samples 通りが山札の構成に散らばる）
+    pub stratify: bool,
 }
 
 thread_local! {
@@ -1149,6 +1153,11 @@ pub fn plan_turn_traced(
             .collect(),
         None => Vec::new(),
     };
+    // stratify: 層別に選ぶ位置のずれ（0 以上 1 未満。どの並びでも同じ）
+    let split_offset: Option<f64> = match opts.draw_split {
+        Some(ds) if ds.stratify => Some(rng.int(1 << 30) as f64 / (1u32 << 30) as f64),
+        _ => None,
+    };
     let split_opts: Option<SearchOptions> = opts.draw_split.map(|ds| SearchOptions {
         beam_width: ds.beam_width,
         max_depth: ds.max_depth,
@@ -1220,6 +1229,9 @@ pub fn plan_turn_traced(
                     let mut r = Rng::new(seed);
                     let mut s = before.clone();
                     reshuffle_own(&mut s, p, &mut r);
+                    if let Some(u) = split_offset {
+                        stratify_top(&mut s, p, (u + j as f64) / k as f64);
+                    }
                     let Some(s1) = try_apply_action(&s, a) else {
                         continue;
                     };
@@ -1538,6 +1550,28 @@ pub(crate) fn reshuffle_own(s: &mut GameState, p: PlayerIndex, rng: &mut Rng) {
     let a = rng.int(1 << 30) as f64;
     let b = rng.int(4) as f64;
     s.rng = (a * 4.0 + b).floor() as u32;
+}
+
+/// p の山札を、カードの種類（フォロワー・スペル・アミュレット）・カードの順に並べたときの位置 x（0 以上 1 未満の割合）にあるカードを、山札の一番上に置く
+/// （drawSplit の stratify。x を等間隔に選ぶと、作り直しごとの一番上のカードが山札の構成に散らばる。x が一様なら、どのカードも一番上に来る確率は同じ）
+pub(crate) fn stratify_top(s: &mut GameState, p: PlayerIndex, x: f64) {
+    let deck = s.players[p].deck.make_mut();
+    if deck.len() < 2 {
+        return;
+    }
+    let kind = |c: CardIdx| match card(c).ctype {
+        CardType::Follower => 0,
+        CardType::Spell => 1,
+        CardType::Amulet => 2,
+    };
+    let mut sorted: Vec<CardRef> = deck.to_vec();
+    sorted.sort_by_key(|r| (kind(r.card), r.card, r.iid));
+    let i = ((x * sorted.len() as f64).floor() as usize).min(sorted.len() - 1);
+    let pick = sorted[i].iid;
+    if let Some(at) = deck.iter().position(|r| r.iid == pick) {
+        let c = deck.remove(at);
+        deck.insert(0, c);
+    }
 }
 
 /// drawSplit で引きを作り直した局面 start から、ターン末までを env のビームで組み直した最善の終局面と、そのターン末の点数。

@@ -1,7 +1,9 @@
 //! 引く手の直前で区切って引きを作り直す（SearchOptions.drawSplit。docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）
 
 use super::*;
-use crate::ai::search::{first_chance_step, is_chance_step, DrawSplit, SearchAgent, SearchOptions};
+use crate::ai::search::{
+    first_chance_step, is_chance_step, stratify_top, DrawSplit, SearchAgent, SearchOptions,
+};
 
 /// スペルウィッチ（0）の turn ターン目。場と手札は空、相手は体力 20 で場も空
 fn position(turn: i32) -> GameState {
@@ -24,6 +26,7 @@ fn split_options() -> SearchOptions {
             beam_width: 32,
             max_depth: 8,
             root_draws: 2,
+            stratify: false,
         }),
         ..SearchOptions::default()
     }
@@ -115,4 +118,32 @@ fn split_value_does_not_depend_on_the_drawn_card() {
             .expect("知恵の輝きの点数")
     };
     assert_eq!(value(split_options(), &s), value(split_options(), &t));
+}
+
+#[test]
+fn stratified_top_covers_each_card_once() {
+    // 位置 x を山札の枚数で等間隔に動かすと、どのカードもちょうど 1 回ずつ一番上に来る（層別に選んでも、1 枚ごとの一番上に来る確率は同じ）。
+    // 一番上に置く以外は山札を動かさない
+    let s = position(3);
+    let n = s.players[0].deck.len();
+    assert!(n >= 2);
+    let mut tops: Vec<Iid> = Vec::new();
+    for i in 0..n {
+        let mut t = s.clone();
+        stratify_top(&mut t, 0, (i as f64 + 0.5) / n as f64);
+        let deck = &t.players[0].deck;
+        assert_eq!(deck.len(), n);
+        let rest: Vec<Iid> = deck.iter().skip(1).map(|r| r.iid).collect();
+        let orig: Vec<Iid> = s.players[0]
+            .deck
+            .iter()
+            .map(|r| r.iid)
+            .filter(|x| *x != deck[0].iid)
+            .collect();
+        assert_eq!(rest, orig);
+        tops.push(deck[0].iid);
+    }
+    tops.sort();
+    tops.dedup();
+    assert_eq!(tops.len(), n);
 }

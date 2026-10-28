@@ -408,7 +408,8 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`
 - `drawSplit`: `null`（既定。使わない）か `{"samples": 4, "beamWidth": 128, "maxDepth": 16, "rootDraws": 2}`（書かない項目はこの値。`{}` でも使う）。
   読み直す並びを、自分の山札から引く手・ランダムな手の直前で区切り、山札の順番と局面の乱数を `samples` 通り作り直して、その手を打った後の残りを幅 `beamWidth`・深さ `maxDepth` のビームで組み直し、
-  それぞれ相手のターンを読んで平均する。今打てる引く手が読み直す上位の手に無ければ、`rootDraws` 個まで候補に足す（2026-10-28。docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）
+  それぞれ相手のターンを読んで平均する。今打てる引く手が読み直す上位の手に無ければ、`rootDraws` 個まで候補に足す（2026-10-28。docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）。
+  `"stratify": true` なら、作り直しごとの山札の一番上のカードを層別に選ぶ（山札をカードの種類・カードの順に並べ、乱数で決めた位置から等間隔に `samples` 枚。既定 false）
 - `rescoreMix`: 0〜1 の数。上位の手を相手のターンまで読み直した点数に、ターン末の点数をこの割合で混ぜる（既定 0.5。0 で 2026-10-22 より前の読み方）
 - `scoreTurnEnd`: `"none"`・`"terminal"`・`"all"`
 - `mulligan`: `"turn1"`（既定。引き直した後、`mulliganTurns`（既定 3）ターン目の自分のターンの終わりまで、0 なら自分の 1 ターン目の最初まで、
