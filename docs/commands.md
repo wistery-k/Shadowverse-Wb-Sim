@@ -407,7 +407,7 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
 - 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`
 - `drawSplit`: `null`（使わない）か `{"samples": 4, "beamWidth": 128, "maxDepth": 16, "rootDraws": 2}`（書かない項目はこの値。`{}` でも使う）。
-  既定（2026-10-28 から）は `{"enumerate": true, "beamWidth": 32, "class": "witch"}`（`DEFAULT_DRAW_SPLIT`。`'{}'` の探索 AI はこれを使い、`{"drawSplit":{}}` は別の設定になる）。
+  既定は `{"enumerate": true, "beamWidth": 32}`（`DEFAULT_DRAW_SPLIT`。2026-10-28 にスペルウィッチだけで使い始め、同じ日にどのクラスでも使うようにした。`'{}'` の探索 AI はこれを使い、`{"drawSplit":{}}` は別の設定になる）。
   読み直す並びを、自分の山札から引く手・ランダムな手の直前で区切り、山札の順番と局面の乱数を `samples` 通り作り直して、その手を打った後の残りを幅 `beamWidth`・深さ `maxDepth` のビームで組み直し、
   それぞれ相手のターンを読んで平均する。今打てる引く手が読み直す上位の手に無ければ、`rootDraws` 個まで候補に足す（2026-10-28。docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）。
   `"stratify": true` なら、作り直しごとの山札の一番上のカードを層別に選ぶ（山札をカードの種類・カードの順に並べ、乱数で決めた位置から等間隔に `samples` 枚。既定 false）。
