@@ -202,6 +202,7 @@ pub fn search_options(
             "sameHandOnce" => o.same_hand_once = flag(k, v)?,
             "chain" => o.chain = flag(k, v)?,
             "chainFuse" => o.chain_fuse = flag(k, v)?,
+            "deferFuse" => o.defer_fuse = flag(k, v)?,
             "settleTrades" => o.settle_trades = flag(k, v)?,
             "dominance" => o.dominance = flag(k, v)?,
             "reusePlan" => o.reuse_plan = flag(k, v)?,

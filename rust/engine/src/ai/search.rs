@@ -11,7 +11,7 @@ use super::determinize::determinize;
 use super::eval::{evaluate_with, EvalWeights};
 use super::exact_lethal::{search_exact_lethal, sure_lethal_options};
 use super::greedy::{choose_greedy, value_after};
-use super::keys::{hand_eq_noid, visible_eq, TurnOrderSet};
+use super::keys::{hand_eq_noid, state_eq, visible_eq, TurnOrderSet};
 use super::lethal::{
     find_lethal, search_lethal, LethalOptions, LethalSearch, DEFAULT_LETHAL_OPTIONS,
     GUARDED_LETHAL_OPTIONS,
@@ -200,6 +200,8 @@ pub struct SearchOptions {
     pub same_hand_once: bool,
     pub chain: bool,
     pub chain_fuse: bool,
+    /// 次のターン以降に回せる融合（作ったカードをこのターンに使わない融合）をした並びを、ターン末の候補にしない（Planner::needless_fuse）
+    pub defer_fuse: bool,
     pub score_turn_end: ScoreTurnEnd,
     pub mulligan: MulliganMode,
     /// MulliganMode::Sample で、返し方ごとに引き直しを試す回数
@@ -298,6 +300,8 @@ impl Default for SearchOptions {
             same_hand_once: true,
             chain: true,
             chain_fuse: false,
+            // 使わない融合を次のターン以降に回す（docs/ai-notes.md「使わない融合を次のターン以降に回す」）
+            defer_fuse: true,
             score_turn_end: ScoreTurnEnd::All,
             // 引き直した後、3 ターン目の終わりまで貪欲法で進めてから採点する
             // （docs/ai-notes.md「引き直した後に先へ進めてから採点するマリガン」。手札の形のモデルより +1.5%）
@@ -368,6 +372,7 @@ impl SearchOptions {
             opp_hand_common: false,
             rescore_mix: 0.0,
             draw_split: None,
+            defer_fuse: false,
             ..self
         }
     }
@@ -516,6 +521,61 @@ impl<'a> Planner<'a> {
                 (a.clone(), state.clone())
             })
             .collect()
+    }
+
+    /// 終局面 t までの並びに、次のターン以降に回せる融合があるか（deferFuse）。
+    /// 融合で作ったカードがターン末まで手札に残り（出していない・素材にしていない）、その融合だけを除いて打ち直しても
+    /// 自分の手札のほかは同じ局面になる（作ったカードをコピーしていない・融合で誘発した能力が無い 等）融合のこと。
+    /// 融合は PP を使わず、変身したカードはそのターンにもう一度融合できるので、使うターンに融合しても同じことができ、
+    /// 素材のまま残せば別のカードを作る選択肢も残る（アタックとキャッスルのどちらを作るか 等）。
+    /// ただし、その融合をしないと手札が上限になる（次のターンの最初に引くカードが溢れる）なら回せないものとする
+    fn needless_fuse(&self, t: &Node) -> bool {
+        let p = self.p;
+        let end = &t.state;
+        if end.phase == Phase::Ended {
+            return false;
+        }
+        let hand = &end.players[p].hand;
+        let deferrable = |a: &Action| match a {
+            Action::Fuse { host, materials } => {
+                hand.len() + materials.len() < HAND_LIMIT && hand.iter().any(|h| h.iid == *host)
+            }
+            _ => false,
+        };
+        let mut order: Vec<usize> = Vec::new();
+        let mut any = false;
+        let mut cur = Some(t.path);
+        while let Some(i) = cur {
+            any |= deferrable(&self.steps[i].action);
+            order.push(i);
+            cur = self.steps[i].prev;
+        }
+        if !any {
+            return false;
+        }
+        order.reverse();
+        'fuse: for (k, &i) in order.iter().enumerate() {
+            if !deferrable(&self.steps[i].action) {
+                continue;
+            }
+            // その融合だけを除いて打ち直す（打てない手があれば、作ったカードを使っている）
+            let mut s: GameState = (*self.root).clone();
+            for (j, &x) in order.iter().enumerate() {
+                let a = &self.steps[x].action;
+                if j == k || matches!(a, Action::EndTurn) {
+                    continue;
+                }
+                match try_apply_action(&s, a) {
+                    Some(next) => s = next,
+                    None => continue 'fuse,
+                }
+            }
+            s.players[p].hand = hand.clone();
+            if state_eq(&s, end) {
+                return true;
+            }
+        }
+        false
     }
 
     /// ターンを終える局面（合流する相打ちを打った後）。変わらなければ None
@@ -1031,6 +1091,26 @@ fn turn_end_bests<'a>(
             }
         }
     }
+    if opts.defer_fuse {
+        // 次のターン以降に回せる融合をした終局面は選ばず、同じ最初の手の次に点数の高い終局面にする（無ければその最初の手を外す）。
+        // 調べるのは選ぶ候補だけ（並びを打ち直すので、全部の終局面では調べない）
+        best_by_first.retain_mut(|(k, i)| {
+            if !pl.needless_fuse(&terminals[*i]) {
+                return true;
+            }
+            let mut same: Vec<usize> = (0..terminals.len())
+                .filter(|&j| j != *i && terminals[j].first == *k)
+                .collect();
+            same.sort_by(|&x, &y| by_value_desc(terminals[x].value, terminals[y].value));
+            match same.into_iter().find(|&j| !pl.needless_fuse(&terminals[j])) {
+                Some(j) => {
+                    *i = j;
+                    true
+                }
+                None => false,
+            }
+        });
+    }
     (pl, terminals, best_by_first)
 }
 
@@ -1154,6 +1234,9 @@ pub fn plan_turn_traced(
         for i in others {
             if out.len() >= opts.plan_candidates {
                 break;
+            }
+            if opts.defer_fuse && pl.needless_fuse(&terminals[i]) {
+                continue;
             }
             if seen.add(&terminals[i].state) {
                 out.push(i);
@@ -1467,6 +1550,7 @@ pub fn plan_turn_traced(
                 if t.state.phase == Phase::Ended
                     || rescored.contains(&i)
                     || added.contains(&t.first)
+                    || (opts.defer_fuse && pl.needless_fuse(t))
                     || !seen.add(&t.state)
                 {
                     continue;
@@ -1496,7 +1580,10 @@ pub fn plan_turn_traced(
             if n >= opts.danger_rescore {
                 break;
             }
-            if rescored.contains(&i) || !seen.add(&terminals[i].state) {
+            if rescored.contains(&i)
+                || (opts.defer_fuse && pl.needless_fuse(&terminals[i]))
+                || !seen.add(&terminals[i].state)
+            {
                 continue;
             }
             rescore_node(i, rng, &mut result, &mut reads, &mut twos);
@@ -1655,9 +1742,11 @@ fn split_turn_end(pl: &Planner, start: Rc<GameState>, env: &Env) -> (Rc<GameStat
         let v = pl.score(&start);
         return (start, v);
     }
-    let (_, terminals, _) = turn_end_bests(&start, pl.p, env);
+    // 最初の手ごとの最善のうち最も高いもの（全部の終局面の最善と同じ。deferFuse で外した終局面は選ばない）
+    let (_, terminals, bests) = turn_end_bests(&start, pl.p, env);
     let mut best: Option<&Node> = None;
-    for t in &terminals {
+    for &(_, i) in &bests {
+        let t = &terminals[i];
         if best.is_none_or(|b| t.value > b.value) {
             best = Some(t);
         }
