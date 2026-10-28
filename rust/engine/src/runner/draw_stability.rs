@@ -2,15 +2,18 @@
 //! （docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）。
 //!
 //! 使い方: svwb draw-stability [--subject spellwitch] [--games 12] [--start 0] [--seeds 8]
-//!                             [--a '<設定JSON>'] [--b '<設定JSON>']
+//!                             [--a '<設定JSON>'] [--b '<設定JSON>'] [--detail 0]
 //!
 //! 比べるデッキと 6 デッキを今の既定の探索 AI どうしで打ち（rhino-compare と同じ組み方・シード）、比べるデッキの各ターンの最初の局面を集める。
 //! 各局面で、設定 A・B の探索 AI に seeds 通りの乱数で手を選ばせ（前に選んだ並びは使わない）、最も多く選ばれた手の割合（そろい方）を平均する。
 //! 比べるのは、最初の 1 手と、選んだ並びの最初に引く手・ランダムな手まで（引いた後の手は引いたカードで変わってよいので比べない。順番は問わない）。
 //! 局面は「カードを引く手（自分の山札が減る手）を今打てる」ものと、そうでないものに分けて出す。最初の 1 手が「引く手・ランダムな手を先に打つか」で割れた局面の割合と、
-//! 1 回考える時間の平均も出す（並列に考えるので、1 スレッドで考えるより長めに出る）
+//! 1 回考える時間の平均も出す（並列に考えるので、1 スレッドで考えるより長めに出る）。
+//! --detail N なら、B で先に引くかどうかが割れた局面を N 個まで、局面と、最初の手ごとの選ばれた回数・点数の平均とぶれを出す
 
 use super::compare_decks;
+use super::deep_gap::describe;
+use super::human_plan::step_text;
 use super::options::{rhino_compare_options, search_options};
 use super::parallel::parallel_map;
 use super::rhino_compare::SUBJECTS;
@@ -112,6 +115,63 @@ fn spread(s: &GameState, opts: &SearchOptions, seeds: u32, salt: u32) -> Spread 
     }
 }
 
+/// 局面 s で、設定 opts の探索 AI に seeds 通りの乱数で考えさせたときの、読み直した最初の手ごとの選ばれた回数と点数（選ぶときの値）を出す（--detail）
+fn print_detail(s: &GameState, opts: &SearchOptions, seeds: u32, salt: u32) {
+    let legal = legal_actions(s);
+    let p = acting_player(s);
+    // (最初の手, 選ばれた回数, 読み直した点数の列)
+    let mut rows: Vec<(Action, u32, Vec<f64>)> = Vec::new();
+    for k in 0..seeds {
+        let agent = SearchAgent::new(opts.clone());
+        let mut rng = Rng::new(salt.wrapping_mul(7919).wrapping_add(k * 104729 + 1));
+        let Some(th) = agent.think_with(s, &legal, &mut rng, None) else {
+            continue;
+        };
+        for c in &th.candidates {
+            let Some(v) = c.value else {
+                continue;
+            };
+            let at = match rows.iter().position(|r| r.0 == c.action) {
+                Some(i) => i,
+                None => {
+                    rows.push((c.action.clone(), 0, Vec::new()));
+                    rows.len() - 1
+                }
+            };
+            rows[at].2.push(v);
+        }
+        if let Some(r) = rows.iter_mut().find(|r| r.0 == th.chosen) {
+            r.1 += 1;
+        } else {
+            rows.push((th.chosen.clone(), 1, Vec::new()));
+        }
+    }
+    let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len().max(1) as f64;
+    rows.sort_by(|x, y| mean(&y.2).total_cmp(&mean(&x.2)));
+    for (a, chosen, vals) in &rows {
+        let m = mean(vals);
+        let sd = if vals.len() > 1 {
+            (vals.iter().map(|v| (v - m).powi(2)).sum::<f64>() / (vals.len() - 1) as f64).sqrt()
+        } else {
+            0.0
+        };
+        let draw = !matches!(a, Action::EndTurn)
+            && try_apply_action(s, a).is_some_and(|n| is_chance_step(s, &n, p));
+        println!(
+            "    {}{}: 選んだ {chosen}/{seeds}、点数 {} ± {}（読んだ {} 回）",
+            step_text(s, a, p),
+            if draw {
+                "（引く・ランダム）"
+            } else {
+                ""
+            },
+            fixed(m, 1),
+            fixed(sd, 1),
+            vals.len()
+        );
+    }
+}
+
 pub fn main(argv: &[String]) -> Result<(), String> {
     let mut games: u32 = 12;
     let mut start: u32 = 0;
@@ -119,6 +179,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut subject = SUBJECTS[2];
     let mut a_text = "{}".to_string();
     let mut b_text = r#"{"drawSplit":{}}"#.to_string();
+    let mut detail: u32 = 0;
     let mut it = argv.iter();
     while let Some(key) = it.next() {
         let v = it.next().ok_or_else(|| format!("{key} の値がありません"))?;
@@ -130,6 +191,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             "--games" => games = int()?,
             "--start" => start = int()?,
             "--seeds" => seeds = int()?,
+            "--detail" => detail = int()?,
             "--a" => a_text = v.clone(),
             "--b" => b_text = v.clone(),
             "--subject" => {
@@ -276,6 +338,34 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     line("引く手を打てる局面", &|d| d);
     line("引く手を打てない局面", &|d| !d);
     line("全部", &|_| true);
+    // B で、最初の 1 手が引く手・ランダムな手を先に打つかどうかで割れた局面を、detail 個まで詳しく出す
+    let picked: Vec<usize> = (0..all.len())
+        .filter(|&j| res[j].1.draw_timing_split)
+        .take(detail as usize)
+        .collect();
+    for j in picked {
+        let (i, n, _) = all[j];
+        let (decks, seat, seed) = setup(tasks[i]);
+        let mut s = create_game(decks, seed);
+        for a in &played[i].0[..n] {
+            s = apply_action(&s, a);
+        }
+        let opp = opponents[tasks[i] as usize % opponents.len()];
+        let names: [String; 2] = if seat == 0 {
+            [me.name.clone(), opp.name.clone()]
+        } else {
+            [opp.name.clone(), me.name.clone()]
+        };
+        println!(
+            "\n試合 {}（シード {seed}）の {} ターン目（B が先に引くかどうかで割れた局面）",
+            tasks[i], s.players[seat].turn_count
+        );
+        for l in describe(&s, seat, &names) {
+            println!("  {l}");
+        }
+        println!("  B の最初の手（選ぶときの値の平均の順）:");
+        print_detail(&s, &ob, seeds, j as u32);
+    }
     eprintln!("考えた時間 {} 秒", fixed(seconds_since(t1), 1));
     Ok(())
 }
