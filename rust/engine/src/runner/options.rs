@@ -7,10 +7,11 @@ use crate::ai::aidata::{weights_from, AI_DATA_JSON};
 use crate::ai::mulligan::OppMulligan;
 use crate::ai::rhino::{rhino_pass_lethal, rhino_search_options, RHINO_POTENTIAL};
 use crate::ai::search::{
-    ExtraEval, MulliganMode, OpponentSearch, OwnNextSearch, RolloutWeights, ScoreTurnEnd,
-    SearchOptions, TwoTurnGate,
+    DrawSplit, ExtraEval, MulliganMode, OpponentSearch, OwnNextSearch, RolloutWeights,
+    ScoreTurnEnd, SearchOptions, TwoTurnGate,
 };
 use crate::ai::valuenet::ValueNet;
+use crate::data::ClassId;
 use crate::json::Json;
 use std::sync::{Arc, OnceLock};
 
@@ -314,6 +315,70 @@ pub fn search_options(
                     _ => {
                         return Err(format!(
                             "\"ownNext\" は null かオブジェクト: {}",
+                            v.stringify()
+                        ))
+                    }
+                }
+            }
+            "drawSplit" => {
+                o.draw_split = match v {
+                    Json::Null => None,
+                    Json::Obj(fields) => {
+                        const KEYS: [&str; 7] = [
+                            "samples",
+                            "beamWidth",
+                            "maxDepth",
+                            "rootDraws",
+                            "stratify",
+                            "enumerate",
+                            "class",
+                        ];
+                        if let Some((k, _)) =
+                            fields.iter().find(|(k, _)| !KEYS.contains(&k.as_str()))
+                        {
+                            return Err(format!("drawSplit の知らない項目: {k}"));
+                        }
+                        let opt = |name: &str, def: usize| -> Result<usize, String> {
+                            match v.get(name) {
+                                None => Ok(def),
+                                Some(x) => count(&format!("drawSplit.{name}"), x),
+                            }
+                        };
+                        Some(DrawSplit {
+                            samples: opt("samples", 4)?,
+                            beam_width: opt("beamWidth", 128)?,
+                            max_depth: opt("maxDepth", 16)?,
+                            root_draws: opt("rootDraws", 2)?,
+                            stratify: match v.get("stratify") {
+                                None => false,
+                                Some(x) => flag("drawSplit.stratify", x)?,
+                            },
+                            enumerate: match v.get("enumerate") {
+                                None => false,
+                                Some(x) => flag("drawSplit.enumerate", x)?,
+                            },
+                            class: match v.get("class") {
+                                None | Some(Json::Null) => None,
+                                Some(Json::Str(name)) => Some(
+                                    ClassId::ALL
+                                        .into_iter()
+                                        .find(|c| c.name() == name)
+                                        .ok_or_else(|| {
+                                            format!("drawSplit.class が違います: {name}")
+                                        })?,
+                                ),
+                                Some(x) => {
+                                    return Err(format!(
+                                        "drawSplit.class はクラスの名前（\"witch\" 等）: {}",
+                                        x.stringify()
+                                    ))
+                                }
+                            },
+                        })
+                    }
+                    _ => {
+                        return Err(format!(
+                            "\"drawSplit\" は null かオブジェクト: {}",
                             v.stringify()
                         ))
                     }

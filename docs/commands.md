@@ -113,6 +113,9 @@ npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …
 | `--out ファイル` | なし | 試合ごとの結果を JSON Lines で書き出す |
 | `--matches ファイル` | なし | 「人間との比較」タブで保存した試合（JSON Lines）と同じ試合だけ打ち、人間の勝敗と並べる。人間の相手が `--opp` と同じ試合だけを使う（`search-classic` なら相手が物差しの試合、`search` なら最新版の試合） |
 
+勝率のほかに、比べるデッキがカードを引く手（自分の山札が減る手）を打った回数と、そのうちの後ドロー（ターンの最初の局面から打てたのに、ほかの手の後で打った）の回数を出す
+（docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）。
+
 ## deck-compare
 
 ```sh
@@ -254,6 +257,7 @@ npm run svwb -- two-turn show [--only <局面>,…] [--sandbox <フォルダ>]
 npm run svwb -- two-turn run --out tt.jsonl [--only <局面>,…] [--m 64] [--reads 4] [--twos 2] [--nextBeam 256] [--seed 1] [--opts '<設定の JSON>']
 npm run svwb -- two-turn report tt.jsonl… [--only <局面>,…]
 npm run svwb -- two-turn trace --only <局面> --cand <候補> [--r 0] [--seed 1] [--opts '<設定の JSON>']
+npm run svwb -- draw-stability [--subject spellwitch] [--games 12] [--start 0] [--seeds 8] [--a '{}'] [--b '{"drawSplit":{}}']
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI。
@@ -286,6 +290,10 @@ npm run svwb -- two-turn trace --only <局面> --cand <候補> [--r 0] [--seed 1
   AI の点数・読み直し・次の自分のターン末（幅 `--nextBeam`）・2 ターン読み・次のターンのリーサル・最後まで打った勝ち負けを 1 行ずつ追記する（済んだものは飛ばす）。
   `report` は今の AI との対の差を Markdown で出す。`trace` は 1 通りの候補のターンと、その後の試合を全部出す。`--opts` は候補のターンを打つ AI の設定（compare の設定と同じ形）。
   docs/ai-notes.md「2 ターン以上の計画が効きそうな局面を手で作って比べる」
+- `draw-stability`: 比べるデッキ（`--subject`。rhino-compare と同じ名前）と他の 6 デッキを今の既定の探索 AI どうしで打ち（rhino-compare と同じ組み方・シード）、
+  比べるデッキの各ターンの最初の局面を集める。各局面で設定 A・B の探索 AI に `--seeds` 通りの乱数で手を選ばせ、最も多く選ばれたものの割合（そろい方）と、全部同じだった局面の割合を、
+  最初の 1 手と、選んだ並びの最初に引く手・ランダムな手まで（引いた後の手は比べない。順番は問わない）について出す。最初の 1 手が引く手・ランダムな手を先に打つかどうかで割れた局面の割合と、
+  1 回考える時間も出す。カードを引く手を今打てる局面とそうでない局面に分ける（同じ局面での手のぶれ。docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）
 
 ## td
 
@@ -398,6 +406,13 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
 - `perPlan`: 数（既定 0 で使わない）。ビームの各深さで、同じ「手の組」（手札から出したカード・進化・超進化・能力・エクストラPP の組。攻撃・融合・選ぶ手は数えない）の局面をまずこの数まで残し、余った枠を点数の順に埋める。攻撃先・融合の素材だけが違う並びが枠を埋めて、別のカードを使う手順が切られるのを防ぐ（2026-10-26。docs/ai-notes.md「手の組ごとにビームの枠を設ける」）
 - 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`
+- `drawSplit`: `null`（使わない）か `{"samples": 4, "beamWidth": 128, "maxDepth": 16, "rootDraws": 2}`（書かない項目はこの値。`{}` でも使う）。
+  既定（2026-10-28 から）は `{"enumerate": true, "beamWidth": 32, "class": "witch"}`（`DEFAULT_DRAW_SPLIT`。`'{}'` の探索 AI はこれを使い、`{"drawSplit":{}}` は別の設定になる）。
+  読み直す並びを、自分の山札から引く手・ランダムな手の直前で区切り、山札の順番と局面の乱数を `samples` 通り作り直して、その手を打った後の残りを幅 `beamWidth`・深さ `maxDepth` のビームで組み直し、
+  それぞれ相手のターンを読んで平均する。今打てる引く手が読み直す上位の手に無ければ、`rootDraws` 個まで候補に足す（2026-10-28。docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）。
+  `"stratify": true` なら、作り直しごとの山札の一番上のカードを層別に選ぶ（山札をカードの種類・カードの順に並べ、乱数で決めた位置から等間隔に `samples` 枚。既定 false）。
+  `"enumerate": true` なら、区切る手が自分の山札の枚数を変える手のとき、`samples` 通りの代わりに山札の一番上のカードを山札にある種類ごとに全部試し、その種類の枚数の割合で重みを付けて平均する
+  （2 枚目からは乱数で並べ直したまま。既定 false）。`"class": "witch"` 等なら、自分のデッキがそのクラスのときだけ使う
 - `rescoreMix`: 0〜1 の数。上位の手を相手のターンまで読み直した点数に、ターン末の点数をこの割合で混ぜる（既定 0.5。0 で 2026-10-22 より前の読み方）
 - `scoreTurnEnd`: `"none"`・`"terminal"`・`"all"`
 - `mulligan`: `"turn1"`（既定。引き直した後、`mulliganTurns`（既定 3）ターン目の自分のターンの終わりまで、0 なら自分の 1 ターン目の最初まで、

@@ -12,6 +12,7 @@ mod damage_bound;
 mod determinize;
 mod dominance;
 mod doomed;
+mod draw_split;
 mod eval;
 mod keys;
 mod lethal;

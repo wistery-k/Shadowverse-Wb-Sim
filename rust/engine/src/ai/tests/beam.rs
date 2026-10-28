@@ -20,7 +20,9 @@ fn state_3108602991_turn18() -> GameState {
 /// 指摘の、ミラ超進化・クオン・成長したですぅ！で両方を倒す手順は、ターン末 1.8 点（実戦 −15.2）、相手のターンを読んだ後 −5.3（実戦 −16.6）。
 /// どの手順を選ぶかは決定化の乱数と学習した補正で変わる（6 万試合で学び直した補正では、乱数 12 通りのうち
 /// 幅 128 で 6 回・幅 32 で 2 回両方を倒し、残すのはどれもアルベール。1 つ前の補正では幅 128 で 9 回）。
-/// そこで 12 通りで、幅 128 が幅 32 より多く両方を倒すことと、エミリアは必ず倒すことを確かめる
+/// そこで 12 通りで、幅 128 が幅 32 より多く両方を倒すことと、エミリアは必ず倒すことを確かめる（ビームの幅を見るので drawSplit は外す）。
+/// drawSplit（2026-10-28 からウィッチの既定）を入れると、成長したですぅ！のランダムな 2 ダメージを平均で見るようになり、
+/// 既定の幅でも幅 32 でも 12 通りとも両方を倒した（docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）
 #[test]
 fn witch_turn18_clears_both() {
     let start = state_3108602991_turn18();
@@ -32,12 +34,14 @@ fn witch_turn18_clears_both() {
         names(&start),
         ["白銀の騎士団長・エミリア", "レヴィオンの迅雷・アルベール"]
     );
-    let clears = |beam_width: usize| -> usize {
+    let clears = |beam_width: usize, draw_split: bool| -> usize {
         (1..=12)
             .filter(|&seed| {
+                let base = SearchOptions::default();
                 let mut agent = SearchAgent::new(SearchOptions {
                     beam_width,
-                    ..SearchOptions::default()
+                    draw_split: if draw_split { base.draw_split } else { None },
+                    ..base
                 });
                 let (_, end) = play_turn(start.clone(), 1, &mut agent, &mut Rng::new(seed));
                 let left = names(&end);
@@ -51,9 +55,12 @@ fn witch_turn18_clears_both() {
             })
             .count()
     };
-    let (wide, narrow) = (clears(SearchOptions::default().beam_width), clears(32));
+    let width = SearchOptions::default().beam_width;
+    let (wide, narrow) = (clears(width, false), clears(32, false));
     assert!(
         wide >= 6 && wide > narrow,
-        "幅 128: {wide}/12、幅 32: {narrow}/12"
+        "drawSplit なしで 幅 {width}: {wide}/12、幅 32: {narrow}/12"
     );
+    let split = clears(width, true);
+    assert!(split >= 10, "drawSplit ありで 幅 {width}: {split}/12");
 }
