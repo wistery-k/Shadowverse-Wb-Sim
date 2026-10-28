@@ -6,14 +6,17 @@
 //!
 //! 比べるデッキと 6 デッキを今の既定の探索 AI どうしで打ち（rhino-compare と同じ組み方・シード）、比べるデッキの各ターンの最初の局面を集める。
 //! 各局面で、設定 A・B の探索 AI に seeds 通りの乱数で手を選ばせ（前に選んだ並びは使わない）、最も多く選ばれた手の割合（そろい方）を平均する。
-//! 局面は「カードを引く手（自分の山札が減る手）を今打てる」ものと、そうでないものに分けて出す
+//! 比べるのは、最初の 1 手と、選んだ並びの最初に引く手・ランダムな手まで（引いた後の手は引いたカードで変わってよいので比べない。順番は問わない）。
+//! 局面は「カードを引く手（自分の山札が減る手）を今打てる」ものと、そうでないものに分けて出す。最初の 1 手が「引く手・ランダムな手を先に打つか」で割れた局面の割合と、
+//! 1 回考える時間の平均も出す（並列に考えるので、1 スレッドで考えるより長めに出る）
 
 use super::compare_decks;
 use super::options::{rhino_compare_options, search_options};
 use super::parallel::parallel_map;
 use super::rhino_compare::SUBJECTS;
 use super::{fixed, seconds_since};
-use crate::ai::search::{SearchAgent, SearchOptions};
+use crate::ai::keys::turn_order_eq;
+use crate::ai::search::{is_chance_step, SearchAgent, SearchOptions};
 use crate::ai::{Agent, Rng};
 use crate::data::{data, Deck};
 use crate::game::{acting_player, apply_action, create_game, legal_actions, try_apply_action};
@@ -30,21 +33,83 @@ fn can_draw(s: &GameState, p: usize, legal: &[Action]) -> bool {
     })
 }
 
-/// 局面 s で、設定 opts の探索 AI に seeds 通りの乱数で手を選ばせたときの、最も多く選ばれた手の割合
-fn agreement(s: &GameState, opts: &SearchOptions, seeds: u32, salt: u32) -> f64 {
-    let legal = legal_actions(s);
-    let mut chosen: Vec<(Action, u32)> = Vec::new();
-    for k in 0..seeds {
-        let mut agent = SearchAgent::new(opts.clone());
-        let mut rng = Rng::new(salt.wrapping_mul(7919).wrapping_add(k * 104729 + 1));
-        let a = agent.choose_action(s, &legal, &mut rng);
-        match chosen.iter_mut().find(|(x, _)| *x == a) {
-            Some(e) => e.1 += 1,
-            None => chosen.push((a, 1)),
+/// 1 つの設定で 1 つの局面を何度も考えさせた結果
+#[derive(Clone, Copy, Default)]
+struct Spread {
+    /// 最初の 1 手で、最も多く選ばれた手の割合
+    first: f64,
+    /// 最初に引く手・ランダムな手まで（それを含む。無ければターンの終わりまで）の並びを順番によらずに比べて、最も多く選ばれた並びの割合
+    prefix: f64,
+    /// 最初の 1 手が、引く手・ランダムな手を先に打つものと、ほかの手を先に打つものに割れたか
+    draw_timing_split: bool,
+    /// 考えた時間（秒）
+    seconds: f64,
+}
+
+/// 並びを、最初に引く手・ランダムな手の直前まで実際の局面 s に打った局面と、その手（無ければ None）
+fn prefix_of(s: &GameState, p: usize, steps: &[Action]) -> (GameState, Option<Action>) {
+    let mut cur = s.clone();
+    for a in steps {
+        if matches!(a, Action::EndTurn) {
+            break;
         }
+        let Some(next) = try_apply_action(&cur, a) else {
+            break;
+        };
+        if is_chance_step(&cur, &next, p) {
+            return (cur, Some(a.clone()));
+        }
+        cur = next;
     }
-    let top = chosen.iter().map(|(_, n)| *n).max().unwrap_or(0);
-    top as f64 / seeds.max(1) as f64
+    (cur, None)
+}
+
+/// 最も多いものの割合（same で同じとみなす）
+fn top_share<T>(xs: &[T], same: impl Fn(&T, &T) -> bool) -> f64 {
+    let top = xs
+        .iter()
+        .map(|x| xs.iter().filter(|y| same(x, y)).count())
+        .max()
+        .unwrap_or(0);
+    top as f64 / xs.len().max(1) as f64
+}
+
+/// 局面 s で、設定 opts の探索 AI に seeds 通りの乱数で手を選ばせる（choose_action と同じ乱数の使い方。前に選んだ並びは使わない）
+fn spread(s: &GameState, opts: &SearchOptions, seeds: u32, salt: u32) -> Spread {
+    let legal = legal_actions(s);
+    let p = acting_player(s);
+    let t = Instant::now();
+    let mut firsts: Vec<Action> = Vec::new();
+    let mut prefixes: Vec<(GameState, Option<Action>)> = Vec::new();
+    let mut chance_first: Vec<bool> = Vec::new();
+    for k in 0..seeds {
+        let agent = SearchAgent::new(opts.clone());
+        let mut rng = Rng::new(salt.wrapping_mul(7919).wrapping_add(k * 104729 + 1));
+        let (first, steps) = match agent.think_with(s, &legal, &mut rng, None) {
+            Some(th) => {
+                let steps = th
+                    .candidates
+                    .iter()
+                    .find(|c| th.lethal.is_none() && c.action == th.chosen)
+                    .map(|c| c.steps.clone())
+                    .unwrap_or_else(|| vec![th.chosen.clone()]);
+                (th.chosen, steps)
+            }
+            None => (legal[0].clone(), vec![legal[0].clone()]),
+        };
+        chance_first.push(
+            !matches!(first, Action::EndTurn)
+                && try_apply_action(s, &first).is_some_and(|n| is_chance_step(s, &n, p)),
+        );
+        prefixes.push(prefix_of(s, p, &steps));
+        firsts.push(first);
+    }
+    Spread {
+        first: top_share(&firsts, |a, b| a == b),
+        prefix: top_share(&prefixes, |a, b| a.1 == b.1 && turn_order_eq(&a.0, &b.0)),
+        draw_timing_split: chance_first.iter().any(|x| *x) && chance_first.iter().any(|x| !*x),
+        seconds: seconds_since(t),
+    }
 }
 
 pub fn main(argv: &[String]) -> Result<(), String> {
@@ -150,7 +215,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         fixed(seconds_since(t0), 1)
     );
     let t1 = Instant::now();
-    let res: Vec<(f64, f64)> = parallel_map(
+    let res: Vec<(Spread, Spread)> = parallel_map(
         &all,
         |&(i, n, _), k| {
             let (decks, _, seed) = setup(tasks[i]);
@@ -159,31 +224,52 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                 s = apply_action(&s, a);
             }
             (
-                agreement(&s, &oa, seeds, k as u32),
-                agreement(&s, &ob, seeds, k as u32),
+                spread(&s, &oa, seeds, k as u32),
+                spread(&s, &ob, seeds, k as u32),
             )
         },
         |_, _, _, _| {},
     );
     let line = |name: &str, f: &dyn Fn(bool) -> bool| {
-        let sel: Vec<&(f64, f64)> = res
+        let sel: Vec<&(Spread, Spread)> = res
             .iter()
             .zip(&all)
             .filter(|(_, x)| f(x.2))
             .map(|(r, _)| r)
             .collect();
         let n = sel.len().max(1) as f64;
-        let a: f64 = sel.iter().map(|r| r.0).sum::<f64>() / n;
-        let b: f64 = sel.iter().map(|r| r.1).sum::<f64>() / n;
-        let full_a = sel.iter().filter(|r| r.0 >= 1.0).count() as f64 / n;
-        let full_b = sel.iter().filter(|r| r.1 >= 1.0).count() as f64 / n;
+        let pct = |g: &dyn Fn(&Spread) -> f64| -> (String, String) {
+            let a = sel.iter().map(|r| g(&r.0)).sum::<f64>() / n * 100.0;
+            let b = sel.iter().map(|r| g(&r.1)).sum::<f64>() / n * 100.0;
+            (fixed(a, 1), fixed(b, 1))
+        };
+        let all_same = |x: f64| if x >= 1.0 { 1.0 } else { 0.0 };
+        let first = pct(&|r| r.first);
+        let first_full = pct(&|r| all_same(r.first));
+        let prefix = pct(&|r| r.prefix);
+        let prefix_full = pct(&|r| all_same(r.prefix));
+        let timing = pct(&|r| if r.draw_timing_split { 1.0 } else { 0.0 });
+        // 1 回考える時間（ミリ秒）の平均
+        let per = n * seeds.max(1) as f64 / 1000.0;
+        let ta: f64 = sel.iter().map(|r| r.0.seconds).sum::<f64>() / per;
+        let tb: f64 = sel.iter().map(|r| r.1.seconds).sum::<f64>() / per;
+        println!("{name}（{} 局面）", sel.len());
         println!(
-            "{name}（{} 局面）: そろい方 A {}% / B {}%、{seeds} 回とも同じ手 A {}% / B {}%",
-            sel.len(),
-            fixed(a * 100.0, 1),
-            fixed(b * 100.0, 1),
-            fixed(full_a * 100.0, 1),
-            fixed(full_b * 100.0, 1)
+            "  最初の 1 手: そろい方 A {}% / B {}%、{seeds} 回とも同じ A {}% / B {}%",
+            first.0, first.1, first_full.0, first_full.1
+        );
+        println!(
+            "  最初に引く手・ランダムな手までの並び（順番は問わない）: そろい方 A {}% / B {}%、{seeds} 回とも同じ A {}% / B {}%",
+            prefix.0, prefix.1, prefix_full.0, prefix_full.1
+        );
+        println!(
+            "  最初の 1 手が、引く手・ランダムな手を先に打つかどうかで割れた局面 A {}% / B {}%",
+            timing.0, timing.1
+        );
+        println!(
+            "  1 回考える時間 A {} ms / B {} ms",
+            fixed(ta, 0),
+            fixed(tb, 0)
         );
     };
     println!("A {a_text} / B {b_text}（{} {seeds} 通り）", subject.1);
