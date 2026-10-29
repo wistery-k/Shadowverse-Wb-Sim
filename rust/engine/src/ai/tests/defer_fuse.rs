@@ -6,7 +6,7 @@ use super::*;
 use crate::ai::search::{SearchAgent, SearchOptions};
 
 /// AFネメシスの手番の局面（PP pp、手札と場は names・board の名前のカード。相手の場は空）
-fn af_turn(pp: i32, hand: &[&str], board: &[&str]) -> GameState {
+pub(super) fn af_turn(pp: i32, hand: &[&str], board: &[&str]) -> GameState {
     let mut s = keep_hands(new_game(deck("AFネメシス"), deck_at(1), 7));
     s.phase = Phase::Main;
     s.active = 0;

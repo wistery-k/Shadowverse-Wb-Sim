@@ -9,6 +9,7 @@ pub mod damage_bound;
 pub mod determinize;
 pub mod eval;
 pub mod exact_lethal;
+pub mod fusion;
 pub mod greedy;
 pub mod keys;
 pub mod lethal;

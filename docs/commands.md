@@ -29,6 +29,7 @@
 | `npm run sim-report` | `sim --json` の結果を Markdown の表にする（下） | `scripts/sim-report-main.ts` |
 | `npm run game` | 1 試合だけ打って行動の列を表示する（下） | `scripts/game-main.ts` |
 | `npm run think-at` | 記録した試合の局面で、AI の考え（最初の手ごとの並びと点数）を出す（下） | `scripts/think-at-main.ts` |
+| `npm run diverge` | 同じ試合を 2 つの設定で打った記録の、最初に手が分かれた局面を出す（下） | `scripts/diverge-main.ts` |
 | `npm run compare` | 探索 AI の設定 A と B の勝率（下） | `rust/engine/src/runner/compare.rs` |
 | `npm run rhino-compare` 等 | デッキ 1 つと他の 6 デッキの勝率（下） | `rust/engine/src/runner/rhino_compare.rs` |
 | `npm run deck-compare` | デッキのカードを入れ替えた案と元のデッキの勝率（下） | `rust/engine/src/runner/deck_compare.rs` |
@@ -103,6 +104,16 @@ AI はその場で考え直すので、試合の中で前の手で決めた並�
 | `--agent AI` | 考える AI（既定はその席で打った AI） |
 | `--rng 1,2,3` | AI の乱数（並べた数だけ考える。既定 1） |
 
+## diverge
+
+```sh
+npm run diverge -- --a <記録のディレクトリ A> --b <記録のディレクトリ B> [--file <ファイル名>] [--turns 1]
+```
+
+同じ試合（同じシード・デッキ）を 2 つの設定で打った記録（`rhino-compare --record`）を、ファイル名で組にして、最初に手が分かれた局面（手番のプレイヤーの手札・場、相手の場）と、
+そこから `--turns` ターン分（手番の交代の数）の A・B の手を出す。設定を変えて勝敗が変わった試合を見るのに使う（docs/ai-notes.md「使わない融合を次のターン以降に回す」）。
+1 つの試合だけ見るなら `--file アマリアロイヤル-g0-s0.json` 等。記録は `npm run think-at -- --json` にもそのまま渡せる
+
 ## compare
 
 ```sh
@@ -117,7 +128,7 @@ A の勝率と、A のデッキごとの勝率を出す。5 番目にデッキ�
 ## rhino-compare（af-compare・spellwitch-compare・bishop-compare・dragon-compare・nightmare-compare・royal-compare）
 
 ```sh
-npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …] [--opts '<設定>'] [--opp search-classic|search] [--out 結果.jsonl] [--matches 試合.jsonl]
+npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …] [--opts '<設定>'] [--opp search-classic|search] [--out 結果.jsonl] [--matches 試合.jsonl] [--record ディレクトリ]
 ```
 
 | 引数 | 既定 | 意味 |
@@ -130,9 +141,12 @@ npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …
 | `--opts JSON` | `{}` | 比べるデッキの AI の設定（`search-classic` では使わない）。下の「探索 AI の設定」に加え、リノセウス用 AI の `"potential"`（数）と `"holds"`（`{"mystery":…, "rhino":…, "extraPp":…}`） |
 | `--out ファイル` | なし | 試合ごとの結果を JSON Lines で書き出す |
 | `--matches ファイル` | なし | 「人間との比較」タブで保存した試合（JSON Lines）と同じ試合だけ打ち、人間の勝敗と並べる。人間の相手が `--opp` と同じ試合だけを使う（`search-classic` なら相手が物差しの試合、`search` なら最新版の試合） |
+| `--record ディレクトリ` | なし | 試合ごとに、`npm run game` の `--json` と同じ形（`seed`・`agents`・`decks`・`winner`・`actions`）を `<ディレクトリ>/<相手デッキ>-g<試合番号>-s<席>.json` に書く（`npm run diverge`・`npm run think-at` で調べる） |
 
 勝率のほかに、比べるデッキがカードを引く手（自分の山札が減る手）を打った回数と、そのうちの後ドロー（ターンの最初の局面から打てたのに、ほかの手の後で打った）の回数を出す
-（docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）。
+（docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）。`af` では融合のまわりの数（融合の回数、作ったカードを手札に残して終えた回数、ターン終了時の手札のコア、
+手札が上限のターン、出したアタック・キャッスル・デストロイ・Ω）も出す（docs/ai-notes.md「使わない融合を次のターン以降に回す」）。
+`--opp search` の相手は今の既定の設定で打つので、既定を変えた後の結果とそれより前の結果は、相手が違う（相手が比べるデッキのターンを読むときにも設定が効く）。
 
 ## deck-compare
 
@@ -276,6 +290,7 @@ npm run svwb -- two-turn run --out tt.jsonl [--only <局面>,…] [--m 64] [--re
 npm run svwb -- two-turn report tt.jsonl… [--only <局面>,…]
 npm run svwb -- two-turn trace --only <局面> --cand <候補> [--r 0] [--seed 1] [--opts '<設定の JSON>']
 npm run svwb -- draw-stability [--subject spellwitch] [--games 12] [--start 0] [--seeds 8] [--a '{}'] [--b '{"drawSplit":{}}']
+npm run svwb -- fuse-gap --dir <記録のディレクトリ> [--opts '<設定の JSON>'] [--out 結果.jsonl] [--show 10]
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI。
@@ -312,6 +327,10 @@ npm run svwb -- draw-stability [--subject spellwitch] [--games 12] [--start 0] [
   比べるデッキの各ターンの最初の局面を集める。各局面で設定 A・B の探索 AI に `--seeds` 通りの乱数で手を選ばせ、最も多く選ばれたものの割合（そろい方）と、全部同じだった局面の割合を、
   最初の 1 手と、選んだ並びの最初に引く手・ランダムな手まで（引いた後の手は比べない。順番は問わない）について出す。最初の 1 手が引く手・ランダムな手を先に打つかどうかで割れた局面の割合と、
   1 回考える時間も出す。カードを引く手を今打てる局面とそうでない局面に分ける（同じ局面での手のぶれ。docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）
+- `fuse-gap`: `rhino-compare --subject af --record <ディレクトリ>` で書いた試合を打ち直し、AFネメシスの側の自分のターンの最初の局面ごとに、手札の作ったカードを素材のコアに戻した局面を作る
+  （キャッスル → パスト 2 枚、アタック → フューチャー 2 枚、α → パスト 2 枚＋フューチャー、β・γ → パスト 2 枚＋フューチャー 2 枚。戻すと手札が上限を超える局面は飛ばす）。
+  元の局面と戻した局面を `--opts` の設定のビーム（相手のターンは読まない）で読み、見つかった並びの点数を比べる。融合は PP を使わないので、戻した局面の最大は元以上になるはずで、
+  戻した局面のほうが低ければ、コアを手札に残したことで探索が取りこぼした分。まとめと、差の大きい `--show` 局面の中身（両方の並び）を出す（docs/ai-notes.md「融合を回した局面で探索が取りこぼすか」）
 
 ## td
 
@@ -424,10 +443,12 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
 - `perPlan`: 数（既定 0 で使わない）。ビームの各深さで、同じ「手の組」（手札から出したカード・進化・超進化・能力・エクストラPP の組。攻撃・融合・選ぶ手は数えない）の局面をまずこの数まで残し、余った枠を点数の順に埋める。攻撃先・融合の素材だけが違う並びが枠を埋めて、別のカードを使う手順が切られるのを防ぐ（2026-10-26。docs/ai-notes.md「手の組ごとにビームの枠を設ける」）
 - 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`
-- `deferFuse`: 真偽（既定 false。2026-10-28 に作ったが、AFネメシスの勝率が上がらなかった）。そのターンに使わない融合（作ったカードがターン末まで手札に残り、その融合を除いて打ち直しても手札のほかが同じになるもの）をした並びを、
-  ターン末の候補にしない。融合しないと手札が上限（9 枚）になるなら残す（docs/ai-notes.md「使わない融合を次のターン以降に回す」）
-- `deferFuseKeepSet`: 真偽（既定 true）。`deferFuse` で、手で作った評価が上がる融合（手札のデストロイアーティファクト α・β・γ の種類が増える。`fusionSet`）は回さない。
-  イクシードアーティファクトΩ の素材（α・β・γ）はコアにすると 11 枚以上で、手札（上限 9 枚）に入りきらないので
+- `deferFuse`: 真偽（既定 false。2026-10-29 に今の形）。次のターン以降に回せる融合（作ったカードがターン末まで手札に残り、その融合を除いて打ち直しても手札のほかが同じになるもの。
+  融合しないと手札が上限（9 枚）になるものは除く）を打たない。並びの選び方と点数は変えず（融合した終局面の点数のまま）、選んだ並びから回せる融合を除いて打つ（docs/ai-notes.md「使わない融合を次のターン以降に回す」）
+- `fuseMinimal`: 真偽（既定 false。2026-10-29）。素材を入れすぎる融合を探索で展開しない。素材を 1 枚除いても融合先が同じカード（融合した種類も同じ）になる融合と、
+  素材のうち 2 枚を先に融合して作ったカードを使えば別の 1 枚を除いても同じになる融合（キャッスルにコア 3 枚 → γ など）、結果が融合前の融合先か素材と同じになる融合
+  （カードを捨てるだけ。アタックに γ → γ など。融合で手札の外に何か起きる（遺産の砲撃が場にある等）ときは残す）。結果は、手札が融合先と素材だけの局面で実際に融合して確かめる
+  （`rust/engine/src/ai/fusion.rs`。フューチャー 2・パスト 2・キャッスル・アタックの手札で、融合の手が 44 通りから 16 通りになる）
 - `drawSplit`: `null`（使わない）か `{"samples": 4, "beamWidth": 128, "maxDepth": 16, "rootDraws": 2}`（書かない項目はこの値。`{}` でも使う）。
   既定は `{"enumerate": true, "beamWidth": 32}`（`DEFAULT_DRAW_SPLIT`。2026-10-28 にスペルウィッチだけで使い始め、同じ日にどのクラスでも使うようにした。`'{}'` の探索 AI はこれを使い、`{"drawSplit":{}}` は別の設定になる）。
   読み直す並びを、自分の山札から引く手・ランダムな手の直前で区切り、山札の順番と局面の乱数を `samples` 通り作り直して、その手を打った後の残りを幅 `beamWidth`・深さ `maxDepth` のビームで組み直し、

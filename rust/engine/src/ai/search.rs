@@ -10,6 +10,7 @@ use super::converging::{converging_attacks, dominated_attack, settle_converging_
 use super::determinize::determinize;
 use super::eval::{evaluate_with, EvalWeights};
 use super::exact_lethal::{search_exact_lethal, sure_lethal_options};
+use super::fusion::excessive_fusion;
 use super::greedy::{choose_greedy, value_after};
 use super::keys::{hand_eq_noid, state_eq, visible_eq, TurnOrderSet};
 use super::lethal::{
@@ -203,6 +204,8 @@ pub struct SearchOptions {
     /// 次のターン以降に回せる融合（作ったカードをこのターンに使わない融合）は打たない。並びの選び方と点数は変えず（融合した終局面の点数のまま）、
     /// 選んだ並びから回せる融合を除いて打つ（Planner::needless_fusions）
     pub defer_fuse: bool,
+    /// 素材を入れすぎる融合（同じ融合先を、素材を 1 枚少なく使って作れる融合。ai/fusion.rs）を展開しない
+    pub fuse_minimal: bool,
     pub score_turn_end: ScoreTurnEnd,
     pub mulligan: MulliganMode,
     /// MulliganMode::Sample で、返し方ごとに引き直しを試す回数
@@ -301,9 +304,11 @@ impl Default for SearchOptions {
             same_hand_once: true,
             chain: true,
             chain_fuse: false,
-            // 使わない融合を次のターン以降に回すのは、AFネメシスの勝率が上がらなかったので使わない（1680 試合で −1.9 ± 1.3 ポイント。
-            // docs/ai-notes.md「使わない融合を次のターン以降に回す」）。使うときは α・β・γ の種類が増える融合は残す
+            // 使わない融合を次のターン以降に回すのは、AFネメシスの勝率が上がらなかったので使わない（並びの選び方を変えない 4 版目で、
+            // 600 試合で −3.2 ± 2.0 ポイント。docs/ai-notes.md「使わない融合を次のターン以降に回す」）
             defer_fuse: false,
+            // 素材を入れすぎる融合を展開しないのは、勝率を比べてから決める（docs/ai-notes.md「融合を回した局面で探索が取りこぼすか」）
+            fuse_minimal: false,
             score_turn_end: ScoreTurnEnd::All,
             // 引き直した後、3 ターン目の終わりまで貪欲法で進めてから採点する
             // （docs/ai-notes.md「引き直した後に先へ進めてから採点するマリガン」。手札の形のモデルより +1.5%）
@@ -726,6 +731,9 @@ impl<'a> Planner<'a> {
         let mut legal = legal_actions(s);
         if self.opts().dominance {
             legal.retain(|a| !dominated_attack(s, a));
+        }
+        if self.opts().fuse_minimal {
+            legal.retain(|a| !excessive_fusion(s, a));
         }
         if self.opts().same_hand_once {
             distinct_plays(s, legal)
@@ -2665,6 +2673,31 @@ impl SearchAgent {
             .into_iter()
             .map(|(k, i)| (k, terminals[i].value, (*terminals[i].state).clone()))
             .collect()
+    }
+
+    /// 局面 root で p が打てる並びのうち、ターン末の点数が最も高いものの点数・手の列・終局面と、ビームの終局面の数（調べもの用。root を決定化せずに読む）
+    pub fn turn_end_best(
+        &self,
+        root: &GameState,
+        p: PlayerIndex,
+    ) -> Option<(f64, Vec<Action>, GameState, usize)> {
+        let env = self.env();
+        let root = Rc::new(root.clone());
+        let (pl, terminals, bests) = turn_end_bests(&root, p, &env);
+        let i = bests.iter().map(|&(_, i)| i).reduce(|b, i| {
+            if terminals[i].value > terminals[b].value {
+                i
+            } else {
+                b
+            }
+        })?;
+        let t = &terminals[i];
+        Some((
+            t.value,
+            pl.steps_actions(t.path),
+            (*t.state).clone(),
+            terminals.len(),
+        ))
     }
 }
 
