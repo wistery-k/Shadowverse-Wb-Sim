@@ -40,11 +40,20 @@ fn candidates_with(s: &GameState, opts: SearchOptions) -> Vec<Cand> {
         .collect()
 }
 
-/// 使わない融合を回す（deferFuse）
+/// 使わない融合を回さない、前の版（2026-10-29 に deferFuse・deferFuseLastWords を既定にする前の既定）
+fn fusing() -> SearchOptions {
+    SearchOptions {
+        defer_fuse: false,
+        defer_fuse_last_words: false,
+        ..SearchOptions::default()
+    }
+}
+
+/// 使わない融合を回す（deferFuse だけ。ラストワードの分は空けない）
 fn deferred() -> SearchOptions {
     SearchOptions {
         defer_fuse: true,
-        ..SearchOptions::default()
+        ..fusing()
     }
 }
 
@@ -88,14 +97,11 @@ fn unused_fusion_is_deferred() {
     assert!(with
         .iter()
         .all(|(_, hand, _)| hand.iter().all(|n| !PRODUCTS.contains(n))));
-    // deferFuse なし（今の既定）なら融合する並びも候補にある
-    let without = candidates_with(&s, SearchOptions::default());
+    // deferFuse なし（前の版）なら融合する並びも候補にある
+    let without = candidates_with(&s, fusing());
     assert!(without.iter().any(|(a, _, _)| is_fuse(a)));
     // 点数は変えない（融合は後でもできるので、融合した終局面の点数より悪くはならない）
-    assert_eq!(
-        top_value(&s, deferred()),
-        top_value(&s, SearchOptions::default())
-    );
+    assert_eq!(top_value(&s, deferred()), top_value(&s, fusing()));
 }
 
 #[test]
@@ -129,7 +135,7 @@ fn core_cards_are_still_played() {
             .find(|(a, _, _)| *a == charge)
             .unwrap()
     };
-    let (_, v0, end0) = plan(SearchOptions::default());
+    let (_, v0, end0) = plan(fusing());
     let (_, v1, end1) = plan(deferred());
     let count = |end: &GameState, f: &dyn Fn(&str) -> bool| {
         end.players[0]
@@ -140,7 +146,7 @@ fn core_cards_are_still_played() {
     };
     let core = |n: &str| n.ends_with("コア");
     let product = |n: &str| PRODUCTS.contains(&n);
-    // 今の既定は、アーティファクトチャージで加えたコアを融合する
+    // 前の版は、アーティファクトチャージで加えたコアを融合する
     assert_eq!(count(&end0, &product), 1);
     // deferFuse は同じ点数のまま、コアを融合せずに残す
     assert_eq!(v0, v1);

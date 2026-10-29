@@ -319,12 +319,12 @@ impl Default for SearchOptions {
             same_hand_once: true,
             chain: true,
             chain_fuse: false,
-            // 使わない融合を次のターン以降に回すのは、AFネメシスの勝率が上がらなかったので使わない（並びの選び方を変えない 4 版目で、
-            // 600 試合で −3.2 ± 2.0 ポイント。docs/ai-notes.md「使わない融合を次のターン以降に回す」）
-            defer_fuse: false,
+            // 使わない融合は次のターン以降に回す（ラストワードの分を空ける形。前の版と勝率は同じで、使わない融合をしない。2026-10-29、
+            // docs/ai-notes.md「回して何も残らない並びで、点数に入れた相打ちをしない見落とし」）
+            defer_fuse: true,
             defer_fuse_keep_set: false,
             defer_fuse_hand: HAND_LIMIT - 1,
-            defer_fuse_last_words: false,
+            defer_fuse_last_words: true,
             // 素材を入れすぎる融合を展開しないのは、勝率を比べてから決める（docs/ai-notes.md「融合を回した局面で探索が取りこぼすか」）
             fuse_minimal: false,
             // 先に融合した局面からも探すのは、勝率を比べてから決める（docs/ai-notes.md「長い融合の並びの取りこぼしを直す」）
