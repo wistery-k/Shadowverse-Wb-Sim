@@ -6,12 +6,16 @@
 //! 4. 平均の評価が最も良い「最初の手」を選ぶ。このターンで勝てる並び（リーサル）が見つかれば最優先する
 
 use super::aidata::{ai_data, Weights};
-use super::converging::{converging_attacks, dominated_attack, settle_converging_trades_with};
+use super::converging::{
+    converging_attacks, dominated_attack, settle_converging_trade_steps,
+    settle_converging_trades_with,
+};
 use super::determinize::determinize;
 use super::eval::{evaluate_with, EvalWeights};
 use super::exact_lethal::{search_exact_lethal, sure_lethal_options};
+use super::fusion::{excessive_fusion, fuse_root_chains, last_words_to_hand};
 use super::greedy::{choose_greedy, value_after};
-use super::keys::{hand_eq_noid, visible_eq, TurnOrderSet};
+use super::keys::{hand_eq_noid, state_eq, visible_eq, TurnOrderSet};
 use super::lethal::{
     find_lethal, search_lethal, LethalOptions, LethalSearch, DEFAULT_LETHAL_OPTIONS,
     GUARDED_LETHAL_OPTIONS,
@@ -200,6 +204,23 @@ pub struct SearchOptions {
     pub same_hand_once: bool,
     pub chain: bool,
     pub chain_fuse: bool,
+    /// 次のターン以降に回せる融合（作ったカードをこのターンに使わない融合）は打たない。並びの選び方と点数は変えず（融合した終局面の点数のまま）、
+    /// 選んだ並びから回せる融合を除いて打つ（Planner::needless_fusions）
+    pub defer_fuse: bool,
+    /// deferFuse で、手で作った評価が上がる融合（手札の α・β・γ の種類が増える。fusionSet）は回さない
+    pub defer_fuse_keep_set: bool,
+    /// deferFuse で回したあとのターン末の手札の枚数の上限。回すと手札がこれより多くなる融合は回さない
+    /// （8 なら次のターンの最初に引くカードが入る。手札が上限近くで止まると、コアを加えるカードを出しにくくなり、引いたカードが溢れる）
+    pub defer_fuse_hand: usize,
+    /// deferFuse で、自分の場のフォロワーのラストワードが手札に加えるカードの枚数（ビビッドインベンター・イリスのコア等）だけ、
+    /// defer_fuse_hand を下げる（相手のターンに破壊されると手札が増え、次のターンの最初に引くカードが溢れる）
+    pub defer_fuse_last_words: bool,
+    /// 素材を入れすぎる融合（同じ融合先を、素材を 1 枚少なく使って作れる融合。ai/fusion.rs）を展開しない
+    pub fuse_minimal: bool,
+    /// 自分のターンの並びを選ぶとき、融合だけで作れて今の PP で出せる、コストが最も高いカードを先に作った局面（融合が 2 回以上要るとき。
+    /// コストが同じカードが何種類もあれば種類ごとに 3 種類まで。ai/fusion.rs の fuse_root_chains）からもビームを打ち、
+    /// その終局面（並びは先にする融合から）も候補にする（fuseRoot）。相手のターンの読みの中のビームでは打たない
+    pub fuse_root: bool,
     pub score_turn_end: ScoreTurnEnd,
     pub mulligan: MulliganMode,
     /// MulliganMode::Sample で、返し方ごとに引き直しを試す回数
@@ -298,6 +319,16 @@ impl Default for SearchOptions {
             same_hand_once: true,
             chain: true,
             chain_fuse: false,
+            // 使わない融合は次のターン以降に回す（ラストワードの分を空ける形。前の版と勝率は同じで、使わない融合をしない。2026-10-29、
+            // docs/ai-notes.md「回して何も残らない並びで、点数に入れた相打ちをしない見落とし」）
+            defer_fuse: true,
+            defer_fuse_keep_set: false,
+            defer_fuse_hand: HAND_LIMIT - 1,
+            defer_fuse_last_words: true,
+            // 素材を入れすぎる融合を展開しないのは、勝率を比べてから決める（docs/ai-notes.md「融合を回した局面で探索が取りこぼすか」）
+            fuse_minimal: false,
+            // 先に融合した局面からも探すのは、勝率を比べてから決める（docs/ai-notes.md「長い融合の並びの取りこぼしを直す」）
+            fuse_root: false,
             score_turn_end: ScoreTurnEnd::All,
             // 引き直した後、3 ターン目の終わりまで貪欲法で進めてから採点する
             // （docs/ai-notes.md「引き直した後に先へ進めてから採点するマリガン」。手札の形のモデルより +1.5%）
@@ -368,6 +399,7 @@ impl SearchOptions {
             opp_hand_common: false,
             rescore_mix: 0.0,
             draw_split: None,
+            defer_fuse: false,
             ..self
         }
     }
@@ -518,6 +550,142 @@ impl<'a> Planner<'a> {
             .collect()
     }
 
+    /// 終局面 t までの並びのうち、次のターン以降に回せる融合（deferFuse）。回せるものを 1 つずつ除いていき、除いた融合を返す。
+    /// 回せる融合は、融合で作ったカードがターン末まで手札に残り（出していない・素材にしていない）、その融合だけを除いて打ち直しても
+    /// 自分の手札のほかは同じ局面になる（作ったカードをコピーしていない・融合で誘発した能力が無い 等）融合のこと。
+    /// 融合は PP を使わず、変身したカードはそのターンにもう一度融合できるので、使うターンに融合しても同じことができ、
+    /// 素材のまま残せば別のカードを作る選択肢も残る（アタックとキャッスルのどちらを作るか 等）。
+    /// ただし、その融合をしないと手札が上限になる（次のターンの最初に引くカードが溢れる）ものと、ターン終了時の処理が変わる
+    /// （手札の枚数で引くかどうかが決まるクレスト等）ものは回さない
+    fn needless_fusions(&self, t: &Node) -> Vec<Action> {
+        let _p = prof::scope(Sec::DeferFuse);
+        let mut removed = Vec::new();
+        if t.state.phase == Phase::Ended {
+            return removed;
+        }
+        let mut acts: Vec<Action> = self
+            .steps_actions(t.path)
+            .into_iter()
+            .filter(|a| !matches!(a, Action::EndTurn))
+            .collect();
+        if !acts.iter().any(|a| matches!(a, Action::Fuse { .. })) {
+            return removed;
+        }
+        let mut end: GameState = (*t.state).clone();
+        while let Some((k, next)) = self.needless_fuse_at(&acts, &end) {
+            removed.push(acts.remove(k));
+            end = next;
+        }
+        removed
+    }
+
+    /// path までの手（root から順に）
+    fn steps_actions(&self, path: usize) -> Vec<Action> {
+        let mut out = Vec::new();
+        let mut cur = Some(path);
+        while let Some(i) = cur {
+            out.push(self.steps[i].action.clone());
+            cur = self.steps[i].prev;
+        }
+        out.reverse();
+        out
+    }
+
+    /// root から acts を打った局面 end で、次のターン以降に回せる融合の添字と、それを除いて打ち直した局面
+    fn needless_fuse_at(&self, acts: &[Action], end: &GameState) -> Option<(usize, GameState)> {
+        let p = self.p;
+        let hand = &end.players[p].hand;
+        let mut limit = self.opts().defer_fuse_hand;
+        if self.opts().defer_fuse_last_words {
+            limit = limit.saturating_sub(last_words_to_hand(end, p));
+        }
+        'fuse: for (k, a) in acts.iter().enumerate() {
+            let Action::Fuse { host, materials } = a else {
+                continue;
+            };
+            if hand.len() + materials.len() > limit || !hand.iter().any(|h| h.iid == *host) {
+                continue;
+            }
+            // 後の手で作ったカードを使っていれば回せない（打ち直さなくても分かる）
+            if acts[k + 1..].iter().any(|b| match b {
+                Action::Choose(v) => v.contains(host),
+                Action::Fuse { materials, .. } => materials.contains(host),
+                Action::Play(x) | Action::Evolve(x) | Action::SuperEvolve(x) | Action::Act(x) => {
+                    x == host
+                }
+                _ => false,
+            }) {
+                continue;
+            }
+            // その融合だけを除いて打ち直す（打てない手があれば、作ったカードを使っている）
+            let mut s: GameState = (*self.root).clone();
+            for (j, b) in acts.iter().enumerate() {
+                if j == k {
+                    continue;
+                }
+                match try_apply_action(&s, b) {
+                    Some(next) => s = next,
+                    None => continue 'fuse,
+                }
+            }
+            // deferFuseKeepSet: 手で作った評価が上がる融合（手札の α・β・γ の種類が増える。fusionSet）は回さない。
+            // Ω の素材はコアにすると 11 枚で手札に入りきらないので、何ターンかかけて作っておく
+            if self.opts().defer_fuse_keep_set
+                && evaluate_with(end, p, self.env.w) > evaluate_with(&s, p, self.env.w) + 1e-9
+            {
+                continue;
+            }
+            // ターン終了時の処理の後まで、手札のほかは同じか（新たなる少女・エースのクレストは、手札が 5 枚以下なら引き、6 枚以上なら回復する。
+            // 融合で手札を減らして引けるなら回さない。2026-10-29、ユーザーの指摘）
+            let mut after = resolve_turn_end(&s).unwrap_or_else(|| s.clone());
+            let end_after = resolve_turn_end(end).unwrap_or_else(|| end.clone());
+            after.players[p].hand = end_after.players[p].hand.clone();
+            let unfused = std::mem::replace(&mut s.players[p].hand, hand.clone());
+            if state_eq(&s, end) && state_eq(&after, &end_after) {
+                s.players[p].hand = unfused;
+                return Some((k, s));
+            }
+        }
+        None
+    }
+
+    /// 並び steps から、終局面 t までの並びで次のターン以降に回せる融合を除き、各手の後の局面を打ち直す（deferFuse）。
+    /// 何も残らなければターン終了だけの並び
+    fn defer_steps(
+        &self,
+        t: &Node,
+        steps: Vec<(Action, Rc<GameState>)>,
+    ) -> Vec<(Action, Rc<GameState>)> {
+        let removed = self.needless_fusions(t);
+        if removed.is_empty() {
+            return steps;
+        }
+        let mut state = self.root.clone();
+        let mut out: Vec<(Action, Rc<GameState>)> = Vec::new();
+        for (a, _) in steps {
+            if removed.contains(&a) {
+                continue;
+            }
+            if !matches!(a, Action::EndTurn) {
+                state = Rc::new(apply_legal(&state, &a));
+            }
+            out.push((a, state.clone()));
+        }
+        // 何も残らなければ、ターン末の点数に入れている合流する相打ち（settle）を打つ。ターン終了だけにすると、
+        // 点数は相打ちをした局面のままで相打ちをせずにターンを終える（2026-10-29、アマリアロイヤル戦の分かれ目から）
+        if out.is_empty() && self.opts().settle_trades {
+            for (a, after) in
+                settle_converging_trade_steps(&self.root, self.p, self.opts().dominance)
+            {
+                out.push((a, Rc::new(after)));
+            }
+        }
+        if out.is_empty() {
+            out.push((Action::EndTurn, self.root.clone()));
+        }
+        out
+    }
+
     /// ターンを終える局面（合流する相打ちを打った後）。変わらなければ None
     fn settle(&self, s: &GameState) -> Option<GameState> {
         if self.opts().settle_trades {
@@ -609,6 +777,9 @@ impl<'a> Planner<'a> {
         let mut legal = legal_actions(s);
         if self.opts().dominance {
             legal.retain(|a| !dominated_attack(s, a));
+        }
+        if self.opts().fuse_minimal {
+            legal.retain(|a| !excessive_fusion(s, a));
         }
         if self.opts().same_hand_once {
             distinct_plays(s, legal)
@@ -727,7 +898,12 @@ impl<'a> Planner<'a> {
 
     /// 攻撃を後にまとめるビーム（attackLater）の終局面。攻撃以外の手（自分の場が埋まっているときは攻撃も）で手順を作り、
     /// 各局面で攻撃を貪欲に済ませた後の点数で並べて幅 attack_later 個を残す。終局面は各局面から攻撃を済ませた局面
-    fn plays_beam_terminals(&mut self, root: &Rc<GameState>) -> Vec<Node> {
+    /// prefix があれば、root はその並び（steps の添字と最初の手）の後の局面で、終局面の並びはその並びから続け、最初の手はその最初の手にする（fuseRoot）
+    fn plays_beam_terminals(
+        &mut self,
+        root: &Rc<GameState>,
+        prefix: Option<(usize, &Action)>,
+    ) -> Vec<Node> {
         struct PlayNode {
             state: Rc<GameState>,
             first: Action,
@@ -754,14 +930,16 @@ impl<'a> Planner<'a> {
             }
         };
         // 深さ 1: 攻撃以外のすべての手を展開する
+        let prev = prefix.map(|(i, _)| i);
         for a in self.expand(root) {
             if matches!(a, Action::EndTurn) || !self.allowed(root, &a) {
                 continue;
             }
+            let first = prefix.map_or_else(|| a.clone(), |(_, f)| f.clone());
             next.clear();
-            self.advance(root, &a, None, 0, &mut next);
+            self.advance(root, &a, prev, 0, &mut next);
             for (st, path) in std::mem::take(&mut next) {
-                let n = make(self, st, a.clone(), path);
+                let n = make(self, st, first.clone(), path);
                 frontier.push((n, path));
             }
         }
@@ -898,38 +1076,46 @@ impl<'a> Planner<'a> {
         out
     }
 
-    fn beam_terminals(&mut self, root: &Rc<GameState>, root_converges: bool) -> Vec<Node> {
+    /// prefix があれば、root はその並び（steps の添字と最初の手）の後の局面で、終局面の並びはその並びから続け、最初の手はその最初の手にする（fuseRoot）
+    fn beam_terminals(
+        &mut self,
+        root: &Rc<GameState>,
+        root_converges: bool,
+        prefix: Option<(usize, &Action)>,
+    ) -> Vec<Node> {
         let p = self.p;
         let opts = self.opts();
         let mut terminals: Vec<Node> = Vec::new();
         let mut frontier: Vec<Node> = Vec::new();
         let mut next: Vec<(Rc<GameState>, usize)> = Vec::new();
+        let prev = prefix.map(|(i, _)| i);
         // 深さ 1: すべての手を展開する（最初の手の候補を落とさない）
         for a in self.expand(root) {
             if !self.allowed(root, &a) {
                 continue;
             }
+            let first = prefix.map_or_else(|| a.clone(), |(_, f)| f.clone());
             if matches!(a, Action::EndTurn) {
                 if root_converges {
                     continue; // 合流する攻撃をしてから終える手に劣らない
                 }
-                let path = self.push_step(a.clone(), None);
+                let path = self.push_step(a, prev);
                 let value = self.score(root);
                 terminals.push(Node {
                     state: root.clone(),
-                    first: a,
+                    first,
                     value,
                     path,
                 });
                 continue;
             }
             next.clear();
-            self.advance(root, &a, None, 0, &mut next);
+            self.advance(root, &a, prev, 0, &mut next);
             for (st, path) in next.drain(..) {
                 let value = self.score(&st);
                 frontier.push(Node {
                     state: st,
-                    first: a.clone(),
+                    first: first.clone(),
                     value,
                     path,
                 });
@@ -993,11 +1179,17 @@ impl<'a> Planner<'a> {
     }
 }
 
-/// ビームサーチの終局面と、最初の手ごとにターン末の点数が最も高い終局面の添字（最初の手が出てきた順）
+/// fuseRoot で、先に融合する並びを探すときに調べる局面の数の上限と、先に融合した局面の数の上限
+const FUSE_ROOT_STATES: usize = 4000;
+const FUSE_ROOT_MAX: usize = 3;
+
+/// ビームサーチの終局面と、最初の手ごとにターン末の点数が最も高い終局面の添字（最初の手が出てきた順）。
+/// fuse_root なら、先に融合した局面からのビームの終局面も足す（SearchOptions.fuse_root）
 fn turn_end_bests<'a>(
     root: &Rc<GameState>,
     p: PlayerIndex,
     env: &'a Env<'a>,
+    fuse_root: bool,
 ) -> (Planner<'a>, Vec<Node>, Vec<(Action, usize)>) {
     let _p = prof::scope(Sec::Beam);
     let opts = env.opts;
@@ -1009,10 +1201,22 @@ fn turn_end_bests<'a>(
         plays_only: false,
     };
     let root_converges = opts.settle_trades && !converging_attacks(root, p).is_empty();
-    let mut terminals = pl.beam_terminals(root, root_converges);
+    let mut terminals = pl.beam_terminals(root, root_converges, None);
     if opts.attack_later > 0 {
-        let more = pl.plays_beam_terminals(root);
+        let more = pl.plays_beam_terminals(root, None);
         terminals.extend(more);
+    }
+    if fuse_root {
+        for (chain, fused) in pre_fused_roots(&mut pl, root) {
+            let (last, first) = (chain.0, &chain.1);
+            let converges = opts.settle_trades && !converging_attacks(&fused, p).is_empty();
+            let more = pl.beam_terminals(&fused, converges, Some((last, first)));
+            terminals.extend(more);
+            if opts.attack_later > 0 {
+                let more = pl.plays_beam_terminals(&fused, Some((last, first)));
+                terminals.extend(more);
+            }
+        }
     }
     if opts.score_turn_end == ScoreTurnEnd::Terminal {
         for t in terminals.iter_mut() {
@@ -1034,6 +1238,32 @@ fn turn_end_bests<'a>(
     (pl, terminals, best_by_first)
 }
 
+/// fuseRoot: root から先に融合する並び（fuse_root_chains）を pl の並びに足し、並びごとに (最後の手の添字, 最初の手) と打った後の局面を返す。
+/// 並びの手が打てない設定（allow）の並びは除く
+fn pre_fused_roots(
+    pl: &mut Planner,
+    root: &Rc<GameState>,
+) -> Vec<((usize, Action), Rc<GameState>)> {
+    let mut out = Vec::new();
+    'chain: for (chain, fused) in fuse_root_chains(root, pl.p, FUSE_ROOT_STATES, FUSE_ROOT_MAX) {
+        let mut s: GameState = (**root).clone();
+        for a in &chain {
+            if !pl.allowed(&s, a) {
+                continue 'chain;
+            }
+            s = apply_legal(&s, a);
+        }
+        let mut prev = None;
+        for a in &chain {
+            prev = Some(pl.push_step(a.clone(), prev));
+        }
+        if let Some(last) = prev {
+            out.push(((last, chain[0].clone()), Rc::new(fused)));
+        }
+    }
+    out
+}
+
 /// plan_turn（相手のターンを読まない）の並びのうち点数が最も高いもの（同じなら先のもの）の、最後の手とその後の局面。
 /// 並びの局面は打ち直して作るので、使うものだけを作る
 fn best_plan_last(
@@ -1041,7 +1271,7 @@ fn best_plan_last(
     p: PlayerIndex,
     env: &Env,
 ) -> Option<(Action, Rc<GameState>)> {
-    let (pl, terminals, bests) = turn_end_bests(root, p, env);
+    let (pl, terminals, bests) = turn_end_bests(root, p, env, false);
     let mut best: Option<usize> = None;
     for &(_, i) in &bests {
         if best.is_none_or(|b| terminals[i].value > terminals[b].value) {
@@ -1053,7 +1283,7 @@ fn best_plan_last(
 
 /// plan_turn（相手のターンを読まない）の並びの点数の最大（並びが無ければ None）
 fn best_plan_value(root: &Rc<GameState>, p: PlayerIndex, env: &Env) -> Option<f64> {
-    let (_, terminals, bests) = turn_end_bests(root, p, env);
+    let (_, terminals, bests) = turn_end_bests(root, p, env, false);
     bests
         .iter()
         .map(|&(_, i)| terminals[i].value)
@@ -1087,7 +1317,7 @@ pub fn plan_turn_traced(
         .draw_split
         .filter(|ds| ds.class.is_none_or(|c| deck_class_of(root, p) == c));
     // 最初の手ごとに最善の終局面を残し、上位を相手のターンまで読んで評価し直す
-    let (pl, terminals, best_by_first) = turn_end_bests(root, p, env);
+    let (pl, terminals, best_by_first) = turn_end_bests(root, p, env, opts.fuse_root);
     if let Some(tr) = trace.as_deref_mut() {
         for (_, i) in &best_by_first {
             let t = &terminals[*i];
@@ -1102,19 +1332,24 @@ pub fn plan_turn_traced(
         }
     }
     if !rescore {
-        return best_by_first
+        let result = best_by_first
             .into_iter()
             .map(|(k, i)| {
                 let t = &terminals[i];
+                let mut steps = pl.steps_of(t.path);
+                if opts.defer_fuse {
+                    steps = pl.defer_steps(t, steps);
+                }
                 let plan = Plan {
                     action: t.first.clone(),
                     value: t.value,
-                    steps: pl.steps_of(t.path),
+                    steps,
                     reads: Vec::new(),
                 };
                 (k, plan)
             })
             .collect();
+        return rekey_deferred(result, opts.defer_fuse);
     }
     let _p = prof::scope(Sec::Rescore);
     let mut ranked: Vec<usize> = best_by_first.iter().map(|(_, i)| *i).collect();
@@ -1401,13 +1636,17 @@ pub fn plan_turn_traced(
         };
         if replace {
             // drawSplit で区切ったときは、引く手までの並び（その先は引いたカードを見て考え直す）
-            let steps = match split_at {
+            let mut steps = match split_at {
                 Some((c, mut steps)) if split.is_some() => {
                     steps.truncate(c + 1);
                     steps
                 }
                 _ => pl.steps_of(node.path),
             };
+            // deferFuse: 選ぶ点数は融合した終局面のまま（融合は後でもできるので、それより悪くはならない）で、回せる融合は打たない
+            if opts.defer_fuse {
+                steps = pl.defer_steps(node, steps);
+            }
             let plan = Plan {
                 action: node.first.clone(),
                 value,
@@ -1509,7 +1748,30 @@ pub fn plan_turn_traced(
     if let Some(tr) = trace {
         tr.reads = reads;
     }
-    result
+    rekey_deferred(result, opts.defer_fuse)
+}
+
+/// deferFuse: 回せる融合を除いた並びの最初の手を、その並びの手にする（同じ手になったものは点数の高いほうを残す）
+fn rekey_deferred(result: Vec<(Action, Plan)>, defer_fuse: bool) -> Vec<(Action, Plan)> {
+    if !defer_fuse {
+        return result;
+    }
+    let mut out: Vec<(Action, Plan)> = Vec::new();
+    for (_, mut plan) in result {
+        let Some(first) = plan.steps.first().map(|(a, _)| a.clone()) else {
+            continue;
+        };
+        plan.action = first.clone();
+        match out.iter_mut().find(|(k, _)| *k == first) {
+            Some(e) => {
+                if plan.value > e.1.value {
+                    e.1 = plan;
+                }
+            }
+            None => out.push((first, plan)),
+        }
+    }
+    out
 }
 
 /// twoTurnGate: 今の点数で 1 位の手（同点は先のもの。choose_action と同じ）より、2 ターン読みの勝率で
@@ -1655,7 +1917,7 @@ fn split_turn_end(pl: &Planner, start: Rc<GameState>, env: &Env) -> (Rc<GameStat
         let v = pl.score(&start);
         return (start, v);
     }
-    let (_, terminals, _) = turn_end_bests(&start, pl.p, env);
+    let (_, terminals, _) = turn_end_bests(&start, pl.p, env, false);
     let mut best: Option<&Node> = None;
     for t in &terminals {
         if best.is_none_or(|b| t.value > b.value) {
@@ -2484,6 +2746,25 @@ impl SearchAgent {
         }
     }
 
+    /// 局面 root で p が打つ並び（相手のターンを読まない plan_turn。root を決定化せずに読む）の、最初の手・点数・並びを打った後の局面。
+    /// deferFuse なら回せる融合を除いた並び
+    pub fn plan_candidates(
+        &self,
+        root: &GameState,
+        p: PlayerIndex,
+    ) -> Vec<(Action, f64, GameState)> {
+        let env = self.env();
+        let root = Rc::new(root.clone());
+        let mut rng = Rng::new(1);
+        plan_turn(&root, p, &env, &mut rng, false)
+            .into_iter()
+            .map(|(k, plan)| {
+                let end = plan.steps.last().map_or(root.clone(), |(_, s)| s.clone());
+                (k, plan.value, (*end).clone())
+            })
+            .collect()
+    }
+
     /// 局面 root で p が打てる並びの、最初の手ごとにターン末の点数が最も高い終局面とその点数（ビームの候補。root を決定化せずに読む）
     pub fn turn_end_candidates(
         &self,
@@ -2492,11 +2773,36 @@ impl SearchAgent {
     ) -> Vec<(Action, f64, GameState)> {
         let env = self.env();
         let root = Rc::new(root.clone());
-        let (_, terminals, bests) = turn_end_bests(&root, p, &env);
+        let (_, terminals, bests) = turn_end_bests(&root, p, &env, env.opts.fuse_root);
         bests
             .into_iter()
             .map(|(k, i)| (k, terminals[i].value, (*terminals[i].state).clone()))
             .collect()
+    }
+
+    /// 局面 root で p が打てる並びのうち、ターン末の点数が最も高いものの点数・手の列・終局面と、ビームの終局面の数（調べもの用。root を決定化せずに読む）
+    pub fn turn_end_best(
+        &self,
+        root: &GameState,
+        p: PlayerIndex,
+    ) -> Option<(f64, Vec<Action>, GameState, usize)> {
+        let env = self.env();
+        let root = Rc::new(root.clone());
+        let (pl, terminals, bests) = turn_end_bests(&root, p, &env, env.opts.fuse_root);
+        let i = bests.iter().map(|&(_, i)| i).reduce(|b, i| {
+            if terminals[i].value > terminals[b].value {
+                i
+            } else {
+                b
+            }
+        })?;
+        let t = &terminals[i];
+        Some((
+            t.value,
+            pl.steps_actions(t.path),
+            (*t.state).clone(),
+            terminals.len(),
+        ))
     }
 }
 

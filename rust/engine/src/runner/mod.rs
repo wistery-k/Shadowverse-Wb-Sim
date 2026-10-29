@@ -7,7 +7,9 @@
 pub mod compare;
 pub mod deck_compare;
 pub mod deep_gap;
+pub mod defer_playout;
 pub mod draw_stability;
+pub mod fuse_gap;
 pub mod human_plan;
 pub mod meta;
 pub mod mulligan_compare;

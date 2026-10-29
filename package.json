@@ -15,6 +15,8 @@
     "cards": "node scripts/convert-cards.ts",
     "sim": "node scripts/vite-run.mjs scripts/simulate-main.ts",
     "game": "node scripts/vite-run.mjs scripts/game-main.ts",
+    "think-at": "node scripts/vite-run.mjs scripts/think-at-main.ts",
+    "diverge": "node scripts/vite-run.mjs scripts/diverge-main.ts",
     "sim-report": "node scripts/vite-run.mjs scripts/sim-report-main.ts",
     "svwb": "node scripts/svwb.mjs",
     "compare": "node scripts/svwb.mjs compare",

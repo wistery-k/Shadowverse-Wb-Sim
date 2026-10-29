@@ -333,16 +333,27 @@ pub fn settle_converging_trades_with(
     cheapest: bool,
 ) -> Option<GameState> {
     let _p = crate::prof::scope(crate::prof::Sec::Settle);
-    let mut cur: Option<GameState> = None;
+    settle_converging_trade_steps(s, p, cheapest)
+        .pop()
+        .map(|(_, after)| after)
+}
+
+/// settle_converging_trades_with が打つ合流する攻撃と、それぞれを打った後の局面（打つ順。無ければ空）
+pub fn settle_converging_trade_steps(
+    s: &GameState,
+    p: PlayerIndex,
+    cheapest: bool,
+) -> Vec<(Action, GameState)> {
+    let mut steps: Vec<(Action, GameState)> = Vec::new();
     for _ in 0..7 {
-        let base = cur.as_ref().unwrap_or(s);
-        let Some((_, after)) = converging_trades(base, p, true, cheapest)
+        let base = steps.last().map_or(s, |(_, after)| after);
+        let Some(step) = converging_trades(base, p, true, cheapest)
             .into_iter()
             .next()
         else {
             break;
         };
-        cur = Some(after);
+        steps.push(step);
     }
-    cur
+    steps
 }
