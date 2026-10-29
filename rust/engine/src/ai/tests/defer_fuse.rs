@@ -198,3 +198,35 @@ fn fusion_at_hand_limit_is_kept() {
     let with = candidates(&s);
     assert!(with.iter().all(|(a, _, _)| !is_fuse(a)), "{with:?}");
 }
+
+#[test]
+fn fusion_adding_destroy_kind_is_kept_with_keep_set() {
+    // PP 1 では α（コスト 5）を出せない。手札に β があるので、キャッスルにフューチャーで α を作ると α・β・γ の種類が増える（Ω の準備）。
+    // deferFuseKeepSet なら α を作る融合は回さず、なければ回す
+    let s = af_turn(
+        1,
+        &[
+            "キャッスルアーティファクト",
+            "フューチャー・コア",
+            "デストロイアーティファクトβ",
+        ],
+        &[],
+    );
+    let alpha = "デストロイアーティファクトα";
+    let keep = candidates_with(
+        &s,
+        SearchOptions {
+            defer_fuse_keep_set: true,
+            ..deferred()
+        },
+    );
+    assert!(
+        keep.iter().any(|(_, hand, _)| hand.contains(&alpha)),
+        "{keep:?}"
+    );
+    let plain = candidates(&s);
+    assert!(
+        plain.iter().all(|(_, hand, _)| !hand.contains(&alpha)),
+        "{plain:?}"
+    );
+}

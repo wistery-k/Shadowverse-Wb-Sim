@@ -1,6 +1,8 @@
 //! 融合を回した（コアを手札に残した）局面で、探索が手順を取りこぼすかを測る（2026-10-29）。
 //!
-//!   svwb fuse-gap --dir <記録のディレクトリ> [--opts '<設定の JSON>'] [--out 結果.jsonl] [--show 10]
+//!   svwb fuse-gap --dir <記録のディレクトリ> [--opts '<設定の JSON>'] [--out 結果.jsonl] [--show 10] [--showLow 0]
+//!
+//! `--show` は戻した局面のほうが低い（取りこぼした）順に、`--showLow` は戻した局面のほうが高い順に（勝ち負けの点を除く）、局面の中身と両方の並びを出す。
 //!
 //! `svwb rhino-compare --subject af --record <ディレクトリ>` で書いた試合を打ち直し、AF ネメシスの側（ファイル名の席）の自分のターンの
 //! 最初の局面ごとに、手札の作ったカードを素材のコアに戻した局面を作る（キャッスル → パスト・コア 2 枚、アタック → フューチャー・コア 2 枚、
@@ -224,6 +226,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut opts_text = "{}".to_string();
     let mut out_path: Option<String> = None;
     let mut show = 10usize;
+    let mut show_low = 0usize;
     let mut i = 0;
     while i < argv.len() {
         let v = argv.get(i + 1).cloned().ok_or("引数の値がありません")?;
@@ -232,12 +235,13 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             "--opts" => opts_text = v,
             "--out" => out_path = Some(v),
             "--show" => show = v.parse().map_err(|_| "--show は数")?,
+            "--showLow" => show_low = v.parse().map_err(|_| "--showLow は数")?,
             k => return Err(format!("不明な引数: {k}")),
         }
         i += 2;
     }
     if dir.is_empty() {
-        return Err("使い方: svwb fuse-gap --dir <記録のディレクトリ> [--opts …] [--out …] [--show 10]（runner/fuse_gap.rs）".into());
+        return Err("使い方: svwb fuse-gap --dir <記録のディレクトリ> [--opts …] [--out …] [--show 10] [--showLow 0]（runner/fuse_gap.rs）".into());
     }
     let opts = compare_options(&opts_text)?;
     let mut files: Vec<_> = std::fs::read_dir(&dir)
@@ -363,7 +367,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             .partial_cmp(&(a.f.value - a.u.value))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    for r in order.into_iter().take(show) {
+    let print = |r: &Row| {
         println!(
             "\n=== {} {} ターン目、差 {}（元 {}・戻した {}）、戻した: {}{}",
             r.file,
@@ -388,6 +392,20 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         println!("  戻した局面の並び:");
         for l in &r.plan_u {
             println!("    {l}");
+        }
+    };
+    for r in order.iter().take(show) {
+        print(r);
+    }
+    if show_low > 0 {
+        println!("\n--- 戻した局面のほうが高い局面（勝ち負けの点を除く）");
+        for r in order
+            .iter()
+            .rev()
+            .filter(|r| r.f.value.abs() < 1e5 && r.u.value.abs() < 1e5)
+            .take(show_low)
+        {
+            print(r);
         }
     }
     Ok(())

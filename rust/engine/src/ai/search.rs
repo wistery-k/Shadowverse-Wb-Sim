@@ -204,6 +204,8 @@ pub struct SearchOptions {
     /// 次のターン以降に回せる融合（作ったカードをこのターンに使わない融合）は打たない。並びの選び方と点数は変えず（融合した終局面の点数のまま）、
     /// 選んだ並びから回せる融合を除いて打つ（Planner::needless_fusions）
     pub defer_fuse: bool,
+    /// deferFuse で、手で作った評価が上がる融合（手札の α・β・γ の種類が増える。fusionSet）は回さない
+    pub defer_fuse_keep_set: bool,
     /// 素材を入れすぎる融合（同じ融合先を、素材を 1 枚少なく使って作れる融合。ai/fusion.rs）を展開しない
     pub fuse_minimal: bool,
     pub score_turn_end: ScoreTurnEnd,
@@ -307,6 +309,7 @@ impl Default for SearchOptions {
             // 使わない融合を次のターン以降に回すのは、AFネメシスの勝率が上がらなかったので使わない（並びの選び方を変えない 4 版目で、
             // 600 試合で −3.2 ± 2.0 ポイント。docs/ai-notes.md「使わない融合を次のターン以降に回す」）
             defer_fuse: false,
+            defer_fuse_keep_set: false,
             // 素材を入れすぎる融合を展開しないのは、勝率を比べてから決める（docs/ai-notes.md「融合を回した局面で探索が取りこぼすか」）
             fuse_minimal: false,
             score_turn_end: ScoreTurnEnd::All,
@@ -602,6 +605,13 @@ impl<'a> Planner<'a> {
                     Some(next) => s = next,
                     None => continue 'fuse,
                 }
+            }
+            // deferFuseKeepSet: 手で作った評価が上がる融合（手札の α・β・γ の種類が増える。fusionSet）は回さない。
+            // Ω の素材はコアにすると 11 枚で手札に入りきらないので、何ターンかかけて作っておく
+            if self.opts().defer_fuse_keep_set
+                && evaluate_with(end, p, self.env.w) > evaluate_with(&s, p, self.env.w) + 1e-9
+            {
+                continue;
             }
             let unfused = std::mem::replace(&mut s.players[p].hand, hand.clone());
             if state_eq(&s, end) {
