@@ -6,7 +6,10 @@
 //! 4. 平均の評価が最も良い「最初の手」を選ぶ。このターンで勝てる並び（リーサル）が見つかれば最優先する
 
 use super::aidata::{ai_data, Weights};
-use super::converging::{converging_attacks, dominated_attack, settle_converging_trades_with};
+use super::converging::{
+    converging_attacks, dominated_attack, settle_converging_trade_steps,
+    settle_converging_trades_with,
+};
 use super::determinize::determinize;
 use super::eval::{evaluate_with, EvalWeights};
 use super::exact_lethal::{search_exact_lethal, sure_lethal_options};
@@ -667,6 +670,15 @@ impl<'a> Planner<'a> {
                 state = Rc::new(apply_legal(&state, &a));
             }
             out.push((a, state.clone()));
+        }
+        // 何も残らなければ、ターン末の点数に入れている合流する相打ち（settle）を打つ。ターン終了だけにすると、
+        // 点数は相打ちをした局面のままで相打ちをせずにターンを終える（2026-10-29、アマリアロイヤル戦の分かれ目から）
+        if out.is_empty() && self.opts().settle_trades {
+            for (a, after) in
+                settle_converging_trade_steps(&self.root, self.p, self.opts().dominance)
+            {
+                out.push((a, Rc::new(after)));
+            }
         }
         if out.is_empty() {
             out.push((Action::EndTurn, self.root.clone()));

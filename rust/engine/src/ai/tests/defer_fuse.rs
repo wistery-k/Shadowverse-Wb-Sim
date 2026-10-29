@@ -283,3 +283,31 @@ fn fusion_that_lets_ace_crest_draw_is_kept() {
     let with = candidates(&s);
     assert!(with.iter().any(|(a, _, _)| is_fuse(a)), "{with:?}");
 }
+
+#[test]
+fn deferred_plan_still_makes_settled_trades() {
+    // AFネメシス対アマリアロイヤル（rhino-compare --subject af の g38・席 0、ラストワード版）の 4 ターン目の終わり。
+    // 場のミリアム 2 体は、相手のワルツ（2/1）・スタチウム（4/4）と相打ちできる（合流する攻撃。ターン末の点数はこれを打った局面）。
+    // 探索の最良の並びは「パスト・コア 2 枚の融合」だけで、回すと何も残らない。そのときターン終了だけにすると相打ちをせずに終える
+    // （2026-10-29、ロイヤル戦の分かれ目から。前の版は 240 試合で 0 回、ラストワード版は 75 回）。相打ちを打つ
+    let mut s = new_game(deck("AFネメシス"), deck("アマリアロイヤル"), 800494);
+    let seq = actions(
+        r#"[{"type":"mulligan","player":1,"swap":[62]},{"type":"mulligan","player":0,"swap":[6,14]},{"type":"endTurn"},
+        {"type":"play","iid":3},{"type":"endTurn"},{"type":"play","iid":50},{"type":"attack","attacker":81,"target":3},{"type":"endTurn"},
+        {"type":"extraPp"},{"type":"play","iid":16},{"type":"attack","attacker":16,"target":50},{"type":"endTurn"},{"type":"play","iid":55},
+        {"type":"endTurn"},{"type":"play","iid":19},{"type":"endTurn"},{"type":"play","iid":59},{"type":"attack","attacker":55,"target":"leader"},
+        {"type":"endTurn"},{"type":"fuse","host":82,"materials":[83]},{"type":"play","iid":20},{"type":"fuse","host":82,"materials":[84,86]},
+        {"type":"evolve","iid":20},{"type":"fuse","host":85,"materials":[88]}]"#,
+    );
+    s = apply_all(&s, &seq);
+    assert_eq!(s.active, 0);
+    assert!(!crate::ai::converging::converging_attacks(&s, 0).is_empty());
+    let legal = legal_actions(&s);
+    let mut ag = SearchAgent::new(SearchOptions {
+        defer_fuse: true,
+        defer_fuse_last_words: true,
+        ..SearchOptions::default()
+    });
+    let a = ag.choose_action(&s, &legal, &mut Rng::new(1));
+    assert!(matches!(a, Action::Attack { .. }), "{a:?}");
+}
