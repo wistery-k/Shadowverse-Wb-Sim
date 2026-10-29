@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::ai::search::{SearchAgent, SearchOptions};
+use crate::data::{data, CrestIdx};
 
 /// AFネメシスの手番の局面（PP pp、手札と場は names・board の名前のカード。相手の場は空）
 pub(super) fn af_turn(pp: i32, hand: &[&str], board: &[&str]) -> GameState {
@@ -206,6 +207,21 @@ fn fusion_at_hand_limit_is_kept() {
         },
     );
     assert!(hand7.iter().any(|(a, _, _)| is_fuse(a)), "{hand7:?}");
+    // deferFuseLastWords: 場のイリスが破壊されるとパスト・コアが手札に加わるので、ターン末の手札が 8 枚になる融合は回さない
+    let s = af_turn(2, &hand, &["ビビッドインベンター・イリス"]);
+    let plain = candidates(&s);
+    assert!(plain.iter().all(|(a, _, _)| !is_fuse(a)), "{plain:?}");
+    let last_words = candidates_with(
+        &s,
+        SearchOptions {
+            defer_fuse_last_words: true,
+            ..deferred()
+        },
+    );
+    assert!(
+        last_words.iter().any(|(a, _, _)| is_fuse(a)),
+        "{last_words:?}"
+    );
 }
 
 #[test]
@@ -238,4 +254,32 @@ fn fusion_adding_destroy_kind_is_kept_with_keep_set() {
         plain.iter().all(|(_, hand, _)| !hand.contains(&alpha)),
         "{plain:?}"
     );
+}
+
+#[test]
+fn fusion_that_lets_ace_crest_draw_is_kept() {
+    // 新たなる少女・エースのクレストは、ターン終了時に手札が 5 枚以下なら 1 枚引き、6 枚以上なら回復する。
+    // 融合で手札を 6 枚から 5 枚にすれば引けるので、その融合は回さない（2026-10-29、ユーザーの指摘）
+    let mut hand = vec!["パスト・コア", "パスト・コア"];
+    hand.extend(["ブーストエクステンド・ララミア"; 3]);
+    hand.push("プロシードハート・オーキス");
+    let mut s = af_turn(2, &hand, &[]);
+    // クレストが無ければ回す
+    let plain = candidates(&s);
+    assert!(plain.iter().all(|(a, _, _)| !is_fuse(a)), "{plain:?}");
+    let crest = data()
+        .crests
+        .iter()
+        .position(|c| c.id == "10174112") // クレスト：新たなる少女・エース
+        .unwrap() as CrestIdx;
+    let iid = s.new_iid();
+    s.players[0].crests.make_mut().push(CrestInstance {
+        iid,
+        crest,
+        countdown: Some(3),
+        order: 0,
+        used_once: Vec::new(),
+    });
+    let with = candidates(&s);
+    assert!(with.iter().any(|(a, _, _)| is_fuse(a)), "{with:?}");
 }

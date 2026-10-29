@@ -5,7 +5,8 @@
 //! 例: 手札がフューチャー・コア 2・パスト・コア 2・キャッスル・アタックなら、融合の手は 44 通りから 16 通りになる。
 
 use super::keys::state_eq;
-use crate::data::CardIdx;
+use crate::data::{CardIdx, Effect, On, Value};
+use crate::effects::board_abilities_on;
 use crate::game::try_apply_action;
 use crate::state::{hand_cost, Action, GameState, HandCard, PlayerIndex};
 use std::cell::RefCell;
@@ -187,4 +188,23 @@ pub fn excessive_fusion(s: &GameState, a: &Action) -> bool {
         }
     }
     false
+}
+
+/// 自分の場のフォロワーのラストワードが手札に加える・引くカードの枚数（相手のターンに破壊されると、次のターンの最初に引く前に手札が増える。
+/// ビビッドインベンター・イリスのパスト・コア等）。枚数が能力で決まるものは 1 枚と数える
+pub fn last_words_to_hand(s: &GameState, p: PlayerIndex) -> usize {
+    s.players[p]
+        .board
+        .iter()
+        .filter(|c| c.is_follower)
+        .flat_map(|c| board_abilities_on(c, On::LastWords))
+        .flat_map(|a| a.effects.iter())
+        .map(|e| match e {
+            Effect::AddToHand { count, .. } | Effect::Draw { count, .. } => match count {
+                Value::Num(n) => (*n).max(0) as usize,
+                Value::Obj(_) => 1,
+            },
+            _ => 0,
+        })
+        .sum()
 }

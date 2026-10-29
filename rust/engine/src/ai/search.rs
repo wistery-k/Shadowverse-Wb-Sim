@@ -10,7 +10,7 @@ use super::converging::{converging_attacks, dominated_attack, settle_converging_
 use super::determinize::determinize;
 use super::eval::{evaluate_with, EvalWeights};
 use super::exact_lethal::{search_exact_lethal, sure_lethal_options};
-use super::fusion::excessive_fusion;
+use super::fusion::{excessive_fusion, last_words_to_hand};
 use super::greedy::{choose_greedy, value_after};
 use super::keys::{hand_eq_noid, state_eq, visible_eq, TurnOrderSet};
 use super::lethal::{
@@ -209,6 +209,9 @@ pub struct SearchOptions {
     /// deferFuse で回したあとのターン末の手札の枚数の上限。回すと手札がこれより多くなる融合は回さない
     /// （8 なら次のターンの最初に引くカードが入る。手札が上限近くで止まると、コアを加えるカードを出しにくくなり、引いたカードが溢れる）
     pub defer_fuse_hand: usize,
+    /// deferFuse で、自分の場のフォロワーのラストワードが手札に加えるカードの枚数（ビビッドインベンター・イリスのコア等）だけ、
+    /// defer_fuse_hand を下げる（相手のターンに破壊されると手札が増え、次のターンの最初に引くカードが溢れる）
+    pub defer_fuse_last_words: bool,
     /// 素材を入れすぎる融合（同じ融合先を、素材を 1 枚少なく使って作れる融合。ai/fusion.rs）を展開しない
     pub fuse_minimal: bool,
     pub score_turn_end: ScoreTurnEnd,
@@ -314,6 +317,7 @@ impl Default for SearchOptions {
             defer_fuse: false,
             defer_fuse_keep_set: false,
             defer_fuse_hand: HAND_LIMIT - 1,
+            defer_fuse_last_words: false,
             // 素材を入れすぎる融合を展開しないのは、勝率を比べてから決める（docs/ai-notes.md「融合を回した局面で探索が取りこぼすか」）
             fuse_minimal: false,
             score_turn_end: ScoreTurnEnd::All,
@@ -542,7 +546,8 @@ impl<'a> Planner<'a> {
     /// 自分の手札のほかは同じ局面になる（作ったカードをコピーしていない・融合で誘発した能力が無い 等）融合のこと。
     /// 融合は PP を使わず、変身したカードはそのターンにもう一度融合できるので、使うターンに融合しても同じことができ、
     /// 素材のまま残せば別のカードを作る選択肢も残る（アタックとキャッスルのどちらを作るか 等）。
-    /// ただし、その融合をしないと手札が上限になる（次のターンの最初に引くカードが溢れる）ものは回さない
+    /// ただし、その融合をしないと手札が上限になる（次のターンの最初に引くカードが溢れる）ものと、ターン終了時の処理が変わる
+    /// （手札の枚数で引くかどうかが決まるクレスト等）ものは回さない
     fn needless_fusions(&self, t: &Node) -> Vec<Action> {
         let _p = prof::scope(Sec::DeferFuse);
         let mut removed = Vec::new();
@@ -581,13 +586,15 @@ impl<'a> Planner<'a> {
     fn needless_fuse_at(&self, acts: &[Action], end: &GameState) -> Option<(usize, GameState)> {
         let p = self.p;
         let hand = &end.players[p].hand;
+        let mut limit = self.opts().defer_fuse_hand;
+        if self.opts().defer_fuse_last_words {
+            limit = limit.saturating_sub(last_words_to_hand(end, p));
+        }
         'fuse: for (k, a) in acts.iter().enumerate() {
             let Action::Fuse { host, materials } = a else {
                 continue;
             };
-            if hand.len() + materials.len() > self.opts().defer_fuse_hand
-                || !hand.iter().any(|h| h.iid == *host)
-            {
+            if hand.len() + materials.len() > limit || !hand.iter().any(|h| h.iid == *host) {
                 continue;
             }
             // 後の手で作ったカードを使っていれば回せない（打ち直さなくても分かる）
@@ -619,8 +626,13 @@ impl<'a> Planner<'a> {
             {
                 continue;
             }
+            // ターン終了時の処理の後まで、手札のほかは同じか（新たなる少女・エースのクレストは、手札が 5 枚以下なら引き、6 枚以上なら回復する。
+            // 融合で手札を減らして引けるなら回さない。2026-10-29、ユーザーの指摘）
+            let mut after = resolve_turn_end(&s).unwrap_or_else(|| s.clone());
+            let end_after = resolve_turn_end(end).unwrap_or_else(|| end.clone());
+            after.players[p].hand = end_after.players[p].hand.clone();
             let unfused = std::mem::replace(&mut s.players[p].hand, hand.clone());
-            if state_eq(&s, end) {
+            if state_eq(&s, end) && state_eq(&after, &end_after) {
                 s.players[p].hand = unfused;
                 return Some((k, s));
             }
