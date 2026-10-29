@@ -16,6 +16,7 @@ mod doomed;
 mod draw_split;
 mod eval;
 mod fuse_minimal;
+mod fuse_root;
 mod keys;
 mod lethal;
 mod mulligan;

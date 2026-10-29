@@ -7,10 +7,10 @@
 use super::keys::state_eq;
 use crate::data::{CardIdx, Effect, On, Value};
 use crate::effects::board_abilities_on;
-use crate::game::try_apply_action;
-use crate::state::{hand_cost, Action, GameState, HandCard, PlayerIndex};
+use crate::game::{legal_actions, try_apply_action};
+use crate::state::{hand_cost, Action, GameState, HandCard, Iid, Phase, PlayerIndex};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// 手札のカードの、融合の結果に関わるところ（カード・手札でのコスト・融合した種類・このターンに融合したか）
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -207,4 +207,78 @@ pub fn last_words_to_hand(s: &GameState, p: PlayerIndex) -> usize {
             _ => 0,
         })
         .sum()
+}
+
+/// 先に融合する並び（SearchOptions.fuseRoot）。局面 s（p が手を選ぶメインフェイズ）から融合だけを打って作れるカード
+/// （融合で手札のカードが変わったもの）のうち、今の PP で出せてコストが最も高いものを、カードの種類ごとに作る最も短い融合の並びと、打った後の局面。
+/// コストが同じカードが何種類もあれば（デストロイアーティファクトα・β・γ はどれもコスト 5）、見つかった順に max_roots 種類まで。
+/// 融合が 2 回以上要るものだけを返す（1 回で作れるなら、ビームは最初の手をすべて展開するので見落とさない）。
+/// 素材を入れすぎる融合は使わず、手札が同じになる並びは 1 つにまとめ、調べる局面は max_states 個まで。
+/// コアから Ω まで融合が 4〜6 回要る並びは、途中の局面の点数が上がらないのでビームから落ちやすい（docs/ai-notes.md「出さなかった Ω を最後まで打って確かめる」）
+pub fn fuse_root_chains(
+    s: &GameState,
+    p: PlayerIndex,
+    max_states: usize,
+    max_roots: usize,
+) -> Vec<(Vec<Action>, GameState)> {
+    let ready = |t: &GameState| t.phase == Phase::Main && t.active == p && t.pending.is_none();
+    if !ready(s) {
+        return Vec::new();
+    }
+    let pp = s.players[p].pp;
+    let orig: Vec<(Iid, CardIdx)> = s.players[p].hand.iter().map(|h| (h.iid, h.card)).collect();
+    let key = |t: &GameState| {
+        let mut k: Vec<CardKey> = t.players[p].hand.iter().map(key_of).collect();
+        k.sort_unstable();
+        k
+    };
+    let mut seen: HashSet<Vec<CardKey>> = HashSet::new();
+    seen.insert(key(s));
+    // 今までに作れたコストの最大と、そのコストのカードの種類ごとに最初に見つかった（幅優先なので最も短い）並び
+    let mut best_cost = i32::MIN;
+    let mut found: Vec<(CardIdx, Vec<Action>, GameState)> = Vec::new();
+    let mut frontier: Vec<(Vec<Action>, GameState)> = vec![(Vec::new(), s.clone())];
+    'search: while !frontier.is_empty() {
+        let mut next = Vec::new();
+        for (path, t) in &frontier {
+            for a in legal_actions(t) {
+                if !matches!(a, Action::Fuse { .. }) || excessive_fusion(t, &a) {
+                    continue;
+                }
+                let Some(u) = try_apply_action(t, &a) else {
+                    continue;
+                };
+                if !ready(&u) || !seen.insert(key(&u)) {
+                    continue;
+                }
+                let mut path = path.clone();
+                path.push(a);
+                // 融合で変わった手札のカードのうち、今の PP で出せるもの
+                for h in u.players[p].hand.iter() {
+                    let c = hand_cost(h);
+                    if orig.contains(&(h.iid, h.card)) || c > pp || c < best_cost {
+                        continue;
+                    }
+                    if c > best_cost {
+                        best_cost = c;
+                        found.clear();
+                    }
+                    if !found.iter().any(|f| f.0 == h.card) {
+                        found.push((h.card, path.clone(), u.clone()));
+                    }
+                }
+                next.push((path, u));
+                if seen.len() > max_states {
+                    break 'search;
+                }
+            }
+        }
+        frontier = next;
+    }
+    found
+        .into_iter()
+        .filter(|f| f.1.len() >= 2)
+        .take(max_roots)
+        .map(|(_, path, u)| (path, u))
+        .collect()
 }

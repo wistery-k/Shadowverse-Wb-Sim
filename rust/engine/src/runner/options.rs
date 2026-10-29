@@ -207,6 +207,7 @@ pub fn search_options(
             "deferFuseHand" => o.defer_fuse_hand = count(k, v)?,
             "deferFuseLastWords" => o.defer_fuse_last_words = flag(k, v)?,
             "fuseMinimal" => o.fuse_minimal = flag(k, v)?,
+            "fuseRoot" => o.fuse_root = flag(k, v)?,
             "settleTrades" => o.settle_trades = flag(k, v)?,
             "dominance" => o.dominance = flag(k, v)?,
             "reusePlan" => o.reuse_plan = flag(k, v)?,
