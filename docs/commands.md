@@ -293,6 +293,7 @@ npm run svwb -- two-turn report tt.jsonl… [--only <局面>,…]
 npm run svwb -- two-turn trace --only <局面> --cand <候補> [--r 0] [--seed 1] [--opts '<設定の JSON>']
 npm run svwb -- draw-stability [--subject spellwitch] [--games 12] [--start 0] [--seeds 8] [--a '{}'] [--b '{"drawSplit":{}}']
 npm run svwb -- fuse-gap --dir <記録のディレクトリ> [--opts '<設定の JSON>'] [--out 結果.jsonl] [--show 10]
+npm run svwb -- defer-playout --dir <記録のディレクトリ> --opts '<回す版の設定>' [--cont '<設定>'] [--seeds 8] [--seedBase 0] [--out 結果.jsonl]
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI。
@@ -333,6 +334,11 @@ npm run svwb -- fuse-gap --dir <記録のディレクトリ> [--opts '<設定の
   （キャッスル → パスト 2 枚、アタック → フューチャー 2 枚、α → パスト 2 枚＋フューチャー、β・γ → パスト 2 枚＋フューチャー 2 枚。戻すと手札が上限を超える局面は飛ばす）。
   元の局面と戻した局面を `--opts` の設定のビーム（相手のターンは読まない）で読み、見つかった並びの点数を比べる。融合は PP を使わないので、戻した局面の最大は元以上になるはずで、
   戻した局面のほうが低ければ、コアを手札に残したことで探索が取りこぼした分。まとめと、差の大きい `--show` 局面の中身（両方の並び）を出す（docs/ai-notes.md「融合を回した局面で探索が取りこぼすか」）
+- `defer-playout`: 融合を回す版（`deferFuse`）で `rhino-compare --subject af --record <ディレクトリ>` で書いた試合を打ち直し、AFネメシスの側がターン終了を打った局面ごとに、
+  `--opts` から `deferFuse` だけを外した AI に同じ局面から打たせる。ターン終了まで融合だけを打つなら、それが回した融合。「そのままターンを終える」と「その融合をしてから終える」を、
+  同じ乱数（相手の手札・山札の並べ直しと AI の乱数）で `--seeds` 通り最後まで打ち、勝ち数を比べる。分かれ目の後は自分を `--cont`（既定は `--opts`）、相手を今の既定の探索 AI で打つ。
+  `--seedBase` を変えると別の乱数で打つ（足し合わせる用）。局面ごとの結果を `--out` に試合が終わった順に書き、最後に、全部・試合ごとの合計・その場で作るはずだったカード・
+  実際の次のターンに作ったカード・相手のデッキ・PP ごとの差を出す（docs/ai-notes.md「回した融合を、その場でした場合と最後まで打ち比べる」）
 
 ## td
 
