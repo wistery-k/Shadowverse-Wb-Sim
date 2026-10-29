@@ -206,6 +206,9 @@ pub struct SearchOptions {
     pub defer_fuse: bool,
     /// deferFuse で、手で作った評価が上がる融合（手札の α・β・γ の種類が増える。fusionSet）は回さない
     pub defer_fuse_keep_set: bool,
+    /// deferFuse で回したあとのターン末の手札の枚数の上限。回すと手札がこれより多くなる融合は回さない
+    /// （8 なら次のターンの最初に引くカードが入る。手札が上限近くで止まると、コアを加えるカードを出しにくくなり、引いたカードが溢れる）
+    pub defer_fuse_hand: usize,
     /// 素材を入れすぎる融合（同じ融合先を、素材を 1 枚少なく使って作れる融合。ai/fusion.rs）を展開しない
     pub fuse_minimal: bool,
     pub score_turn_end: ScoreTurnEnd,
@@ -310,6 +313,7 @@ impl Default for SearchOptions {
             // 600 試合で −3.2 ± 2.0 ポイント。docs/ai-notes.md「使わない融合を次のターン以降に回す」）
             defer_fuse: false,
             defer_fuse_keep_set: false,
+            defer_fuse_hand: HAND_LIMIT - 1,
             // 素材を入れすぎる融合を展開しないのは、勝率を比べてから決める（docs/ai-notes.md「融合を回した局面で探索が取りこぼすか」）
             fuse_minimal: false,
             score_turn_end: ScoreTurnEnd::All,
@@ -581,7 +585,9 @@ impl<'a> Planner<'a> {
             let Action::Fuse { host, materials } = a else {
                 continue;
             };
-            if hand.len() + materials.len() >= HAND_LIMIT || !hand.iter().any(|h| h.iid == *host) {
+            if hand.len() + materials.len() > self.opts().defer_fuse_hand
+                || !hand.iter().any(|h| h.iid == *host)
+            {
                 continue;
             }
             // 後の手で作ったカードを使っていれば回せない（打ち直さなくても分かる）

@@ -197,6 +197,15 @@ fn fusion_at_hand_limit_is_kept() {
     let s = af_turn(2, &hand, &[]);
     let with = candidates(&s);
     assert!(with.iter().all(|(a, _, _)| !is_fuse(a)), "{with:?}");
+    // deferFuseHand 7 なら、回すとターン末の手札が 8 枚になる融合は回さない
+    let hand7 = candidates_with(
+        &s,
+        SearchOptions {
+            defer_fuse_hand: 7,
+            ..deferred()
+        },
+    );
+    assert!(hand7.iter().any(|(a, _, _)| is_fuse(a)), "{hand7:?}");
 }
 
 #[test]
