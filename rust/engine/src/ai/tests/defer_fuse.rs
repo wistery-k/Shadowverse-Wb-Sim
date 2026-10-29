@@ -1,5 +1,6 @@
-//! 使わない融合を次のターン以降に回す（SearchOptions.deferFuse・deferFuseKeepSet。2026-10-28、ユーザーの指摘
-//! 「AFネメシスが 3 ターン目に、出せないキャッスルアーティファクトを作るためにコアを融合する」から）
+//! 使わない融合を次のターン以降に回す（SearchOptions.deferFuse。2026-10-28、ユーザーの指摘
+//! 「AFネメシスが 3 ターン目に、出せないキャッスルアーティファクトを作るためにコアを融合する」から）。
+//! 並びの選び方と点数は変えず、選んだ並びから回せる融合を除いて打つ
 
 use super::*;
 use crate::ai::search::{SearchAgent, SearchOptions};
@@ -24,11 +25,11 @@ fn af_turn(pp: i32, hand: &[&str], board: &[&str]) -> GameState {
 /// 候補の最初の手と、終局面の自分の手札・場（カード名）
 type Cand = (Action, Vec<&'static str>, Vec<&'static str>);
 
-/// 最初の手ごとのターン末の候補
+/// 打つ並びの候補（相手のターンを読まない）
 fn candidates_with(s: &GameState, opts: SearchOptions) -> Vec<Cand> {
     let ag = SearchAgent::new(opts);
     let names = |v: &mut dyn Iterator<Item = CardIdx>| v.map(name_of).collect::<Vec<_>>();
-    ag.turn_end_candidates(s, 0)
+    ag.plan_candidates(s, 0)
         .into_iter()
         .map(|(a, _, end)| {
             let hand = names(&mut end.players[0].hand.iter().map(|h| h.card));
@@ -38,7 +39,7 @@ fn candidates_with(s: &GameState, opts: SearchOptions) -> Vec<Cand> {
         .collect()
 }
 
-/// 使わない融合を回す（deferFuse。α・β・γ の種類が増える融合は残す deferFuseKeepSet も既定のまま）
+/// 使わない融合を回す（deferFuse）
 fn deferred() -> SearchOptions {
     SearchOptions {
         defer_fuse: true,
@@ -51,12 +52,13 @@ fn candidates(s: &GameState) -> Vec<Cand> {
     candidates_with(s, deferred())
 }
 
-/// α・β・γ の種類が増える融合も回す（deferFuseKeepSet なし）
-fn strict() -> SearchOptions {
-    SearchOptions {
-        defer_fuse_keep_set: false,
-        ..deferred()
-    }
+/// 点数の最も高い候補の点数
+fn top_value(s: &GameState, opts: SearchOptions) -> f64 {
+    SearchAgent::new(opts)
+        .plan_candidates(s, 0)
+        .into_iter()
+        .map(|(_, v, _)| v)
+        .fold(f64::MIN, f64::max)
 }
 
 fn is_fuse(a: &Action) -> bool {
@@ -74,18 +76,75 @@ const PRODUCTS: [&str; 6] = [
 
 #[test]
 fn unused_fusion_is_deferred() {
-    // PP 2 ではアタック・キャッスル（コスト 3）を出せないので、コアを融合しても使えない。ターン末の候補に融合は残らない
-    let s = af_turn(2, &["パスト・コア", "フューチャー・コア"], &[]);
-    for opts in [deferred(), strict()] {
-        let with = candidates_with(&s, opts);
-        assert!(with.iter().all(|(a, _, _)| !is_fuse(a)), "{with:?}");
-        assert!(with
-            .iter()
-            .all(|(_, hand, _)| hand.iter().all(|n| !PRODUCTS.contains(n))));
-    }
-    // deferFuse なし（今の既定）なら融合も候補に残る
+    // PP 2 ではアタック・キャッスル（コスト 3）も α（コスト 5）も出せないので、コアを融合しても使えない。融合する並びは打たない
+    let s = af_turn(
+        2,
+        &["パスト・コア", "パスト・コア", "フューチャー・コア"],
+        &[],
+    );
+    let with = candidates(&s);
+    assert!(with.iter().all(|(a, _, _)| !is_fuse(a)), "{with:?}");
+    assert!(with
+        .iter()
+        .all(|(_, hand, _)| hand.iter().all(|n| !PRODUCTS.contains(n))));
+    // deferFuse なし（今の既定）なら融合する並びも候補にある
     let without = candidates_with(&s, SearchOptions::default());
     assert!(without.iter().any(|(a, _, _)| is_fuse(a)));
+    // 点数は変えない（融合は後でもできるので、融合した終局面の点数より悪くはならない）
+    assert_eq!(
+        top_value(&s, deferred()),
+        top_value(&s, SearchOptions::default())
+    );
+}
+
+#[test]
+fn core_cards_are_still_played() {
+    // 1 版目（使わない融合をした並びを候補から外し、同じ最初の手の別の並びに替える）は、コアを手札に加えるカードを出さなくなった
+    // （補正が融合したカードを持つ局面を高く見るので、融合しない並びはどれも低く見える。docs/ai-notes.md「使わない融合を次のターン以降に回す」）。
+    // 今の形では、融合した並びの点数のまま融合だけを除くので、アーティファクトチャージを出してコアを手札に残す
+    let mut s = af_turn(
+        1,
+        &[
+            "レゾリューション・ミリアム",
+            "ブーストエクステンド・ララミア",
+            "レゾリューション・ミリアム",
+            "アーティファクトチャージ",
+            "砲撃の猫獣人",
+        ],
+        &["改良型・操り人形"],
+    );
+    s.players[0].max_pp = 2;
+    let charge = s.players[0]
+        .hand
+        .iter()
+        .find(|h| name_of(h.card) == "アーティファクトチャージ")
+        .map(|h| Action::Play(h.iid))
+        .unwrap();
+    // アーティファクトチャージから始まる並び
+    let plan = |opts| {
+        SearchAgent::new(opts)
+            .plan_candidates(&s, 0)
+            .into_iter()
+            .find(|(a, _, _)| *a == charge)
+            .unwrap()
+    };
+    let (_, v0, end0) = plan(SearchOptions::default());
+    let (_, v1, end1) = plan(deferred());
+    let count = |end: &GameState, f: &dyn Fn(&str) -> bool| {
+        end.players[0]
+            .hand
+            .iter()
+            .filter(|h| f(name_of(h.card)))
+            .count()
+    };
+    let core = |n: &str| n.ends_with("コア");
+    let product = |n: &str| PRODUCTS.contains(&n);
+    // 今の既定は、アーティファクトチャージで加えたコアを融合する
+    assert_eq!(count(&end0, &product), 1);
+    // deferFuse は同じ点数のまま、コアを融合せずに残す
+    assert_eq!(v0, v1);
+    assert_eq!(count(&end1, &core), 2);
+    assert_eq!(count(&end1, &product), 0);
 }
 
 #[test]
@@ -105,46 +164,15 @@ fn fusion_used_this_turn_is_kept() {
 }
 
 #[test]
-fn destroy_built_and_played_in_one_turn() {
-    // 変身したカードはそのターンにもう一度融合できるので、コア 3 枚から α を作ってそのターンに出せる（PP 5）。回さない融合も同じターンに使える
-    // （アタック・キャッスルを出す手は打たせない）
-    let s = af_turn(
-        5,
-        &["パスト・コア", "パスト・コア", "フューチャー・コア"],
-        &[],
-    );
-    let no_base: crate::ai::search::Allow = std::sync::Arc::new(|s: &GameState, a: &Action, p| {
-        let Action::Play(iid) = a else { return true };
-        s.players[p]
-            .hand
-            .iter()
-            .find(|h| h.iid == *iid)
-            .is_none_or(|h| !PRODUCTS[..2].contains(&name_of(h.card)))
-    });
-    let with = candidates_with(
-        &s,
-        SearchOptions {
-            allow: Some(no_base),
-            ..strict()
-        },
-    );
-    assert!(
-        with.iter()
-            .any(|(_, _, board)| board.contains(&"デストロイアーティファクトα")),
-        "{with:?}"
-    );
-}
-
-#[test]
 fn fusion_copied_by_alouette_is_kept() {
     // 融合で作ったデストロイアーティファクトγを、改境の天宮・アルエットの進化時能力でコピーする並びは、γ が手札に残っても使ったものとする
-    // （手札のアーティファクト・フォロワーが γ だけなので、選ぶ手を打たずに選ばれる）。γ を作る融合は種類が増えるので残すが、それが無くても残す
+    // （手札のアーティファクト・フォロワーが γ だけなので、選ぶ手を打たずに選ばれる）
     let s = af_turn(
         0,
         &["アタックアーティファクト", "キャッスルアーティファクト"],
         &["改境の天宮・アルエット"],
     );
-    let with = candidates_with(&s, strict());
+    let with = candidates(&s);
     let (_, hand, board) = with
         .iter()
         .find(|(a, _, _)| is_fuse(a))
@@ -167,52 +195,6 @@ fn fusion_at_hand_limit_is_kept() {
     // 1 枚少なければ回す
     hand.pop();
     let s = af_turn(2, &hand, &[]);
-    let with = candidates(&s);
-    assert!(with.iter().all(|(a, _, _)| !is_fuse(a)), "{with:?}");
-}
-
-#[test]
-fn fusion_that_adds_a_destroy_kind_is_kept() {
-    // deferFuseKeepSet: 手札に無い種類のデストロイアーティファクトを作る融合は、そのターンに使わなくても残す（手で作った評価の fusionSet が上がる）。
-    // イクシードアーティファクトΩ の素材（α・β・γ）はコアにすると 11 枚以上で、手札に入りきらないので。同じ種類がもう手札にあれば回す
-    let s = af_turn(
-        0,
-        &["アタックアーティファクト", "キャッスルアーティファクト"],
-        &[],
-    );
-    let with = candidates(&s);
-    let (_, hand, _) = with
-        .iter()
-        .find(|(a, _, _)| is_fuse(a))
-        .unwrap_or_else(|| panic!("融合から始まる候補がありません: {with:?}"));
-    assert_eq!(hand, &vec!["デストロイアーティファクトγ"]);
-    // deferFuseKeepSet なしなら回す
-    let with = candidates_with(&s, strict());
-    assert!(with.iter().all(|(a, _, _)| !is_fuse(a)), "{with:?}");
-    // コア 3 枚から α を作るのも残す（PP 2 で出せなくても）
-    let s = af_turn(
-        2,
-        &["パスト・コア", "パスト・コア", "フューチャー・コア"],
-        &[],
-    );
-    let with = candidates(&s);
-    assert!(
-        with.iter()
-            .any(|(_, hand, _)| hand.contains(&"デストロイアーティファクトα")),
-        "{with:?}"
-    );
-    let with = candidates_with(&s, strict());
-    assert!(with.iter().all(|(a, _, _)| !is_fuse(a)), "{with:?}");
-    // 同じ種類がもう手札にあれば回す
-    let s = af_turn(
-        0,
-        &[
-            "アタックアーティファクト",
-            "キャッスルアーティファクト",
-            "デストロイアーティファクトγ",
-        ],
-        &[],
-    );
     let with = candidates(&s);
     assert!(with.iter().all(|(a, _, _)| !is_fuse(a)), "{with:?}");
 }

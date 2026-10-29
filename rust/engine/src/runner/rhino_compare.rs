@@ -2,10 +2,12 @@
 //!
 //!   svwb rhino-compare [--subject rhino|af|spellwitch|bishop|dragon|nightmare|royal] [--games 50] [--start 0]
 //!                      [--agent rhino|rhino-lethal|search|search-classic] [--opts '<設定JSON>'] [--out 結果.jsonl] [--matches 試合.jsonl]
-//!                      [--opp search-classic|search]
+//!                      [--opp search-classic|search] [--record ディレクトリ]
 //!
 //! 比べるデッキ vs 他の 6 デッキ（相手は学習した補正を入れる前の探索 AI。--opp search なら今の既定の探索 AI）を、両方の席で同じシードで打つ
 //! （試合の決め方は src/sim/humanCompare.ts）。序盤のターンを全探索する "exhaustive" は TypeScript 版とともに消した。
+//! --record を付けると、試合ごとに npm run game の --json と同じ形（seed・agents・decks・winner・actions）を
+//! <ディレクトリ>/<相手デッキ>-g<g>-s<席>.json に書く（npm run think-at・npm run diverge で調べる）
 
 use super::deep_gap::{describe, multiset_minus, steps_of, used_of};
 use super::options::{rhino_compare_options, rhino_options, search_options};
@@ -206,13 +208,16 @@ fn hand_name(
         .map(|h| card(h.card).name.as_str())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn play_one(
     subject: &(&str, &str, &str, u32),
     me: &'static Deck,
     opp: &'static Deck,
     t: &Task,
     agent: &AgentConfig,
+    agent_key: &str,
     opp_options: &SearchOptions,
+    record: Option<&str>,
 ) -> Outcome {
     let (subject_id, _, _, seed_base) = *subject;
     let seed = seed_base + t.g * 13 + t.seat as u32;
@@ -235,7 +240,11 @@ fn play_one(
     let mut af = AfStats::default();
     // このターンに融合して作ったカード（iid）
     let mut fused: Vec<crate::state::Iid> = Vec::new();
+    let mut log: Vec<Action> = Vec::new();
     let visit = |s: &GameState, act: &Action| {
+        if record.is_some() {
+            log.push(act.clone());
+        }
         if s.active == seat && acting_player(s) == seat && s.phase == Phase::Main {
             match act {
                 Action::Fuse { host, .. } => {
@@ -334,6 +343,31 @@ fn play_one(
     let winner = end
         .winner
         .unwrap_or_else(|| panic!("勝者がいません（{} g{} 席{seat}）", t.deck, t.g));
+    if let Some(dir) = record {
+        let ids = |d: &[crate::data::CardIdx]| -> Vec<Json> {
+            d.iter().map(|&c| Json::Str(card(c).id.clone())).collect()
+        };
+        let mut agents = [Json::Str(agent_key.to_string()), Json::Str("search".into())];
+        if seat == 1 {
+            agents.swap(0, 1);
+        }
+        let game = Json::Obj(vec![
+            ("seed".into(), Json::Num(seed as f64)),
+            ("agents".into(), Json::Arr(agents.to_vec())),
+            (
+                "decks".into(),
+                Json::Arr(vec![Json::Arr(ids(decks[0])), Json::Arr(ids(decks[1]))]),
+            ),
+            ("winner".into(), Json::Num(winner as f64)),
+            (
+                "actions".into(),
+                Json::Arr(log.iter().map(crate::state_json::action_to_json).collect()),
+            ),
+        ]);
+        let file = format!("{dir}/{}-g{}-s{seat}.json", t.deck, t.g);
+        std::fs::write(&file, game.stringify())
+            .unwrap_or_else(|e| panic!("{file} に書けません: {e}"));
+    }
     Outcome {
         won: winner == seat,
         aria_turn,
@@ -391,6 +425,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut matches: Option<String> = None;
     let mut opts_text: Option<String> = None;
     let mut opp_key = "search-classic".to_string();
+    let mut record: Option<String> = None;
     let mut it = argv.iter();
     while let Some(key) = it.next() {
         let v = it.next().ok_or_else(|| format!("{key} の値がありません"))?;
@@ -414,6 +449,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             }
             "--opts" => opts_text = Some(v.clone()),
             "--opp" => opp_key = v.clone(),
+            "--record" => record = Some(v.clone()),
             _ => return Err(format!("不明な引数: {key}")),
         }
     }
@@ -483,6 +519,9 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             return Err(format!("相手デッキがありません: {}", t.deck));
         }
     }
+    if let Some(dir) = &record {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{dir} を作れません: {e}"))?;
+    }
     let t0 = Instant::now();
     let results = parallel_map(
         &tasks,
@@ -491,7 +530,16 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                 .iter()
                 .find(|o| o.name == t.deck)
                 .expect("相手デッキ");
-            play_one(&subject, me, opp, t, &agent, &opp_options)
+            play_one(
+                &subject,
+                me,
+                opp,
+                t,
+                &agent,
+                &agent_key,
+                &opp_options,
+                record.as_deref(),
+            )
         },
         |_, _, _, _| {},
     );
