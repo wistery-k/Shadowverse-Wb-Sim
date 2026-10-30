@@ -1,6 +1,7 @@
 //! 探索 AI のデータ（`npm run rust-data` が書き出す rust/engine/data/ai-data.json）。
 //! 評価関数の重み・学習した評価の補正・マリガンの係数等を TypeScript 版から受け取る（書き写さない）。
 
+use super::potential::RawPotentialNet;
 use crate::data::{data, CardIdx};
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
@@ -128,6 +129,7 @@ struct RawAiData {
     decay_pow: HashMap<String, Vec<f64>>,
     cards: RawCards,
     value_net: RawValueNet,
+    potential_net: RawPotentialNet,
     mulligan_weights: HashMap<String, HashMap<String, [f64; 2]>>,
     mulligan_model: HashMap<String, RawMulliganDeck>,
     mulligan_roles: HashMap<String, HashMap<String, Vec<String>>>,
@@ -158,6 +160,8 @@ pub struct AiData {
     pub boost_grown: Vec<CardIdx>,
     /// 学習した評価の補正（data/value-net.json）
     pub value_net: RawValueNet,
+    /// ターン途中の見込み（data/potential-net.json。ai/potential.rs）
+    pub potential_net: RawPotentialNet,
     /// デッキ名 → カード → [1 枚目を残す重み, 2 枚目も残す重み]
     pub mulligan_weights: HashMap<String, HashMap<CardIdx, [f64; 2]>>,
     pub mulligan_model: HashMap<String, MulliganDeckModel>,
@@ -204,6 +208,7 @@ fn load(json: &str) -> AiData {
         fusion_set: ids(&raw.cards.fusion_set),
         boost_grown: ids(&raw.cards.boost_grown),
         value_net: raw.value_net,
+        potential_net: raw.potential_net,
         mulligan_weights: raw
             .mulligan_weights
             .into_iter()

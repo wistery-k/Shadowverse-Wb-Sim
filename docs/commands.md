@@ -38,6 +38,7 @@
 | `npm run profile` | デッキごとの 1 試合の時間と、思考の処理ごとの時間の内訳（下） | `scripts/profile.mjs`・`rust/engine/src/runner/profile.rs` |
 | `npm run svwb` | Rust 版の CLI（下） | `rust/engine/src/main.rs` |
 | `npm run td` | TD 学習のモデルの作成・学習・分析（下） | `scripts/td-main.ts` |
+| `npm run potential` | ターン途中の見込みのネットワーク（`potentialNet`）を学ぶ（下） | `scripts/potential-main.ts` |
 | `npm run pack-run` | PC で回した 1 回分の出力（自己対戦・モデル・ログ）を、共有フォルダに上げる `.tar.gz` にまとめる（下） | `scripts/pack-run-main.ts` |
 | `cloud/gcp.sh` | ジョブ（meta.sh 等）をクラウドの Spot VM で回す。使うたびにユーザーの承認が要る（下） | `cloud/gcp.sh`・`cloud/vm-startup.sh` |
 | `docker/remote-control` | Claude Code の Remote Control を Docker のコンテナの中で動かす。実験を回す既定の場所（使い方は本体の README.md） | `docker/remote-control/compose.yaml`・`Dockerfile` |
@@ -294,6 +295,7 @@ npm run svwb -- two-turn trace --only <局面> --cand <候補> [--r 0] [--seed 1
 npm run svwb -- draw-stability [--subject spellwitch] [--games 12] [--start 0] [--seeds 8] [--a '{}'] [--b '{"drawSplit":{}}']
 npm run svwb -- fuse-gap --dir <記録のディレクトリ> [--opts '<設定の JSON>'] [--out 結果.jsonl] [--show 10]
 npm run svwb -- defer-playout --dir <記録のディレクトリ> --opts '<回す版の設定>' [--cont '<設定>'] [--seeds 8] [--seedBase 0] [--out 結果.jsonl]
+npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth":4096,"potentialNet":null}'] [--variants '{"名前":{設定},…}'] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl] [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl] [--inputs 学習のデータ.jsonl]
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI。
@@ -339,6 +341,15 @@ npm run svwb -- defer-playout --dir <記録のディレクトリ> --opts '<回�
   同じ乱数（相手の手札・山札の並べ直しと AI の乱数）で `--seeds` 通り最後まで打ち、勝ち数を比べる。分かれ目の後は自分を `--cont`（既定は `--opts`）、相手を今の既定の探索 AI で打つ。
   `--seedBase` を変えると別の乱数で打つ（足し合わせる用）。局面ごとの結果を `--out` に試合が終わった順に書き、最後に、全部・試合ごとの合計・その場で作るはずだったカード・
   実際の次のターンに作ったカード・相手のデッキ・PP ごとの差を出す（docs/ai-notes.md「回した融合を、その場でした場合と最後まで打ち比べる」）
+- `beam-gap`: 今の既定どうしの自己対戦（`ai-play` と同じ試合。比較用の 7 デッキ）の自分のターンの最初の局面（`--every k` なら k 局面に 1 つ）で、視点のプレイヤーから決定化した局面に、
+  基準の設定（`--ref`）と比べる設定（`--variants`。名前から設定へのオブジェクト）のビームを 1 回ずつ打つ（相手のターンは読まない）。設定ごとに、ターン末の点数の最大が基準より低い局面の割合・
+  平均の差・最善の最初の手が違う割合・採点した局面の数・1 局面の時間・段をまたいで同じ局面の割合を、全部・基準の最善の並びに引く手やランダムな手が無い局面・デッキごとに出す
+  （勝ち負けの点の付く局面は数えない）。`--sample k` なら、基準のビームが残した局面から局面ごとに k 個と最善の並びの途中の局面すべてを、そこでターンを終えた点数・その先で届いた最善・
+  伸びしろの項（`beamKey` の項）と一緒に `--nodes` に書く（`beamKey` の重みを決める用）。自己対戦は時間がかかるので、`--savePositions` で書いた局面を次から `--positions` で読める。
+  基準のビームも時間がかかるので、同じ局面・同じ基準で前に書いた `--out` を `--refFrom` に渡すと、基準を打ち直さずにその結果を使う（`--sample` とは一緒に使えない）。
+  `--inputs` なら、`--sample` で選んだ局面の見込みのネットワーク（`potentialNet`）の入力と、終えた点数・届いた最善を書く（学習のデータ）。
+  設定は今の既定の上に重ねるので、2026-10-30 からは見込みが入る。見込みなしのビームは `"potentialNet":null` を書く（`--ref` の既定は見込みなしの幅 4096）
+  （docs/ai-notes.md「ターン途中の評価の見直し」）
 
 ## td
 
@@ -363,6 +374,23 @@ npm run td -- eval --model a.json,b.json --data d.jsonl [--cards <カード名,�
 書き出すモデルの `baseWeights` をその重みにする（`--base search` は探索の既定の重み。省略すると元のモデルのまま）。
 そのモデルを `"valueNet"` で使うと、自分の評価だけをその重みにし、読みの中の相手は探索の既定の重みで打つ（下の `policyWeights`）。
 `eval`・`ivcheck`・`attrcheck` も、モデルの `baseWeights` に合わせて `"s"`・`"sd"`・0 を読む。
+
+## potential
+
+```sh
+npm run svwb -- beam-gap --games 200 --variants '{"w32":{"beamWidth":32,"potentialNet":null}}' --sample 100 --inputs d1.jsonl --savePositions pos1.jsonl --out rows1.jsonl
+npm run potential -- train --data d1.jsonl[,d2.jsonl] --out model.json [--hidden 64] [--epochs 8] [--T 5] [--lr 0.001]
+                       [--l2 0.000001] [--batch 256] [--scale 20] [--valid 160-199] [--seed 1]
+                       [--groups depth|position]
+npm run svwb -- beam-gap --positions pos1.jsonl --refFrom rows1.jsonl --variants '{"w32":{"beamWidth":32,"potentialNet":null},"w32p":{"beamWidth":32,"potentialNet":"model.json"}}'
+```
+
+`beam-gap --sample k --inputs` は、基準のビーム（既定は幅 4096）が残した途中の局面を局面ごとに k 個（と最善の並びの途中の局面）選び、
+見込みのネットワークの入力・そこでターンを終えた点数・そこから届いた最善を書く。`train` は同じ局面・同じ手数の局面の組ごとに、
+「終えた点数 + 見込み」の順位が届いた最善の順位に合うように学ぶ（ListNet。`--T` は softmax の温度で点数の単位）。
+`--groups position` なら組を手数で分けず局面ごとにする（段を作らない探索 `bestFirst` 向けの試し。段のあるビームでは既定の `depth` がずっと良い）。
+`--valid` の範囲の試合（`game`）は学ばず、確かめの損失と「1 位の当たり」を出す。この 2 つは目安で、良し悪しは学びに使っていない試合の局面での
+`beam-gap`（`--positions` と `--refFrom` で基準のビームを打ち直さずに比べる）で決める。docs/ai-notes.md「ターン途中の見込みを学ぶ」
 
 ## pack-run（PC で回した結果をクラウドから見られるようにする）
 
@@ -448,6 +476,20 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
 
 - 数: `samples`・`beamWidth`・`maxDepth`・`rescoreTop`・`planCandidates`・`perFirst`・`oppHandSamples`・`dangerRescore`・`mulliganSamples`・`mulliganTurns`・`mulliganRolloutBeam`・`nextLethal`・`beamPp`
 - `attackLater`: 数（既定 0 で使わない）。今のビームに加えて、攻撃以外の手（自分の場が埋まっているときは攻撃も）で手順を作り、攻撃は貪欲に済ませた後の点数で並べるビームを、この幅で打つ（2026-10-26。docs/ai-notes.md「攻撃を後にまとめるビーム」）
+- `beamKey`: 項の名前から重みへのオブジェクト（既定は無し。2026-10-30）。ビームで残す局面を選ぶ並べ替えのキーに、伸びしろの項と重みの積の和を足す
+  （ターンを終える局面の点数には足さない）。項は `pp`（残り PP）・`usablePp`（手札のカードのコストの組で残り PP 以下の和の最大）・`attack`（まだ攻撃できる自分のフォロワーの攻撃力の和）・
+  `attackers`（その数）・`evolve`・`superEvolve`（このターンにまだ進化・超進化できるか）・`extraPp`（エクストラPP がまだ使えるか）。自分のターンのビーム（drawSplit の組み直しを含む）だけに効き、
+  読みの中の相手のビームには効かない（`beamPp` は読みの中の相手にも効く）。点数の高い局面が残らないことがあるので、段ごとに、最初の手ごとの残らなかった局面の点数の最大も終局面の候補にする
+  （`rust/engine/src/ai/beam_key.rs`。docs/ai-notes.md「ターン途中の評価の見直し」）
+- `bestFirst`: 数（既定 0 で使わない。2026-10-30）。自分のターンのビームを、段を作らずに、優先度（ターン末の点数 + `beamKey` の伸びしろ）の高い局面から 1 つずつ広げる探索に替える。
+  採点した局面の数がこの数に達したら広げるのをやめる（深さの上限は `maxDepth`）。同じ局面は段をまたいでまとめ、点数の高いほうを残す。`beamWidth` は使わない
+  （drawSplit の組み直しにも効く。読みの中の相手のビームには効かない）
+- `potentialNet`: 見込みのネットワークのファイルの場所か `null`（使わない）。既定は `data/potential-net.json`（2026-10-30 から。ビームの幅の既定も 512 → 128）。
+  ターン途中の局面から届くターン末の点数の最大と、そこで終えた点数の差を当てる小さなネットワーク（`rust/engine/src/ai/potential.rs`）の出力に
+  `potentialWeight`（既定 1）を掛けて、`beamKey` と同じく並べ替えのキー（と `bestFirst` の優先度）にだけ足す（読みの中の相手のビームには効かない）。
+  学び方は上の「potential」（docs/ai-notes.md「ターン途中の見込みを学ぶ」）。
+  `potentialDrawSplit`（真偽、既定 false）を true にすると、drawSplit の組み直しのビームにも見込みを使う（重くなり、勝率は同じ）。
+  2026-10-30 より前の既定は `{"beamWidth":512,"potentialNet":null}`
 - `perPlan`: 数（既定 0 で使わない）。ビームの各深さで、同じ「手の組」（手札から出したカード・進化・超進化・能力・エクストラPP の組。攻撃・融合・選ぶ手は数えない）の局面をまずこの数まで残し、余った枠を点数の順に埋める。攻撃先・融合の素材だけが違う並びが枠を埋めて、別のカードを使う手順が切られるのを防ぐ（2026-10-26。docs/ai-notes.md「手の組ごとにビームの枠を設ける」）
 - 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`

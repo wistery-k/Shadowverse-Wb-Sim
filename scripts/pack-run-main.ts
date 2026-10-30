@@ -6,7 +6,7 @@
 //
 // アーカイブの中は共有フォルダと同じ形にする（そのまま /mnt/project-files/ に展開できる）:
 //   data/selfplay/<名前>/  td selfplay の自己対戦（.jsonl は 1 ファイルずつ gzip して .jsonl.gz にする）
-//   data/models/<名前>/    学習した補正（"kind":"td-value-net" の .json）
+//   data/models/<名前>/    学習した補正（"kind":"td-value-net" の .json）と見込みのネットワーク（"kind":"potential-net"）
 //   logs/<名前>/           それ以外（.log・.sh・.txt・他の .jsonl（gzip する）など）と、中身の一覧 MANIFEST.md
 // tar は自前で書く（ustar。名前が長いか ASCII 以外を含むときは PAX の path を付ける）。外部のコマンドは git だけ（無くてもよい）。
 
@@ -106,7 +106,7 @@ export function classify(file: string, head: string): Kind {
   const base = file.endsWith(".gz") ? file.slice(0, -3) : file;
   const firstLine = head.split("\n", 1)[0] ?? "";
   if (base.endsWith(".jsonl") && /"samples"\s*:/.test(firstLine)) return "selfplay";
-  if (base.endsWith(".json") && /^\s*\{\s*"kind"\s*:\s*"td-value-net"/.test(head)) return "models";
+  if (base.endsWith(".json") && /^\s*\{\s*"kind"\s*:\s*"(td-value-net|potential-net)"/.test(head)) return "models";
   return "logs";
 }
 

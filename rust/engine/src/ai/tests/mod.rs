@@ -21,6 +21,7 @@ mod keys;
 mod lethal;
 mod mulligan;
 mod per_plan;
+mod potential;
 mod rhino;
 mod rhino_bound;
 mod rhino_puzzles;

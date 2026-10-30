@@ -4,7 +4,9 @@
 //! （scripts/valueNetOption.ts）。TypeScript 版とともに消した実験用の項目（exhaustive 等）は、既定の値のときだけ受け付ける。
 
 use crate::ai::aidata::{weights_from, AI_DATA_JSON};
+use crate::ai::beam_key::{BeamKey, BEAM_FEATURES, N_BEAM_FEATURES};
 use crate::ai::mulligan::OppMulligan;
+use crate::ai::potential::PotentialNet;
 use crate::ai::rhino::{rhino_pass_lethal, rhino_search_options, RHINO_POTENTIAL};
 use crate::ai::search::{
     DrawSplit, ExtraEval, MulliganMode, OpponentSearch, OwnNextSearch, RolloutWeights,
@@ -105,6 +107,27 @@ fn flag(k: &str, v: &Json) -> Result<bool, String> {
         Json::Bool(b) => Ok(*b),
         _ => Err(format!("\"{k}\" は true か false: {}", v.stringify())),
     }
+}
+
+/// beamKey（項の名前から重みへのオブジェクト。ai/beam_key.rs の BEAM_FEATURES。書かない項は 0）
+fn beam_key(v: &Json) -> Result<BeamKey, String> {
+    let Json::Obj(items) = v else {
+        return Err(format!(
+            "\"beamKey\" は項の名前から重みへのオブジェクト: {}",
+            v.stringify()
+        ));
+    };
+    let mut w = [0.0; N_BEAM_FEATURES];
+    for (k, x) in items {
+        let i = BEAM_FEATURES.iter().position(|f| f == k).ok_or_else(|| {
+            format!(
+                "\"beamKey\" の項は {} のどれか: {k}",
+                BEAM_FEATURES.join("・")
+            )
+        })?;
+        w[i] = number(k, x)?;
+    }
+    Ok(BeamKey(w))
 }
 
 /// カード名の配列（mulliganKeep・mulliganReturn）
@@ -224,6 +247,22 @@ pub fn search_options(
             "nextLethalRange" => o.next_lethal_range = Some(number(k, v)?),
             "passLethal" => o.pass_lethal = count(k, v)?,
             "beamPp" => o.beam_pp = number(k, v)?,
+            "beamKey" => o.beam_key = Some(beam_key(v)?),
+            "bestFirst" => o.best_first = count(k, v)?,
+            "potentialNet" => {
+                o.potential = match v {
+                    Json::Str(path) => Some(Arc::new(PotentialNet::load(path)?)),
+                    // 見込みを使わない（2026-10-30 より前の既定は {"beamWidth":512,"potentialNet":null}）
+                    Json::Null => None,
+                    _ => {
+                        return Err(
+                            "potentialNet は見込みのネットワークのファイルの場所か null".into()
+                        )
+                    }
+                };
+            }
+            "potentialWeight" => o.potential_weight = number(k, v)?,
+            "potentialDrawSplit" => o.potential_draw_split = flag(k, v)?,
             "attackLater" => o.attack_later = count(k, v)?,
             "perPlan" => o.per_plan = count(k, v)?,
             "scoreTurnEnd" => {

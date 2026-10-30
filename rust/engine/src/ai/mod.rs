@@ -4,6 +4,7 @@
 //! テストは tests/（`cargo test --release`）。
 
 pub mod aidata;
+pub mod beam_key;
 pub mod converging;
 pub mod damage_bound;
 pub mod determinize;
@@ -15,6 +16,7 @@ pub mod keys;
 pub mod lethal;
 pub mod lethal_hint;
 pub mod mulligan;
+pub mod potential;
 pub mod registry;
 pub mod rhino;
 pub mod rhino_lethal;

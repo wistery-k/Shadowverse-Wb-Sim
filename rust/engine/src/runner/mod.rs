@@ -4,6 +4,7 @@
 //! td selfplay の書き出したファイルは、そのまま `npm run td -- train` に渡せる。
 //! 試合は CPU のコア数だけのスレッドで並列に行う（環境変数 THREADS で変えられる）。
 
+pub mod beam_gap;
 pub mod compare;
 pub mod deck_compare;
 pub mod deep_gap;
