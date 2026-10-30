@@ -16,6 +16,7 @@
 # クラウドで（使うたびにユーザーの承認が要る）: cloud/gcp.sh run relearn7 cloud/jobs/relearn.sh --hours 4
 # 自己対戦だけクラウドで: cloud/gcp.sh run relearn7 cloud/jobs/relearn.sh --hours 3 --env STOP_AFTER=selfplay
 #   → 作業フォルダの s<i>.jsonl.gz を PC の作業フォルダに写し、PC で上の形で流す（自己対戦は飛ばして学習から回る）
+# 補正の学習までで止める: STOP_AFTER=model（できた ${NAME}pa.json を PC の作業フォルダに置いて流すと、見込みの学び直しと判定から回る）
 # 小さく試す: CLOUD_W=/tmp/rl G=40 CHUNK=20 CMP=10 CMP2=10 CMPV=10 YS=10 RHINO=2 POT_GAMES=12 POT_VALID=4 bash cloud/jobs/relearn.sh
 #
 # 途中で止めても、終わった段階（自己対戦の CHUNK 試合ごと・学習・間引き・埋め・見込みのデータの 500 試合ごと・見込みの学習・比べごと）は飛ばして続きから回る。
@@ -112,6 +113,13 @@ if [ ! -f "$MPA" ]; then
 else
   echo "== $MPA があるので、判定から回す"
   sha256sum "$MPA"
+fi
+
+if [ "${STOP_AFTER:-}" = model ]; then
+  # 補正の学習までを別の場所（Claude のクラウド環境など）で回し、${NAME}pa.json を PC の作業フォルダに置いて、見込みと判定を PC で回すとき
+  echo "== 補正の学習まで（STOP_AFTER=model）"
+  echo DONE "$(date '+%m-%d %H:%M')"
+  exit 0
 fi
 
 # 3.5 学び直した補正の点数で、見込み（potentialNet）を学び直す
