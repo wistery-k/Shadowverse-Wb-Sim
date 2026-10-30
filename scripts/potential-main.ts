@@ -11,7 +11,8 @@
 // --valid の範囲の試合は学ばず、確かめに使う（損失と、組の中で届いた最善が最大の局面をキーで 1 位にした割合）。
 // この 2 つは目安で、採用は beam-gap（学びに使っていない局面での取りこぼし）で決める。
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { closeSync, openSync, readSync, writeFileSync } from "node:fs";
+import { StringDecoder } from "node:string_decoder";
 
 const USAGE = `使い方: npm run potential -- train --data d1.jsonl[,d2.jsonl] --out model.json [--hidden 64] [--epochs 8] [--T 5]
   [--lr 0.001] [--l2 0.000001] [--batch 256] [--scale 20] [--valid 160-199] [--seed 1]（docs/commands.md の「potential」）`;
@@ -124,6 +125,25 @@ function field(o: Record<string, unknown>, k: string, where: string): number {
   return x;
 }
 
+/** ファイルを 1 行ずつ読む（大きなファイルを 1 つの文字列にしない） */
+function* readLines(file: string): Generator<string> {
+  const fd = openSync(file, "r");
+  try {
+    const buf = Buffer.alloc(1 << 24);
+    const dec = new StringDecoder("utf8");
+    let rest = "";
+    for (;;) {
+      const n = readSync(fd, buf, 0, buf.length, null);
+      const parts = (rest + (n === 0 ? dec.end() : dec.write(buf.subarray(0, n)))).split("\n");
+      rest = n === 0 ? "" : (parts.pop() ?? "");
+      yield* parts;
+      if (n === 0) return;
+    }
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export function loadPotentialData(files: string[]): PotentialData {
   let head: { vocab: string[]; zones: string[]; scalars: string[] } | undefined;
   const rowPtr = new Grow(new Int32Array(1024), (n) => new Int32Array(n));
@@ -135,19 +155,20 @@ export function loadPotentialData(files: string[]): PotentialData {
   const group: string[] = [];
   rowPtr.push(0);
   files.forEach((file, fi) => {
-    const lines = readFileSync(file, "utf8").split("\n");
-    const h0: unknown = JSON.parse(lines[0] ?? "");
+    const lines = readLines(file);
+    const h0: unknown = JSON.parse(lines.next().value ?? "");
     if (typeof h0 !== "object" || h0 === null) throw new Error(`${file}: 1 行目が語彙と入力の並びではありません`);
     const hr = h0 as Record<string, unknown>;
     const h = { vocab: strings(hr.vocab, "vocab"), zones: strings(hr.zones, "zones"), scalars: strings(hr.scalars, "scalars") };
     if (head === undefined) head = h;
     else if (JSON.stringify(h) !== JSON.stringify(head)) throw new Error(`${file}: 語彙・入力の並びが前のファイルと違います`);
     const nIn = h.zones.length * h.vocab.length + h.scalars.length;
-    for (let li = 1; li < lines.length; li++) {
-      const line = lines[li]!;
+    let li = 1;
+    for (const line of lines) {
+      li++;
       if (line === "") continue;
       const r0: unknown = JSON.parse(line);
-      const where = `${file}:${li + 1}`;
+      const where = `${file}:${li}`;
       if (typeof r0 !== "object" || r0 === null) throw new Error(`${where}: 局面の行ではありません`);
       const r = r0 as Record<string, unknown>;
       const x = r.x;
