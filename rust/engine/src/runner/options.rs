@@ -247,6 +247,7 @@ pub fn search_options(
             "passLethal" => o.pass_lethal = count(k, v)?,
             "beamPp" => o.beam_pp = number(k, v)?,
             "beamKey" => o.beam_key = Some(beam_key(v)?),
+            "bestFirst" => o.best_first = count(k, v)?,
             "attackLater" => o.attack_later = count(k, v)?,
             "perPlan" => o.per_plan = count(k, v)?,
             "scoreTurnEnd" => {

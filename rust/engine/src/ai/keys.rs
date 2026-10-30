@@ -389,6 +389,23 @@ impl<T> EqSet<T> {
         bucket.push(value);
         true
     }
+
+    /// eq で同じとみなす値があればそれを返し、無ければ加えて None
+    pub fn get_or_add(
+        &mut self,
+        value: T,
+        hash: u32,
+        eq: impl Fn(&T, &T) -> bool,
+    ) -> Option<&mut T> {
+        let bucket = self.buckets.entry(hash).or_default();
+        match bucket.iter().position(|x| eq(x, &value)) {
+            Some(i) => Some(&mut bucket[i]),
+            None => {
+                bucket.push(value);
+                None
+            }
+        }
+    }
 }
 
 /// ビームの同じ局面の判定用の集合（turnOrderEqual でまとめる）
@@ -400,6 +417,26 @@ impl TurnOrderSet {
         let _p = crate::prof::scope(crate::prof::Sec::SameState);
         let h = turn_order_hash(s);
         self.0.add(s.clone(), h, |a, b| turn_order_eq(a, b))
+    }
+}
+
+/// 同じ局面（turnOrderEqual）ごとに値 V を 1 つ持つ表
+pub struct TurnOrderMap<V>(EqSet<(Rc<GameState>, V)>);
+
+impl<V> Default for TurnOrderMap<V> {
+    fn default() -> Self {
+        TurnOrderMap(EqSet::default())
+    }
+}
+
+impl<V> TurnOrderMap<V> {
+    /// s と同じ局面があればその値を返し、無ければ v を加えて None
+    pub fn get_or_add(&mut self, s: &Rc<GameState>, v: V) -> Option<&mut V> {
+        let _p = crate::prof::scope(crate::prof::Sec::SameState);
+        let h = turn_order_hash(s);
+        self.0
+            .get_or_add((s.clone(), v), h, |a, b| turn_order_eq(&a.0, &b.0))
+            .map(|e| &mut e.1)
     }
 }
 

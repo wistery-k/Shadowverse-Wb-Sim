@@ -16,7 +16,7 @@ use super::eval::{evaluate_with, EvalWeights};
 use super::exact_lethal::{search_exact_lethal, sure_lethal_options};
 use super::fusion::{excessive_fusion, fuse_root_chains, last_words_to_hand};
 use super::greedy::{choose_greedy, value_after};
-use super::keys::{hand_eq_noid, state_eq, visible_eq, TurnOrderSet};
+use super::keys::{hand_eq_noid, state_eq, visible_eq, TurnOrderMap, TurnOrderSet};
 use super::lethal::{
     find_lethal, search_lethal, LethalOptions, LethalSearch, DEFAULT_LETHAL_OPTIONS,
     GUARDED_LETHAL_OPTIONS,
@@ -262,8 +262,13 @@ pub struct SearchOptions {
     pub pass_lethal_search: Option<NextLethalSearch>,
     pub beam_pp: f64,
     /// ビームで残す局面を選ぶ並べ替えのキーに足す伸びしろの項の重み（beamKey。ai/beam_key.rs。ターンを終える局面の点数には足さない）。
-    /// 自分のターンのビーム（drawSplit の組み直しを含む）だけに効き、読みの中の相手のビームには効かない
+    /// 自分のターンのビーム（drawSplit の組み直しを含む）だけに効き、読みの中の相手のビームには効かない。
+    /// 点数の高い子が残らないことがあるので、各段で最初の手ごとに、残らなかった子の点数の最大も終局面の候補にする
     pub beam_key: Option<BeamKey>,
+    /// 層ごとのビームの代わりに、優先度（ターン末の点数 + beamKey の伸びしろ）の高い局面から 1 つずつ広げ、採点した局面の数がこの数に達したら止める
+    /// （bestFirst。0 なら使わず、beamWidth のビーム）。同じ局面はターン全体でまとめ、点数の高いほうを残す。深さの上限は maxDepth。
+    /// 自分のターンのビームだけに効く
+    pub best_first: usize,
     /// 攻撃を後にまとめるビームの幅（attackLater。0 なら使わない）。今のビームに加えて、攻撃以外の手（自分の場が埋まっているときは攻撃も）
     /// だけで手順を作り、各局面で攻撃を貪欲に（手で作った評価で）済ませた後の点数で並べるビームを打ち、その終局面（攻撃を済ませた局面）も候補にする
     pub attack_later: usize,
@@ -362,6 +367,7 @@ impl Default for SearchOptions {
             pass_lethal_search: None,
             beam_pp: 0.0,
             beam_key: None,
+            best_first: 0,
             attack_later: 0,
             per_plan: 0,
             extra_eval: Some(Arc::new(value_net_eval)),
@@ -461,6 +467,7 @@ struct Step {
     prev: Option<usize>,
 }
 
+#[derive(Clone)]
 struct Node {
     state: Rc<GameState>,
     first: Action,
@@ -468,6 +475,35 @@ struct Node {
     path: usize,
     /// ビームの何段目の局面か（根の局面は 0）
     depth: u32,
+}
+
+/// bestFirst の優先度つきキューの要素（key の大きい順、同じなら先に入れた順）
+struct Prio {
+    key: f64,
+    seq: usize,
+}
+
+impl PartialEq for Prio {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == std::cmp::Ordering::Equal
+    }
+}
+
+impl Eq for Prio {}
+
+impl PartialOrd for Prio {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Prio {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.key
+            .partial_cmp(&other.key)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(other.seq.cmp(&self.seq))
+    }
 }
 
 fn by_value_desc(x: f64, y: f64) -> std::cmp::Ordering {
@@ -1087,6 +1123,90 @@ impl<'a> Planner<'a> {
         out
     }
 
+    /// bestFirst: 層を作らず、優先度（ターン末の点数 + beamKey の伸びしろ）の高い局面から 1 つずつ広げる。start は深さ 1 の局面（すべて採点済み）。
+    /// 採点した局面の数が best_first に達したら広げるのをやめ、広げた局面と残った局面をすべて終局面の候補にする。
+    /// 同じ局面（turnOrderEqual）は採点してから比べ、点数の高いほうを残す。turnOrderEqual は評価が見る項の一部（手札のスペルブーストの回数など）を比べないので、
+    /// 同じとみなした局面とその先の局面の点数が違うことがある（ビームは段ごとに点数で並べてから同じ局面を除くので、点数の高いほうが残る）。
+    /// 先に出た同じ局面をもう広げていても、点数が高ければ後の局面も広げる
+    fn best_first_terminals(&mut self, mut terminals: Vec<Node>, start: Vec<Node>) -> Vec<Node> {
+        let p = self.p;
+        let opts = self.opts();
+        let budget = opts.best_first;
+        let prio =
+            |n: &Node| n.value + opts.beam_key.as_ref().map_or(0.0, |k| k.bonus(&n.state, p));
+        let mut heap: std::collections::BinaryHeap<Prio> = std::collections::BinaryHeap::new();
+        let mut nodes: Vec<Option<Node>> = Vec::new();
+        // 同じ局面ごとに、残した局面の nodes の添字と点数
+        let mut seen: TurnOrderMap<(usize, f64)> = TurnOrderMap::default();
+        let mut scored = start.len();
+        // n を広げる候補に足す。同じ局面があれば点数の高いほうを残す
+        let mut add = |heap: &mut std::collections::BinaryHeap<Prio>,
+                       nodes: &mut Vec<Option<Node>>,
+                       n: Node| {
+            let seq = nodes.len();
+            if opts.dedup {
+                if let Some(e) = seen.get_or_add(&n.state, (seq, n.value)) {
+                    if n.value <= e.1 {
+                        return;
+                    }
+                    // 先の局面がまだ広げていなければ除く（もう広げていれば、後の局面も広げる）
+                    nodes[e.0] = None;
+                    *e = (seq, n.value);
+                }
+            }
+            heap.push(Prio { key: prio(&n), seq });
+            nodes.push(Some(n));
+        };
+        for n in start {
+            add(&mut heap, &mut nodes, n);
+        }
+        let mut next: Vec<(Rc<GameState>, usize)> = Vec::new();
+        while let Some(Prio { seq, .. }) = heap.pop() {
+            let Some(node) = nodes[seq].take() else {
+                continue;
+            };
+            let actor = node
+                .state
+                .pending
+                .as_ref()
+                .map(|pd| pd.player())
+                .unwrap_or(node.state.active);
+            if scored >= budget
+                || node.state.phase == Phase::Ended
+                || actor != p
+                || node.depth as usize >= opts.max_depth
+            {
+                terminals.push(node);
+                continue;
+            }
+            let st = node.state.clone();
+            let first = node.first.clone();
+            let path = node.path;
+            let depth = node.depth;
+            terminals.push(node);
+            for a in self.expand(&st) {
+                if matches!(a, Action::EndTurn) || !self.allowed(&st, &a) {
+                    continue;
+                }
+                next.clear();
+                self.advance(&st, &a, Some(path), 0, &mut next);
+                for (ns, np) in std::mem::take(&mut next) {
+                    let value = self.score(&ns);
+                    scored += 1;
+                    let n = Node {
+                        state: ns,
+                        first: first.clone(),
+                        value,
+                        path: np,
+                        depth: depth + 1,
+                    };
+                    add(&mut heap, &mut nodes, n);
+                }
+            }
+        }
+        terminals
+    }
+
     /// prefix があれば、root はその並び（steps の添字と最初の手）の後の局面で、終局面の並びはその並びから続け、最初の手はその最初の手にする（fuseRoot）
     fn beam_terminals(
         &mut self,
@@ -1134,6 +1254,9 @@ impl<'a> Planner<'a> {
                 });
             }
         }
+        if opts.best_first > 0 {
+            return self.best_first_terminals(terminals, frontier);
+        }
         let mut depth = 1;
         while depth < opts.max_depth && !frontier.is_empty() {
             let mut children: Vec<Node> = Vec::new();
@@ -1172,6 +1295,20 @@ impl<'a> Planner<'a> {
                 }
             }
             let _p = prof::scope(Sec::Select);
+            // beamKey では、点数の高い子が残らないことがある。採点は済んでいるので、最初の手ごとに残らなかった子の点数の最大も終局面の候補にする
+            let mut cut_best: Vec<Node> = Vec::new();
+            if opts.beam_key.is_some() {
+                for c in &children {
+                    match cut_best.iter_mut().find(|b| b.first == c.first) {
+                        None => cut_best.push(c.clone()),
+                        Some(b) => {
+                            if c.value > b.value {
+                                *b = c.clone();
+                            }
+                        }
+                    }
+                }
+            }
             if let Some(k) = &opts.beam_key {
                 let mut keyed: Vec<(f64, Node)> = children
                     .into_iter()
@@ -1193,6 +1330,11 @@ impl<'a> Planner<'a> {
                 children.truncate(opts.beam_width);
                 children
             };
+            for b in cut_best {
+                if !frontier.iter().any(|f| Rc::ptr_eq(&f.state, &b.state)) {
+                    terminals.push(b);
+                }
+            }
             depth += 1;
         }
         terminals.extend(frontier);
@@ -2260,6 +2402,7 @@ pub fn simulate_opponent_turn_by_search(
         attack_later: 0,
         per_plan: 0,
         beam_key: None,
+        best_first: 0,
         ..opts.clone()
     };
     // 読みの中の相手は、自分の評価の重みでなく方策の重み（policy_weights。既定は同じ）で打つ

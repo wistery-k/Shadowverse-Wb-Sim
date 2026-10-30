@@ -294,6 +294,7 @@ npm run svwb -- two-turn trace --only <局面> --cand <候補> [--r 0] [--seed 1
 npm run svwb -- draw-stability [--subject spellwitch] [--games 12] [--start 0] [--seeds 8] [--a '{}'] [--b '{"drawSplit":{}}']
 npm run svwb -- fuse-gap --dir <記録のディレクトリ> [--opts '<設定の JSON>'] [--out 結果.jsonl] [--show 10]
 npm run svwb -- defer-playout --dir <記録のディレクトリ> --opts '<回す版の設定>' [--cont '<設定>'] [--seeds 8] [--seedBase 0] [--out 結果.jsonl]
+npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth":4096}'] [--variants '{"名前":{設定},…}'] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl] [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl]
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI。
@@ -339,6 +340,13 @@ npm run svwb -- defer-playout --dir <記録のディレクトリ> --opts '<回�
   同じ乱数（相手の手札・山札の並べ直しと AI の乱数）で `--seeds` 通り最後まで打ち、勝ち数を比べる。分かれ目の後は自分を `--cont`（既定は `--opts`）、相手を今の既定の探索 AI で打つ。
   `--seedBase` を変えると別の乱数で打つ（足し合わせる用）。局面ごとの結果を `--out` に試合が終わった順に書き、最後に、全部・試合ごとの合計・その場で作るはずだったカード・
   実際の次のターンに作ったカード・相手のデッキ・PP ごとの差を出す（docs/ai-notes.md「回した融合を、その場でした場合と最後まで打ち比べる」）
+- `beam-gap`: 今の既定どうしの自己対戦（`ai-play` と同じ試合。比較用の 7 デッキ）の自分のターンの最初の局面（`--every k` なら k 局面に 1 つ）で、視点のプレイヤーから決定化した局面に、
+  基準の設定（`--ref`）と比べる設定（`--variants`。名前から設定へのオブジェクト）のビームを 1 回ずつ打つ（相手のターンは読まない）。設定ごとに、ターン末の点数の最大が基準より低い局面の割合・
+  平均の差・最善の最初の手が違う割合・採点した局面の数・1 局面の時間・段をまたいで同じ局面の割合を、全部・基準の最善の並びに引く手やランダムな手が無い局面・デッキごとに出す
+  （勝ち負けの点の付く局面は数えない）。`--sample k` なら、基準のビームが残した局面から局面ごとに k 個と最善の並びの途中の局面すべてを、そこでターンを終えた点数・その先で届いた最善・
+  伸びしろの項（`beamKey` の項）と一緒に `--nodes` に書く（`beamKey` の重みを決める用）。自己対戦は時間がかかるので、`--savePositions` で書いた局面を次から `--positions` で読める。
+  基準のビームも時間がかかるので、同じ局面・同じ基準で前に書いた `--out` を `--refFrom` に渡すと、基準を打ち直さずにその結果を使う（`--sample` とは一緒に使えない）
+  （docs/ai-notes.md「ターン途中の評価の見直し」）
 
 ## td
 
@@ -448,6 +456,14 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
 
 - 数: `samples`・`beamWidth`・`maxDepth`・`rescoreTop`・`planCandidates`・`perFirst`・`oppHandSamples`・`dangerRescore`・`mulliganSamples`・`mulliganTurns`・`mulliganRolloutBeam`・`nextLethal`・`beamPp`
 - `attackLater`: 数（既定 0 で使わない）。今のビームに加えて、攻撃以外の手（自分の場が埋まっているときは攻撃も）で手順を作り、攻撃は貪欲に済ませた後の点数で並べるビームを、この幅で打つ（2026-10-26。docs/ai-notes.md「攻撃を後にまとめるビーム」）
+- `beamKey`: 項の名前から重みへのオブジェクト（既定は無し。2026-10-30）。ビームで残す局面を選ぶ並べ替えのキーに、伸びしろの項と重みの積の和を足す
+  （ターンを終える局面の点数には足さない）。項は `pp`（残り PP）・`usablePp`（手札のカードのコストの組で残り PP 以下の和の最大）・`attack`（まだ攻撃できる自分のフォロワーの攻撃力の和）・
+  `attackers`（その数）・`evolve`・`superEvolve`（このターンにまだ進化・超進化できるか）・`extraPp`（エクストラPP がまだ使えるか）。自分のターンのビーム（drawSplit の組み直しを含む）だけに効き、
+  読みの中の相手のビームには効かない（`beamPp` は読みの中の相手にも効く）。点数の高い局面が残らないことがあるので、段ごとに、最初の手ごとの残らなかった局面の点数の最大も終局面の候補にする
+  （`rust/engine/src/ai/beam_key.rs`。docs/ai-notes.md「ターン途中の評価の見直し」）
+- `bestFirst`: 数（既定 0 で使わない。2026-10-30）。自分のターンのビームを、段を作らずに、優先度（ターン末の点数 + `beamKey` の伸びしろ）の高い局面から 1 つずつ広げる探索に替える。
+  採点した局面の数がこの数に達したら広げるのをやめる（深さの上限は `maxDepth`）。同じ局面は段をまたいでまとめ、点数の高いほうを残す。`beamWidth` は使わない
+  （drawSplit の組み直しにも効く。読みの中の相手のビームには効かない）
 - `perPlan`: 数（既定 0 で使わない）。ビームの各深さで、同じ「手の組」（手札から出したカード・進化・超進化・能力・エクストラPP の組。攻撃・融合・選ぶ手は数えない）の局面をまずこの数まで残し、余った枠を点数の順に埋める。攻撃先・融合の素材だけが違う並びが枠を埋めて、別のカードを使う手順が切られるのを防ぐ（2026-10-26。docs/ai-notes.md「手の組ごとにビームの枠を設ける」）
 - 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`

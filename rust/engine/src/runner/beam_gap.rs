@@ -2,7 +2,7 @@
 //!
 //!   svwb beam-gap [--games 50] [--from 0] [--ref '{"beamWidth":4096}'] [--variants '{"名前":{設定},…}']
 //!                 [--every 1] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl]
-//!                 [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl]
+//!                 [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl]
 //!
 //! 今の既定どうしの自己対戦（`sim::play_ai`、比較用の 7 デッキ）の、自分のターンの最初の局面（`--every k` なら k 局面に 1 つ）を集め、
 //! 視点のプレイヤーから決定化した局面で、基準の設定（`--ref`）と比べる設定（`--variants`）のビームを 1 回ずつ打つ（相手のターンは読まない）。
@@ -14,6 +14,8 @@
 //! 伸びしろの項の重み（`beamKey`）を決めるのに使う。
 //!
 //! 自己対戦は時間がかかるので、`--savePositions` で集めた局面を書いておき、次からは `--positions` で読める。
+//! 基準のビームも時間がかかるので、同じ局面・同じ基準で前に書いた `--out` を `--refFrom` に渡すと、基準を打ち直さずにその結果を使う
+//! （`--sample` とは一緒に使えない）。
 //! docs/ai-notes.md「ターン途中の評価の見直し」
 
 use super::human_plan::{is_start_of_turn, mean_se};
@@ -206,6 +208,34 @@ fn node_line(pos: &Position, turn: i32, n: &crate::ai::search::ProbeNode) -> Str
     Json::Obj(items).stringify()
 }
 
+/// `--out` の行の ref から基準の結果と、並びに引く手・ランダムな手があったかを読む（並びの手は持たない）
+fn ref_from_json(line: &str) -> Result<((u32, usize), Probe, bool), String> {
+    let v = Json::parse(line)?;
+    let num = |o: &Json, k: &str| match o.get(k) {
+        Some(Json::Num(x)) => Ok(*x),
+        _ => Err(format!("結果の行に {k} がありません")),
+    };
+    let r = v.get("ref").ok_or("結果の行に ref がありません")?;
+    let probe = Probe {
+        best: num(r, "best")?,
+        first: match r.get("first") {
+            Some(Json::Str(s)) => s.clone(),
+            _ => return Err("結果の行に ref.first がありません".into()),
+        },
+        actions: Vec::new(),
+        scored: num(r, "scored")? as u64,
+        terminals: num(r, "terminals")? as usize,
+        dup: num(r, "dup")? as usize,
+        secs: num(r, "secs")?,
+    };
+    let chance = matches!(v.get("chance"), Some(Json::Bool(true)));
+    Ok((
+        (num(&v, "game")? as u32, num(&v, "k")? as usize),
+        probe,
+        chance,
+    ))
+}
+
 fn probe_json(r: &Probe) -> Json {
     Json::Obj(vec![
         ("best".into(), Json::Num(r.best)),
@@ -229,6 +259,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut out_path: Option<String> = None;
     let mut positions_path: Option<String> = None;
     let mut save_path: Option<String> = None;
+    let mut ref_from: Option<String> = None;
     let mut i = 0;
     while i < argv.len() {
         let v = argv.get(i + 1).cloned().ok_or("引数の値がありません")?;
@@ -243,11 +274,27 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             "--out" => out_path = Some(v),
             "--positions" => positions_path = Some(v),
             "--savePositions" => save_path = Some(v),
+            "--refFrom" => ref_from = Some(v),
             k => return Err(format!("不明な引数: {k}（runner/beam_gap.rs）")),
         }
         i += 2;
     }
+    if ref_from.is_some() && sample > 0 {
+        return Err("--refFrom と --sample は一緒に使えません".into());
+    }
     let ref_opts = compare_options(&ref_text)?;
+    // 前に打った基準の結果（試合・局面の番号ごと）
+    let mut known: Vec<((u32, usize), Probe, bool)> = Vec::new();
+    if let Some(path) = &ref_from {
+        let f = std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?;
+        for line in std::io::BufReader::new(f).lines() {
+            let line = line.map_err(|e| e.to_string())?;
+            if !line.trim().is_empty() {
+                known.push(ref_from_json(&line)?);
+            }
+        }
+        known.sort_by_key(|x| x.0);
+    }
     let Json::Obj(vs) = Json::parse(&variants_text)? else {
         return Err("--variants は名前から設定へのオブジェクト".into());
     };
@@ -303,19 +350,32 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             let mut r = Rng::new(pos.game.wrapping_mul(1000).wrapping_add(pos.k as u32));
             let det = determinize(&s, p, &mut r, false);
             let mut rng = Rng::new(7 + pos.k as u32);
-            let (reference, full) = probe(
-                &SearchAgent::new(ref_opts.clone()),
-                &det,
-                p,
-                sample,
-                &mut rng,
-            );
             let turn = det.players[p].turn_count;
-            let nodes = match full {
-                Some(f) => f.nodes.iter().map(|n| node_line(pos, turn, n)).collect(),
-                None => Vec::new(),
+            let (reference, nodes, chance) = if ref_from.is_some() {
+                let i = known
+                    .binary_search_by_key(&(pos.game, pos.k), |x| x.0)
+                    .map_err(|_| {
+                        format!(
+                            "--refFrom に試合 {} の局面 {} がありません",
+                            pos.game, pos.k
+                        )
+                    })?;
+                (known[i].1.clone(), Vec::new(), known[i].2)
+            } else {
+                let (reference, full) = probe(
+                    &SearchAgent::new(ref_opts.clone()),
+                    &det,
+                    p,
+                    sample,
+                    &mut rng,
+                );
+                let nodes = match full {
+                    Some(f) => f.nodes.iter().map(|n| node_line(pos, turn, n)).collect(),
+                    None => Vec::new(),
+                };
+                let chance = has_chance(&det, &reference.actions, p);
+                (reference, nodes, chance)
             };
-            let chance = has_chance(&det, &reference.actions, p);
             let variants = variants
                 .iter()
                 .map(|(_, o, _)| probe(&SearchAgent::new(o.clone()), &det, p, 0, &mut rng).0)
