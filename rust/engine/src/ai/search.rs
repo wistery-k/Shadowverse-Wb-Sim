@@ -133,6 +133,30 @@ pub struct DrawSplit {
     pub class: Option<ClassId>,
 }
 
+/// 相手のターンを読み直す上位の手のうち、drawSplit で区切らない・決着していない終局面（rescoreRace）は、相手の手札の引き直し（oppHandCommon）を
+/// first 通り読んだところと、その後 step 通り読むたびに、選ぶときの値の見込み（読んだ分の平均にターン末の点数を混ぜたもの）を比べ、
+/// いちばん良い終局面との差が、同じ引き直しどうしの差のぶれ（標準誤差）の z 倍に delta を足したものより大きい終局面は、残りを読まない。
+/// 読んだ分は残った終局面の読みに使うので、残った終局面の点数は全部読んだときと同じ。
+/// reentry が Some(m) なら、読み終えた手のいちばん高い点数が、落とした終局面の落としたときの見込みより m 以上低ければ
+/// （先に良く見えた終局面が後の引き直しで相手のリーサルを受けた等）、その終局面も残りを読んで候補に戻す
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RescoreRace {
+    pub first: usize,
+    pub step: usize,
+    pub z: f64,
+    pub delta: f64,
+    pub reentry: Option<f64>,
+}
+
+/// rescoreRace の項目を省いたときの値（{} で使うもの）
+pub const DEFAULT_RESCORE_RACE: RescoreRace = RescoreRace {
+    first: 3,
+    step: 3,
+    z: 2.0,
+    delta: 5.0,
+    reentry: Some(0.0),
+};
+
 /// 既定の drawSplit: 区切る手が引く手なら一番上のカードを種類ごとに全部試し、残りを幅 32 で組み直す。
 /// 2026-10-28 にスペルウィッチだけで使い始め、同じ日にどのクラスでも使うようにした（docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）
 pub const DEFAULT_DRAW_SPLIT: DrawSplit = DrawSplit {
@@ -353,6 +377,8 @@ pub struct SearchOptions {
     pub danger_rescore: usize,
     /// 上位の手を読み直した点数に、ターン末の点数をこの割合で混ぜる（0 なら読み直した点数だけ。既定 0.5、2026-10-22）
     pub rescore_mix: f64,
+    /// 見込みのない終局面の読みを途中で打ち切る（RescoreRace。None なら全部読む）
+    pub rescore_race: Option<RescoreRace>,
     pub reuse_agree: bool,
     /// 上位の手を読み直すとき、このターンに引いて手札に残っているカードも引き直す（oppHandSamples の引き直しごと。ビームで決めた 1 通りの引きで手を比べない）
     pub resample_draws: bool,
@@ -443,6 +469,7 @@ impl Default for SearchOptions {
             opp_fuse: false,
             danger_rescore: 0,
             rescore_mix: 0.5,
+            rescore_race: None,
             reuse_agree: false,
             resample_draws: false,
             draw_first: false,
@@ -1523,6 +1550,8 @@ pub fn plan_turn_traced(
         policy_w: env.policy_w,
     });
     let log_rows: RefCell<Vec<RescoreRow>> = RefCell::new(Vec::new());
+    // rescoreRace で先に読んだ引き直し（終局面の添字と、引き直しの順の (点数, 読んだ後の局面, 読んだ後の乱数の状態)）
+    let race_reads: RefCell<Vec<(usize, Vec<RaceRead>)>> = RefCell::new(Vec::new());
     let mut result: Vec<(Action, Plan)> = Vec::new();
     let mut rescored: Vec<usize> = Vec::new();
     let tracing = trace.is_some();
@@ -1751,13 +1780,24 @@ pub fn plan_turn_traced(
             };
             let mut sum = 0.0;
             if opts.opp_hand_common {
-                for &seed in &common_seeds {
-                    let mut r = Rng::new(seed);
-                    let mut d = determinize(base, p, &mut r, opts.peek_opp_hand);
-                    if opts.resample_draws {
-                        resample_own_draws(&mut d, root, p, &mut r);
+                // rescoreRace で先に読んだ分（引き直しの順の始めから）はそれを使う
+                let mut done = {
+                    let mut c = race_reads.borrow_mut();
+                    match c.iter().position(|(x, _)| *x == i) {
+                        Some(k) => c.swap_remove(k).1,
+                        None => Vec::new(),
                     }
-                    let (v, after) = read_once(&pl, &d, &mut r);
+                }
+                .into_iter();
+                for &seed in &common_seeds {
+                    let (v, after, r) = match done.next() {
+                        Some(x) => (x.value, x.after, Rng { state: x.rng }),
+                        None => {
+                            let mut r = Rng::new(seed);
+                            let (v, after) = read_common(&pl, base, root, &mut r);
+                            (v, after, r)
+                        }
+                    };
                     sum += v;
                     two_of(&after, &r);
                     add(after);
@@ -1859,6 +1899,35 @@ pub fn plan_turn_traced(
             }
         }
     };
+    // rescoreRace: drawSplit で区切らない・決着していない上位の終局面は、引き直しを何通りか読むたびに比べ、見込みのないものは残りを読まない
+    // 落とした終局面（添字・読み直す理由・落としたときの見込み）
+    let mut dropped: Vec<(usize, RescoreOrigin, f64)> = Vec::new();
+    if let Some(rr) = opts.rescore_race {
+        if opts.opp_hand_common && common_seeds.len() > 1 && gate.is_none() {
+            let racers: Vec<(usize, RescoreOrigin)> = ranked
+                .iter()
+                .enumerate()
+                .flat_map(|(bi, &b)| {
+                    let origin = if bi < n_top {
+                        RescoreOrigin::Top
+                    } else {
+                        RescoreOrigin::Draw
+                    };
+                    candidates_of(b).into_iter().map(move |i| (i, origin))
+                })
+                .filter(|&(i, _)| {
+                    let t = &terminals[i];
+                    t.state.phase != Phase::Ended
+                        && (split_env.is_none()
+                            || first_chance_step(root, &pl.steps_of(t.path), p).is_none())
+                })
+                .collect();
+            let (kept, out) = race_rescore(&pl, &terminals, &racers, &common_seeds, root, rr);
+            *race_reads.borrow_mut() = kept;
+            dropped = out;
+        }
+    }
+    let is_dropped = |i: usize| dropped.iter().any(|d| d.0 == i);
     for (bi, best) in ranked.into_iter().enumerate() {
         let origin = if bi < n_top {
             RescoreOrigin::Top
@@ -1866,8 +1935,25 @@ pub fn plan_turn_traced(
             RescoreOrigin::Draw
         };
         for i in candidates_of(best) {
-            rescore_node(i, origin, rng, &mut result, &mut reads, &mut twos);
             rescored.push(i);
+            if is_dropped(i) {
+                continue;
+            }
+            rescore_node(i, origin, rng, &mut result, &mut reads, &mut twos);
+        }
+    }
+    // rescoreRace の reentry: 読み終えた手のいちばん高い点数より、落としたときの見込みが高い終局面は、残りも読んで戻す
+    if let Some(m) = opts.rescore_race.and_then(|rr| rr.reentry) {
+        if !dropped.is_empty() {
+            let best = result
+                .iter()
+                .map(|(_, x)| x.value)
+                .fold(f64::NEG_INFINITY, f64::max);
+            for &(i, origin, est) in &dropped {
+                if est > best - m {
+                    rescore_node(i, origin, rng, &mut result, &mut reads, &mut twos);
+                }
+            }
         }
     }
     // 相手が何もしなければ次のターンに倒しきれる終局面を、ターン末の点数の高い順に passLethal 個まで読み足す
@@ -1955,6 +2041,120 @@ pub fn plan_turn_traced(
     }
     rekey_deferred(result, opts.defer_fuse)
 }
+
+/// rescoreRace で先に読んだ 1 通りの引き直し
+struct RaceRead {
+    value: f64,
+    after: GameState,
+    /// 読んだ後の乱数の状態（twoTurnGate 等が続きの乱数を使う）
+    rng: u32,
+}
+
+/// 相手の手札の引き直し（oppHandCommon。r はその引き直しの種で作った乱数で、読んだ後の状態になる）で、
+/// base から相手のターンを読んだ点数と、読んだ後の局面
+fn read_common(pl: &Planner, base: &GameState, root: &GameState, r: &mut Rng) -> (f64, GameState) {
+    let opts = pl.opts();
+    let mut d = determinize(base, pl.p, r, opts.peek_opp_hand);
+    if opts.resample_draws {
+        resample_own_draws(&mut d, root, pl.p, r);
+    }
+    read_once(pl, &d, r)
+}
+
+/// rescoreRace: 終局面 racers（terminals の添字と、読み直す理由）を、引き直しを rr.first 通り、その後 rr.step 通りずつ読んで比べ、
+/// 見込みのないものを落とす。終局面ごとの読んだ分（落とした終局面も。reentry で戻すときに使う）と、
+/// 落とした終局面（添字・読み直す理由・落としたときの選ぶ値の見込み）を返す
+fn race_rescore(
+    pl: &Planner,
+    terminals: &[Node],
+    racers: &[(usize, RescoreOrigin)],
+    seeds: &[u32],
+    root: &GameState,
+    rr: RescoreRace,
+) -> RaceResult {
+    struct Racer {
+        i: usize,
+        origin: RescoreOrigin,
+        settled: Option<GameState>,
+        left: f64,
+        /// 引き直しごとの読みの点数（残った PP の分を引いたもの）
+        xs: Vec<f64>,
+        reads: Vec<RaceRead>,
+    }
+    let mix = pl.opts().rescore_mix;
+    let mut alive: Vec<Racer> = racers
+        .iter()
+        .map(|&(i, origin)| Racer {
+            i,
+            origin,
+            settled: pl.settle(&terminals[i].state),
+            left: pl.leftover(&terminals[i].state),
+            xs: Vec::new(),
+            reads: Vec::new(),
+        })
+        .collect();
+    let mut dropped: Vec<(usize, RescoreOrigin, f64)> = Vec::new();
+    let mut kept: Vec<(usize, Vec<RaceRead>)> = Vec::new();
+    let mut n = 0;
+    let mut next = rr.first.max(1);
+    while next < seeds.len() && alive.len() >= 2 {
+        for rc in alive.iter_mut() {
+            let base = rc.settled.as_ref().unwrap_or(&terminals[rc.i].state);
+            for &seed in &seeds[n..next] {
+                let mut r = Rng::new(seed);
+                let (v, after) = read_common(pl, base, root, &mut r);
+                rc.xs.push(v - rc.left);
+                rc.reads.push(RaceRead {
+                    value: v,
+                    after,
+                    rng: r.state,
+                });
+            }
+        }
+        n = next;
+        let k = n as f64;
+        let est =
+            |rc: &Racer| (1.0 - mix) * rc.xs.iter().sum::<f64>() / k + mix * terminals[rc.i].value;
+        let mut lead = 0;
+        for j in 1..alive.len() {
+            if est(&alive[j]) > est(&alive[lead]) {
+                lead = j;
+            }
+        }
+        let lead_xs = alive[lead].xs.clone();
+        let lead_te = terminals[alive[lead].i].value;
+        let mut rest: Vec<Racer> = Vec::new();
+        for (j, rc) in alive.into_iter().enumerate() {
+            let keep = j == lead || {
+                let d: Vec<f64> = lead_xs.iter().zip(&rc.xs).map(|(a, b)| a - b).collect();
+                let mean = d.iter().sum::<f64>() / k;
+                let var = if n > 1 {
+                    d.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>() / (k - 1.0)
+                } else {
+                    0.0
+                };
+                let gap = (1.0 - mix) * mean + mix * (lead_te - terminals[rc.i].value);
+                gap <= rr.z * (1.0 - mix) * (var / k).sqrt() + rr.delta
+            };
+            if keep {
+                rest.push(rc);
+            } else {
+                dropped.push((rc.i, rc.origin, est(&rc)));
+                kept.push((rc.i, rc.reads));
+            }
+        }
+        alive = rest;
+        next = n + rr.step.max(1);
+    }
+    kept.extend(alive.into_iter().map(|rc| (rc.i, rc.reads)));
+    (kept, dropped)
+}
+
+/// race_rescore の結果（終局面ごとの読んだ分と、落とした終局面）
+type RaceResult = (
+    Vec<(usize, Vec<RaceRead>)>,
+    Vec<(usize, RescoreOrigin, f64)>,
+);
 
 /// deferFuse: 回せる融合を除いた並びの最初の手を、その並びの手にする（同じ手になったものは点数の高いほうを残す）
 fn rekey_deferred(result: Vec<(Action, Plan)>, defer_fuse: bool) -> Vec<(Action, Plan)> {
