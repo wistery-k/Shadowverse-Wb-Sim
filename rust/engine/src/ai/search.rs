@@ -1449,7 +1449,7 @@ pub fn plan_turn_traced(
                 (k, plan)
             })
             .collect();
-        return rekey_deferred(result, opts.defer_fuse);
+        return rekey_deferred(result, opts.defer_fuse, root);
     }
     let _p = prof::scope(Sec::Rescore);
     let mut ranked: Vec<usize> = best_by_first.iter().map(|(_, i)| *i).collect();
@@ -2051,7 +2051,7 @@ pub fn plan_turn_traced(
         let rows = log_rows.into_inner();
         RESCORE_LOG.with(|e| e.borrow_mut().push(RescoreRecord { p, rows }));
     }
-    rekey_deferred(result, opts.defer_fuse)
+    rekey_deferred(result, opts.defer_fuse, root)
 }
 
 /// rescoreRace で先に読んだ 1 通りの引き直し
@@ -2172,15 +2172,29 @@ type RaceResult = (
 );
 
 /// deferFuse: 回せる融合を除いた並びの最初の手を、その並びの手にする（同じ手になったものは点数の高いほうを残す）
-fn rekey_deferred(result: Vec<(Action, Plan)>, defer_fuse: bool) -> Vec<(Action, Plan)> {
+fn rekey_deferred(
+    result: Vec<(Action, Plan)>,
+    defer_fuse: bool,
+    root: &GameState,
+) -> Vec<(Action, Plan)> {
     if !defer_fuse {
         return result;
     }
+    let legal = legal_actions(root);
     let mut out: Vec<(Action, Plan)> = Vec::new();
     for (_, mut plan) in result {
-        let Some(first) = plan.steps.first().map(|(a, _)| a.clone()) else {
+        let Some(mut first) = plan.steps.first().map(|(a, _)| a.clone()) else {
             continue;
         };
+        // 回せる融合を除いて打ち直した並びの最初の手は、合法手の一覧に無い同じカードの別の 1 枚を使うことがある
+        // （一覧は同じカードの融合先・素材を区別しない）。一覧の手に直す。後の手は使うカードの番号がずれるので、その手を打った後は考え直す
+        if !legal.contains(&first) {
+            if let Some(a) = same_fusion_in(root, &legal, &first) {
+                let after = Rc::new(apply_legal(root, &a));
+                plan.steps = vec![(a.clone(), after)];
+                first = a;
+            }
+        }
         plan.action = first.clone();
         match out.iter_mut().find(|(k, _)| *k == first) {
             Some(e) => {
@@ -2192,6 +2206,36 @@ fn rekey_deferred(result: Vec<(Action, Plan)>, defer_fuse: bool) -> Vec<(Action,
         }
     }
     out
+}
+
+/// 融合 a と同じカード（融合先は種類と融合した種類、素材は種類の組）を使う、合法手の一覧 legal の融合
+fn same_fusion_in(s: &GameState, legal: &[Action], a: &Action) -> Option<Action> {
+    let Action::Fuse { host, materials } = a else {
+        return None;
+    };
+    let hand = &s.players[s.active].hand;
+    let card_of = |iid: Iid| hand.iter().find(|c| c.iid == iid);
+    let kinds = |ms: &[Iid]| -> Option<Vec<CardIdx>> {
+        let mut v = ms
+            .iter()
+            .map(|&m| card_of(m).map(|c| c.card))
+            .collect::<Option<Vec<_>>>()?;
+        v.sort_unstable();
+        Some(v)
+    };
+    let h = card_of(*host)?;
+    let want = kinds(materials)?;
+    legal.iter().find_map(|b| match b {
+        Action::Fuse {
+            host: h2,
+            materials: m2,
+        } => {
+            let c2 = card_of(*h2)?;
+            (c2.card == h.card && c2.fused_kinds == h.fused_kinds && kinds(m2)? == want)
+                .then(|| b.clone())
+        }
+        _ => None,
+    })
 }
 
 /// twoTurnGate: 今の点数で 1 位の手（同点は先のもの。choose_action と同じ）より、2 ターン読みの勝率で
