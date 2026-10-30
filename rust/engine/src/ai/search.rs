@@ -6,6 +6,7 @@
 //! 4. 平均の評価が最も良い「最初の手」を選ぶ。このターンで勝てる並び（リーサル）が見つかれば最優先する
 
 use super::aidata::{ai_data, Weights};
+use super::beam_key::BeamKey;
 use super::converging::{
     converging_attacks, dominated_attack, settle_converging_trade_steps,
     settle_converging_trades_with,
@@ -146,6 +147,8 @@ pub const DEFAULT_DRAW_SPLIT: DrawSplit = DrawSplit {
 };
 
 thread_local! {
+    /// ビームが局面を採点した回数（Planner::score。調べもの用。スレッドごと。svwb beam-gap）
+    static SCORED: Cell<u64> = const { Cell::new(0) };
     /// twoTurnGate を確かめた回数と、手を変えた回数（実験の集計用。スレッドごと）
     static TWO_TURN_GATE_COUNTS: Cell<(u32, u32)> = const { Cell::new((0, 0)) };
 }
@@ -258,6 +261,9 @@ pub struct SearchOptions {
     /// passLethal で終局面を選ぶ判定（None なら next_lethal_search）
     pub pass_lethal_search: Option<NextLethalSearch>,
     pub beam_pp: f64,
+    /// ビームで残す局面を選ぶ並べ替えのキーに足す伸びしろの項の重み（beamKey。ai/beam_key.rs。ターンを終える局面の点数には足さない）。
+    /// 自分のターンのビーム（drawSplit の組み直しを含む）だけに効き、読みの中の相手のビームには効かない
+    pub beam_key: Option<BeamKey>,
     /// 攻撃を後にまとめるビームの幅（attackLater。0 なら使わない）。今のビームに加えて、攻撃以外の手（自分の場が埋まっているときは攻撃も）
     /// だけで手順を作り、各局面で攻撃を貪欲に（手で作った評価で）済ませた後の点数で並べるビームを打ち、その終局面（攻撃を済ませた局面）も候補にする
     pub attack_later: usize,
@@ -355,6 +361,7 @@ impl Default for SearchOptions {
             pass_lethal: 0,
             pass_lethal_search: None,
             beam_pp: 0.0,
+            beam_key: None,
             attack_later: 0,
             per_plan: 0,
             extra_eval: Some(Arc::new(value_net_eval)),
@@ -459,6 +466,8 @@ struct Node {
     first: Action,
     value: f64,
     path: usize,
+    /// ビームの何段目の局面か（根の局面は 0）
+    depth: u32,
 }
 
 fn by_value_desc(x: f64, y: f64) -> std::cmp::Ordering {
@@ -752,6 +761,7 @@ impl<'a> Planner<'a> {
 
     fn score(&self, s: &GameState) -> f64 {
         let _p = prof::scope(Sec::Score);
+        SCORED.with(|c| c.set(c.get() + 1));
         if self.opts().score_turn_end == ScoreTurnEnd::All {
             return self.end_score(s);
         }
@@ -962,6 +972,7 @@ impl<'a> Planner<'a> {
                     first: node.first,
                     value: node.value,
                     path: node.end_path,
+                    depth: depth as u32,
                 });
                 if !expand {
                     continue;
@@ -1106,6 +1117,7 @@ impl<'a> Planner<'a> {
                     first,
                     value,
                     path,
+                    depth: 0,
                 });
                 continue;
             }
@@ -1118,6 +1130,7 @@ impl<'a> Planner<'a> {
                     first: first.clone(),
                     value,
                     path,
+                    depth: 1,
                 });
             }
         }
@@ -1153,12 +1166,20 @@ impl<'a> Planner<'a> {
                             first: first.clone(),
                             value,
                             path: np,
+                            depth: depth as u32 + 1,
                         });
                     }
                 }
             }
             let _p = prof::scope(Sec::Select);
-            if opts.beam_pp != 0.0 {
+            if let Some(k) = &opts.beam_key {
+                let mut keyed: Vec<(f64, Node)> = children
+                    .into_iter()
+                    .map(|n| (n.value + k.bonus(&n.state, p), n))
+                    .collect();
+                keyed.sort_by(|x, y| by_value_desc(x.0, y.0));
+                children = keyed.into_iter().map(|(_, n)| n).collect();
+            } else if opts.beam_pp != 0.0 {
                 let key = |n: &Node| n.value + opts.beam_pp * n.state.players[p].pp as f64;
                 children.sort_by(|x, y| by_value_desc(key(x), key(y)));
             } else {
@@ -2238,6 +2259,7 @@ pub fn simulate_opponent_turn_by_search(
         opponent_search: None,
         attack_later: 0,
         per_plan: 0,
+        beam_key: None,
         ..opts.clone()
     };
     // 読みの中の相手は、自分の評価の重みでなく方策の重み（policy_weights。既定は同じ）で打つ
@@ -2803,6 +2825,128 @@ impl SearchAgent {
             (*t.state).clone(),
             terminals.len(),
         ))
+    }
+}
+
+/// 調べもの用（svwb beam-gap）: 自分のターンのビームを 1 回打った結果
+pub struct BeamProbe {
+    /// ターン末の点数の最大と、その並び
+    pub best: f64,
+    pub best_actions: Vec<Action>,
+    /// ビームの終局面（残した局面）の数
+    pub terminals: usize,
+    /// 局面を採点した回数（残さなかった子の局面を含む）
+    pub scored: u64,
+    /// 残した局面のうち、別の段で先に残した局面と同じもの（同じ局面をまとめるのは段の中だけなので、段をまたいで重なる）
+    pub dup_states: usize,
+    /// 残した局面のうち、段ごとの数（添字が段。0 は根の局面でターンを終える手）
+    pub per_depth: Vec<usize>,
+    /// 選んだ局面（beam_probe の sample）
+    pub nodes: Vec<ProbeNode>,
+}
+
+/// BeamProbe の、残した局面 1 つ
+pub struct ProbeNode {
+    pub state: Rc<GameState>,
+    pub depth: u32,
+    /// ターン末の点数（そこでターンを終えたらの点数。ビームが並べ替えに使う点数）
+    pub value: f64,
+    /// その局面から（その局面を含めて）ビームが届いたターン末の点数の最大
+    pub best_after: f64,
+    /// ターン末の点数が最大の並びの途中の局面か
+    pub on_best: bool,
+    /// 同じ段で残した局面の中での、ターン末の点数の順位（0 が最も高い）と、その段で残した数
+    pub rank: usize,
+    pub layer: usize,
+}
+
+impl SearchAgent {
+    /// 調べもの用（svwb beam-gap）: 局面 root で p のターンのビームを 1 回打つ（root を決定化せず、相手のターンは読まない）。
+    /// sample が 0 より大きければ、残した局面から乱数で sample 個と、最善の並びの途中の局面すべてを、その先で届いた最善と一緒に返す
+    pub fn beam_probe(
+        &self,
+        root: &GameState,
+        p: PlayerIndex,
+        sample: usize,
+        rng: &mut Rng,
+    ) -> Option<BeamProbe> {
+        let env = self.env();
+        let root = Rc::new(root.clone());
+        let before = SCORED.with(|c| c.get());
+        let (pl, terminals, bests) = turn_end_bests(&root, p, &env, env.opts.fuse_root);
+        let scored = SCORED.with(|c| c.get()) - before;
+        let bi = bests.iter().map(|&(_, i)| i).reduce(|b, i| {
+            if terminals[i].value > terminals[b].value {
+                i
+            } else {
+                b
+            }
+        })?;
+        // 並びの手ごとに、その手を通る終局面の点数の最大
+        let mut best_step = vec![f64::NEG_INFINITY; pl.steps.len()];
+        for t in &terminals {
+            let mut cur = Some(t.path);
+            while let Some(i) = cur {
+                best_step[i] = best_step[i].max(t.value);
+                cur = pl.steps[i].prev;
+            }
+        }
+        let mut on_best = vec![false; pl.steps.len()];
+        let mut cur = Some(terminals[bi].path);
+        while let Some(i) = cur {
+            on_best[i] = true;
+            cur = pl.steps[i].prev;
+        }
+        let max_depth = terminals.iter().map(|t| t.depth).max().unwrap_or(0) as usize;
+        let mut per_depth = vec![0usize; max_depth + 1];
+        let mut layers: Vec<Vec<f64>> = vec![Vec::new(); max_depth + 1];
+        for t in &terminals {
+            per_depth[t.depth as usize] += 1;
+            layers[t.depth as usize].push(t.value);
+        }
+        for l in layers.iter_mut() {
+            l.sort_by(|x, y| by_value_desc(*x, *y));
+        }
+        let mut seen = TurnOrderSet::default();
+        let mut dup_states = 0;
+        for t in &terminals {
+            if !seen.add(&t.state) {
+                dup_states += 1;
+            }
+        }
+        let mut nodes = Vec::new();
+        if sample > 0 {
+            let mut pick: Vec<usize> = (0..terminals.len()).collect();
+            rng.shuffle(&mut pick);
+            pick.truncate(sample);
+            for (i, t) in terminals.iter().enumerate() {
+                if on_best[t.path] && !pick.contains(&i) {
+                    pick.push(i);
+                }
+            }
+            for i in pick {
+                let t = &terminals[i];
+                let layer = &layers[t.depth as usize];
+                nodes.push(ProbeNode {
+                    state: t.state.clone(),
+                    depth: t.depth,
+                    value: t.value,
+                    best_after: best_step[t.path],
+                    on_best: on_best[t.path],
+                    rank: layer.iter().take_while(|&&v| v > t.value).count(),
+                    layer: layer.len(),
+                });
+            }
+        }
+        Some(BeamProbe {
+            best: terminals[bi].value,
+            best_actions: pl.steps_actions(terminals[bi].path),
+            terminals: terminals.len(),
+            scored,
+            dup_states,
+            per_depth,
+            nodes,
+        })
     }
 }
 

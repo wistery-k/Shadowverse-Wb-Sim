@@ -4,6 +4,7 @@
 //! テストは tests/（`cargo test --release`）。
 
 pub mod aidata;
+pub mod beam_key;
 pub mod converging;
 pub mod damage_bound;
 pub mod determinize;
