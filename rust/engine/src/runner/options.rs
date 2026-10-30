@@ -256,6 +256,7 @@ pub fn search_options(
                 o.potential = Some(Arc::new(PotentialNet::load(path)?));
             }
             "potentialWeight" => o.potential_weight = number(k, v)?,
+            "potentialDrawSplit" => o.potential_draw_split = flag(k, v)?,
             "attackLater" => o.attack_later = count(k, v)?,
             "perPlan" => o.per_plan = count(k, v)?,
             "scoreTurnEnd" => {

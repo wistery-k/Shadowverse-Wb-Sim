@@ -274,6 +274,8 @@ pub struct SearchOptions {
     /// beamKey と同じく、ターンを終える局面の点数には足さず、自分のターンのビームと bestFirst だけに効く
     pub potential: Option<Arc<PotentialNet>>,
     pub potential_weight: f64,
+    /// 見込みを drawSplit の組み直しのビームにも使うか（potentialDrawSplit、既定 true）
+    pub potential_draw_split: bool,
     /// 攻撃を後にまとめるビームの幅（attackLater。0 なら使わない）。今のビームに加えて、攻撃以外の手（自分の場が埋まっているときは攻撃も）
     /// だけで手順を作り、各局面で攻撃を貪欲に（手で作った評価で）済ませた後の点数で並べるビームを打ち、その終局面（攻撃を済ませた局面）も候補にする
     pub attack_later: usize,
@@ -375,6 +377,7 @@ impl Default for SearchOptions {
             best_first: 0,
             potential: None,
             potential_weight: 1.0,
+            potential_draw_split: true,
             attack_later: 0,
             per_plan: 0,
             extra_eval: Some(Arc::new(value_net_eval)),
@@ -1607,6 +1610,7 @@ pub fn plan_turn_traced(
         beam_width: ds.beam_width,
         max_depth: ds.max_depth,
         draw_split: None,
+        potential: opts.potential.clone().filter(|_| opts.potential_draw_split),
         ..opts.clone()
     });
     let split_env: Option<Env> = split_opts.as_ref().map(|o| Env {

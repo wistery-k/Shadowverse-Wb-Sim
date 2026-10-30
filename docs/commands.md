@@ -485,7 +485,8 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
   （drawSplit の組み直しにも効く。読みの中の相手のビームには効かない）
 - `potentialNet`: 見込みのネットワークのファイルの場所（既定は無し。2026-10-30）。ターン途中の局面から届くターン末の点数の最大と、そこで終えた点数の差を当てる
   小さなネットワーク（`rust/engine/src/ai/potential.rs`）の出力に `potentialWeight`（既定 1）を掛けて、`beamKey` と同じく並べ替えのキー（と `bestFirst` の優先度）にだけ足す。
-  学習のデータは `svwb beam-gap --sample k --inputs`（docs/ai-notes.md「ターン途中の見込みを学ぶ」）
+  学習のデータは `svwb beam-gap --sample k --inputs`（docs/ai-notes.md「ターン途中の見込みを学ぶ」）。
+  `potentialDrawSplit`（真偽、既定 true）を false にすると、drawSplit の組み直しのビームには見込みを使わない
 - `perPlan`: 数（既定 0 で使わない）。ビームの各深さで、同じ「手の組」（手札から出したカード・進化・超進化・能力・エクストラPP の組。攻撃・融合・選ぶ手は数えない）の局面をまずこの数まで残し、余った枠を点数の順に埋める。攻撃先・融合の素材だけが違う並びが枠を埋めて、別のカードを使う手順が切られるのを防ぐ（2026-10-26。docs/ai-notes.md「手の組ごとにビームの枠を設ける」）
 - 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`
