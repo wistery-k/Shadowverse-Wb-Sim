@@ -15,6 +15,7 @@ describe("まとめ方（scripts/pack-run-main.ts）", () => {
     expect(classify("f0.jsonl.gz", '{"g":1,"samples":[]}\n')).toBe("selfplay");
     expect(classify("rc-base.jsonl", '{"g":0,"seat":0,"won":true}\n{"samples":1}')).toBe("logs");
     expect(classify("rfp.json", '{"kind":"td-value-net","version":1,"vocab":[]}')).toBe("models");
+    expect(classify("m1.json", '{"kind":"potential-net","version":1,"vocab":[]}')).toBe("models");
     expect(classify("sim.json", '{"games":[]}')).toBe("logs");
     expect(classify("f0.log", '"samples": 1')).toBe("logs");
   });

@@ -6,7 +6,7 @@
 //! 同じ局面・同じ段の中の順位が合うように学ぶ。並べ替えのキーに足すだけで、ターンを終える局面の点数には足さない。
 //!
 //! 入力は、カードごとの入力（P_ZONES × 語彙）と数値の入力（P_SCALARS）。学習のデータは `svwb beam-gap --inputs`、
-//! 学習は `scripts/train-potential.py`。
+//! 学習は `npm run potential -- train`（scripts/potential-main.ts）。
 
 use super::beam_key::beam_features;
 use crate::data::{data, CardIdx, WARD};
@@ -193,7 +193,7 @@ impl PotentialEncoder {
     }
 }
 
-/// モデルのファイルの形（scripts/train-potential.py が書く）
+/// モデルのファイルの形（scripts/potential-main.ts が書く）
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawPotentialNet {
