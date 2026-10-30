@@ -17,6 +17,7 @@ pub mod mulligan_data;
 pub mod options;
 pub mod parallel;
 pub mod profile;
+pub mod read_log;
 pub mod rhino_compare;
 pub mod td;
 pub mod two_turn;

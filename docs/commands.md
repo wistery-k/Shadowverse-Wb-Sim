@@ -294,6 +294,7 @@ npm run svwb -- two-turn trace --only <局面> --cand <候補> [--r 0] [--seed 1
 npm run svwb -- draw-stability [--subject spellwitch] [--games 12] [--start 0] [--seeds 8] [--a '{}'] [--b '{"drawSplit":{}}']
 npm run svwb -- fuse-gap --dir <記録のディレクトリ> [--opts '<設定の JSON>'] [--out 結果.jsonl] [--show 10]
 npm run svwb -- defer-playout --dir <記録のディレクトリ> --opts '<回す版の設定>' [--cont '<設定>'] [--seeds 8] [--seedBase 0] [--out 結果.jsonl]
+npm run svwb -- read-log --out 記録.jsonl [--games 49] [--start 0] [--opts '<設定の JSON>'] [--b 12] [--alt-opp '{"beamWidth":8,"maxDepth":8}']
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI。
@@ -339,6 +340,10 @@ npm run svwb -- defer-playout --dir <記録のディレクトリ> --opts '<回�
   同じ乱数（相手の手札・山札の並べ直しと AI の乱数）で `--seeds` 通り最後まで打ち、勝ち数を比べる。分かれ目の後は自分を `--cont`（既定は `--opts`）、相手を今の既定の探索 AI で打つ。
   `--seedBase` を変えると別の乱数で打つ（足し合わせる用）。局面ごとの結果を `--out` に試合が終わった順に書き、最後に、全部・試合ごとの合計・その場で作るはずだったカード・
   実際の次のターンに作ったカード・相手のデッキ・PP ごとの差を出す（docs/ai-notes.md「回した融合を、その場でした場合と最後まで打ち比べる」）
+- `read-log`: `profile` と同じ試合（両方の席が `--opts` の設定）を打ち、考え直すたびに、相手のターンまで読み直した終局面ごとの最初の手・ターン末の点数・選ぶときの値と、
+  相手の手札の引き直しごとの読みの点数を 1 行（JSON）ずつ書く。`--b` は、選ぶのに使ったのとは別の乱数の引き直しで読んだ点数（確かめ用の独立な読み）、
+  `--alt-opp` は、同じ引き直しを相手のターンのビームの設定を変えて読んだ点数も書く。記録のための読みは選ぶ値にも乱数にも使わないので、打つ手は記録しないときと同じ
+  （時間は 1.8 倍ほど）。読みを途中で打ち切る決まりを、試合を打たずに試す用（docs/ai-notes.md「読み直しの記録で、見込みのない候補を途中で打ち切る」）
 
 ## td
 

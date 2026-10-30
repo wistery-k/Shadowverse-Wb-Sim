@@ -166,7 +166,7 @@ fn main() {
             cmd @ ("compare" | "rhino-compare" | "deck-compare" | "mulligan-compare"
             | "mulligan-data" | "td" | "yardstick" | "human-plan-value" | "meta"
             | "deep-gap" | "profile" | "two-turn" | "draw-stability" | "fuse-gap"
-            | "defer-playout"),
+            | "defer-playout" | "read-log"),
         ) => {
             let rest = &args[1..];
             let r = match cmd {
@@ -184,6 +184,7 @@ fn main() {
                 "defer-playout" => runner::defer_playout::main(rest),
                 "meta" => runner::meta::main(rest),
                 "profile" => runner::profile::main(rest),
+                "read-log" => runner::read_log::main(rest),
                 _ => runner::td::main(rest),
             };
             if let Err(e) = r {
@@ -192,7 +193,7 @@ fn main() {
             }
         }
         _ => {
-            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | mulligan-data … | td selfplay … | yardstick … | human-plan-value … | deep-gap … | two-turn … | draw-stability … | fuse-gap … | defer-playout … | profile …（rust/README.md）");
+            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | mulligan-data … | td selfplay … | yardstick … | human-plan-value … | deep-gap … | two-turn … | draw-stability … | fuse-gap … | defer-playout … | profile … | read-log …（rust/README.md）");
             std::process::exit(2);
         }
     }

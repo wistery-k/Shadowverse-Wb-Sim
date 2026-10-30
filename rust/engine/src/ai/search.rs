@@ -185,6 +185,73 @@ pub fn take_two_turn_gate_events() -> Vec<GateEvent> {
     GATE_EVENTS.with(|e| std::mem::take(&mut *e.borrow_mut()))
 }
 
+/// 読み直しの記録の設定（svwb read-log。相手のターンの読み直しを軽くする実験用）。
+/// 記録のための読みは、選ぶ値にも乱数にも使わない（打つ手は記録しないときと同じ）
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RescoreLogConfig {
+    /// 相手の手札の引き直しを、選ぶのに使ったもの（oppHandCommon）とは別の乱数でこの数だけ読む（確かめ用の独立な読み。0 なら読まない）
+    pub b_samples: usize,
+    /// 選ぶのに使ったのと同じ引き直しを、相手のターンを読むビームをこの設定にして読む（None なら読まない）
+    pub alt_opp: Option<OpponentSearch>,
+}
+
+/// 読み直す終局面を選んだ理由
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RescoreOrigin {
+    /// ターン末の点数の上位（rescoreTop）
+    Top,
+    /// drawSplit で足した、今打てる引く手（rootDraws）
+    Draw,
+    /// passLethal
+    PassLethal,
+    /// dangerRescore
+    Danger,
+}
+
+/// 読み直した 1 つの終局面の記録
+pub struct RescoreRow {
+    /// 最初の手（deferFuse で回す融合を除く前）
+    pub action: Action,
+    pub origin: RescoreOrigin,
+    /// 決着した終局面（相手のターンを読まない）
+    pub ended: bool,
+    /// drawSplit で区切ったときの、作り直した引きの数（区切らなければ 0）
+    pub split_kinds: usize,
+    /// 混ぜたターン末の点数（区切ったときは作り直した引きごとの平均）
+    pub turn_end: f64,
+    /// 読んだ点数（重み, 点数）。区切らなければ引き直しごと（oppHandCommon の順、重み 1）。どれも残った PP の分を引いたもの
+    pub reads: Vec<(f64, f64)>,
+    /// 別の乱数の引き直しで読んだ点数（RescoreLogConfig::b_samples。区切ったときは、引きごとに同じように分けたもの）
+    pub b_reads: Vec<(f64, f64)>,
+    /// reads と同じ引き直しを、相手のビームを RescoreLogConfig::alt_opp にして読んだ点数
+    pub alt_reads: Vec<(f64, f64)>,
+    /// 選ぶときの値（読んだ点数にターン末の点数を混ぜたもの）
+    pub value: f64,
+}
+
+/// 1 回の考え直し（plan_turn の読み直し）の記録
+pub struct RescoreRecord {
+    pub p: PlayerIndex,
+    /// 読み直した順
+    pub rows: Vec<RescoreRow>,
+}
+
+thread_local! {
+    static RESCORE_LOG_CFG: Cell<Option<RescoreLogConfig>> = const { Cell::new(None) };
+    static RESCORE_LOG: RefCell<Vec<RescoreRecord>> = const { RefCell::new(Vec::new()) };
+}
+
+/// このスレッドで、読み直しを記録するか（None なら記録しない。残したものは捨てる）
+pub fn record_rescores(cfg: Option<RescoreLogConfig>) {
+    RESCORE_LOG_CFG.with(|c| c.set(cfg));
+    RESCORE_LOG.with(|e| e.borrow_mut().clear());
+}
+
+/// 残した読み直しの記録を取り出す
+pub fn take_rescores() -> Vec<RescoreRecord> {
+    RESCORE_LOG.with(|e| std::mem::take(&mut *e.borrow_mut()))
+}
+
 /// 探索 AI の設定（search.ts の SearchOptions。exhaustive 等の実験用の項目のうち既定で使わないものは省く）
 #[derive(Clone)]
 pub struct SearchOptions {
@@ -1355,6 +1422,7 @@ pub fn plan_turn_traced(
     let mut ranked: Vec<usize> = best_by_first.iter().map(|(_, i)| *i).collect();
     ranked.sort_by(|&x, &y| by_value_desc(terminals[x].value, terminals[y].value));
     ranked.truncate(opts.rescore_top);
+    let n_top = ranked.len();
     // drawSplit: 今打てる引く手（先に引く手）が上位に無ければ、ターン末の点数の高い順に足す
     // （同じ局面をまとめると、先に引く並びの終局面が後で引く並びの側に数えられて、先に引く手の点数が下がるため）
     if let Some(ds) = draw_split {
@@ -1433,6 +1501,28 @@ pub fn plan_turn_traced(
         opp_w: env.opp_w,
         policy_w: env.policy_w,
     });
+    // 読み直しの記録（svwb read-log）。記録のための読みの乱数は rng を進めずに作り、選ぶ値には使わない
+    let log_cfg = RESCORE_LOG_CFG.with(|c| c.get());
+    let b_seeds: Vec<u32> = match log_cfg {
+        Some(c) if c.b_samples > 0 => {
+            let mut r = Rng::new(rng.state ^ 0x5bd1_e995);
+            (0..c.b_samples)
+                .map(|_| r.int(u32::MAX as usize) as u32)
+                .collect()
+        }
+        _ => Vec::new(),
+    };
+    let alt_opts: Option<SearchOptions> = log_cfg.and_then(|c| c.alt_opp).map(|o| SearchOptions {
+        opponent_search: Some(o),
+        ..opts.clone()
+    });
+    let alt_env: Option<Env> = alt_opts.as_ref().map(|o| Env {
+        opts: o,
+        w: env.w,
+        opp_w: env.opp_w,
+        policy_w: env.policy_w,
+    });
+    let log_rows: RefCell<Vec<RescoreRow>> = RefCell::new(Vec::new());
     let mut result: Vec<(Action, Plan)> = Vec::new();
     let mut rescored: Vec<usize> = Vec::new();
     let tracing = trace.is_some();
@@ -1441,11 +1531,18 @@ pub fn plan_turn_traced(
     let mut twos: Vec<(Action, f64)> = Vec::new();
     let gate = opts.two_turn_gate;
     let rescore_node = |i: usize,
+                        origin: RescoreOrigin,
                         rng: &mut Rng,
                         result: &mut Vec<(Action, Plan)>,
                         reads: &mut Vec<(Action, ScoreParts)>,
                         twos: &mut Vec<(Action, f64)>| {
         let node = &terminals[i];
+        // 読み直しの記録（読んだ点数・別の乱数で読んだ点数・相手のビームを変えて読んだ点数。どれも (重み, 点数)）
+        let logging = log_cfg.is_some();
+        let mut lg_a: Vec<(f64, f64)> = Vec::new();
+        let mut lg_b: Vec<(f64, f64)> = Vec::new();
+        let mut lg_alt: Vec<(f64, f64)> = Vec::new();
+        let mut lg_kinds = 0usize;
         // twoTurnGate の 2 ターン読みの勝率の合計（読んだ後の局面ごと。乱数は呼んだ側の乱数を写したもので、呼んだ側の乱数は進めない）
         let mut two_sum = 0.0;
         let mut two_of = |after: &GameState, rng: &Rng| {
@@ -1514,6 +1611,7 @@ pub fn plan_turn_traced(
                         .collect(),
                 };
                 let k = samples.len();
+                lg_kinds = k;
                 // 読んだ点数・ターン末の点数の重み付きの和と、重みの和
                 let mut read_sum = 0.0;
                 let mut read_w = 0.0;
@@ -1542,21 +1640,29 @@ pub fn plan_turn_traced(
                         reads += 1;
                         two_of(&end, &r);
                         add((*end).clone());
+                        if logging {
+                            lg_a.push((w, v));
+                            lg_b.push((w, v));
+                            lg_alt.push((w, v));
+                        }
                         continue;
                     }
                     let settled = pl.settle(&end);
                     let base = settled.as_ref().unwrap_or(&end);
                     let left = pl.leftover(&end);
                     // 相手の手札の引き直しは、どの並びでも同じもの（oppHandCommon）を引きの数で分けて使う
-                    let mine: Vec<u32> = if common_seeds.len() >= k {
-                        common_seeds.iter().skip(j).step_by(k).copied().collect()
-                    } else if !common_seeds.is_empty() {
-                        vec![common_seeds[j % common_seeds.len()]]
-                    } else {
-                        vec![r.int(u32::MAX as usize) as u32]
+                    let split_seeds_of = |seeds: &[u32], r: &mut Rng| -> Vec<u32> {
+                        if seeds.len() >= k {
+                            seeds.iter().skip(j).step_by(k).copied().collect()
+                        } else if !seeds.is_empty() {
+                            vec![seeds[j % seeds.len()]]
+                        } else {
+                            vec![r.int(u32::MAX as usize) as u32]
+                        }
                     };
+                    let mine: Vec<u32> = split_seeds_of(&common_seeds, &mut r);
                     let wr = w / mine.len().max(1) as f64;
-                    for seed2 in mine {
+                    for &seed2 in &mine {
                         let mut r2 = Rng::new(seed2);
                         let d = determinize(base, p, &mut r2, opts.peek_opp_hand);
                         let (v, after) = read_once(&pl, &d, &mut r2);
@@ -1565,6 +1671,30 @@ pub fn plan_turn_traced(
                         reads += 1;
                         two_of(&after, &r2);
                         add(after);
+                        if logging {
+                            lg_a.push((wr, v - left));
+                        }
+                    }
+                    if logging {
+                        if !b_seeds.is_empty() {
+                            let mut rb = Rng { state: r.state };
+                            let theirs = split_seeds_of(&b_seeds, &mut rb);
+                            let wb = w / theirs.len().max(1) as f64;
+                            for seed2 in theirs {
+                                let mut r2 = Rng::new(seed2);
+                                let d = determinize(base, p, &mut r2, opts.peek_opp_hand);
+                                let (v, _) = read_once(&pl, &d, &mut r2);
+                                lg_b.push((wb, v - left));
+                            }
+                        }
+                        if let Some(ae) = &alt_env {
+                            for &seed2 in &mine {
+                                let mut r2 = Rng::new(seed2);
+                                let d = determinize(base, p, &mut r2, opts.peek_opp_hand);
+                                let (v, _) = read_once_with(&pl, ae, &d, &mut r2);
+                                lg_alt.push((wr, v - left));
+                            }
+                        }
                     }
                 }
                 if te_w > 0.0 && read_w > 0.0 {
@@ -1576,6 +1706,12 @@ pub fn plan_turn_traced(
             }
             _ => None,
         };
+        if logging && split.is_none() {
+            lg_a.clear();
+            lg_b.clear();
+            lg_alt.clear();
+            lg_kinds = 0;
+        }
         let (value, n) = if let Some(x) = split {
             x
         } else if node.state.phase == Phase::Ended {
@@ -1592,10 +1728,27 @@ pub fn plan_turn_traced(
             let (v, after) = read_once(&pl, settled.as_ref().unwrap_or(&node.state), rng);
             two_of(&after, rng);
             add(after);
+            if logging {
+                lg_a.push((1.0, v - pl.leftover(&node.state)));
+            }
             (v - pl.leftover(&node.state), 1)
         } else {
             let settled = pl.settle(&node.state);
             let base = settled.as_ref().unwrap_or(&node.state);
+            let left = if logging {
+                pl.leftover(&node.state)
+            } else {
+                0.0
+            };
+            // 記録用に、引き直し seed で 1 回読んだ点数（相手は opp_env の設定のビームで打つ）
+            let read_seed = |seed: u32, opp_env: &Env| -> f64 {
+                let mut r = Rng::new(seed);
+                let mut d = determinize(base, p, &mut r, opts.peek_opp_hand);
+                if opts.resample_draws {
+                    resample_own_draws(&mut d, root, p, &mut r);
+                }
+                read_once_with(&pl, opp_env, &d, &mut r).0
+            };
             let mut sum = 0.0;
             if opts.opp_hand_common {
                 for &seed in &common_seeds {
@@ -1608,6 +1761,19 @@ pub fn plan_turn_traced(
                     sum += v;
                     two_of(&after, &r);
                     add(after);
+                    if logging {
+                        lg_a.push((1.0, v - left));
+                    }
+                }
+                if logging {
+                    for &seed in &b_seeds {
+                        lg_b.push((1.0, read_seed(seed, env) - left));
+                    }
+                    if let Some(ae) = &alt_env {
+                        for &seed in &common_seeds {
+                            lg_alt.push((1.0, read_seed(seed, ae) - left));
+                        }
+                    }
                 }
             } else {
                 for _ in 0..opts.opp_hand_samples {
@@ -1616,6 +1782,9 @@ pub fn plan_turn_traced(
                     sum += v;
                     two_of(&after, rng);
                     add(after);
+                    if logging {
+                        lg_a.push((1.0, v - left));
+                    }
                 }
             }
             (
@@ -1630,6 +1799,19 @@ pub fn plan_turn_traced(
         } else {
             value
         };
+        if logging {
+            log_rows.borrow_mut().push(RescoreRow {
+                action: node.first.clone(),
+                origin,
+                ended: node.state.phase == Phase::Ended,
+                split_kinds: lg_kinds,
+                turn_end,
+                reads: lg_a,
+                b_reads: lg_b,
+                alt_reads: lg_alt,
+                value,
+            });
+        }
         let replace = match result.iter().find(|(k, _)| *k == node.first) {
             None => true,
             Some((_, cur)) => value > cur.value,
@@ -1677,9 +1859,14 @@ pub fn plan_turn_traced(
             }
         }
     };
-    for best in ranked {
+    for (bi, best) in ranked.into_iter().enumerate() {
+        let origin = if bi < n_top {
+            RescoreOrigin::Top
+        } else {
+            RescoreOrigin::Draw
+        };
         for i in candidates_of(best) {
-            rescore_node(i, rng, &mut result, &mut reads, &mut twos);
+            rescore_node(i, origin, rng, &mut result, &mut reads, &mut twos);
             rescored.push(i);
         }
     }
@@ -1715,7 +1902,14 @@ pub fn plan_turn_traced(
                 if !pass_turn(base, p).is_some_and(|next| f(&next, p)) {
                     continue;
                 }
-                rescore_node(i, rng, &mut result, &mut reads, &mut twos);
+                rescore_node(
+                    i,
+                    RescoreOrigin::PassLethal,
+                    rng,
+                    &mut result,
+                    &mut reads,
+                    &mut twos,
+                );
                 rescored.push(i);
                 added.push(t.first.clone());
                 n += 1;
@@ -1738,7 +1932,14 @@ pub fn plan_turn_traced(
             if rescored.contains(&i) || !seen.add(&terminals[i].state) {
                 continue;
             }
-            rescore_node(i, rng, &mut result, &mut reads, &mut twos);
+            rescore_node(
+                i,
+                RescoreOrigin::Danger,
+                rng,
+                &mut result,
+                &mut reads,
+                &mut twos,
+            );
             n += 1;
         }
     }
@@ -1747,6 +1948,10 @@ pub fn plan_turn_traced(
     }
     if let Some(tr) = trace {
         tr.reads = reads;
+    }
+    if log_cfg.is_some() {
+        let rows = log_rows.into_inner();
+        RESCORE_LOG.with(|e| e.borrow_mut().push(RescoreRecord { p, rows }));
     }
     rekey_deferred(result, opts.defer_fuse)
 }
@@ -2091,14 +2296,24 @@ pub fn pass_turn(s: &GameState, p: PlayerIndex) -> Option<GameState> {
 
 /// start から相手のターンを読んだ点数と、読んだ後の局面
 fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng) -> (f64, GameState) {
+    read_once_with(pl, pl.env, start, rng)
+}
+
+/// read_once と同じ。相手のターンは opp_env の設定で打つ（読み直しの記録で、相手のビームの設定を変えて比べる用）
+fn read_once_with(
+    pl: &Planner,
+    opp_env: &Env,
+    start: &GameState,
+    rng: &mut Rng,
+) -> (f64, GameState) {
     let env = pl.env;
     let p = pl.p;
     let after = {
         let _p = prof::scope(Sec::OppTurn);
-        if env.opts.opponent_search.is_some() {
-            simulate_opponent_turn_by_search(start, p, rng, env)
+        if opp_env.opts.opponent_search.is_some() {
+            simulate_opponent_turn_by_search(start, p, rng, opp_env)
         } else {
-            simulate_opponent_turn(start, p, rng, env.policy_w, env.opts.opp_fuse)
+            simulate_opponent_turn(start, p, rng, opp_env.policy_w, opp_env.opts.opp_fuse)
         }
     };
     let mut v = match env.opts.own_next {
