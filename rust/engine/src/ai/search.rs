@@ -383,7 +383,7 @@ pub struct SearchOptions {
     pub danger_rescore: usize,
     /// 上位の手を読み直した点数に、ターン末の点数をこの割合で混ぜる（0 なら読み直した点数だけ。既定 0.5、2026-10-22）
     pub rescore_mix: f64,
-    /// 見込みのない終局面の読みを途中で打ち切る（RescoreRace。None なら全部読む）
+    /// 見込みのない終局面の読みを途中で打ち切る（RescoreRace。None なら全部読む。既定は DEFAULT_RESCORE_RACE、2026-10-30）
     pub rescore_race: Option<RescoreRace>,
     pub reuse_agree: bool,
     /// 上位の手を読み直すとき、このターンに引いて手札に残っているカードも引き直す（oppHandSamples の引き直しごと。ビームで決めた 1 通りの引きで手を比べない）
@@ -475,7 +475,7 @@ impl Default for SearchOptions {
             opp_fuse: false,
             danger_rescore: 0,
             rescore_mix: 0.5,
-            rescore_race: None,
+            rescore_race: Some(DEFAULT_RESCORE_RACE),
             reuse_agree: false,
             resample_draws: false,
             draw_first: false,
