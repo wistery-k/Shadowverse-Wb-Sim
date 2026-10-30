@@ -168,7 +168,8 @@ pub fn search_options(
                 o.rescore_race = match v {
                     Json::Null => None,
                     Json::Obj(fields) => {
-                        const KEYS: [&str; 5] = ["first", "step", "z", "delta", "reentry"];
+                        const KEYS: [&str; 6] =
+                            ["first", "step", "z", "delta", "reentry", "lethalGuard"];
                         if let Some((k, _)) =
                             fields.iter().find(|(k, _)| !KEYS.contains(&k.as_str()))
                         {
@@ -196,6 +197,10 @@ pub fn search_options(
                                 None => def.reentry,
                                 Some(Json::Null) => None,
                                 Some(x) => Some(number("rescoreRace.reentry", x)?),
+                            },
+                            lethal_guard: match v.get("lethalGuard") {
+                                None => def.lethal_guard,
+                                Some(x) => flag("rescoreRace.lethalGuard", x)?,
                             },
                         })
                     }

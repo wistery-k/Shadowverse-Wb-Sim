@@ -138,7 +138,9 @@ pub struct DrawSplit {
 /// いちばん良い終局面との差が、同じ引き直しどうしの差のぶれ（標準誤差）の z 倍に delta を足したものより大きい終局面は、残りを読まない。
 /// 読んだ分は残った終局面の読みに使うので、残った終局面の点数は全部読んだときと同じ。
 /// reentry が Some(m) なら、読み終えた手のいちばん高い点数が、落とした終局面の落としたときの見込みより m 以上低ければ
-/// （先に良く見えた終局面が後の引き直しで相手のリーサルを受けた等）、その終局面も残りを読んで候補に戻す
+/// （先に良く見えた終局面が後の引き直しで相手のリーサルを受けた等）、その終局面も残りを読んで候補に戻す。
+/// lethal_guard なら、読んだ引き直しのどれかで相手のリーサルを受けた終局面があるうちは落とさない
+/// （選ぶ値はリーサルを受けた引き直しの数でほぼ決まるが、それは先に読んだ引き直しの点数からは読めない）
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RescoreRace {
     pub first: usize,
@@ -146,6 +148,7 @@ pub struct RescoreRace {
     pub z: f64,
     pub delta: f64,
     pub reentry: Option<f64>,
+    pub lethal_guard: bool,
 }
 
 /// rescoreRace の項目を省いたときの値（{} で使うもの）
@@ -153,8 +156,9 @@ pub const DEFAULT_RESCORE_RACE: RescoreRace = RescoreRace {
     first: 3,
     step: 3,
     z: 2.0,
-    delta: 5.0,
+    delta: 10.0,
     reentry: Some(0.0),
+    lethal_guard: true,
 };
 
 /// 既定の drawSplit: 区切る手が引く手なら一番上のカードを種類ごとに全部試し、残りを幅 32 で組み直す。
@@ -241,6 +245,8 @@ pub struct RescoreRow {
     pub ended: bool,
     /// drawSplit で区切ったときの、作り直した引きの数（区切らなければ 0）
     pub split_kinds: usize,
+    /// drawSplit で区切ったときの、作り直した引きごとの (重み, ターン末の点数, reads の数, b_reads の数)（読んだ順。reads・b_reads はこの順に並ぶ）
+    pub split_detail: Vec<(f64, f64, usize, usize)>,
     /// 混ぜたターン末の点数（区切ったときは作り直した引きごとの平均）
     pub turn_end: f64,
     /// 読んだ点数（重み, 点数）。区切らなければ引き直しごと（oppHandCommon の順、重み 1）。どれも残った PP の分を引いたもの
@@ -1572,6 +1578,7 @@ pub fn plan_turn_traced(
         let mut lg_b: Vec<(f64, f64)> = Vec::new();
         let mut lg_alt: Vec<(f64, f64)> = Vec::new();
         let mut lg_kinds = 0usize;
+        let mut lg_detail: Vec<(f64, f64, usize, usize)> = Vec::new();
         // twoTurnGate の 2 ターン読みの勝率の合計（読んだ後の局面ごと。乱数は呼んだ側の乱数を写したもので、呼んだ側の乱数は進めない）
         let mut two_sum = 0.0;
         let mut two_of = |after: &GameState, rng: &Rng| {
@@ -1673,6 +1680,7 @@ pub fn plan_turn_traced(
                             lg_a.push((w, v));
                             lg_b.push((w, v));
                             lg_alt.push((w, v));
+                            lg_detail.push((w, te, 1, 1));
                         }
                         continue;
                     }
@@ -1691,6 +1699,7 @@ pub fn plan_turn_traced(
                     };
                     let mine: Vec<u32> = split_seeds_of(&common_seeds, &mut r);
                     let wr = w / mine.len().max(1) as f64;
+                    let (na0, nb0) = (lg_a.len(), lg_b.len());
                     for &seed2 in &mine {
                         let mut r2 = Rng::new(seed2);
                         let d = determinize(base, p, &mut r2, opts.peek_opp_hand);
@@ -1724,6 +1733,7 @@ pub fn plan_turn_traced(
                                 lg_alt.push((wr, v - left));
                             }
                         }
+                        lg_detail.push((w, te, lg_a.len() - na0, lg_b.len() - nb0));
                     }
                 }
                 if te_w > 0.0 && read_w > 0.0 {
@@ -1740,6 +1750,7 @@ pub fn plan_turn_traced(
             lg_b.clear();
             lg_alt.clear();
             lg_kinds = 0;
+            lg_detail.clear();
         }
         let (value, n) = if let Some(x) = split {
             x
@@ -1845,6 +1856,7 @@ pub fn plan_turn_traced(
                 origin,
                 ended: node.state.phase == Phase::Ended,
                 split_kinds: lg_kinds,
+                split_detail: lg_detail,
                 turn_end,
                 reads: lg_a,
                 b_reads: lg_b,
@@ -2112,6 +2124,10 @@ fn race_rescore(
             }
         }
         n = next;
+        next = n + rr.step.max(1);
+        if rr.lethal_guard && alive.iter().any(|rc| rc.xs.iter().any(|&x| x <= DANGER)) {
+            continue;
+        }
         let k = n as f64;
         let est =
             |rc: &Racer| (1.0 - mix) * rc.xs.iter().sum::<f64>() / k + mix * terminals[rc.i].value;
@@ -2144,7 +2160,6 @@ fn race_rescore(
             }
         }
         alive = rest;
-        next = n + rr.step.max(1);
     }
     kept.extend(alive.into_iter().map(|rc| (rc.i, rc.reads)));
     (kept, dropped)

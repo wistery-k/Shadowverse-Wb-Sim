@@ -12,7 +12,8 @@
 //! 1 行が 1 回の考え直し（"type":"think"）か 1 試合の結果（"type":"game"）。考え直しの行の "rescores" は plan_turn の読み直しごとに、
 //! 読み直した順の終局面（"rows"）を持つ。各終局面は最初の手（"a"）、選んだ理由（"origin": top・draw・passLethal・danger）、
 //! 決着した終局面か（"ended"）、drawSplit で作り直した引きの数（"kinds"、区切らなければ 0）、混ぜたターン末の点数（"te"）、
-//! 選ぶときの値（"value"）と、読んだ点数の列（"reads"・"b"・"alt"。どれも [重み, 点数]。区切らなければ引き直しごとに重み 1）
+//! 選ぶときの値（"value"）と、読んだ点数の列（"reads"・"b"・"alt"。どれも [重み, 点数]。区切らなければ引き直しごとに重み 1）。
+//! 区切ったときの "kd" は作り直した引きごとの [重み, ターン末の点数, "reads" の数, "b" の数]（読んだ順。"reads"・"b" はこの順に並ぶ）
 
 use super::compare::compare_setup;
 use super::compare_decks;
@@ -51,6 +52,7 @@ fn row_json(s: &crate::state::GameState, p: usize, r: &RescoreRow) -> Value {
         "origin": origin_name(r.origin),
         "ended": r.ended,
         "kinds": r.split_kinds,
+        "kd": r.split_detail.iter().map(|&(w, te, na, nb)| json!([w, te, na, nb])).collect::<Vec<_>>(),
         "te": r.turn_end,
         "value": r.value,
         "reads": pairs(&r.reads),

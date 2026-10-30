@@ -70,6 +70,7 @@ fn race_keeps_values_of_the_rest() {
         z: 0.0,
         delta: 0.0,
         reentry: None,
+        lethal_guard: false,
     };
     let mut dropped = 0;
     for (full, raced) in both(race) {
@@ -96,6 +97,7 @@ fn race_with_huge_margin_changes_nothing() {
         z: 0.0,
         delta: 1e12,
         reentry: Some(0.0),
+        lethal_guard: true,
     };
     for (full, raced) in both(race) {
         assert_eq!(full, raced);
