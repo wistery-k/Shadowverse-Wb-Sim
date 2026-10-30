@@ -296,6 +296,7 @@ npm run svwb -- draw-stability [--subject spellwitch] [--games 12] [--start 0] [
 npm run svwb -- fuse-gap --dir <記録のディレクトリ> [--opts '<設定の JSON>'] [--out 結果.jsonl] [--show 10]
 npm run svwb -- defer-playout --dir <記録のディレクトリ> --opts '<回す版の設定>' [--cont '<設定>'] [--seeds 8] [--seedBase 0] [--out 結果.jsonl]
 npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth":4096,"potentialNet":null}'] [--variants '{"名前":{設定},…}'] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl] [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl] [--inputs 学習のデータ.jsonl]
+npm run svwb -- read-log --out 記録.jsonl [--games 49] [--start 0] [--opts '<設定の JSON>'] [--b 12] [--alt-opp '{"beamWidth":8,"maxDepth":8}']
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI。
@@ -350,6 +351,10 @@ npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth
   `--inputs` なら、`--sample` で選んだ局面の見込みのネットワーク（`potentialNet`）の入力と、終えた点数・届いた最善を書く（学習のデータ）。
   設定は今の既定の上に重ねるので、2026-10-30 からは見込みが入る。見込みなしのビームは `"potentialNet":null` を書く（`--ref` の既定は見込みなしの幅 4096）
   （docs/ai-notes.md「ターン途中の評価の見直し」）
+- `read-log`: `profile` と同じ試合（両方の席が `--opts` の設定）を打ち、考え直すたびに、相手のターンまで読み直した終局面ごとの最初の手・ターン末の点数・選ぶときの値と、
+  相手の手札の引き直しごとの読みの点数を 1 行（JSON）ずつ書く。`--b` は、選ぶのに使ったのとは別の乱数の引き直しで読んだ点数（確かめ用の独立な読み）、
+  `--alt-opp` は、同じ引き直しを相手のターンのビームの設定を変えて読んだ点数も書く。記録のための読みは選ぶ値にも乱数にも使わないので、打つ手は記録しないときと同じ
+  （時間は 1.8 倍ほど）。読みを途中で打ち切る決まりを、試合を打たずに試す用（docs/ai-notes.md「読み直しの記録で、見込みのない候補を途中で打ち切る」）
 
 ## td
 
@@ -515,6 +520,12 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
   `"enumerate": true` なら、区切る手が自分の山札の枚数を変える手のとき、`samples` 通りの代わりに山札の一番上のカードを山札にある種類ごとに全部試し、その種類の枚数の割合で重みを付けて平均する
   （2 枚目からは乱数で並べ直したまま。既定 false）。`"class": "witch"` 等なら、自分のデッキがそのクラスのときだけ使う
 - `rescoreMix`: 0〜1 の数。上位の手を相手のターンまで読み直した点数に、ターン末の点数をこの割合で混ぜる（既定 0.5。0 で 2026-10-22 より前の読み方）
+- `rescoreRace`: `null`（使わない。2026-10-30 より前）か `{"first": 3, "step": 3, "z": 2, "delta": 10, "reentry": 0, "lethalGuard": true}`（既定。書かない項目はこの値）。
+  読み直す上位の手のうち、drawSplit で区切らない・決着していない終局面は、相手の手札の引き直しを `first` 通り、その後 `step` 通り読むたびに選ぶ値の見込みを比べ、
+  いちばん良い終局面との差が、同じ引き直しどうしの差の標準誤差の `z` 倍に `delta` を足したものより大きいものは残りを読まない。
+  `reentry` が数なら、読み終えた手のいちばん高い点数が、落とした終局面の落としたときの見込みよりその数以上低ければ、その終局面も残りを読んで戻す（`null` で戻さない）。
+  `lethalGuard` なら、読んだ引き直しのどれかで相手のリーサルを受けた終局面があるうちは落とさない。
+  残った終局面の点数は全部読んだときと同じ（docs/ai-notes.md「読み直しの記録で、見込みのない候補を途中で打ち切る」）
 - `scoreTurnEnd`: `"none"`・`"terminal"`・`"all"`
 - `mulligan`: `"turn1"`（既定。引き直した後、`mulliganTurns`（既定 3）ターン目の自分のターンの終わりまで、0 なら自分の 1 ターン目の最初まで、
   貪欲法か幅 `mulliganRolloutBeam` のビームで進めてから採点する）・`"model"`（手札の形のモデル。2026-10-26 より前の既定）・`"weights"`・`"cost"`・`"sample"`・`"keep"`（1 枚も返さない。比べ用）

@@ -9,8 +9,8 @@ use crate::ai::mulligan::OppMulligan;
 use crate::ai::potential::PotentialNet;
 use crate::ai::rhino::{rhino_pass_lethal, rhino_search_options, RHINO_POTENTIAL};
 use crate::ai::search::{
-    DrawSplit, ExtraEval, MulliganMode, OpponentSearch, OwnNextSearch, RolloutWeights,
-    ScoreTurnEnd, SearchOptions, TwoTurnGate,
+    DrawSplit, ExtraEval, MulliganMode, OpponentSearch, OwnNextSearch, RescoreRace, RolloutWeights,
+    ScoreTurnEnd, SearchOptions, TwoTurnGate, DEFAULT_RESCORE_RACE,
 };
 use crate::ai::valuenet::ValueNet;
 use crate::data::ClassId;
@@ -186,6 +186,54 @@ pub fn search_options(
                     return Err(format!("\"rescoreMix\" は 0 以上 1 以下: {x}"));
                 }
                 o.rescore_mix = x;
+            }
+            "rescoreRace" => {
+                o.rescore_race = match v {
+                    Json::Null => None,
+                    Json::Obj(fields) => {
+                        const KEYS: [&str; 6] =
+                            ["first", "step", "z", "delta", "reentry", "lethalGuard"];
+                        if let Some((k, _)) =
+                            fields.iter().find(|(k, _)| !KEYS.contains(&k.as_str()))
+                        {
+                            return Err(format!("rescoreRace の知らない項目: {k}"));
+                        }
+                        let def = DEFAULT_RESCORE_RACE;
+                        Some(RescoreRace {
+                            first: match v.get("first") {
+                                None => def.first,
+                                Some(x) => count("rescoreRace.first", x)?,
+                            },
+                            step: match v.get("step") {
+                                None => def.step,
+                                Some(x) => count("rescoreRace.step", x)?,
+                            },
+                            z: match v.get("z") {
+                                None => def.z,
+                                Some(x) => number("rescoreRace.z", x)?,
+                            },
+                            delta: match v.get("delta") {
+                                None => def.delta,
+                                Some(x) => number("rescoreRace.delta", x)?,
+                            },
+                            reentry: match v.get("reentry") {
+                                None => def.reentry,
+                                Some(Json::Null) => None,
+                                Some(x) => Some(number("rescoreRace.reentry", x)?),
+                            },
+                            lethal_guard: match v.get("lethalGuard") {
+                                None => def.lethal_guard,
+                                Some(x) => flag("rescoreRace.lethalGuard", x)?,
+                            },
+                        })
+                    }
+                    _ => {
+                        return Err(format!(
+                            "\"rescoreRace\" は null かオブジェクト: {}",
+                            v.stringify()
+                        ))
+                    }
+                }
             }
             "mulliganSamples" => o.mulligan_samples = count(k, v)?,
             "mulliganTurns" => o.mulligan_turns = count(k, v)? as i32,

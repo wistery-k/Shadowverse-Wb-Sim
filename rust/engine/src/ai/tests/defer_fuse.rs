@@ -317,3 +317,42 @@ fn deferred_plan_still_makes_settled_trades() {
     let a = ag.choose_action(&s, &legal, &mut Rng::new(1));
     assert!(matches!(a, Action::Attack { .. }), "{a:?}");
 }
+
+#[test]
+fn deferred_plans_start_with_listed_actions() {
+    // 回せる融合を除いて打ち直した並びの最初の手が、同じカードの別の 1 枚を使う融合（合法手の一覧には無い）になることがある。
+    // 一覧に無い手は選ばれず、次に良い手を打っていた（2026-10-30、AFネメシスで 1 試合 0.46 回）。読み直した手は、どれも一覧の手
+    let small = || SearchOptions {
+        beam_width: 32,
+        max_depth: 8,
+        ..SearchOptions::default()
+    };
+    let mut checked = 0;
+    for (k, seed) in [5u32, 11, 17].into_iter().enumerate() {
+        let mut s = new_game(deck("AFネメシス"), deck_at(k + 1), seed);
+        let mut agents = [SearchAgent::new(small()), SearchAgent::new(small())];
+        let mut rng = Rng::new(seed);
+        while s.phase != Phase::Ended && s.turn <= 16 {
+            let legal = legal_actions(&s);
+            let p = acting_player(&s);
+            if p == 0
+                && s.pending.is_none()
+                && legal.len() > 1
+                && legal.iter().any(|a| matches!(a, Action::Fuse { .. }))
+            {
+                for plan in agents[0].ranked_plans(&s, p, &mut Rng::new(seed ^ s.turn as u32)) {
+                    assert!(
+                        legal.contains(&plan.action),
+                        "一覧に無い手 {:?}（ターン {}）",
+                        plan.action,
+                        s.turn
+                    );
+                    checked += 1;
+                }
+            }
+            let a = agents[p].choose_action(&s, &legal, &mut rng);
+            s = apply(&s, &a);
+        }
+    }
+    assert!(checked > 0);
+}
