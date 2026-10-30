@@ -2,12 +2,13 @@
 // docs/ai-notes.md「ターン途中の見込みを学ぶ」
 //
 //   npm run potential -- train --data d1.jsonl[,d2.jsonl] --out model.json [--hidden 64] [--epochs 8] [--T 5] [--lr 0.001]
-//                          [--l2 0.000001] [--batch 256] [--scale 20] [--valid 160-199] [--seed 1]
+//                          [--l2 0.000001] [--batch 256] [--scale 20] [--valid 160-199] [--seed 1] [--groups depth|position]
 //
 // データは svwb beam-gap --sample k --inputs の JSON Lines（1 行目は語彙と入力の並び、2 行目からは途中の局面 1 つずつ）。
 // 同じ局面・同じ段（試合・局面・手数）の途中の局面の組ごとに、キー = そこでターンを終えた点数 v + 見込み g(x) の softmax(キー / T) が、
 // 幅の広いビームでその途中の局面から届いた最善 y の softmax(y / T) に近づくように学ぶ（ListNet）。
 // ネットワークは入力 → 隠れ層 1 つ（ReLU）→ 出力。学ぶ間は出力の重みを小さく持ち、scale 倍して書き出す。
+// --groups position なら、組を段に分けず局面ごとにする（手数の違う局面どうしも比べられるように学ぶ。段を作らない探索 bestFirst 向けの試し）。
 // --valid の範囲の試合は学ばず、確かめに使う（損失と、組の中で届いた最善が最大の局面をキーで 1 位にした割合）。
 // この 2 つは目安で、採用は beam-gap（学びに使っていない局面での取りこぼし）で決める。
 
@@ -15,7 +16,7 @@ import { closeSync, openSync, readSync, writeFileSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 
 const USAGE = `使い方: npm run potential -- train --data d1.jsonl[,d2.jsonl] --out model.json [--hidden 64] [--epochs 8] [--T 5]
-  [--lr 0.001] [--l2 0.000001] [--batch 256] [--scale 20] [--valid 160-199] [--seed 1]（docs/commands.md の「potential」）`;
+  [--lr 0.001] [--l2 0.000001] [--batch 256] [--scale 20] [--valid 160-199] [--seed 1] [--groups depth|position]（docs/commands.md の「potential」）`;
 
 export async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
@@ -28,7 +29,9 @@ export async function main(argv: string[]): Promise<number> {
   const data = loadPotentialData(need(args, "data").split(","));
   const [lo, hi] = need(args, "valid", "160-199").split("-").map(Number);
   if (lo === undefined || hi === undefined || !Number.isFinite(lo) || !Number.isFinite(hi)) throw new Error("--valid は 160-199 の形");
-  const { train, valid } = makeGroups(data, (game) => game >= lo && game <= hi);
+  const groupsBy = need(args, "groups", "depth");
+  if (groupsBy !== "depth" && groupsBy !== "position") throw new Error("--groups は depth か position");
+  const { train, valid } = makeGroups(data, (game) => game >= lo && game <= hi, groupsBy === "depth");
   console.log(`${data.v.length} 局面・入力 ${data.nIn}、学びの組 ${train.length}・確かめの組 ${valid.length}（読み込み ${((Date.now() - t0) / 1000).toFixed(0)}s）`);
   const opts: TrainOptions = {
     hidden: num(args, "hidden", 64),
@@ -90,8 +93,10 @@ export interface PotentialData {
   /** 幅の広いビームでそこから届いた最善 */
   y: Float64Array;
   game: Int32Array;
-  /** 同じ局面・同じ段の組の名前（ファイル・試合・局面・手数） */
-  group: string[];
+  /** 局面の名前（ファイル・試合・局面） */
+  position: string[];
+  /** 手数 */
+  depth: Int32Array;
 }
 
 /** 型付き配列を伸ばしながら足す */
@@ -152,7 +157,8 @@ export function loadPotentialData(files: string[]): PotentialData {
   const v = new Grow(new Float64Array(1024), (n) => new Float64Array(n));
   const y = new Grow(new Float64Array(1024), (n) => new Float64Array(n));
   const game = new Grow(new Int32Array(1024), (n) => new Int32Array(n));
-  const group: string[] = [];
+  const position: string[] = [];
+  const depth = new Grow(new Int32Array(1024), (n) => new Int32Array(n));
   rowPtr.push(0);
   files.forEach((file, fi) => {
     const lines = readLines(file);
@@ -185,7 +191,8 @@ export function loadPotentialData(files: string[]): PotentialData {
       y.push(field(r, "y", where));
       const g = field(r, "game", where);
       game.push(g);
-      group.push(`${fi}/${g}/${field(r, "k", where)}/${field(r, "depth", where)}`);
+      position.push(`${fi}/${g}/${field(r, "k", where)}`);
+      depth.push(field(r, "depth", where));
     }
   });
   if (head === undefined) throw new Error("--data がありません");
@@ -198,14 +205,19 @@ export function loadPotentialData(files: string[]): PotentialData {
     v: v.done(),
     y: y.done(),
     game: game.done(),
-    group,
+    position,
+    depth: depth.done(),
   };
 }
 
-/** 局面を組にまとめ、届いた最善が 2 通り以上ある組だけを学び・確かめに分けて返す（組は局面の添字の配列） */
-export function makeGroups(d: PotentialData, isValid: (game: number) => boolean): { train: Int32Array[]; valid: Int32Array[] } {
+/**
+ * 途中の局面を組（同じ局面・同じ段。byDepth が false なら同じ局面）にまとめ、届いた最善が 2 通り以上ある組だけを
+ * 学び・確かめに分けて返す（組は途中の局面の添字の配列）
+ */
+export function makeGroups(d: PotentialData, isValid: (game: number) => boolean, byDepth = true): { train: Int32Array[]; valid: Int32Array[] } {
   const m = new Map<string, number[]>();
-  d.group.forEach((g, i) => {
+  d.position.forEach((pos, i) => {
+    const g = byDepth ? `${pos}/${d.depth[i]!}` : pos;
     const a = m.get(g);
     if (a) a.push(i);
     else m.set(g, [i]);
