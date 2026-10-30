@@ -149,10 +149,11 @@ if [ "$POT" = 1 ]; then
   if [ ! -s "$W/$NAME-pot-eval.txt" ]; then
     EVAR="{\"w32\":{\"beamWidth\":32,\"potentialNet\":null,\"valueNet\":\"$MPA\"},\"w32cur\":{\"beamWidth\":32,\"valueNet\":\"$MPA\"},\"w32new\":{\"beamWidth\":32,\"potentialNet\":\"$MPOT\",\"valueNet\":\"$MPA\"},"
     EVAR+="\"w128\":{\"beamWidth\":128,\"potentialNet\":null,\"valueNet\":\"$MPA\"},\"w128cur\":{\"beamWidth\":128,\"valueNet\":\"$MPA\"},\"w128new\":{\"beamWidth\":128,\"potentialNet\":\"$MPOT\",\"valueNet\":\"$MPA\"}}"
-    $B beam-gap --positions "$W/pot-val-pos.jsonl" --refFrom "$W/pot-val-rows.jsonl" --variants "$EVAR" > "$W/$NAME-pot-eval.txt.tmp" 2> "$W/$NAME-pot-eval.log"
+    $B beam-gap --positions "$W/pot-val-pos.jsonl" --refFrom "$W/pot-val-rows.jsonl" --ref "$PREF" --variants "$EVAR" \
+      > "$W/$NAME-pot-eval.txt.tmp" 2> "$W/$NAME-pot-eval.log"
     mv "$W/$NAME-pot-eval.txt.tmp" "$W/$NAME-pot-eval.txt"
   fi
-  echo "== 見込みの取りこぼし（学ばなかった g$((POT_FROM + PT))〜）"; { grep -E "^(基準|全部|  )" "$W/$NAME-pot-eval.txt" || true; } | head -n 9
+  echo "== 見込みの取りこぼし（学ばなかった g$((POT_FROM + PT))〜）"; { grep -E "^(基準|全部|  )" "$W/$NAME-pot-eval.txt" || true; } | head -n 9 | sed "s|$W/||g"
   sha256sum "$MPOT"
   OPT="{\"valueNet\":\"$MPA\",\"potentialNet\":\"$MPOT\"}"
 else
@@ -187,7 +188,7 @@ pct() { grep -m 1 -oE '[0-9]+/[0-9]+ = [0-9.]+%' "$1" || true; }
 {
   echo "# 補正の学び直し（$NAME、出発点 $NET0、S は --base $BASE、自己対戦 $G 試合・g$SEED0〜）"
   echo
-  echo "判定した設定: \`$OPT\`（リノセウス用 AI は \`$OPTV\`）"
+  echo "判定した設定（作業フォルダの中のファイル）: \`${OPT//$W\//}\`（リノセウス用 AI は \`${OPTV//$W\//}\`）"
   echo
   echo "| 判定 | 勝率 |"
   echo "| --- | ---: |"
@@ -208,7 +209,7 @@ pct() { grep -m 1 -oE '[0-9]+/[0-9]+ = [0-9.]+%' "$1" || true; }
     echo "見込みの取りこぼし（学ばなかった試合の局面。基準は見込みなしの幅 4096、どれも学び直した補正で採点。cur は今の既定の見込み、new は学び直した見込み）:"
     echo
     echo '```'
-    { grep -E "^(基準|全部|  )" "$W/$NAME-pot-eval.txt" || true; } | head -n 9
+    { grep -E "^(基準|全部|  )" "$W/$NAME-pot-eval.txt" || true; } | head -n 9 | sed "s|$W/||g"
     echo '```'
   fi
 } > "$W/relearn.md"
