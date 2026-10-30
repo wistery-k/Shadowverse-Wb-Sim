@@ -7,13 +7,19 @@
 //!
 //! 入力は、カードごとの入力（P_ZONES × 語彙）と数値の入力（P_SCALARS）。学習のデータは `svwb beam-gap --inputs`、
 //! 学習は `npm run potential -- train`（scripts/potential-main.ts）。
+//!
+//! 2026-10-30 から探索 AI の既定（幅 128 ＋ この見込み。今の幅 512 と同じ強さで思考は 12% 速い）。既定のモデルは data/potential-net.json
+//! （ユーザーの PC で 2000 試合分のデータで学んだもの。共有フォルダの data/models/potential-1/m1.json の重みを有効数字 7 桁にしたもの）。
+//! 評価関数（重み・data/value-net.json）を変えたら、見込みも学び直す（データの v・y はその評価の点数）。
 
+use super::aidata::ai_data;
 use super::beam_key::beam_features;
 use crate::data::{data, CardIdx, WARD};
 use crate::game::{can_attack_followers, can_attack_leader};
 use crate::state::{hand_cost, opponent, Evolve, GameState, Phase, PlayerIndex};
 use serde::Deserialize;
 use std::cell::RefCell;
+use std::sync::{Arc, OnceLock};
 
 /// カードごとの入力の種類（並びはモデルと同じでなければならない）
 pub const P_ZONES: [&str; 8] = [
@@ -194,9 +200,9 @@ impl PotentialEncoder {
 }
 
 /// モデルのファイルの形（scripts/potential-main.ts が書く）
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct RawPotentialNet {
+pub struct RawPotentialNet {
     kind: String,
     version: u32,
     vocab: Vec<String>,
@@ -233,11 +239,15 @@ impl PotentialNet {
             std::fs::read_to_string(path).map_err(|e| format!("{path} を読めません: {e}"))?;
         let raw: RawPotentialNet = serde_json::from_str(&text)
             .map_err(|e| format!("{path} は見込みのネットワークではありません: {e}"))?;
+        PotentialNet::new(raw).map_err(|e| format!("{path}: {e}"))
+    }
+
+    pub fn new(raw: RawPotentialNet) -> Result<PotentialNet, String> {
         if raw.kind != "potential-net" || raw.version != 1 {
-            return Err(format!("{path}: kind・version が違います"));
+            return Err("kind・version が違います".into());
         }
         if raw.zones != P_ZONES || raw.scalars != P_SCALARS {
-            return Err(format!("{path}: 入力の並びが今のコードと違います"));
+            return Err("入力の並びが今のコードと違います".into());
         }
         let enc = PotentialEncoder::new(&raw.vocab);
         let n = enc.n_inputs();
@@ -245,7 +255,7 @@ impl PotentialNet {
             || raw.b1.len() != raw.hidden
             || raw.w2.len() != raw.hidden
         {
-            return Err(format!("{path}: 重みの大きさが合いません"));
+            return Err("重みの大きさが合いません".into());
         }
         Ok(PotentialNet {
             enc,
@@ -282,4 +292,15 @@ impl PotentialNet {
             z
         })
     }
+}
+
+/// 既定の見込み（data/potential-net.json。探索 AI の既定 SearchOptions::default() が使う）
+pub fn default_potential_net() -> Arc<PotentialNet> {
+    static NET: OnceLock<Arc<PotentialNet>> = OnceLock::new();
+    NET.get_or_init(|| {
+        Arc::new(
+            PotentialNet::new(ai_data().potential_net.clone()).expect("data/potential-net.json"),
+        )
+    })
+    .clone()
 }

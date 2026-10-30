@@ -25,7 +25,7 @@ use super::mulligan::{
     model_mulligan_swap, mulligan_action, rollout_mulligan, sampled_mulligan,
     weighted_mulligan_swap, OppMulligan, RolloutPolicy,
 };
-use super::potential::PotentialNet;
+use super::potential::{default_potential_net, PotentialNet};
 use super::rhino::deck_class_of;
 use super::think::{Thought, ThoughtCandidate};
 use super::valuenet::{default_net_weights, value_net_eval, ValuePhase};
@@ -271,10 +271,11 @@ pub struct SearchOptions {
     /// 自分のターンのビームだけに効く
     pub best_first: usize,
     /// ビームで残す局面を選ぶ並べ替えのキーに足す、学習した見込み（potentialNet。ai/potential.rs）と、その倍率（potentialWeight）。
-    /// beamKey と同じく、ターンを終える局面の点数には足さず、自分のターンのビームと bestFirst だけに効く
+    /// beamKey と同じく、ターンを終える局面の点数には足さず、自分のターンのビームと bestFirst だけに効く（読みの中の相手には効かない）。
+    /// 既定は data/potential-net.json（2026-10-30 から）
     pub potential: Option<Arc<PotentialNet>>,
     pub potential_weight: f64,
-    /// 見込みを drawSplit の組み直しのビームにも使うか（potentialDrawSplit、既定 true）
+    /// 見込みを drawSplit の組み直しのビームにも使うか（potentialDrawSplit、既定 false。使うと組み直しが重くなり、勝率は同じ）
     pub potential_draw_split: bool,
     /// 攻撃を後にまとめるビームの幅（attackLater。0 なら使わない）。今のビームに加えて、攻撃以外の手（自分の場が埋まっているときは攻撃も）
     /// だけで手順を作り、各局面で攻撃を貪欲に（手で作った評価で）済ませた後の点数で並べるビームを打ち、その終局面（攻撃を済ませた局面）も候補にする
@@ -323,8 +324,10 @@ impl Default for SearchOptions {
             samples: 1,
             // 32 から 128 に（6400 試合で 52.9%、時間は 1 割ほど増える。docs/ai-notes.md「棋譜の指摘: ビームの幅」）。
             // 2026-10-26 に幅 128・深さ 8 から幅 512・深さ 16 に（別のシードの 2000 試合で 51.3%、1 試合の時間は 1.1 倍ほど。
-            // docs/ai-notes.md「人間なら見える手順の取りこぼしを掘る」）
-            beam_width: 512,
+            // docs/ai-notes.md「人間なら見える手順の取りこぼしを掘る」）。
+            // 2026-10-30 に、並べ替えに学習した見込み（potential）を足して幅 128 に（幅 512 に 50.4% ± 0.67、思考は 12% 速い。
+            // docs/ai-notes.md「ターン途中の見込みを学ぶ」）
+            beam_width: 128,
             max_depth: 16,
             rescore_top: 4,
             lethal: true,
@@ -375,9 +378,9 @@ impl Default for SearchOptions {
             beam_pp: 0.0,
             beam_key: None,
             best_first: 0,
-            potential: None,
+            potential: Some(default_potential_net()),
             potential_weight: 1.0,
-            potential_draw_split: true,
+            potential_draw_split: false,
             attack_later: 0,
             per_plan: 0,
             extra_eval: Some(Arc::new(value_net_eval)),
@@ -415,6 +418,7 @@ impl SearchOptions {
     pub fn with_classic_sampling(self) -> SearchOptions {
         SearchOptions {
             beam_width: 32,
+            potential: None,
             max_depth: 8,
             samples: 3,
             plan_candidates: 3,

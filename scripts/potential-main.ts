@@ -9,6 +9,7 @@
 // 幅の広いビームでその途中の局面から届いた最善 y の softmax(y / T) に近づくように学ぶ（ListNet）。
 // ネットワークは入力 → 隠れ層 1 つ（ReLU）→ 出力。学ぶ間は出力の重みを小さく持ち、scale 倍して書き出す。
 // --groups position なら、組を段に分けず局面ごとにする（手数の違う局面どうしも比べられるように学ぶ。段を作らない探索 bestFirst 向けの試し）。
+// 重みは有効数字 7 桁で書き出す（ファイルを小さくする。data/potential-net.json もこの形）。
 // --valid の範囲の試合は学ばず、確かめに使う（損失と、組の中で届いた最善が最大の局面をキーで 1 位にした割合）。
 // この 2 つは目安で、採用は beam-gap（学びに使っていない局面での取りこぼし）で決める。
 
@@ -412,6 +413,7 @@ export function trainPotential(d: PotentialData, train: Int32Array[], valid: Int
     }
     report(`${ep + 1} 回目 学びの損失 ${(lossSum / Math.max(1, train.length)).toFixed(4)}`);
   }
+  const round = (x: number): number => Number(x.toPrecision(7));
   return {
     kind: "potential-net",
     version: 1,
@@ -419,9 +421,9 @@ export function trainPotential(d: PotentialData, train: Int32Array[], valid: Int
     zones: d.zones,
     scalars: d.scalars,
     hidden: H,
-    w1: Array.from(p.w1),
-    b1: Array.from(p.b1),
-    w2: Array.from(p.w2, (x) => x * opts.scale),
+    w1: Array.from(p.w1, round),
+    b1: Array.from(p.b1, round),
+    w2: Array.from(p.w2, (x) => round(x * opts.scale)),
     b2: 0,
   };
 }

@@ -1,6 +1,6 @@
 //! 自分のターンのビームが、広いビームの見つけるターン末の最善にどれだけ届くかを、ビームの形（幅・並べ替え）ごとに測る（2026-10-30）。
 //!
-//!   svwb beam-gap [--games 50] [--from 0] [--ref '{"beamWidth":4096}'] [--variants '{"名前":{設定},…}']
+//!   svwb beam-gap [--games 50] [--from 0] [--ref '{"beamWidth":4096,"potentialNet":null}'] [--variants '{"名前":{設定},…}']
 //!                 [--every 1] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl]
 //!                 [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl]
 //!                 [--inputs 学習のデータ.jsonl]
@@ -9,6 +9,8 @@
 //! 視点のプレイヤーから決定化した局面で、基準の設定（`--ref`）と比べる設定（`--variants`）のビームを 1 回ずつ打つ（相手のターンは読まない）。
 //! 設定ごとに、ターン末の点数の最大が基準より低い局面の割合・平均の差・最善の最初の手が違う割合・採点した局面の数・時間を出す。
 //! 勝ち負けの点（絶対値 1e5 以上）が付く局面は数えない。
+//! 設定は今の既定の上に重ねる。2026-10-30 から既定に学習した見込み（potentialNet）が入るので、見込みなしのビームは `"potentialNet":null` を書く
+//! （基準の既定は見込みなしの幅 4096）。
 //!
 //! `--sample k` なら、基準のビームが残した局面から局面ごとに k 個（と最善の並びの途中の局面すべて）を、そこでターンを終えた点数・
 //! その先で届いた最善（伸びしろ = 届いた最善 − 終えた点数）・伸びしろの項（ai/beam_key.rs）と一緒に `--nodes` に書く。
@@ -18,7 +20,7 @@
 //! 基準のビームも時間がかかるので、同じ局面・同じ基準で前に書いた `--out` を `--refFrom` に渡すと、基準を打ち直さずにその結果を使う
 //! （`--sample` とは一緒に使えない）。
 //! `--inputs` なら、`--sample` で選んだ局面（段 1 以上）の見込みのネットワークの入力（ai/potential.rs）と、終えた点数・届いた最善を書く
-//! （1 行目は語彙と入力の並び。学習は scripts/train-potential.py）。
+//! （1 行目は語彙と入力の並び。学習は npm run potential -- train）。
 //! docs/ai-notes.md「ターン途中の評価の見直し」
 
 use super::human_plan::{is_start_of_turn, mean_se};
@@ -286,7 +288,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut games = 50u32;
     let mut from = 0u32;
     let mut every = 1usize;
-    let mut ref_text = r#"{"beamWidth":4096}"#.to_string();
+    let mut ref_text = r#"{"beamWidth":4096,"potentialNet":null}"#.to_string();
     let mut variants_text = r#"{"w128":{"beamWidth":128},"w512":{}}"#.to_string();
     let mut sample = 0usize;
     let mut nodes_path: Option<String> = None;

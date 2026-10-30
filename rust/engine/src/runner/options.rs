@@ -250,10 +250,16 @@ pub fn search_options(
             "beamKey" => o.beam_key = Some(beam_key(v)?),
             "bestFirst" => o.best_first = count(k, v)?,
             "potentialNet" => {
-                let Json::Str(path) = v else {
-                    return Err("potentialNet は見込みのネットワークのファイルの場所".into());
+                o.potential = match v {
+                    Json::Str(path) => Some(Arc::new(PotentialNet::load(path)?)),
+                    // 見込みを使わない（2026-10-30 より前の既定は {"beamWidth":512,"potentialNet":null}）
+                    Json::Null => None,
+                    _ => {
+                        return Err(
+                            "potentialNet は見込みのネットワークのファイルの場所か null".into()
+                        )
+                    }
                 };
-                o.potential = Some(Arc::new(PotentialNet::load(path)?));
             }
             "potentialWeight" => o.potential_weight = number(k, v)?,
             "potentialDrawSplit" => o.potential_draw_split = flag(k, v)?,

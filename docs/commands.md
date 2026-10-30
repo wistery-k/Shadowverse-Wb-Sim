@@ -295,7 +295,7 @@ npm run svwb -- two-turn trace --only <局面> --cand <候補> [--r 0] [--seed 1
 npm run svwb -- draw-stability [--subject spellwitch] [--games 12] [--start 0] [--seeds 8] [--a '{}'] [--b '{"drawSplit":{}}']
 npm run svwb -- fuse-gap --dir <記録のディレクトリ> [--opts '<設定の JSON>'] [--out 結果.jsonl] [--show 10]
 npm run svwb -- defer-playout --dir <記録のディレクトリ> --opts '<回す版の設定>' [--cont '<設定>'] [--seeds 8] [--seedBase 0] [--out 結果.jsonl]
-npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth":4096}'] [--variants '{"名前":{設定},…}'] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl] [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl] [--inputs 学習のデータ.jsonl]
+npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth":4096,"potentialNet":null}'] [--variants '{"名前":{設定},…}'] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl] [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl] [--inputs 学習のデータ.jsonl]
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI。
@@ -347,7 +347,8 @@ npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth
   （勝ち負けの点の付く局面は数えない）。`--sample k` なら、基準のビームが残した局面から局面ごとに k 個と最善の並びの途中の局面すべてを、そこでターンを終えた点数・その先で届いた最善・
   伸びしろの項（`beamKey` の項）と一緒に `--nodes` に書く（`beamKey` の重みを決める用）。自己対戦は時間がかかるので、`--savePositions` で書いた局面を次から `--positions` で読める。
   基準のビームも時間がかかるので、同じ局面・同じ基準で前に書いた `--out` を `--refFrom` に渡すと、基準を打ち直さずにその結果を使う（`--sample` とは一緒に使えない）。
-  `--inputs` なら、`--sample` で選んだ局面の見込みのネットワーク（`potentialNet`）の入力と、終えた点数・届いた最善を書く（学習のデータ）
+  `--inputs` なら、`--sample` で選んだ局面の見込みのネットワーク（`potentialNet`）の入力と、終えた点数・届いた最善を書く（学習のデータ）。
+  設定は今の既定の上に重ねるので、2026-10-30 からは見込みが入る。見込みなしのビームは `"potentialNet":null` を書く（`--ref` の既定は見込みなしの幅 4096）
   （docs/ai-notes.md「ターン途中の評価の見直し」）
 
 ## td
@@ -377,11 +378,11 @@ npm run td -- eval --model a.json,b.json --data d.jsonl [--cards <カード名,�
 ## potential
 
 ```sh
-npm run svwb -- beam-gap --games 200 --variants '{"w32":{"beamWidth":32}}' --sample 100 --inputs d1.jsonl --savePositions pos1.jsonl --out rows1.jsonl
+npm run svwb -- beam-gap --games 200 --variants '{"w32":{"beamWidth":32,"potentialNet":null}}' --sample 100 --inputs d1.jsonl --savePositions pos1.jsonl --out rows1.jsonl
 npm run potential -- train --data d1.jsonl[,d2.jsonl] --out model.json [--hidden 64] [--epochs 8] [--T 5] [--lr 0.001]
                        [--l2 0.000001] [--batch 256] [--scale 20] [--valid 160-199] [--seed 1]
                        [--groups depth|position]
-npm run svwb -- beam-gap --positions pos1.jsonl --refFrom rows1.jsonl --variants '{"w32":{"beamWidth":32},"w32p":{"beamWidth":32,"potentialNet":"model.json"}}'
+npm run svwb -- beam-gap --positions pos1.jsonl --refFrom rows1.jsonl --variants '{"w32":{"beamWidth":32,"potentialNet":null},"w32p":{"beamWidth":32,"potentialNet":"model.json"}}'
 ```
 
 `beam-gap --sample k --inputs` は、基準のビーム（既定は幅 4096）が残した途中の局面を局面ごとに k 個（と最善の並びの途中の局面）選び、
@@ -483,10 +484,12 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
 - `bestFirst`: 数（既定 0 で使わない。2026-10-30）。自分のターンのビームを、段を作らずに、優先度（ターン末の点数 + `beamKey` の伸びしろ）の高い局面から 1 つずつ広げる探索に替える。
   採点した局面の数がこの数に達したら広げるのをやめる（深さの上限は `maxDepth`）。同じ局面は段をまたいでまとめ、点数の高いほうを残す。`beamWidth` は使わない
   （drawSplit の組み直しにも効く。読みの中の相手のビームには効かない）
-- `potentialNet`: 見込みのネットワークのファイルの場所（既定は無し。2026-10-30）。ターン途中の局面から届くターン末の点数の最大と、そこで終えた点数の差を当てる
-  小さなネットワーク（`rust/engine/src/ai/potential.rs`）の出力に `potentialWeight`（既定 1）を掛けて、`beamKey` と同じく並べ替えのキー（と `bestFirst` の優先度）にだけ足す。
-  学習のデータは `svwb beam-gap --sample k --inputs`（docs/ai-notes.md「ターン途中の見込みを学ぶ」）。
-  `potentialDrawSplit`（真偽、既定 true）を false にすると、drawSplit の組み直しのビームには見込みを使わない
+- `potentialNet`: 見込みのネットワークのファイルの場所か `null`（使わない）。既定は `data/potential-net.json`（2026-10-30 から。ビームの幅の既定も 512 → 128）。
+  ターン途中の局面から届くターン末の点数の最大と、そこで終えた点数の差を当てる小さなネットワーク（`rust/engine/src/ai/potential.rs`）の出力に
+  `potentialWeight`（既定 1）を掛けて、`beamKey` と同じく並べ替えのキー（と `bestFirst` の優先度）にだけ足す（読みの中の相手のビームには効かない）。
+  学び方は上の「potential」（docs/ai-notes.md「ターン途中の見込みを学ぶ」）。
+  `potentialDrawSplit`（真偽、既定 false）を true にすると、drawSplit の組み直しのビームにも見込みを使う（重くなり、勝率は同じ）。
+  2026-10-30 より前の既定は `{"beamWidth":512,"potentialNet":null}`
 - `perPlan`: 数（既定 0 で使わない）。ビームの各深さで、同じ「手の組」（手札から出したカード・進化・超進化・能力・エクストラPP の組。攻撃・融合・選ぶ手は数えない）の局面をまずこの数まで残し、余った枠を点数の順に埋める。攻撃先・融合の素材だけが違う並びが枠を埋めて、別のカードを使う手順が切られるのを防ぐ（2026-10-26。docs/ai-notes.md「手の組ごとにビームの枠を設ける」）
 - 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`
