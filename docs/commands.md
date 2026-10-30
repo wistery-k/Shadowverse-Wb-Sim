@@ -380,12 +380,14 @@ npm run td -- eval --model a.json,b.json --data d.jsonl [--cards <カード名,�
 npm run svwb -- beam-gap --games 200 --variants '{"w32":{"beamWidth":32}}' --sample 100 --inputs d1.jsonl --savePositions pos1.jsonl --out rows1.jsonl
 npm run potential -- train --data d1.jsonl[,d2.jsonl] --out model.json [--hidden 64] [--epochs 8] [--T 5] [--lr 0.001]
                        [--l2 0.000001] [--batch 256] [--scale 20] [--valid 160-199] [--seed 1]
+                       [--groups depth|position]
 npm run svwb -- beam-gap --positions pos1.jsonl --refFrom rows1.jsonl --variants '{"w32":{"beamWidth":32},"w32p":{"beamWidth":32,"potentialNet":"model.json"}}'
 ```
 
 `beam-gap --sample k --inputs` は、基準のビーム（既定は幅 4096）が残した途中の局面を局面ごとに k 個（と最善の並びの途中の局面）選び、
 見込みのネットワークの入力・そこでターンを終えた点数・そこから届いた最善を書く。`train` は同じ局面・同じ手数の局面の組ごとに、
 「終えた点数 + 見込み」の順位が届いた最善の順位に合うように学ぶ（ListNet。`--T` は softmax の温度で点数の単位）。
+`--groups position` なら組を手数で分けず局面ごとにする（段を作らない探索 `bestFirst` 向けの試し。段のあるビームでは既定の `depth` がずっと良い）。
 `--valid` の範囲の試合（`game`）は学ばず、確かめの損失と「1 位の当たり」を出す。この 2 つは目安で、良し悪しは学びに使っていない試合の局面での
 `beam-gap`（`--positions` と `--refFrom` で基準のビームを打ち直さずに比べる）で決める。docs/ai-notes.md「ターン途中の見込みを学ぶ」
 
