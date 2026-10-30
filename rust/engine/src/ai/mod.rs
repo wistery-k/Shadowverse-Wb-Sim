@@ -16,6 +16,7 @@ pub mod keys;
 pub mod lethal;
 pub mod lethal_hint;
 pub mod mulligan;
+pub mod potential;
 pub mod registry;
 pub mod rhino;
 pub mod rhino_lethal;

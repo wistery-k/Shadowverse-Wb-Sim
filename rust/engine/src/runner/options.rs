@@ -6,6 +6,7 @@
 use crate::ai::aidata::{weights_from, AI_DATA_JSON};
 use crate::ai::beam_key::{BeamKey, BEAM_FEATURES, N_BEAM_FEATURES};
 use crate::ai::mulligan::OppMulligan;
+use crate::ai::potential::PotentialNet;
 use crate::ai::rhino::{rhino_pass_lethal, rhino_search_options, RHINO_POTENTIAL};
 use crate::ai::search::{
     DrawSplit, ExtraEval, MulliganMode, OpponentSearch, OwnNextSearch, RolloutWeights,
@@ -248,6 +249,13 @@ pub fn search_options(
             "beamPp" => o.beam_pp = number(k, v)?,
             "beamKey" => o.beam_key = Some(beam_key(v)?),
             "bestFirst" => o.best_first = count(k, v)?,
+            "potentialNet" => {
+                let Json::Str(path) = v else {
+                    return Err("potentialNet は見込みのネットワークのファイルの場所".into());
+                };
+                o.potential = Some(Arc::new(PotentialNet::load(path)?));
+            }
+            "potentialWeight" => o.potential_weight = number(k, v)?,
             "attackLater" => o.attack_later = count(k, v)?,
             "perPlan" => o.per_plan = count(k, v)?,
             "scoreTurnEnd" => {

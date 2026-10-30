@@ -25,6 +25,7 @@ use super::mulligan::{
     model_mulligan_swap, mulligan_action, rollout_mulligan, sampled_mulligan,
     weighted_mulligan_swap, OppMulligan, RolloutPolicy,
 };
+use super::potential::PotentialNet;
 use super::rhino::deck_class_of;
 use super::think::{Thought, ThoughtCandidate};
 use super::valuenet::{default_net_weights, value_net_eval, ValuePhase};
@@ -269,6 +270,10 @@ pub struct SearchOptions {
     /// （bestFirst。0 なら使わず、beamWidth のビーム）。同じ局面はターン全体でまとめ、点数の高いほうを残す。深さの上限は maxDepth。
     /// 自分のターンのビームだけに効く
     pub best_first: usize,
+    /// ビームで残す局面を選ぶ並べ替えのキーに足す、学習した見込み（potentialNet。ai/potential.rs）と、その倍率（potentialWeight）。
+    /// beamKey と同じく、ターンを終える局面の点数には足さず、自分のターンのビームと bestFirst だけに効く
+    pub potential: Option<Arc<PotentialNet>>,
+    pub potential_weight: f64,
     /// 攻撃を後にまとめるビームの幅（attackLater。0 なら使わない）。今のビームに加えて、攻撃以外の手（自分の場が埋まっているときは攻撃も）
     /// だけで手順を作り、各局面で攻撃を貪欲に（手で作った評価で）済ませた後の点数で並べるビームを打ち、その終局面（攻撃を済ませた局面）も候補にする
     pub attack_later: usize,
@@ -368,6 +373,8 @@ impl Default for SearchOptions {
             beam_pp: 0.0,
             beam_key: None,
             best_first: 0,
+            potential: None,
+            potential_weight: 1.0,
             attack_later: 0,
             per_plan: 0,
             extra_eval: Some(Arc::new(value_net_eval)),
@@ -1132,8 +1139,7 @@ impl<'a> Planner<'a> {
         let p = self.p;
         let opts = self.opts();
         let budget = opts.best_first;
-        let prio =
-            |n: &Node| n.value + opts.beam_key.as_ref().map_or(0.0, |k| k.bonus(&n.state, p));
+        let prio = |n: &Node| n.value + key_bonus(opts, &n.state, p).unwrap_or(0.0);
         let mut heap: std::collections::BinaryHeap<Prio> = std::collections::BinaryHeap::new();
         let mut nodes: Vec<Option<Node>> = Vec::new();
         // 同じ局面ごとに、残した局面の nodes の添字と点数
@@ -1297,7 +1303,7 @@ impl<'a> Planner<'a> {
             let _p = prof::scope(Sec::Select);
             // beamKey では、点数の高い子が残らないことがある。採点は済んでいるので、最初の手ごとに残らなかった子の点数の最大も終局面の候補にする
             let mut cut_best: Vec<Node> = Vec::new();
-            if opts.beam_key.is_some() {
+            if opts.beam_key.is_some() || opts.potential.is_some() {
                 for c in &children {
                     match cut_best.iter_mut().find(|b| b.first == c.first) {
                         None => cut_best.push(c.clone()),
@@ -1309,10 +1315,10 @@ impl<'a> Planner<'a> {
                     }
                 }
             }
-            if let Some(k) = &opts.beam_key {
+            if opts.beam_key.is_some() || opts.potential.is_some() {
                 let mut keyed: Vec<(f64, Node)> = children
                     .into_iter()
-                    .map(|n| (n.value + k.bonus(&n.state, p), n))
+                    .map(|n| (n.value + key_bonus(opts, &n.state, p).unwrap_or(0.0), n))
                     .collect();
                 keyed.sort_by(|x, y| by_value_desc(x.0, y.0));
                 children = keyed.into_iter().map(|(_, n)| n).collect();
@@ -1340,6 +1346,19 @@ impl<'a> Planner<'a> {
         terminals.extend(frontier);
         terminals
     }
+}
+
+/// 並べ替えのキーに足す伸びしろ（beamKey の項と、学習した見込み potentialNet の和）。どちらも無ければ None
+fn key_bonus(opts: &SearchOptions, s: &GameState, p: PlayerIndex) -> Option<f64> {
+    if opts.beam_key.is_none() && opts.potential.is_none() {
+        return None;
+    }
+    let k = opts.beam_key.as_ref().map_or(0.0, |k| k.bonus(s, p));
+    let n = opts
+        .potential
+        .as_ref()
+        .map_or(0.0, |net| opts.potential_weight * net.eval(s, p));
+    Some(k + n)
 }
 
 /// fuseRoot で、先に融合する並びを探すときに調べる局面の数の上限と、先に融合した局面の数の上限
@@ -2403,6 +2422,7 @@ pub fn simulate_opponent_turn_by_search(
         per_plan: 0,
         beam_key: None,
         best_first: 0,
+        potential: None,
         ..opts.clone()
     };
     // 読みの中の相手は、自分の評価の重みでなく方策の重み（policy_weights。既定は同じ）で打つ

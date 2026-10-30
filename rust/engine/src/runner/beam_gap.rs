@@ -3,6 +3,7 @@
 //!   svwb beam-gap [--games 50] [--from 0] [--ref '{"beamWidth":4096}'] [--variants '{"名前":{設定},…}']
 //!                 [--every 1] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl]
 //!                 [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl]
+//!                 [--inputs 学習のデータ.jsonl]
 //!
 //! 今の既定どうしの自己対戦（`sim::play_ai`、比較用の 7 デッキ）の、自分のターンの最初の局面（`--every k` なら k 局面に 1 つ）を集め、
 //! 視点のプレイヤーから決定化した局面で、基準の設定（`--ref`）と比べる設定（`--variants`）のビームを 1 回ずつ打つ（相手のターンは読まない）。
@@ -16,6 +17,8 @@
 //! 自己対戦は時間がかかるので、`--savePositions` で集めた局面を書いておき、次からは `--positions` で読める。
 //! 基準のビームも時間がかかるので、同じ局面・同じ基準で前に書いた `--out` を `--refFrom` に渡すと、基準を打ち直さずにその結果を使う
 //! （`--sample` とは一緒に使えない）。
+//! `--inputs` なら、`--sample` で選んだ局面（段 1 以上）の見込みのネットワークの入力（ai/potential.rs）と、終えた点数・届いた最善を書く
+//! （1 行目は語彙と入力の並び。学習は scripts/train-potential.py）。
 //! docs/ai-notes.md「ターン途中の評価の見直し」
 
 use super::human_plan::{is_start_of_turn, mean_se};
@@ -24,6 +27,7 @@ use super::parallel::parallel_map;
 use super::{fixed, seconds_since};
 use crate::ai::beam_key::{beam_features, BEAM_FEATURES};
 use crate::ai::determinize::determinize;
+use crate::ai::potential::{default_vocab, PotentialEncoder, P_SCALARS, P_ZONES};
 use crate::ai::search::{is_chance_step, BeamProbe, SearchAgent, SearchOptions};
 use crate::ai::{Agent, Rng};
 use crate::data::data;
@@ -68,6 +72,8 @@ struct Row {
     reference: Probe,
     variants: Vec<Probe>,
     nodes: Vec<String>,
+    /// 見込みのネットワークの学習のデータ（--inputs）
+    inputs: Vec<String>,
 }
 
 fn deck_names(g: u32) -> [String; 2] {
@@ -236,6 +242,34 @@ fn ref_from_json(line: &str) -> Result<((u32, usize), Probe, bool), String> {
     ))
 }
 
+/// 見込みのネットワークの学習のデータの 1 行（局面の入力と、終えた点数・届いた最善）
+fn input_line(
+    pos: &Position,
+    enc: &PotentialEncoder,
+    n: &crate::ai::search::ProbeNode,
+    buf: &mut Vec<(usize, f64)>,
+) -> String {
+    enc.encode(&n.state, pos.p, buf);
+    let x = Json::Arr(
+        buf.iter()
+            .map(|&(i, v)| Json::Arr(vec![Json::Num(i as f64), Json::Num(v)]))
+            .collect(),
+    );
+    Json::Obj(vec![
+        ("game".into(), Json::Num(pos.game as f64)),
+        ("k".into(), Json::Num(pos.k as f64)),
+        ("depth".into(), Json::Num(n.depth as f64)),
+        ("deck".into(), Json::Str(pos.deck.clone())),
+        ("v".into(), Json::Num(n.value)),
+        ("y".into(), Json::Num(n.best_after)),
+        ("on".into(), Json::Bool(n.on_best)),
+        ("rank".into(), Json::Num(n.rank as f64)),
+        ("layer".into(), Json::Num(n.layer as f64)),
+        ("x".into(), x),
+    ])
+    .stringify()
+}
+
 fn probe_json(r: &Probe) -> Json {
     Json::Obj(vec![
         ("best".into(), Json::Num(r.best)),
@@ -260,6 +294,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut positions_path: Option<String> = None;
     let mut save_path: Option<String> = None;
     let mut ref_from: Option<String> = None;
+    let mut inputs_path: Option<String> = None;
     let mut i = 0;
     while i < argv.len() {
         let v = argv.get(i + 1).cloned().ok_or("引数の値がありません")?;
@@ -275,10 +310,16 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             "--positions" => positions_path = Some(v),
             "--savePositions" => save_path = Some(v),
             "--refFrom" => ref_from = Some(v),
+            "--inputs" => inputs_path = Some(v),
             k => return Err(format!("不明な引数: {k}（runner/beam_gap.rs）")),
         }
         i += 2;
     }
+    if inputs_path.is_some() && sample == 0 {
+        return Err("--inputs には --sample が要ります".into());
+    }
+    let vocab = default_vocab();
+    let encoder = PotentialEncoder::new(&vocab);
     if ref_from.is_some() && sample > 0 {
         return Err("--refFrom と --sample は一緒に使えません".into());
     }
@@ -351,6 +392,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             let det = determinize(&s, p, &mut r, false);
             let mut rng = Rng::new(7 + pos.k as u32);
             let turn = det.players[p].turn_count;
+            let mut inputs = Vec::new();
             let (reference, nodes, chance) = if ref_from.is_some() {
                 let i = known
                     .binary_search_by_key(&(pos.game, pos.k), |x| x.0)
@@ -369,10 +411,21 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                     sample,
                     &mut rng,
                 );
-                let nodes = match full {
+                let nodes = match &full {
                     Some(f) => f.nodes.iter().map(|n| node_line(pos, turn, n)).collect(),
                     None => Vec::new(),
                 };
+                if let (Some(f), true) = (&full, inputs_path.is_some()) {
+                    let mut buf = Vec::new();
+                    inputs = f
+                        .nodes
+                        .iter()
+                        .filter(|n| {
+                            n.depth > 0 && n.value.abs() < DECIDED && n.best_after.abs() < DECIDED
+                        })
+                        .map(|n| input_line(pos, &encoder, n, &mut buf))
+                        .collect();
+                }
                 let chance = has_chance(&det, &reference.actions, p);
                 (reference, nodes, chance)
             };
@@ -389,6 +442,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                 reference,
                 variants,
                 nodes,
+                inputs,
             })
         },
         |done, total, _, _| {
@@ -402,6 +456,29 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         let mut w = std::fs::File::create(path).map_err(|e| format!("{path}: {e}"))?;
         for r in &rows {
             for l in &r.nodes {
+                writeln!(w, "{l}").map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    if let Some(path) = &inputs_path {
+        let mut w = std::fs::File::create(path).map_err(|e| format!("{path}: {e}"))?;
+        let head = Json::Obj(vec![
+            (
+                "vocab".into(),
+                Json::Arr(vocab.iter().map(|v| Json::Str(v.clone())).collect()),
+            ),
+            (
+                "zones".into(),
+                Json::Arr(P_ZONES.iter().map(|v| Json::Str((*v).into())).collect()),
+            ),
+            (
+                "scalars".into(),
+                Json::Arr(P_SCALARS.iter().map(|v| Json::Str((*v).into())).collect()),
+            ),
+        ]);
+        writeln!(w, "{}", head.stringify()).map_err(|e| e.to_string())?;
+        for r in &rows {
+            for l in &r.inputs {
                 writeln!(w, "{l}").map_err(|e| e.to_string())?;
             }
         }
