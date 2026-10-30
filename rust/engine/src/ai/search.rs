@@ -6,6 +6,7 @@
 //! 4. 平均の評価が最も良い「最初の手」を選ぶ。このターンで勝てる並び（リーサル）が見つかれば最優先する
 
 use super::aidata::{ai_data, Weights};
+use super::beam_key::BeamKey;
 use super::converging::{
     converging_attacks, dominated_attack, settle_converging_trade_steps,
     settle_converging_trades_with,
@@ -15,7 +16,7 @@ use super::eval::{evaluate_with, EvalWeights};
 use super::exact_lethal::{search_exact_lethal, sure_lethal_options};
 use super::fusion::{excessive_fusion, fuse_root_chains, last_words_to_hand};
 use super::greedy::{choose_greedy, value_after};
-use super::keys::{hand_eq_noid, state_eq, visible_eq, TurnOrderSet};
+use super::keys::{hand_eq_noid, state_eq, visible_eq, TurnOrderMap, TurnOrderSet};
 use super::lethal::{
     find_lethal, search_lethal, LethalOptions, LethalSearch, DEFAULT_LETHAL_OPTIONS,
     GUARDED_LETHAL_OPTIONS,
@@ -24,6 +25,7 @@ use super::mulligan::{
     model_mulligan_swap, mulligan_action, rollout_mulligan, sampled_mulligan,
     weighted_mulligan_swap, OppMulligan, RolloutPolicy,
 };
+use super::potential::{default_potential_net, PotentialNet};
 use super::rhino::deck_class_of;
 use super::think::{Thought, ThoughtCandidate};
 use super::valuenet::{default_net_weights, value_net_eval, ValuePhase};
@@ -174,6 +176,8 @@ pub const DEFAULT_DRAW_SPLIT: DrawSplit = DrawSplit {
 };
 
 thread_local! {
+    /// ビームが局面を採点した回数（Planner::score。調べもの用。スレッドごと。svwb beam-gap）
+    static SCORED: Cell<u64> = const { Cell::new(0) };
     /// twoTurnGate を確かめた回数と、手を変えた回数（実験の集計用。スレッドごと）
     static TWO_TURN_GATE_COUNTS: Cell<(u32, u32)> = const { Cell::new((0, 0)) };
 }
@@ -355,6 +359,21 @@ pub struct SearchOptions {
     /// passLethal で終局面を選ぶ判定（None なら next_lethal_search）
     pub pass_lethal_search: Option<NextLethalSearch>,
     pub beam_pp: f64,
+    /// ビームで残す局面を選ぶ並べ替えのキーに足す伸びしろの項の重み（beamKey。ai/beam_key.rs。ターンを終える局面の点数には足さない）。
+    /// 自分のターンのビーム（drawSplit の組み直しを含む）だけに効き、読みの中の相手のビームには効かない。
+    /// 点数の高い子が残らないことがあるので、各段で最初の手ごとに、残らなかった子の点数の最大も終局面の候補にする
+    pub beam_key: Option<BeamKey>,
+    /// 層ごとのビームの代わりに、優先度（ターン末の点数 + beamKey の伸びしろ）の高い局面から 1 つずつ広げ、採点した局面の数がこの数に達したら止める
+    /// （bestFirst。0 なら使わず、beamWidth のビーム）。同じ局面はターン全体でまとめ、点数の高いほうを残す。深さの上限は maxDepth。
+    /// 自分のターンのビームだけに効く
+    pub best_first: usize,
+    /// ビームで残す局面を選ぶ並べ替えのキーに足す、学習した見込み（potentialNet。ai/potential.rs）と、その倍率（potentialWeight）。
+    /// beamKey と同じく、ターンを終える局面の点数には足さず、自分のターンのビームと bestFirst だけに効く（読みの中の相手には効かない）。
+    /// 既定は data/potential-net.json（2026-10-30 から）
+    pub potential: Option<Arc<PotentialNet>>,
+    pub potential_weight: f64,
+    /// 見込みを drawSplit の組み直しのビームにも使うか（potentialDrawSplit、既定 false。使うと組み直しが重くなり、勝率は同じ）
+    pub potential_draw_split: bool,
     /// 攻撃を後にまとめるビームの幅（attackLater。0 なら使わない）。今のビームに加えて、攻撃以外の手（自分の場が埋まっているときは攻撃も）
     /// だけで手順を作り、各局面で攻撃を貪欲に（手で作った評価で）済ませた後の点数で並べるビームを打ち、その終局面（攻撃を済ませた局面）も候補にする
     pub attack_later: usize,
@@ -404,8 +423,10 @@ impl Default for SearchOptions {
             samples: 1,
             // 32 から 128 に（6400 試合で 52.9%、時間は 1 割ほど増える。docs/ai-notes.md「棋譜の指摘: ビームの幅」）。
             // 2026-10-26 に幅 128・深さ 8 から幅 512・深さ 16 に（別のシードの 2000 試合で 51.3%、1 試合の時間は 1.1 倍ほど。
-            // docs/ai-notes.md「人間なら見える手順の取りこぼしを掘る」）
-            beam_width: 512,
+            // docs/ai-notes.md「人間なら見える手順の取りこぼしを掘る」）。
+            // 2026-10-30 に、並べ替えに学習した見込み（potential）を足して幅 128 に（幅 512 に 50.4% ± 0.67、思考は 12% 速い。
+            // docs/ai-notes.md「ターン途中の見込みを学ぶ」）
+            beam_width: 128,
             max_depth: 16,
             rescore_top: 4,
             lethal: true,
@@ -454,6 +475,11 @@ impl Default for SearchOptions {
             pass_lethal: 0,
             pass_lethal_search: None,
             beam_pp: 0.0,
+            beam_key: None,
+            best_first: 0,
+            potential: Some(default_potential_net()),
+            potential_weight: 1.0,
+            potential_draw_split: false,
             attack_later: 0,
             per_plan: 0,
             extra_eval: Some(Arc::new(value_net_eval)),
@@ -492,6 +518,7 @@ impl SearchOptions {
     pub fn with_classic_sampling(self) -> SearchOptions {
         SearchOptions {
             beam_width: 32,
+            potential: None,
             max_depth: 8,
             samples: 3,
             plan_candidates: 3,
@@ -554,11 +581,43 @@ struct Step {
     prev: Option<usize>,
 }
 
+#[derive(Clone)]
 struct Node {
     state: Rc<GameState>,
     first: Action,
     value: f64,
     path: usize,
+    /// ビームの何段目の局面か（根の局面は 0）
+    depth: u32,
+}
+
+/// bestFirst の優先度つきキューの要素（key の大きい順、同じなら先に入れた順）
+struct Prio {
+    key: f64,
+    seq: usize,
+}
+
+impl PartialEq for Prio {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == std::cmp::Ordering::Equal
+    }
+}
+
+impl Eq for Prio {}
+
+impl PartialOrd for Prio {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Prio {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.key
+            .partial_cmp(&other.key)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(other.seq.cmp(&self.seq))
+    }
 }
 
 fn by_value_desc(x: f64, y: f64) -> std::cmp::Ordering {
@@ -852,6 +911,7 @@ impl<'a> Planner<'a> {
 
     fn score(&self, s: &GameState) -> f64 {
         let _p = prof::scope(Sec::Score);
+        SCORED.with(|c| c.set(c.get() + 1));
         if self.opts().score_turn_end == ScoreTurnEnd::All {
             return self.end_score(s);
         }
@@ -1062,6 +1122,7 @@ impl<'a> Planner<'a> {
                     first: node.first,
                     value: node.value,
                     path: node.end_path,
+                    depth: depth as u32,
                 });
                 if !expand {
                     continue;
@@ -1176,6 +1237,89 @@ impl<'a> Planner<'a> {
         out
     }
 
+    /// bestFirst: 層を作らず、優先度（ターン末の点数 + beamKey の伸びしろ）の高い局面から 1 つずつ広げる。start は深さ 1 の局面（すべて採点済み）。
+    /// 採点した局面の数が best_first に達したら広げるのをやめ、広げた局面と残った局面をすべて終局面の候補にする。
+    /// 同じ局面（turnOrderEqual）は採点してから比べ、点数の高いほうを残す。turnOrderEqual は評価が見る項の一部（手札のスペルブーストの回数など）を比べないので、
+    /// 同じとみなした局面とその先の局面の点数が違うことがある（ビームは段ごとに点数で並べてから同じ局面を除くので、点数の高いほうが残る）。
+    /// 先に出た同じ局面をもう広げていても、点数が高ければ後の局面も広げる
+    fn best_first_terminals(&mut self, mut terminals: Vec<Node>, start: Vec<Node>) -> Vec<Node> {
+        let p = self.p;
+        let opts = self.opts();
+        let budget = opts.best_first;
+        let prio = |n: &Node| n.value + key_bonus(opts, &n.state, p).unwrap_or(0.0);
+        let mut heap: std::collections::BinaryHeap<Prio> = std::collections::BinaryHeap::new();
+        let mut nodes: Vec<Option<Node>> = Vec::new();
+        // 同じ局面ごとに、残した局面の nodes の添字と点数
+        let mut seen: TurnOrderMap<(usize, f64)> = TurnOrderMap::default();
+        let mut scored = start.len();
+        // n を広げる候補に足す。同じ局面があれば点数の高いほうを残す
+        let mut add = |heap: &mut std::collections::BinaryHeap<Prio>,
+                       nodes: &mut Vec<Option<Node>>,
+                       n: Node| {
+            let seq = nodes.len();
+            if opts.dedup {
+                if let Some(e) = seen.get_or_add(&n.state, (seq, n.value)) {
+                    if n.value <= e.1 {
+                        return;
+                    }
+                    // 先の局面がまだ広げていなければ除く（もう広げていれば、後の局面も広げる）
+                    nodes[e.0] = None;
+                    *e = (seq, n.value);
+                }
+            }
+            heap.push(Prio { key: prio(&n), seq });
+            nodes.push(Some(n));
+        };
+        for n in start {
+            add(&mut heap, &mut nodes, n);
+        }
+        let mut next: Vec<(Rc<GameState>, usize)> = Vec::new();
+        while let Some(Prio { seq, .. }) = heap.pop() {
+            let Some(node) = nodes[seq].take() else {
+                continue;
+            };
+            let actor = node
+                .state
+                .pending
+                .as_ref()
+                .map(|pd| pd.player())
+                .unwrap_or(node.state.active);
+            if scored >= budget
+                || node.state.phase == Phase::Ended
+                || actor != p
+                || node.depth as usize >= opts.max_depth
+            {
+                terminals.push(node);
+                continue;
+            }
+            let st = node.state.clone();
+            let first = node.first.clone();
+            let path = node.path;
+            let depth = node.depth;
+            terminals.push(node);
+            for a in self.expand(&st) {
+                if matches!(a, Action::EndTurn) || !self.allowed(&st, &a) {
+                    continue;
+                }
+                next.clear();
+                self.advance(&st, &a, Some(path), 0, &mut next);
+                for (ns, np) in std::mem::take(&mut next) {
+                    let value = self.score(&ns);
+                    scored += 1;
+                    let n = Node {
+                        state: ns,
+                        first: first.clone(),
+                        value,
+                        path: np,
+                        depth: depth + 1,
+                    };
+                    add(&mut heap, &mut nodes, n);
+                }
+            }
+        }
+        terminals
+    }
+
     /// prefix があれば、root はその並び（steps の添字と最初の手）の後の局面で、終局面の並びはその並びから続け、最初の手はその最初の手にする（fuseRoot）
     fn beam_terminals(
         &mut self,
@@ -1206,6 +1350,7 @@ impl<'a> Planner<'a> {
                     first,
                     value,
                     path,
+                    depth: 0,
                 });
                 continue;
             }
@@ -1218,8 +1363,12 @@ impl<'a> Planner<'a> {
                     first: first.clone(),
                     value,
                     path,
+                    depth: 1,
                 });
             }
+        }
+        if opts.best_first > 0 {
+            return self.best_first_terminals(terminals, frontier);
         }
         let mut depth = 1;
         while depth < opts.max_depth && !frontier.is_empty() {
@@ -1253,12 +1402,34 @@ impl<'a> Planner<'a> {
                             first: first.clone(),
                             value,
                             path: np,
+                            depth: depth as u32 + 1,
                         });
                     }
                 }
             }
             let _p = prof::scope(Sec::Select);
-            if opts.beam_pp != 0.0 {
+            // beamKey では、点数の高い子が残らないことがある。採点は済んでいるので、最初の手ごとに残らなかった子の点数の最大も終局面の候補にする
+            let mut cut_best: Vec<Node> = Vec::new();
+            if opts.beam_key.is_some() || opts.potential.is_some() {
+                for c in &children {
+                    match cut_best.iter_mut().find(|b| b.first == c.first) {
+                        None => cut_best.push(c.clone()),
+                        Some(b) => {
+                            if c.value > b.value {
+                                *b = c.clone();
+                            }
+                        }
+                    }
+                }
+            }
+            if opts.beam_key.is_some() || opts.potential.is_some() {
+                let mut keyed: Vec<(f64, Node)> = children
+                    .into_iter()
+                    .map(|n| (n.value + key_bonus(opts, &n.state, p).unwrap_or(0.0), n))
+                    .collect();
+                keyed.sort_by(|x, y| by_value_desc(x.0, y.0));
+                children = keyed.into_iter().map(|(_, n)| n).collect();
+            } else if opts.beam_pp != 0.0 {
                 let key = |n: &Node| n.value + opts.beam_pp * n.state.players[p].pp as f64;
                 children.sort_by(|x, y| by_value_desc(key(x), key(y)));
             } else {
@@ -1272,11 +1443,29 @@ impl<'a> Planner<'a> {
                 children.truncate(opts.beam_width);
                 children
             };
+            for b in cut_best {
+                if !frontier.iter().any(|f| Rc::ptr_eq(&f.state, &b.state)) {
+                    terminals.push(b);
+                }
+            }
             depth += 1;
         }
         terminals.extend(frontier);
         terminals
     }
+}
+
+/// 並べ替えのキーに足す伸びしろ（beamKey の項と、学習した見込み potentialNet の和）。どちらも無ければ None
+fn key_bonus(opts: &SearchOptions, s: &GameState, p: PlayerIndex) -> Option<f64> {
+    if opts.beam_key.is_none() && opts.potential.is_none() {
+        return None;
+    }
+    let k = opts.beam_key.as_ref().map_or(0.0, |k| k.bonus(s, p));
+    let n = opts
+        .potential
+        .as_ref()
+        .map_or(0.0, |net| opts.potential_weight * net.eval(s, p));
+    Some(k + n)
 }
 
 /// fuseRoot で、先に融合する並びを探すときに調べる局面の数の上限と、先に融合した局面の数の上限
@@ -1526,6 +1715,7 @@ pub fn plan_turn_traced(
         beam_width: ds.beam_width,
         max_depth: ds.max_depth,
         draw_split: None,
+        potential: opts.potential.clone().filter(|_| opts.potential_draw_split),
         ..opts.clone()
     });
     let split_env: Option<Env> = split_opts.as_ref().map(|o| Env {
@@ -2712,6 +2902,9 @@ pub fn simulate_opponent_turn_by_search(
         opponent_search: None,
         attack_later: 0,
         per_plan: 0,
+        beam_key: None,
+        best_first: 0,
+        potential: None,
         ..opts.clone()
     };
     // 読みの中の相手は、自分の評価の重みでなく方策の重み（policy_weights。既定は同じ）で打つ
@@ -3277,6 +3470,128 @@ impl SearchAgent {
             (*t.state).clone(),
             terminals.len(),
         ))
+    }
+}
+
+/// 調べもの用（svwb beam-gap）: 自分のターンのビームを 1 回打った結果
+pub struct BeamProbe {
+    /// ターン末の点数の最大と、その並び
+    pub best: f64,
+    pub best_actions: Vec<Action>,
+    /// ビームの終局面（残した局面）の数
+    pub terminals: usize,
+    /// 局面を採点した回数（残さなかった子の局面を含む）
+    pub scored: u64,
+    /// 残した局面のうち、別の段で先に残した局面と同じもの（同じ局面をまとめるのは段の中だけなので、段をまたいで重なる）
+    pub dup_states: usize,
+    /// 残した局面のうち、段ごとの数（添字が段。0 は根の局面でターンを終える手）
+    pub per_depth: Vec<usize>,
+    /// 選んだ局面（beam_probe の sample）
+    pub nodes: Vec<ProbeNode>,
+}
+
+/// BeamProbe の、残した局面 1 つ
+pub struct ProbeNode {
+    pub state: Rc<GameState>,
+    pub depth: u32,
+    /// ターン末の点数（そこでターンを終えたらの点数。ビームが並べ替えに使う点数）
+    pub value: f64,
+    /// その局面から（その局面を含めて）ビームが届いたターン末の点数の最大
+    pub best_after: f64,
+    /// ターン末の点数が最大の並びの途中の局面か
+    pub on_best: bool,
+    /// 同じ段で残した局面の中での、ターン末の点数の順位（0 が最も高い）と、その段で残した数
+    pub rank: usize,
+    pub layer: usize,
+}
+
+impl SearchAgent {
+    /// 調べもの用（svwb beam-gap）: 局面 root で p のターンのビームを 1 回打つ（root を決定化せず、相手のターンは読まない）。
+    /// sample が 0 より大きければ、残した局面から乱数で sample 個と、最善の並びの途中の局面すべてを、その先で届いた最善と一緒に返す
+    pub fn beam_probe(
+        &self,
+        root: &GameState,
+        p: PlayerIndex,
+        sample: usize,
+        rng: &mut Rng,
+    ) -> Option<BeamProbe> {
+        let env = self.env();
+        let root = Rc::new(root.clone());
+        let before = SCORED.with(|c| c.get());
+        let (pl, terminals, bests) = turn_end_bests(&root, p, &env, env.opts.fuse_root);
+        let scored = SCORED.with(|c| c.get()) - before;
+        let bi = bests.iter().map(|&(_, i)| i).reduce(|b, i| {
+            if terminals[i].value > terminals[b].value {
+                i
+            } else {
+                b
+            }
+        })?;
+        // 並びの手ごとに、その手を通る終局面の点数の最大
+        let mut best_step = vec![f64::NEG_INFINITY; pl.steps.len()];
+        for t in &terminals {
+            let mut cur = Some(t.path);
+            while let Some(i) = cur {
+                best_step[i] = best_step[i].max(t.value);
+                cur = pl.steps[i].prev;
+            }
+        }
+        let mut on_best = vec![false; pl.steps.len()];
+        let mut cur = Some(terminals[bi].path);
+        while let Some(i) = cur {
+            on_best[i] = true;
+            cur = pl.steps[i].prev;
+        }
+        let max_depth = terminals.iter().map(|t| t.depth).max().unwrap_or(0) as usize;
+        let mut per_depth = vec![0usize; max_depth + 1];
+        let mut layers: Vec<Vec<f64>> = vec![Vec::new(); max_depth + 1];
+        for t in &terminals {
+            per_depth[t.depth as usize] += 1;
+            layers[t.depth as usize].push(t.value);
+        }
+        for l in layers.iter_mut() {
+            l.sort_by(|x, y| by_value_desc(*x, *y));
+        }
+        let mut seen = TurnOrderSet::default();
+        let mut dup_states = 0;
+        for t in &terminals {
+            if !seen.add(&t.state) {
+                dup_states += 1;
+            }
+        }
+        let mut nodes = Vec::new();
+        if sample > 0 {
+            let mut pick: Vec<usize> = (0..terminals.len()).collect();
+            rng.shuffle(&mut pick);
+            pick.truncate(sample);
+            for (i, t) in terminals.iter().enumerate() {
+                if on_best[t.path] && !pick.contains(&i) {
+                    pick.push(i);
+                }
+            }
+            for i in pick {
+                let t = &terminals[i];
+                let layer = &layers[t.depth as usize];
+                nodes.push(ProbeNode {
+                    state: t.state.clone(),
+                    depth: t.depth,
+                    value: t.value,
+                    best_after: best_step[t.path],
+                    on_best: on_best[t.path],
+                    rank: layer.iter().take_while(|&&v| v > t.value).count(),
+                    layer: layer.len(),
+                });
+            }
+        }
+        Some(BeamProbe {
+            best: terminals[bi].value,
+            best_actions: pl.steps_actions(terminals[bi].path),
+            terminals: terminals.len(),
+            scored,
+            dup_states,
+            per_depth,
+            nodes,
+        })
     }
 }
 

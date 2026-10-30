@@ -265,6 +265,9 @@ pub fn rhino_search_options(potential: f64, learned: Option<ExtraEval>) -> Searc
         // 相手のターンの読みで相手の評価にも補正を足すとき（opponentSearch.extraEval。既定では使わない）は、
         // エルフ用の打点の項を除いた補正だけにする（docs/ai-notes.md「棋譜の指摘: バックウッドかフェアリーか」）
         opp_extra_eval: learned,
+        // 評価が違う（打点の項を足す）ので、学習した見込み（標準の評価で学んだもの）は使わず、2026-10-30 より前の既定の幅 512 のまま
+        beam_width: 512,
+        potential: None,
         ..SearchOptions::default()
     }
 }

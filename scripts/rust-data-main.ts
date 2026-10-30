@@ -16,6 +16,7 @@ import { enhanceCost, staticOf } from "../src/engine";
 import { id } from "../src/cards/abilities/helpers";
 import { CLASS_WEIGHTS, DEFAULT_WEIGHTS, MODEL_FEATURES, MULLIGAN_MODEL, MULLIGAN_ROLES, MULLIGAN_WEIGHTS, ROLES, SEARCH_WEIGHTS } from "../src/ai/data";
 import valueNet from "../data/value-net.json";
+import potentialNet from "../data/potential-net.json";
 
 export const RUST_DATA_PATH = "rust/engine/data/engine-data.json";
 export const RUST_AI_DATA_PATH = "rust/engine/data/ai-data.json";
@@ -79,7 +80,7 @@ export function engineData() {
   };
 }
 
-/** 探索 AI のデータ（src/ai/data.ts と、学習した評価の補正 data/value-net.json） */
+/** 探索 AI のデータ（src/ai/data.ts と、学習した評価の補正 data/value-net.json、ターン途中の見込み data/potential-net.json） */
 export function aiData() {
   return {
     defaultWeights: DEFAULT_WEIGHTS,
@@ -96,6 +97,7 @@ export function aiData() {
       boostGrown: [id("成長したですぅ！")],
     },
     valueNet,
+    potentialNet,
     mulliganWeights: MULLIGAN_WEIGHTS,
     mulliganModel: MULLIGAN_MODEL,
     mulliganRoles: MULLIGAN_ROLES,

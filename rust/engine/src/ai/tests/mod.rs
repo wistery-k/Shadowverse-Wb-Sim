@@ -21,6 +21,7 @@ mod keys;
 mod lethal;
 mod mulligan;
 mod per_plan;
+mod potential;
 mod rescore_race;
 mod rhino;
 mod rhino_bound;
