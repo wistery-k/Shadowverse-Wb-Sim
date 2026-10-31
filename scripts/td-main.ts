@@ -811,11 +811,15 @@ function preActAt(net: CompiledValueNet, d: SparseRows, i: number, hidden: Float
   }
 }
 
-/** 全局面の勝つ確率の予測 */
-function predictAll(net: CompiledValueNet, d: SparseRows & { s: Float64Array }): Float64Array {
+/** 全局面の勝つ確率の予測（abs を渡すと、補正 (c + L) / a の絶対値の和も足す） */
+function predictAll(net: CompiledValueNet, d: SparseRows & { s: Float64Array }, abs?: { sum: number }): Float64Array {
   const h = newActs(net.model), ba = newBoardActs(net.model);
   const v = new Float64Array(d.s.length);
-  for (let i = 0; i < v.length; i++) v[i] = sigmoid(net.model.a * d.s[i]! + net.model.c + forwardAt(net, d, i, h, ba));
+  for (let i = 0; i < v.length; i++) {
+    const z = forwardAt(net, d, i, h, ba);
+    v[i] = sigmoid(net.model.a * d.s[i]! + net.model.c + z);
+    if (abs) abs.sum += Math.abs((net.model.c + z) / net.model.a);
+  }
   return v;
 }
 
@@ -1100,7 +1104,28 @@ function train(args: Args): number {
       `属性 ${KA} 個（${fromModel ? "モデルの A から" : `今の行にリッジ回帰（λ ${numArg(args, "ridge", 3)}）で当てはめて`}始める）、カードの行 ${ZV} のうち学んだ行 ${learned}・学習データに出た行 ${dataRows.length}、` +
         `減衰 R ${l2Res}・A ${l2Attr}、A の学習率 ×${lrAttr}`,
     );
+  } else {
+    // 読んだ局面（学びの局面・確かめ用の局面・ランダムに打った局面・打ち比べ）に一度も出ない入力の行は勾配が常に 0 で、
+    // Adam は重みの減衰をかけるだけ（予測には効かず、td prune で 0 にされる）。その行を飛ばす（Adam が学習の時間の 4 割ほど。docs/ai-notes.md「td train を速くする」）
+    const nB = baseInputSize(model);
+    const seen = new Uint8Array(nB);
+    for (const r of d.idx) if (r < nB) seen[r] = 1;
+    if (cmp) for (const r of cmp.idx) if (r < nB) seen[r] = 1;
+    active.length = 0;
+    let rows = 0;
+    for (let r = 0; r < nB; r++) {
+      if (!seen[r]) continue;
+      rows++;
+      const last = active[active.length - 1];
+      if (last && last[1] === r * H) last[1] += H;
+      else active.push([r * H, r * H + H, 1]);
+    }
+    // 場のカードのネットワークの出力を受ける行・隠れ層の後ろ・場のカードのネットワークは全部
+    active.push([nB * H, size, 1]);
+    console.log(`入力 ${nB} のうち、読んだ局面に出た ${rows} 個の行の重みを学ぶ（出ない行は動かさない）`);
   }
+  // 勾配を 0 に戻す範囲（Adam で更新する範囲と、--lrAttr 0 なら動かさない A の分。勾配はこの外には書かない）
+  const zeroRanges = attrOn && lrAttr === 0 ? [...active, [oAttr, size, 1] as [number, number, number]] : active;
   const touched: number[] = [], touchedMark = new Uint8Array(attrOn ? ZV : 0);
   const grad = new Float64Array(size), m1 = new Float64Array(size), m2 = new Float64Array(size);
   const beta1 = 0.9, beta2 = 0.999;
@@ -1244,13 +1269,18 @@ function train(args: Args): number {
     return loss;
   };
 
-  const v0 = predictAll(current(), d);
+  // 全局面の予測は、学習前と各エポックの終わりにだけ計算する。エポックの最初の目標は、重みの変わっていない直前の予測から作り、
+  // 最後に出す補正の大きさも、書き出す重みの予測のときに足した値を使う（計算し直しても同じ値。docs/ai-notes.md「td train を速くする」）
+  const abs0 = { sum: 0 };
+  const v0 = predictAll(current(), d, abs0);
   report("学習前", d, v0, lambdaReturns(d, v0, lambda));
   if (cmp) console.log(`学習前: ${cmpReport(cmp, predictAll(current(), cmp))}`);
   // --best 1: 確かめ用の局面の勝敗の交差エントロピーが一番小さかったエポックの重み
-  let best = { loss: holdoutLoss(d, v0, bestOn), epoch: 0, params: keepBest ? params.slice() : params };
+  let best = { loss: holdoutLoss(d, v0, bestOn), epoch: 0, params: keepBest ? params.slice() : params, abs: abs0.sum };
+  /** 今の重みの全局面の予測と、補正の大きさの和 */
+  let last = { v: v0, abs: abs0.sum };
   for (let epoch = 0; epoch < epochs; epoch++) {
-    const targets = lambdaReturns(d, predictAll(current(), d), lambda);
+    const targets = lambdaReturns(d, last.v, lambda);
     // 並べ替え（Fisher-Yates）
     for (let i = trainIdx.length - 1; i > 0; i--) {
       const j = Math.floor(nextFloat(holder) * (i + 1));
@@ -1273,7 +1303,7 @@ function train(args: Args): number {
     }
     for (const job of jobs) {
       const net = current();
-      grad.fill(0);
+      for (const [q0, q1] of zeroRanges) grad.fill(0, q0, q1);
       // 属性の分: このミニバッチの局面に出るカードの行だけ作り直す（A が変わると全部の行が変わるが、使う行だけで足りる）
       if (basis && job >= 0) {
         const end = Math.min(trainIdx.length, job + batch);
@@ -1333,11 +1363,13 @@ function train(args: Args): number {
       if (params[oA]! < 0.005) params[oA] = 0.005;
     }
     materialize(false);
-    const v = predictAll(current(), d);
+    const abs = { sum: 0 };
+    const v = predictAll(current(), d, abs);
+    last = { v, abs: abs.sum };
     report(`エポック ${epoch + 1}（学習の TD ${(lossSum / trainIdx.length).toFixed(4)}、a ${params[oA]!.toFixed(4)}、c ${params[oC]!.toFixed(3)}）`, d, v, lambdaReturns(d, v, lambda));
     if (cmp) console.log(`エポック ${epoch + 1}（学習の打ち比べ ${(cmpLoss / Math.max(1, trainGroups.length)).toFixed(4)}）: ${cmpReport(cmp, predictAll(current(), cmp))}`);
     const loss = holdoutLoss(d, v, bestOn);
-    if (keepBest && loss < best.loss) best = { loss, epoch: epoch + 1, params: params.slice() };
+    if (keepBest && loss < best.loss) best = { loss, epoch: epoch + 1, params: params.slice(), abs: abs.sum };
   }
   if (keepBest) {
     params.set(best.params);
@@ -1345,11 +1377,8 @@ function train(args: Args): number {
     const on = [...bestOn].map((ph) => Object.keys(PHASE_OF).find((k) => PHASE_OF[k] === ph)).join("・");
     console.log(`確かめ用の局面（${on}）の勝敗の交差エントロピーが一番小さい ${best.epoch === 0 ? "学習前" : `エポック ${best.epoch}`}（${best.loss.toFixed(4)}）の重みを書き出す`);
   }
-  // 補正の大きさ（評価の点数の単位）
-  const net = current();
-  const hBuf = newActs(model), bBuf = newBoardActs(model);
-  let absSum = 0;
-  for (let i = 0; i < n; i++) absSum += Math.abs((net.model.c + forwardAt(net, d, i, hBuf, bBuf)) / net.model.a);
+  // 補正の大きさ（評価の点数の単位。書き出す重みの予測のときに足した値）
+  const absSum = keepBest ? best.abs : last.abs;
   console.log(`補正 (c + L) / a の絶対値の平均 ${(absSum / n).toFixed(2)} 点、${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
   // 属性の分を足し込んで書き出す（学習データに出なかったカードの行は属性の分だけ）。A も残す（続きを学ぶ・td prune で埋める用）

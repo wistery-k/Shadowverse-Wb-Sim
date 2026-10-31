@@ -180,7 +180,7 @@ z（1 つ）── (c + z) / a を S に足す
 ```sh
 # 自己対戦（ユーザーの PC で 3000 試合ずつ 20 回、28 並列で 4 時間ほど）
 svwb td selfplay --model data/value-net.json --games 3000 --start <g> --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --out d<i>.jsonl
-# 学習（6 万試合で 1 時間ほど）
+# 学習（6 万試合で 45 分ほどの見込み。2026-10-30 に速くする前は 1 時間ほど）
 npm run td -- train --model data/value-net.json --data d0.jsonl,...,d19.jsonl --out m.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined
 # 後の処理
 npm run td -- prune --model m.json --data d0.jsonl,...,d19.jsonl --out mp.json
@@ -219,6 +219,7 @@ V   = 今学んでいるモデルの予測 σ(a·S + c + z)。エポックの最
 - 学ぶもの: 全部の重み・バイアスと、c・a
 - Adam（β1 0.9・β2 0.999）、ミニバッチ 128 局面、学習率 0.0003（`--lr`）、3 エポック（`--epochs`）。
   重みの減衰 0.001（`--l2`。重みから直接引く形で、バイアス・c・a は減衰させない）
+  読んだ局面に一度も出ない入力の行は更新しない（勾配が常に 0 で、`td prune` で 0 にする行。2026-10-30 から減衰もかけない。ai-notes.md「td train を速くする」）
 - 確かめ用: 試合番号から決めた 1 割の試合を学ばずに取っておき、エポックごとに勝敗の交差エントロピー・AUC を出す。
   `--best 1 --bestOn end,imagined` で、ターン末と想像の局面（探索が点数に使う 2 つ）の交差エントロピーが一番小さいエポック（学習前も含む）の重みを書き出す
 - 一から学ばず、今の補正から続けて学ぶ。同じデータなら続けて学んだ版のほうが少し強く、一から学ぶ 256・32 は 3000〜6000 試合ではデータが足りず弱かった
