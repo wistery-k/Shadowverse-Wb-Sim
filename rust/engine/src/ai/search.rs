@@ -490,9 +490,10 @@ impl Default for SearchOptions {
             weights,
             policy_weights,
             // 相手のターンを読むビームの幅は 4 から 16 に（6400 試合で 51.9%、物差しは 78.0% → 79.8%。
-            // docs/ai-notes.md「相手のターンを読むビームの幅を 16 に」）
+            // docs/ai-notes.md「相手のターンを読むビームの幅を 16 に」）。
+            // 2026-10-31 に 8 に（幅 16 に 49.8% ± 0.31、思考は 0.87 倍。docs/ai-notes.md「学習した見込みを読みの中の相手のビームに使う」）
             opponent_search: Some(OpponentSearch {
-                beam_width: 16,
+                beam_width: 8,
                 max_depth: 8,
                 extra_eval: false,
             }),
