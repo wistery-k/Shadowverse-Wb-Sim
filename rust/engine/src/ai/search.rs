@@ -325,7 +325,7 @@ pub struct SearchOptions {
     pub fuse_root: bool,
     pub score_turn_end: ScoreTurnEnd,
     pub mulligan: MulliganMode,
-    /// MulliganMode::Sample で、返し方ごとに引き直しを試す回数
+    /// MulliganMode::Sample・Turn1 で、返し方ごとに引き直しを試す回数
     pub mulligan_samples: usize,
     /// MulliganMode::Sample で、評価関数（手で決めた部分）と学習した補正のどちらを使うか
     pub mulligan_static: bool,
@@ -454,7 +454,9 @@ impl Default for SearchOptions {
             // 引き直した後、3 ターン目の終わりまで貪欲法で進めてから採点する
             // （docs/ai-notes.md「引き直した後に先へ進めてから採点するマリガン」。手札の形のモデルより +1.5%）
             mulligan: MulliganMode::Turn1,
-            mulligan_samples: 100,
+            // 引き直しを試す回数。100 回と勝率が変わらず、マリガンの時間が半分になる 50 回
+            // （docs/ai-notes.md「マリガンで引き直しを試す回数を減らす」）
+            mulligan_samples: 50,
             mulligan_static: true,
             mulligan_net: true,
             mulligan_turns: 3,

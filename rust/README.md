@@ -84,7 +84,7 @@ npm run yardstick -- --opts '{}' --games 1000 --label 名前 --record    # 固�
   リノセウス用 AI の `"potential"` 等を受け付ける。TypeScript 版とともに消した実験用の項目（序盤のターンを全探索する
   `"exhaustive"` 等）はエラーになる（既定の値なら受け付ける）。知らない項目もエラーにする
 - rhino-compare の `--agent` は rhino・rhino-lethal・search・search-classic。相手は `--opp`（既定は search-classic、`search` なら今の既定の探索 AI）
-- マリガンの設定 `"mulligan"` は model（既定）・weights・cost・sample（返し方 16 通りごとに引き直しを `"mulliganSamples"` 回（既定 100）試し、評価関数の平均で選ぶ）
+- マリガンの設定 `"mulligan"` は model（既定）・weights・cost・sample（返し方 16 通りごとに引き直しを `"mulliganSamples"` 回（既定 50。`turn1` と同じ値を使う）試し、評価関数の平均で選ぶ）
 - td の init・extend・train・probe・prune は `npm run td -- …`（`scripts/td-main.ts`）で行い、td selfplay の書き出したファイルをそのまま渡せる
 
 ## 構成
