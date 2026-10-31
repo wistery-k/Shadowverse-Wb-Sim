@@ -9,7 +9,8 @@
 //! 学習は `npm run potential -- train`（scripts/potential-main.ts）。
 //!
 //! 2026-10-30 から探索 AI の既定（幅 128 ＋ この見込み。今の幅 512 と同じ強さで思考は 12% 速い）。既定のモデルは data/potential-net.json
-//! （ユーザーの PC で 2000 試合分のデータで学んだもの。共有フォルダの data/models/potential-1/m1.json の重みを有効数字 7 桁にしたもの）。
+//! （2026-10-31 から、補正 relearn8 で採点した 2000 試合分のデータで学び直したもの。共有フォルダの data/models/relearn8/upot.json。
+//! 前は data/models/potential-1/m1.json の重みを有効数字 7 桁にしたもの）。
 //! 評価関数（重み・data/value-net.json）を変えたら、見込みも学び直す（データの v・y はその評価の点数）。
 
 use super::aidata::ai_data;

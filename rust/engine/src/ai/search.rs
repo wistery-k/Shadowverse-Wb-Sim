@@ -308,7 +308,8 @@ pub struct SearchOptions {
     /// 次のターン以降に回せる融合（作ったカードをこのターンに使わない融合）は打たない。並びの選び方と点数は変えず（融合した終局面の点数のまま）、
     /// 選んだ並びから回せる融合を除いて打つ（Planner::needless_fusions）
     pub defer_fuse: bool,
-    /// deferFuse で、手で作った評価が上がる融合（手札の α・β・γ の種類が増える。fusionSet）は回さない
+    /// deferFuse で、手で作った評価が上がる融合（手札の α・β・γ の種類が増える。fusionSet）は回さない。
+    /// 自分の評価の重み（weights）で比べるので、S = 0 の補正（2026-10-31 からの既定。weights が全部 0）のままでは効かない
     pub defer_fuse_keep_set: bool,
     /// deferFuse で回したあとのターン末の手札の枚数の上限。回すと手札がこれより多くなる融合は回さない
     /// （8 なら次のターンの最初に引くカードが入る。手札が上限近くで止まると、コアを加えるカードを出しにくくなり、引いたカードが溢れる）
@@ -527,6 +528,17 @@ impl SearchOptions {
             rescore_mix: 0.0,
             draw_split: None,
             defer_fuse: false,
+            ..self
+        }
+    }
+
+    /// 学習した補正を外し、手で作った評価（探索 AI の既定の重み）だけで打つ設定。
+    /// 既定の補正が S = 0（baseWeights が全部 0）なら既定の weights も全部 0 なので、補正と一緒に重みも探索 AI の既定に戻す
+    pub fn without_value_net(self) -> SearchOptions {
+        SearchOptions {
+            extra_eval: None,
+            weights: None,
+            policy_weights: None,
             ..self
         }
     }

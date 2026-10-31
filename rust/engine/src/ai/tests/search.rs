@@ -86,8 +86,7 @@ fn sep_turn(s: GameState, learned: bool) -> Vec<Action> {
     let d = SearchOptions::default();
     let mut agent = SearchAgent::new(SearchOptions {
         opponent_search: None,
-        extra_eval: if learned { d.extra_eval.clone() } else { None },
-        ..d
+        ..if learned { d } else { d.without_value_net() }
     });
     let (moves, _) = play_turn(s, 0, &mut agent, &mut Rng::new(7));
     moves_of(&moves)
@@ -261,6 +260,9 @@ fn policy_weights_equal_to_weights_change_nothing() {
         );
         actions
     };
-    let same = std::sync::Arc::new(crate::ai::aidata::ai_data().search_weights.clone());
+    // 自分の評価の重みは既定のもの（既定の補正が S = 0 なら全部 0、そうでなければ探索 AI の既定の重み）
+    let same = SearchOptions::default().weights.unwrap_or_else(|| {
+        std::sync::Arc::new(crate::ai::aidata::ai_data().search_weights.clone())
+    });
     assert_eq!(run(None), run(Some(same)));
 }

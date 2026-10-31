@@ -483,10 +483,14 @@ fn base_weights_model_keeps_policy_weights() {
     ))
     .expect("設定");
     assert_eq!(o.policy_weights.expect("方策の重み").max_pp, 0.0);
-    // 補正のファイルなしなら、weights の文字列の指定で基準の重み・全部 0 にし、方策の重みは書かなければ無い（weights と同じ）
+    // 補正のファイルなしなら、weights の文字列の指定で基準の重み・全部 0 にし、方策の重みは書かなければ既定のまま
+    // （既定の補正に baseWeights が無ければ無し＝weights と同じ。S = 0 の補正が既定なら探索 AI の既定の重み）
     let o = compare_options(r#"{"weights":"zero"}"#).expect("設定");
     assert_eq!(o.weights.expect("重み").my_hp, 0.0);
-    assert!(o.policy_weights.is_none());
+    assert_eq!(
+        o.policy_weights.map(|w| w.max_pp),
+        SearchOptions::default().policy_weights.map(|w| w.max_pp)
+    );
     let o = compare_options(r#"{"weights":"default","policyWeights":"search"}"#).expect("設定");
     assert_eq!(o.weights.expect("重み").max_pp, 0.0);
     assert_eq!(o.policy_weights.expect("方策の重み").max_pp, search.max_pp);

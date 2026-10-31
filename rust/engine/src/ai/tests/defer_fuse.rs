@@ -244,10 +244,14 @@ fn fusion_adding_destroy_kind_is_kept_with_keep_set() {
         &[],
     );
     let alpha = "デストロイアーティファクトα";
+    // keepSet は自分の評価の重みの手で作った評価で比べるので、重みを探索 AI の既定にして見る
+    // （S = 0 の補正が既定なら既定の weights は全部 0 で、keepSet は効かない）
     let keep = candidates_with(
         &s,
         SearchOptions {
             defer_fuse_keep_set: true,
+            weights: None,
+            policy_weights: None,
             ..deferred()
         },
     );

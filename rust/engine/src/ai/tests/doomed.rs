@@ -22,10 +22,7 @@ fn position(turn: i32) -> GameState {
 /// 評価関数の doomed の効き目を見るので、学習した評価の補正（data/value-net.json）を足さない探索 AI で打つ
 /// （補正を足すと、手札も場も空にした作りものの局面では攻撃しないことがある）
 fn turn_moves(s: GameState) -> Vec<(GameState, Action)> {
-    let mut agent = SearchAgent::new(SearchOptions {
-        extra_eval: None,
-        ..SearchOptions::default()
-    });
+    let mut agent = SearchAgent::new(SearchOptions::default().without_value_net());
     play_turn(s, 0, &mut agent, &mut Rng::new(7)).0
 }
 
