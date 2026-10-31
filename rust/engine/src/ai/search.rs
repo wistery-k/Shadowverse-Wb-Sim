@@ -205,11 +205,12 @@ pub(crate) fn average_reads(xs: &[(f64, f64)], offset: f64, how: RescoreAverage)
     }
 }
 
-/// 既定の drawSplit: 区切る手が引く手なら一番上のカードを種類ごとに全部試し、残りを幅 32 で組み直す。
-/// 2026-10-28 にスペルウィッチだけで使い始め、同じ日にどのクラスでも使うようにした（docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）
+/// 既定の drawSplit: 区切る手が引く手なら一番上のカードを種類ごとに全部試し、残りを幅 8 で組み直す。
+/// 2026-10-28 にスペルウィッチだけで使い始め、同じ日にどのクラスでも使うようにした（docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）。
+/// 組み直しの幅は 2026-10-31 に 32 から 8 にした（勝率は同じで、思考が 2 割ほど軽い。docs/ai-notes.md「drawSplit の組み直しのビームを幅 8 に」）
 pub const DEFAULT_DRAW_SPLIT: DrawSplit = DrawSplit {
     samples: 4,
-    beam_width: 32,
+    beam_width: 8,
     max_depth: 16,
     root_draws: 2,
     stratify: false,
