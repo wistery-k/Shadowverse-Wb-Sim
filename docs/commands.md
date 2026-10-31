@@ -284,7 +284,7 @@ npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mul
 npm run svwb -- mulligan-data --games 6000 [--start 0] [--seed 1] [--flip 0.5] --out d.jsonl
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
                 [--sampling classic|default] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
-                [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>']
+                [--sDefault 0] [--searchValue 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>']
 npm run svwb -- deep-gap play --out gap.jsonl [--games 100] [--start 0] [--deep '<設定の JSON>'] [--k 4] [--evalSeeds 48] [--turns 1-30]
 npm run svwb -- deep-gap rollout --in gap.jsonl[,…] --out roll.jsonl [--top 200] [--random 200] [--seed 1] [--m 48]
 npm run svwb -- deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 30] [--only <内訳の一部>] [--skipDecks <デッキ>,…] [--sort gap|rollout] [--listOnly 1]
@@ -314,7 +314,9 @@ npm run svwb -- read-log --out 記録.jsonl [--games 49] [--start 0] [--opts '<�
   ランダムな手・介入は学ぶ側だけ。行に `"learner"` が付き、学習は `td train --seat learner` で学ぶ側の局面だけを読む（狙い撃ちの相手を学ばせる。
   回りを回すジョブは `cloud/jobs/exploit.sh`。docs/ai-notes.md「狙い撃ちする相手を学ばせて死角を探す」）。
   `--sDefault 1` で、各局面に基準の重み（DEFAULT_WEIGHTS）での手で作った評価も書く（`"sd"`。打つ手は変わらない）。`td train --base default` がこれを読む
-  （手で作った項を外した補正を、同じ自己対戦から学ぶ。docs/ai-notes.md「評価関数の手作りの項を外す」）
+  （手で作った項を外した補正を、同じ自己対戦から学ぶ。docs/ai-notes.md「評価関数の手作りの項を外す」）。
+  `--searchValue 1` で、ターン末の局面に探索の値の材料（`"qe"`・`"qr"`。そのターンに選んだ並びのターン末と、相手のターンを読んだ後の勝つ確率）も書く（打つ手は変わらない）。
+  `td train --searchTarget` がこれを読む（docs/ai-notes.md「補正の学習の目標に探索の値を使う」）
 - `deep-gap`: 今の既定の AI どうしの自己対戦（`ai-play` と同じ試合）の、自分のターンの最初の局面ごとに、試合のターンと深い読み（`--deep`。既定は
   ビーム 2048（今の既定が幅 512 になる 2026-10-26 までは 512）・読み直す最初の手 8・最初の手ごとの終局面 3・相手の手札の引き直し 48・相手のターンのビーム 32。読む深さは今の既定と同じで、広く・多く読む）のターンを比べる。
   食い違った局面は、手番の側から見た決定化を `--k` 通り作って両方に打たせ、深い読みの点数（別の引き直し `--evalSeeds` 通り。引き直しごとに勝率にしてから平均する）で見た勝率の差と、
@@ -379,6 +381,7 @@ npm run td -- eval --model a.json,b.json --data d.jsonl [--cards <カード名,�
 書き出すモデルの `baseWeights` をその重みにする（`--base search` は探索の既定の重み。省略すると元のモデルのまま）。
 そのモデルを `"valueNet"` で使うと、自分の評価だけをその重みにし、読みの中の相手は探索の既定の重みで打つ（下の `policyWeights`）。
 `eval`・`ivcheck`・`attrcheck` も、モデルの `baseWeights` に合わせて `"s"`・`"sd"`・0 を読む。
+`train --searchTarget m` は、λ 収益の次の局面の予測を (1 − m)·予測 + m·探索の値 にして学ぶ（探索の値は `td selfplay --searchValue 1` で書いたもの。`--searchMix` はその中のターン末の割合、既定 0.5）。
 
 ## potential
 
