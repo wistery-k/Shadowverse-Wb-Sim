@@ -24,7 +24,8 @@ use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
 use crate::ai::aidata::{weights_from, Weights};
 use crate::ai::search::{
-    MulliganMode, OpponentSearch, RolloutWeights, ScoreTurnEnd, SearchAgent, SearchOptions,
+    MulliganMode, OpponentSearch, RescoreAverage, RolloutWeights, ScoreTurnEnd, SearchAgent,
+    SearchOptions,
 };
 use crate::ai::valuenet::ValueNet;
 use crate::ai::Agent;
@@ -114,6 +115,7 @@ pub fn reference_options() -> SearchOptions {
         danger_rescore: 0,
         rescore_mix: 0.0,
         rescore_race: None,
+        rescore_average: RescoreAverage::Score,
         reuse_agree: false,
         resample_draws: false,
         draw_first: false,
@@ -214,6 +216,7 @@ pub fn strong_reference_options() -> SearchOptions {
         danger_rescore: 0,
         rescore_mix: 0.0,
         rescore_race: None,
+        rescore_average: RescoreAverage::Score,
         reuse_agree: false,
         resample_draws: false,
         draw_first: false,

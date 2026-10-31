@@ -9,8 +9,8 @@ use crate::ai::mulligan::OppMulligan;
 use crate::ai::potential::PotentialNet;
 use crate::ai::rhino::{rhino_pass_lethal, rhino_search_options, RHINO_POTENTIAL};
 use crate::ai::search::{
-    DrawSplit, ExtraEval, MulliganMode, OpponentSearch, OwnNextSearch, RescoreRace, RolloutWeights,
-    ScoreTurnEnd, SearchOptions, TwoTurnGate, DEFAULT_RESCORE_RACE,
+    DrawSplit, ExtraEval, MulliganMode, OpponentSearch, OwnNextSearch, RescoreAverage, RescoreRace,
+    RolloutWeights, ScoreTurnEnd, SearchOptions, TwoTurnGate, DEFAULT_RESCORE_RACE,
 };
 use crate::ai::valuenet::ValueNet;
 use crate::data::ClassId;
@@ -186,6 +186,19 @@ pub fn search_options(
                     return Err(format!("\"rescoreMix\" は 0 以上 1 以下: {x}"));
                 }
                 o.rescore_mix = x;
+            }
+            "rescoreAverage" => {
+                o.rescore_average = match v {
+                    Json::Str(s) if s == "score" => RescoreAverage::Score,
+                    Json::Str(s) if s == "winProb" => RescoreAverage::WinProb,
+                    Json::Str(s) if s == "decidedWinProb" => RescoreAverage::DecidedWinProb,
+                    _ => {
+                        return Err(format!(
+                            "\"rescoreAverage\" は score / winProb / decidedWinProb: {}",
+                            v.stringify()
+                        ))
+                    }
+                }
             }
             "rescoreRace" => {
                 o.rescore_race = match v {
@@ -708,6 +721,20 @@ mod tests {
             0.25
         );
         assert!(compare_options(r#"{"rescoreMix":1.5}"#).is_err());
+        use crate::ai::search::RescoreAverage;
+        assert_eq!(
+            compare_options("{}").unwrap().rescore_average,
+            RescoreAverage::Score
+        );
+        for (name, want) in [
+            ("score", RescoreAverage::Score),
+            ("winProb", RescoreAverage::WinProb),
+            ("decidedWinProb", RescoreAverage::DecidedWinProb),
+        ] {
+            let raw = format!(r#"{{"rescoreAverage":"{name}"}}"#);
+            assert_eq!(compare_options(&raw).unwrap().rescore_average, want);
+        }
+        assert!(compare_options(r#"{"rescoreAverage":"mean"}"#).is_err());
         assert!(compare_options(r#"{"exhaustive":{"untilTurn":5,"maxStates":100}}"#).is_err());
         assert!(compare_options(r#"{"exhaustive":null,"valueNet":false}"#)
             .unwrap()

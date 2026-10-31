@@ -163,6 +163,48 @@ pub const DEFAULT_RESCORE_RACE: RescoreRace = RescoreRace {
     lethal_guard: true,
 };
 
+/// 読み直しで、相手の手札の引き直し（drawSplit で区切ったときは作り直した引きも）ごとに読んだ点数を 1 つにまとめる方法（rescoreAverage）
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RescoreAverage {
+    /// 点数のまま平均する（2026-10-31 までの読み方）。相手のリーサルを受けた引き直しは負けの点数（-1e6）のまま入るので、
+    /// 1 通りでもリーサルがある終局面は、ほかの引き直しがどれほど良くても選ばれにくい
+    Score,
+    /// 引き直しごとに勝率 σ(a·点数)（a は既定の学習した補正のもの）にしてから平均し、点数に戻す。
+    /// 相手のリーサルは「その引き直しでは勝率 0」として、ほかの引き直しと同じ重みで数える
+    WinProb,
+    /// 決着した（相手のリーサルを受けた・自分が勝った）引き直しがある終局面だけ WinProb、ほかは Score
+    DecidedWinProb,
+}
+
+/// 引き直しごとの (重み, 点数) を how の方法で 1 つの点数にまとめる（重みの和は正であること）。
+/// Score は重み付きの平均から offset を引いたもの（2026-10-31 までと同じ計算）。WinProb は各点数から offset を引いてから勝率にする。
+/// 平均した勝率が 0 なら負けの点数（-1e6）、1 なら勝ちの点数（1e6）
+pub(crate) fn average_reads(xs: &[(f64, f64)], offset: f64, how: RescoreAverage) -> f64 {
+    let decided = |x: f64| x <= DANGER || x >= -DANGER;
+    let prob = match how {
+        RescoreAverage::Score => false,
+        RescoreAverage::WinProb => true,
+        RescoreAverage::DecidedWinProb => xs.iter().any(|&(_, x)| decided(x)),
+    };
+    let w: f64 = xs.iter().map(|&(w, _)| w).sum();
+    if !prob {
+        return xs.iter().map(|&(w, x)| w * x).sum::<f64>() / w - offset;
+    }
+    let a = ai_data().value_net.a;
+    let p = xs
+        .iter()
+        .map(|&(w, x)| w / (1.0 + (-a * (x - offset)).exp()))
+        .sum::<f64>()
+        / w;
+    if p <= 0.0 {
+        -1e6
+    } else if p >= 1.0 {
+        1e6
+    } else {
+        (p / (1.0 - p)).ln() / a
+    }
+}
+
 /// 既定の drawSplit: 区切る手が引く手なら一番上のカードを種類ごとに全部試し、残りを幅 32 で組み直す。
 /// 2026-10-28 にスペルウィッチだけで使い始め、同じ日にどのクラスでも使うようにした（docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）
 pub const DEFAULT_DRAW_SPLIT: DrawSplit = DrawSplit {
@@ -405,6 +447,8 @@ pub struct SearchOptions {
     pub rescore_mix: f64,
     /// 見込みのない終局面の読みを途中で打ち切る（RescoreRace。None なら全部読む。既定は DEFAULT_RESCORE_RACE、2026-10-30）
     pub rescore_race: Option<RescoreRace>,
+    /// 読み直しで、引き直しごとに読んだ点数をまとめる方法（RescoreAverage。既定は Score）
+    pub rescore_average: RescoreAverage,
     pub reuse_agree: bool,
     /// 上位の手を読み直すとき、このターンに引いて手札に残っているカードも引き直す（oppHandSamples の引き直しごと。ビームで決めた 1 通りの引きで手を比べない）
     pub resample_draws: bool,
@@ -506,6 +550,7 @@ impl Default for SearchOptions {
             danger_rescore: 0,
             rescore_mix: 0.5,
             rescore_race: Some(DEFAULT_RESCORE_RACE),
+            rescore_average: RescoreAverage::Score,
             reuse_agree: false,
             resample_draws: false,
             draw_first: false,
@@ -1853,8 +1898,8 @@ pub fn plan_turn_traced(
                 };
                 let k = samples.len();
                 lg_kinds = k;
-                // 読んだ点数・ターン末の点数の重み付きの和と、重みの和
-                let mut read_sum = 0.0;
+                // 読んだ (重み, 点数)、ターン末の点数の重み付きの和と、重みの和
+                let mut read_xs: Vec<(f64, f64)> = Vec::new();
                 let mut read_w = 0.0;
                 let mut reads = 0usize;
                 let mut te_sum = 0.0;
@@ -1876,7 +1921,7 @@ pub fn plan_turn_traced(
                     te_w += w;
                     if end.phase == Phase::Ended {
                         let v = pl.eval_state(&end);
-                        read_sum += w * v;
+                        read_xs.push((w, v));
                         read_w += w;
                         reads += 1;
                         two_of(&end, &r);
@@ -1909,7 +1954,7 @@ pub fn plan_turn_traced(
                         let mut r2 = Rng::new(seed2);
                         let d = determinize(base, p, &mut r2, opts.peek_opp_hand);
                         let (v, after) = read_once(&pl, &d, &mut r2);
-                        read_sum += wr * (v - left);
+                        read_xs.push((wr, v - left));
                         read_w += wr;
                         reads += 1;
                         two_of(&after, &r2);
@@ -1943,7 +1988,7 @@ pub fn plan_turn_traced(
                 }
                 if te_w > 0.0 && read_w > 0.0 {
                     turn_end = te_sum / te_w;
-                    Some((read_sum / read_w, reads))
+                    Some((average_reads(&read_xs, 0.0, opts.rescore_average), reads))
                 } else {
                     None
                 }
@@ -1994,7 +2039,8 @@ pub fn plan_turn_traced(
                 }
                 read_once_with(&pl, opp_env, &d, &mut r).0
             };
-            let mut sum = 0.0;
+            // 引き直しごとの (重み, 点数)（残った PP の分は引かずに入れ、まとめるときに引く）
+            let mut xs: Vec<(f64, f64)> = Vec::new();
             if opts.opp_hand_common {
                 // rescoreRace で先に読んだ分（引き直しの順の始めから）はそれを使う
                 let mut done = {
@@ -2014,7 +2060,7 @@ pub fn plan_turn_traced(
                             (v, after, r)
                         }
                     };
-                    sum += v;
+                    xs.push((1.0, v));
                     two_of(&after, &r);
                     add(after);
                     if logging {
@@ -2035,7 +2081,7 @@ pub fn plan_turn_traced(
                 for _ in 0..opts.opp_hand_samples {
                     let d = determinize(base, p, rng, opts.peek_opp_hand);
                     let (v, after) = read_once(&pl, &d, rng);
-                    sum += v;
+                    xs.push((1.0, v));
                     two_of(&after, rng);
                     add(after);
                     if logging {
@@ -2044,7 +2090,7 @@ pub fn plan_turn_traced(
                 }
             }
             (
-                sum / opts.opp_hand_samples as f64 - pl.leftover(&node.state),
+                average_reads(&xs, pl.leftover(&node.state), opts.rescore_average),
                 opts.opp_hand_samples,
             )
         };
@@ -2299,6 +2345,7 @@ fn race_rescore(
         reads: Vec<RaceRead>,
     }
     let mix = pl.opts().rescore_mix;
+    let how = pl.opts().rescore_average;
     let mut alive: Vec<Racer> = racers
         .iter()
         .map(|&(i, origin)| Racer {
@@ -2334,8 +2381,10 @@ fn race_rescore(
             continue;
         }
         let k = n as f64;
-        let est =
-            |rc: &Racer| (1.0 - mix) * rc.xs.iter().sum::<f64>() / k + mix * terminals[rc.i].value;
+        let est = |rc: &Racer| {
+            let xs: Vec<(f64, f64)> = rc.xs.iter().map(|&x| (1.0, x)).collect();
+            (1.0 - mix) * average_reads(&xs, 0.0, how) + mix * terminals[rc.i].value
+        };
         let mut lead = 0;
         for j in 1..alive.len() {
             if est(&alive[j]) > est(&alive[lead]) {
