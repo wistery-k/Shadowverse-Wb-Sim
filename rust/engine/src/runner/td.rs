@@ -1144,7 +1144,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::data::AMBUSH;
-    use crate::state::EVOLVE_BONUS;
+    use crate::state::{EVOLVE_BONUS, HAND_LIMIT};
 
     fn card_named(name: &str) -> CardIdx {
         data()
@@ -1302,6 +1302,9 @@ mod tests {
             let hand: Vec<Iid> = at.players[p].hand.iter().map(|h| h.iid).collect();
             if turn == 1 {
                 assert_eq!(r.drawn, hand);
+            } else if r.drawn.is_empty() {
+                // 手札が上限で、引いたカードは手札に入らなかった（墓地へ）
+                assert_eq!(hand.len(), HAND_LIMIT, "g{g} {hand:?}");
             } else {
                 assert_eq!(r.drawn.len(), 1, "g{g} {:?} {:?}", r.drawn, hand);
                 assert_eq!(r.drawn.last(), hand.last());
