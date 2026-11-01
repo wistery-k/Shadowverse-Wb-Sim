@@ -3478,6 +3478,45 @@ impl SearchAgent {
         }
     }
 
+    /// 局面 root から p が手の列 actions（ターン終了の前まで）を打つ並びを、探索が選んだとして、
+    /// deferFuse で回せる融合を除いて実際に打つ手の列（テスト用。どの並びを選ぶかは学習した補正で変わるので、並びを決めて確かめる）
+    #[cfg(test)]
+    pub(crate) fn deferred_actions(
+        &self,
+        root: &GameState,
+        p: PlayerIndex,
+        actions: &[Action],
+    ) -> Vec<Action> {
+        let env = self.env();
+        let root = Rc::new(root.clone());
+        let mut pl = Planner {
+            env: &env,
+            p,
+            root: root.clone(),
+            steps: Vec::new(),
+            plays_only: false,
+        };
+        let mut prev = None;
+        let mut state = root.clone();
+        for a in actions {
+            prev = Some(pl.push_step(a.clone(), prev));
+            state = Rc::new(apply_legal(&state, a));
+        }
+        let path = prev.expect("手の列が空");
+        let node = Node {
+            state,
+            first: actions[0].clone(),
+            value: 0.0,
+            path,
+            depth: actions.len() as u32,
+        };
+        let steps = pl.steps_of(path);
+        pl.defer_steps(&node, steps)
+            .into_iter()
+            .map(|(a, _)| a)
+            .collect()
+    }
+
     /// 局面 root で p が打つ並び（相手のターンを読まない plan_turn。root を決定化せずに読む）の、最初の手・点数・並びを打った後の局面。
     /// deferFuse なら回せる融合を除いた並び
     pub fn plan_candidates(
