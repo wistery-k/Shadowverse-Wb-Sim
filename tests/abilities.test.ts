@@ -539,6 +539,28 @@ describe("相手から見て分かる手札の情報（AI の determinization �
     expect(hand(s, me, hinted)).toMatchObject({ revealed: false, drawnBy: null });
   });
 
+  it("手札で変身したカードは相手に公開されない（宿題やるですぅ！ → 成長したですぅ！）", () => {
+    let { s, me } = setup();
+    const homework = toHand(s, me, "宿題やるですぅ！");
+    hand(s, me, homework)!.x = 4;
+    s = applyAction(s, { type: "play", iid: toHand(s, me, "知恵の輝き") });
+    expect(hand(s, me, homework)).toMatchObject({ cardId: id("成長したですぅ！"), revealed: false, drawnBy: null });
+  });
+
+  it("手札で変身しても、変身の前に相手に分かっていた印は残る（豊麗なるローズクイーン）", () => {
+    let { s, me } = setup();
+    const known = toHand(s, me, "フェアリー");
+    hand(s, me, known)!.revealed = true;
+    const hinted = toHand(s, me, "アドベンチャーエルフ・メイ");
+    hand(s, me, hinted)!.drawnBy = { type: "follower" };
+    const plain = toHand(s, me, "アドベンチャーエルフ・メイ");
+    s = applyAction(s, { type: "play", iid: toHand(s, me, "豊麗なるローズクイーン") });
+    const rose = id("薔薇の閃撃");
+    expect(hand(s, me, known)).toMatchObject({ cardId: rose, revealed: true });
+    expect(hand(s, me, hinted)).toMatchObject({ cardId: rose, revealed: false, drawnBy: { type: "follower" } });
+    expect(hand(s, me, plain)).toMatchObject({ cardId: rose, revealed: false, drawnBy: null });
+  });
+
   it("手札以外から選んだときは、手札の印は残る（ベビーカーバンクル）", () => {
     let { s, me } = setup();
     const fairy = toHand(s, me, "フェアリー");
