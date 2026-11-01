@@ -297,6 +297,7 @@ npm run svwb -- fuse-gap --dir <記録のディレクトリ> [--opts '<設定の
 npm run svwb -- defer-playout --dir <記録のディレクトリ> --opts '<回す版の設定>' [--cont '<設定>'] [--seeds 8] [--seedBase 0] [--out 結果.jsonl]
 npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth":4096,"potentialNet":null}'] [--variants '{"名前":{設定},…}'] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl] [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl] [--inputs 学習のデータ.jsonl]
 npm run svwb -- read-log --out 記録.jsonl [--games 49] [--start 0] [--opts '<設定の JSON>'] [--b 12] [--alt-opp '{"beamWidth":8,"maxDepth":8}']
+npm run svwb -- read-gap --out 記録.jsonl [--games 49] [--start 0] [--opts '<設定の JSON>'] [--samples 12] [--depths 1,2,3,4,5,6,7]
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI。
@@ -357,6 +358,11 @@ npm run svwb -- read-log --out 記録.jsonl [--games 49] [--start 0] [--opts '<�
   相手の手札の引き直しごとの読みの点数を 1 行（JSON）ずつ書く。`--b` は、選ぶのに使ったのとは別の乱数の引き直しで読んだ点数（確かめ用の独立な読み）、
   `--alt-opp` は、同じ引き直しを相手のターンのビームの設定を変えて読んだ点数も書く。記録のための読みは選ぶ値にも乱数にも使わないので、打つ手は記録しないときと同じ
   （時間は 1.8 倍ほど）。読みを途中で打ち切る決まりを、試合を打たずに試す用（docs/ai-notes.md「読み直しの記録で、見込みのない候補を途中で打ち切る」）
+- `read-gap`: `read-log` と同じ試合を打ち、自分のターン終了を打つ直前の局面（本物のターン末）ごとに、ターン末の点数と、相手の手札を `--samples` 通り引き直して
+  （選ぶのとは別の乱数）相手のターンを読み直しと同じに読んだ記録を 1 行（JSON）ずつ書く。読みごとに、相手のビームが選んだ並びを 0 手（何もせずにターンを終える）・1 手・…・全部で
+  打ち切って自分の次のターンの最初まで進めた局面の点数（想像の局面と、楽観を直す入力を 0 にした自分のターンの最初）と局面の特徴、
+  `--depths` なら相手のビームの深さだけを変えて読んだ点数も書く。本物の次の自分のターンの最初の点数（`"type":"start"`）と試合の結果も書く。打つ手は変わらない。
+  ターン末の点数と読んだ点数の差が相手のターンのどこで生まれるかを測る用（docs/ai-notes.md「相手のターンの読みのギャップがどこで生まれるか」）
 
 ## td
 
