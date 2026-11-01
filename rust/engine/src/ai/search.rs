@@ -2983,6 +2983,8 @@ pub struct ReadTrace {
     pub after: Vec<f64>,
     /// read_values と同じ読みの点数（imagined の最後と同じになるはず）
     pub full: f64,
+    /// 同じ引き直しを、読みの中の相手のビームの深さだけを変えて読んだ点数（read_trace の depths の順）
+    pub depth_values: Vec<f64>,
 }
 
 /// 相手のターンの最後まで進める（simulate_opponent_turn_by_search の、相手のビームの後と同じ。自分の手番に戻るか決着したら止める）
@@ -3031,6 +3033,7 @@ fn trace_opponent_turn(pl: &Planner, start: &GameState, rng: &mut Rng, leftover:
         imagined: Vec::new(),
         after: Vec::new(),
         full: 0.0,
+        depth_values: Vec::new(),
     };
     // 相手のビームの前まで（simulate_opponent_turn_by_search と同じ）
     let mut cur = start.clone();
@@ -3514,8 +3517,15 @@ impl SearchAgent {
     }
 
     /// read_values の引き直し seed 1 つを、相手のビームが選んだ並びを k 手目で打ち切りながら読む（svwb read-gap。打つ手は変わらない）。
-    /// 試合が終わった局面なら None。full は read_values の同じ seed の点数
-    pub fn read_trace(&self, end: &GameState, p: PlayerIndex, seed: u32) -> Option<ReadTrace> {
+    /// 試合が終わった局面なら None。full は read_values の同じ seed の点数。depths があれば、同じ引き直しを
+    /// 読みの中の相手のビームの深さをそれぞれにして（幅は同じ）読んだ点数も求める
+    pub fn read_trace(
+        &self,
+        end: &GameState,
+        p: PlayerIndex,
+        seed: u32,
+        depths: &[usize],
+    ) -> Option<ReadTrace> {
         if end.phase == Phase::Ended {
             return None;
         }
@@ -3534,8 +3544,26 @@ impl SearchAgent {
         let d = determinize(base, p, &mut r, self.opts.peek_opp_hand);
         let mut r_full = Rng { state: r.state };
         let full = read_once(&pl, &d, &mut r_full).0 - leftover;
-        let mut tr = trace_opponent_turn(&pl, &d, &mut r, leftover);
+        let mut tr = trace_opponent_turn(&pl, &d, &mut Rng { state: r.state }, leftover);
         tr.full = full;
+        for &depth in depths {
+            let opts = SearchOptions {
+                opponent_search: self.opts.opponent_search.map(|o| OpponentSearch {
+                    max_depth: depth,
+                    ..o
+                }),
+                ..self.opts.clone()
+            };
+            let alt = Env {
+                opts: &opts,
+                w: &self.w,
+                opp_w: &self.opp_w,
+                policy_w: &self.policy_w,
+            };
+            let mut rd = Rng { state: r.state };
+            tr.depth_values
+                .push(read_once_with(&pl, &alt, &d, &mut rd).0 - leftover);
+        }
         Some(tr)
     }
 

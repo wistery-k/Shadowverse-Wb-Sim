@@ -1,7 +1,7 @@
 //! read-gap: 探索 AI どうしの試合で、自分のターンを終えるたびに、ターン末の点数と、相手のターンを読み直しと同じに読んだ点数の差（ギャップ）が
 //! 相手のターンのどこで生まれるかを測る（docs/ai-notes.md「相手のターンの読みのギャップがどこで生まれるか」）。
 //!
-//!   svwb read-gap --out 記録.jsonl [--games 49] [--start 0] [--opts '<設定JSON>'] [--samples 12]
+//!   svwb read-gap --out 記録.jsonl [--games 49] [--start 0] [--opts '<設定JSON>'] [--samples 12] [--depths 1,2,4]
 //!
 //! - 試合は read-log と同じ（compare と同じデッキの組で、試合番号ごとに席とデッキを入れ替えて 2 試合。両方の席が同じ設定）
 //! - 打つ手は測らないときと同じ（測るための読みは、試合の乱数を使わない。引き直しの乱数は試合のシード・ターン・席から作る）
@@ -10,6 +10,8 @@
 //!   （と、合流する相打ちの後）で打ち切り、そこで相手がターンを終えて自分の次のターンの最初まで進めた局面を、想像の局面（"imag"。読み直しの点数と同じ）と
 //!   自分のターンの最初（"after"。楽観を直す入力 imagined が 0）で採点する。"full" は読み直しと同じ読みの点数（"imag" の最後と同じはず）。
 //!   ターン末の局面そのものを自分のターンの最初・想像の局面として採点した点数も書く（"teAfter"・"teImag"。入力の after・imagined だけを変えた分）
+//! - --depths: 同じ引き直しを、読みの中の相手のビームの深さだけをそれぞれにして（幅は設定のまま）読んだ点数も書く（"depth"。並びを打ち切るのと違い、
+//!   その深さで相手のビームが選び直した並びの後の点数）
 //! - 各打ち切りの局面の特徴 "f"（自分から見て）: [自分の体力, 相手の体力, 自分の場のフォロワー数, 相手の場のフォロワー数, 自分の手札, 相手の手札,
 //!   自分の場の攻撃力の和, 相手の場の攻撃力の和, 決着（自分の勝ち 1・負け -1・まだ 0）]。"fe" はターン末の局面の同じ特徴
 //! - 本物の次の自分のターンの最初（"type":"start"）で、その局面を自分のターンの最初・想像の局面として採点した点数も書く（本物の相手との比べ用）
@@ -112,6 +114,7 @@ fn trace_json(tr: &ReadTrace, p: PlayerIndex) -> Value {
     }
     json!({
         "full": tr.full,
+        "depth": tr.depth_values,
         "beam": tr.opp_root.is_some(),
         "imag": tr.imagined,
         "after": tr.after,
@@ -125,6 +128,7 @@ fn trace_json(tr: &ReadTrace, p: PlayerIndex) -> Value {
 fn play_traced(
     opts: &SearchOptions,
     samples: usize,
+    depths: &[usize],
     decks: &[&'static Deck],
     g: u32,
     swap: bool,
@@ -173,7 +177,7 @@ fn play_traced(
                 .collect();
             let reads: Vec<Value> = seeds
                 .iter()
-                .filter_map(|&sd| ag.read_trace(&s, actor, sd))
+                .filter_map(|&sd| ag.read_trace(&s, actor, sd, depths))
                 .map(|tr| trace_json(&tr, actor))
                 .collect();
             out.push(json!({
@@ -210,6 +214,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut start: u32 = 0;
     let mut opts_text = "{}".to_string();
     let mut samples: usize = 12;
+    let mut depths: Vec<usize> = Vec::new();
     let mut out_path: Option<String> = None;
     let mut it = argv.iter();
     while let Some(key) = it.next() {
@@ -222,6 +227,13 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             "--games" => games = int()?,
             "--start" => start = int()?,
             "--samples" => samples = int()? as usize,
+            "--depths" => {
+                depths = v
+                    .split(',')
+                    .map(|x| x.trim().parse::<usize>())
+                    .collect::<Result<_, _>>()
+                    .map_err(|_| format!("--depths は整数をコンマで並べたもの: {v}"))?
+            }
             "--opts" => opts_text = v.clone(),
             "--out" => out_path = Some(v.clone()),
             _ => return Err(format!("知らないオプション: {key}")),
@@ -249,7 +261,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut write_err: Option<String> = None;
     parallel_map(
         &tasks,
-        |&(g, swap), _| play_traced(&opts, samples, &decks, g, swap),
+        |&(g, swap), _| play_traced(&opts, samples, &depths, &decks, g, swap),
         |done, total, lines, _| {
             for l in lines {
                 if l["type"] == "end" {
