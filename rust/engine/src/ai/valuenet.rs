@@ -379,6 +379,11 @@ impl ValueNet {
             .is_some_and(|j| self.scalar_slot[j].is_some())
     }
 
+    /// 勝つ確率の傾き a（勝つ確率は σ(a × 点数)。点数は出発点の評価 S と補正 eval の和）
+    pub fn a(&self) -> f64 {
+        self.a
+    }
+
     /// 補正が 0 のモデル（出力の重み・バイアスがすべて 0）
     pub fn is_zero(&self) -> bool {
         self.w2.iter().all(|&x| x == 0.0) && self.b2 == 0.0 && self.c == 0.0

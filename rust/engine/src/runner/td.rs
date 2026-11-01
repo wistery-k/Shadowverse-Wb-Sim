@@ -1,6 +1,6 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--sampling classic|default] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--searchValue 0] [--sampling classic|default] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] --out d0.jsonl
 //!
 //! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・幅 128、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
 //! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
@@ -25,6 +25,11 @@
 //! 相手の手札の引き直しごとに 1 つ）から k 個を選んで書き出す（"ph": 2）。学習はその目標を、同じターンのターン末の局面と同じ
 //! （本物の次の自分のターンの最初の局面からの λ 収益）にする。モデルには "imagined" の入力が要る（npm run td -- extend で足す）。
 //! 打つ手は変わらない（同じ試合になる）。docs/ai-notes.md「読みの中の相手のずれを学習で直す・資源の介入」
+//!
+//! --searchValue 1 なら、各ターン末の局面に探索の値の材料を書く（"qe": ターン末の局面の勝つ確率、"qr": そのターンに選んだ並びを
+//! 探索が相手のターンまで読んだ想像の局面（引き直しごとに 1 つ。相手のターンで決着したものも含む）の勝つ確率の平均。どちらも --model の評価で、
+//! 点数 v を σ(a × v) にしたもの。探索しなかったターンには無い）。学習（npm run td -- train --searchTarget）が、λ 収益の次の局面の予測の
+//! 代わりに混ぜる。打つ手は変わらない。docs/ai-notes.md「補正の学習の目標に探索の値を使う」
 //!
 //! --cmp k なら、各試合で 1 つの自分のターンの最初（--iv と同じ選び方）から、探索が読んだ点数の高い順に最初の手の違う並びを k 個まで選び、
 //! 並びごとにターン末から最後まで --rollouts 回打った勝ち数を書き出す（"cmp" 付きの行。打ち比べ）。r 回目はどの並びも同じ乱数で
@@ -133,6 +138,8 @@ struct Model {
     s_default: Option<EvalWeights>,
     /// ターン末の後に書く想像の局面の数（--imagined）
     imagined: usize,
+    /// ターン末の局面に探索の値の材料（"qe"・"qr"）も書く（--searchValue。打つ手は変わらない）
+    search_value: bool,
     /// 固定した相手の設定（--frozen）。あれば、学ぶ側でない席はこの設定で打つ
     frozen: Option<SearchOptions>,
 }
@@ -174,6 +181,7 @@ fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Mo
         check: false,
         s_default: None,
         imagined: 0,
+        search_value: false,
         frozen: None,
     })
 }
@@ -197,7 +205,9 @@ struct Summary {
 }
 
 /// 局面 1 つ（{"ph":…,"s":…,"x":[…],"v":[…]}、ランダムに打った局面は "ex":1、board なら場のカードの属性 "b"、--sDefault なら基準の重みの評価 "sd" も）。
-/// ph は 0: ターン末、1: 自分のターンの最初、2: 探索が相手のターンを読んだ後の想像の局面（--imagined）
+/// ph は 0: ターン末、1: 自分のターンの最初、2: 探索が相手のターンを読んだ後の想像の局面（--imagined）。
+/// q（--searchValue。ターン末の局面だけ）があれば、探索の値の材料 "qe"・"qr"（search_value の (ターン末, 読みの平均)）も書く
+#[allow(clippy::too_many_arguments)]
 fn write_sample(
     out: &mut String,
     m: &Model,
@@ -206,6 +216,7 @@ fn write_sample(
     phase: ValuePhase,
     explored: bool,
     board: bool,
+    q: Option<(f64, f64)>,
 ) {
     let x = m.net.encode(s, p, phase);
     out.push_str(&format!(
@@ -250,7 +261,51 @@ fn write_sample(
             js_num(round_precision(m.net.eval(s, p, phase), 12))
         ));
     }
+    if let Some((qe, qr)) = q {
+        out.push_str(&format!(
+            ",\"qe\":{},\"qr\":{}",
+            js_num(round_precision(qe, 6)),
+            js_num(round_precision(qr, 6))
+        ));
+    }
     out.push('}');
+}
+
+/// m の評価（出発点の評価 S と補正）で見た、局面 s の p の勝つ確率 σ(a × 点数)。終わった局面は勝ち負け（1・0）
+fn win_prob(m: &Model, s: &GameState, p: PlayerIndex, phase: ValuePhase) -> f64 {
+    if s.phase == Phase::Ended {
+        return match s.winner {
+            Some(w) if w == p => 1.0,
+            Some(_) => 0.0,
+            None => 0.5,
+        };
+    }
+    let mut v = evaluate_with(s, p, &m.w);
+    if !m.net.is_zero() {
+        v += m.net.eval(s, p, phase);
+    }
+    1.0 / (1.0 + (-m.net.a() * v).exp())
+}
+
+/// 探索の値の材料（--searchValue）: ターン末の局面 end の勝つ確率と、そのターンに選んだ並びを探索が相手のターンまで読んだ
+/// 想像の局面（引き直しごとに 1 つ。相手のターンで決着したものも含む）の勝つ確率の平均。読みが無ければ（探索しなかったターン）None。
+/// 探索は (1 - rescoreMix) × 読みの平均 + rescoreMix × ターン末 の点数で並びを選ぶ。学習（npm run td -- train --searchTarget）は
+/// これを勝つ確率のまま混ぜて、次の局面の予測の代わりに使う
+fn search_value(
+    m: &Model,
+    end: &GameState,
+    p: PlayerIndex,
+    reads: &[std::rc::Rc<GameState>],
+) -> Option<(f64, f64)> {
+    if reads.is_empty() {
+        return None;
+    }
+    let r = reads
+        .iter()
+        .map(|x| win_prob(m, x, p, ValuePhase::Imagined))
+        .sum::<f64>()
+        / reads.len() as f64;
+    Some((win_prob(m, end, p, ValuePhase::End), r))
 }
 
 /// 場のカードの属性（,"b":[[p の場],[相手の場]]、場の並び順）。学習の入力に直す前の値なので、入力の形を変えても
@@ -479,12 +534,13 @@ fn play_out(
                     counts: &mut [usize; 2],
                     s: &GameState,
                     phase: ValuePhase,
-                    ex: bool| {
+                    ex: bool,
+                    q: Option<(f64, f64)>| {
             if counts[actor] > 0 {
                 samples[actor].push(',');
             }
             counts[actor] += 1;
-            write_sample(&mut samples[actor], m, s, actor, phase, ex, m.board);
+            write_sample(&mut samples[actor], m, s, actor, phase, ex, m.board, q);
         };
         // 自分のターンの最初の局面（相手のターンを読んだ後に探索が評価する局面と同じ）
         if state.phase == Phase::Main
@@ -528,6 +584,7 @@ fn play_out(
                 &state,
                 ValuePhase::After,
                 action.is_some(),
+                None,
             );
         }
         let action = match action {
@@ -541,16 +598,28 @@ fn play_out(
             let end = resolve_turn_end(&state);
             let end = end.as_ref().unwrap_or(&state);
             if end.phase != Phase::Ended {
-                push(&mut samples, &mut counts, end, ValuePhase::End, false);
+                let reads = agents[actor].take_reads(actor);
+                let q = if m.search_value {
+                    search_value(m, end, actor, &reads)
+                } else {
+                    None
+                };
+                push(&mut samples, &mut counts, end, ValuePhase::End, false, q);
                 // そのターンに選んだ並びの想像の局面から m.imagined 個（試合の乱数とは別の乱数で選ぶ）
-                let mut reads: Vec<_> = agents[actor]
-                    .take_reads(actor)
+                let mut reads: Vec<_> = reads
                     .into_iter()
                     .filter(|x| x.phase != Phase::Ended)
                     .collect();
                 for _ in 0..m.imagined.min(reads.len()) {
                     let x = reads.swap_remove(img_rng.int(reads.len()));
-                    push(&mut samples, &mut counts, &x, ValuePhase::Imagined, false);
+                    push(
+                        &mut samples,
+                        &mut counts,
+                        &x,
+                        ValuePhase::Imagined,
+                        false,
+                        None,
+                    );
                 }
             }
         }
@@ -652,14 +721,14 @@ fn compare_plans(
             continue;
         }
         let mut json = String::new();
-        write_sample(&mut json, m, label, p, ValuePhase::End, false, false);
+        write_sample(&mut json, m, label, p, ValuePhase::End, false, false, None);
         // ターン末が同じ局面になる並び（入力と点数が同じ）は 1 つだけ（--board でも選ぶ並びは変えない）
         if cands.iter().any(|x| x.2 == json) {
             continue;
         }
         let full = if m.board {
             let mut full = String::new();
-            write_sample(&mut full, m, label, p, ValuePhase::End, false, true);
+            write_sample(&mut full, m, label, p, ValuePhase::End, false, true, None);
             full
         } else {
             json.clone()
@@ -983,7 +1052,12 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     let mut m = model_options(net.clone(), opp_beam, classic)?;
     m.board = board;
     m.imagined = imagined as usize;
-    m.opts.record_reads = m.imagined > 0;
+    m.search_value = match arg(args, "searchValue").unwrap_or("0") {
+        "0" => false,
+        "1" => true,
+        x => return Err(format!("--searchValue は 0 か 1: {x}")),
+    };
+    m.opts.record_reads = m.imagined > 0 || m.search_value;
     m.check = match arg(args, "check").unwrap_or("0") {
         "0" => false,
         "1" => true,
@@ -1242,6 +1316,52 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn search_value_on_turn_ends_without_changing_games() {
+        // --searchValue 1 を付けても試合は同じ。探索の値の材料 "qe"・"qr" はターン末の局面にだけ付き、勝つ確率（0〜1）
+        let decks = compare_decks();
+        let mut sv = imagined_model(0);
+        sv.search_value = true;
+        sv.opts.record_reads = true;
+        for g in [3u32, 10] {
+            let plain = play_one(
+                g,
+                &decks,
+                None,
+                &imagined_model(0),
+                0.1,
+                0.0,
+                IvZone::Hand,
+                0.0,
+                None,
+            );
+            let with = play_one(g, &decks, None, &sv, 0.1, 0.0, IvZone::Hand, 0.0, None);
+            let mut v: serde_json::Value = serde_json::from_str(&with.line).expect("JSON");
+            let (mut ends, mut valued) = (0, 0);
+            for seq in v["samples"].as_array_mut().expect("局面") {
+                for x in seq.as_array_mut().expect("局面の列") {
+                    let o = x.as_object_mut().expect("局面");
+                    let (qe, qr) = (o.remove("qe"), o.remove("qr"));
+                    assert_eq!(qe.is_some(), qr.is_some());
+                    if o["ph"] == 0 {
+                        ends += 1;
+                    } else {
+                        assert!(qe.is_none(), "{o:?}");
+                    }
+                    if let (Some(qe), Some(qr)) = (qe, qr) {
+                        valued += 1;
+                        for q in [qe.as_f64().expect("qe"), qr.as_f64().expect("qr")] {
+                            assert!((0.0..=1.0).contains(&q), "{q}");
+                        }
+                    }
+                }
+            }
+            assert!(ends > 0 && valued * 10 >= ends * 9, "{valued}/{ends}");
+            let plain: serde_json::Value = serde_json::from_str(&plain.line).expect("JSON");
+            assert_eq!(plain, v);
         }
     }
 

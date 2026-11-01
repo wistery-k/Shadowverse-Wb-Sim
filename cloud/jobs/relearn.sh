@@ -10,6 +10,9 @@
 # 見込みは評価の点数の差を当てるので、評価を変えたら学び直す（docs/ai-notes.md「ターン途中の見込みを学ぶ」）。学び方は potential-1 と同じ
 # （今の既定の自己対戦の試合 POT_FROM〜 の POT_GAMES 試合で、見込みなしの幅 4096 のビームが残した局面を局面ごとに 100 個。最後の POT_VALID 試合は学ばず確かめに使う）。
 # 判定は「学び直した補正 ＋ 学び直した見込み」で打つ（リノセウス用 AI は見込みを使わないので補正だけ）。補正だけ替えた版も CMPV 組だけ測る。
+# 自己対戦はターン末の局面に探索の値の材料も書く（td selfplay --searchValue 1。打つ手は変わらない）。学習の目標に探索の値を混ぜるなら
+# TRAIN_EXTRA='--searchTarget 0.5' のように渡す（docs/ai-notes.md「補正の学習の目標に探索の値を使う」）。
+# 同じ自己対戦から学び方を変えた補正をいくつも作るときは、NAME を変えて流す（最後の 1 つの前までは KEEP=1 で学習のデータを残す）。
 #
 # PC で（既定。リポジトリの一番上で。Docker のコンテナでは ~/svwb-data の下に置く）:
 #   mkdir -p ~/svwb-data/td-relearn7 && CLOUD_W=~/svwb-data/td-relearn7 bash cloud/jobs/relearn.sh 2>&1 | tee -a ~/svwb-data/td-relearn7/relearn.log
@@ -22,7 +25,7 @@
 # 途中で止めても、終わった段階（自己対戦の CHUNK 試合ごと・学習・間引き・埋め・見込みのデータの 500 試合ごと・見込みの学習・比べごと）は飛ばして続きから回る。
 # 自己対戦は CHUNK 試合ごとに s<i>.jsonl.gz に残す。学習・間引きに読むのは gzip する前の s<i>.jsonl.tmp
 # （.tmp はクラウドの作業フォルダの写しに入らない。止められて作り直された VM では .gz から戻す）で、間引きが終わったら消す（KEEP=1 なら残す）。
-# 結果は $W/relearn.md。PC（CLOUD_W が ~/svwb-data の下）なら最後に pack-run でモデルとログだけを ~/svwb-data/upload/ にまとめる
+# 結果は $W/relearn-$NAME.md。PC（CLOUD_W が ~/svwb-data の下）なら最後に pack-run でモデルとログだけを ~/svwb-data/upload/ にまとめる
 # （共有フォルダに上げる用。自己対戦は大きいので入れない。PACK=0 でしない）。
 set -euo pipefail
 W=${CLOUD_W:?}
@@ -33,6 +36,7 @@ NET0=${NET0:-data/value-net.json}  # 自己対戦を打つ補正と、学習の�
 NAME=${NAME:-t}                # 学んだ補正の名前（$NAME.json → 間引き ${NAME}p.json → 埋め ${NAME}pa.json）
 IV=${IV:-3}                    # 介入の数（今までの学び直しの手順と同じ）
 SP_EXTRA=${SP_EXTRA:-}         # td selfplay に足す引数（打つ手を変えないもの。例: --sDefault 1）
+TRAIN_EXTRA=${TRAIN_EXTRA:-}   # td train に足す引数（例: --searchTarget 0.5）
 LR=${LR:-0.0003}
 EPOCHS=${EPOCHS:-3}
 BASE=${BASE:-zero}             # 学習の出発点の評価 S（td train --base。zero・default・search）
@@ -70,7 +74,7 @@ if [ ! -f "$MPA" ]; then
     n=$(( G - CHUNK * i < CHUNK ? G - CHUNK * i : CHUNK ))
     # shellcheck disable=SC2086
     $B td selfplay --model "$W/net0.json" --games "$n" --start $((SEED0 + CHUNK * i)) \
-      --eps 0.1 --opp beam --sampling default --iv "$IV" --ivZone both --imagined 2 $SP_EXTRA --out "$f.tmp" > "$f.log" 2>&1
+      --eps 0.1 --opp beam --sampling default --iv "$IV" --ivZone both --imagined 2 --searchValue 1 $SP_EXTRA --out "$f.tmp" > "$f.log" 2>&1
     gzip -c "$f.tmp" > "$f.gz.tmp"
     mv "$f.gz.tmp" "$f.gz"
     echo "== 自己対戦 s$i $(date '+%m-%d %H:%M')"; grep -E "試合、局面" "$f.log" | sed 's|^.*: ||'
@@ -91,11 +95,12 @@ if [ ! -f "$MPA" ]; then
   # 2. NET0 から学び直す
   if [ ! -f "$M" ]; then
     restore
+    # shellcheck disable=SC2086
     npm run -s td -- train --model "$W/net0.json" --data "$DATA" --out "$M.tmp" \
-      --epochs "$EPOCHS" --lr "$LR" --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base "$BASE" > "$W/$NAME-train.log" 2>&1
+      --epochs "$EPOCHS" --lr "$LR" --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base "$BASE" $TRAIN_EXTRA > "$W/$NAME-train.log" 2>&1
     mv "$M.tmp" "$M"
   fi
-  echo "== 学習 $NAME $(date '+%m-%d %H:%M')"; grep -hE "^(出発点|学習前|エポック|確かめ用|補正)" "$W/$NAME-train.log" | cut -c1-240
+  echo "== 学習 $NAME $(date '+%m-%d %H:%M')"; grep -hE "^(出発点|探索の値|学習前|エポック|確かめ用|補正)" "$W/$NAME-train.log" | cut -c1-240
 
   # 3. 学習データに出なかった入力を 0 にし（td prune）、学んでいないカードの行を属性の分で埋める（td attr --keepA 0、λ 3）
   if [ ! -f "$MP" ]; then
@@ -194,7 +199,7 @@ echo "== 今の既定 rhino"; tail -n 4 "$W/cur-rhino.log"
 # まとめ
 pct() { grep -m 1 -oE '[0-9]+/[0-9]+ = [0-9.]+%' "$1" || true; }
 {
-  echo "# 補正の学び直し（$NAME、出発点 $NET0、S は --base $BASE、自己対戦 $G 試合・g$SEED0〜）"
+  echo "# 補正の学び直し（$NAME、出発点 $NET0、S は --base $BASE${TRAIN_EXTRA:+、学習 $TRAIN_EXTRA}、自己対戦 $G 試合・g$SEED0〜）"
   echo
   echo "判定した設定（作業フォルダの中のファイル）: \`${OPT//$W\//}\`（リノセウス用 AI は \`${OPTV//$W\//}\`）"
   echo
@@ -220,8 +225,8 @@ pct() { grep -m 1 -oE '[0-9]+/[0-9]+ = [0-9.]+%' "$1" || true; }
     { grep -E "^(基準|全部|  )" "$W/$NAME-pot-eval.txt" || true; } | head -n 9 | sed "s|$W/||g"
     echo '```'
   fi
-} > "$W/relearn.md"
-cat "$W/relearn.md"
+} > "$W/relearn-$NAME.md"
+cat "$W/relearn-$NAME.md"
 case "$W" in
   */svwb-data/*) [ "$PACK" = 0 ] || npm run -s pack-run -- "$W" --name "$(basename "$W")" --note '強くなった探索の棋譜で補正を学び直す（relearn.sh）' \
     --out "$HOME/svwb-data/upload" --exclude 'net0.json' --only models,logs --force ;;

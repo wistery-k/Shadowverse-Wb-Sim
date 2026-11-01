@@ -299,7 +299,9 @@ fn deferred_plan_still_makes_settled_trades() {
     // AFネメシス対アマリアロイヤル（rhino-compare --subject af の g38・席 0、ラストワード版）の 4 ターン目の終わり。
     // 場のミリアム 2 体は、相手のワルツ（2/1）・スタチウム（4/4）と相打ちできる（合流する攻撃。ターン末の点数はこれを打った局面）。
     // 探索の最良の並びは「パスト・コア 2 枚の融合」だけで、回すと何も残らない。そのときターン終了だけにすると相打ちをせずに終える
-    // （2026-10-29、ロイヤル戦の分かれ目から。前の版は 240 試合で 0 回、ラストワード版は 75 回）。相打ちを打つ
+    // （2026-10-29、ロイヤル戦の分かれ目から。前の版は 240 試合で 0 回、ラストワード版は 75 回）。相打ちを打つ。
+    // どの並びを選ぶかは学習した補正で変わる（補正 relearn9 では、アーティファクトチャージを出してから融合と相打ちをする並びを選ぶ）ので、
+    // 融合だけの並びを選んだとして回した後の手を確かめ、実際に打つターンでも相打ちをすることを確かめる
     let mut s = new_game(deck("AFネメシス"), deck("アマリアロイヤル"), 800494);
     let seq = actions(
         r#"[{"type":"mulligan","player":1,"swap":[62]},{"type":"mulligan","player":0,"swap":[6,14]},{"type":"endTurn"},
@@ -312,14 +314,36 @@ fn deferred_plan_still_makes_settled_trades() {
     s = apply_all(&s, &seq);
     assert_eq!(s.active, 0);
     assert!(!crate::ai::converging::converging_attacks(&s, 0).is_empty());
-    let legal = legal_actions(&s);
-    let mut ag = SearchAgent::new(SearchOptions {
+    let opts = SearchOptions {
         defer_fuse: true,
         defer_fuse_last_words: true,
         ..SearchOptions::default()
-    });
-    let a = ag.choose_action(&s, &legal, &mut Rng::new(1));
-    assert!(matches!(a, Action::Attack { .. }), "{a:?}");
+    };
+    let fuse = Action::Fuse {
+        host: 87,
+        materials: vec![89],
+    };
+    assert!(legal_actions(&s).contains(&fuse));
+    let deferred = SearchAgent::new(opts.clone()).deferred_actions(&s, 0, &[fuse]);
+    let trades = |acts: &[Action]| {
+        let mut t: Vec<_> = acts
+            .iter()
+            .filter_map(|a| match a {
+                Action::Attack {
+                    attacker,
+                    target: Some(t),
+                } => Some((*attacker, *t)),
+                _ => None,
+            })
+            .collect();
+        t.sort();
+        t
+    };
+    assert_eq!(trades(&deferred), [(19, 55), (20, 59)], "{deferred:?}");
+    assert!(deferred.iter().all(|a| !is_fuse(a)), "{deferred:?}");
+    let mut ag = SearchAgent::new(opts);
+    let (moves, _) = play_turn(s, 0, &mut ag, &mut Rng::new(1));
+    assert_eq!(trades(&moves_of(&moves)), [(19, 55), (20, 59)], "{moves:?}");
 }
 
 #[test]

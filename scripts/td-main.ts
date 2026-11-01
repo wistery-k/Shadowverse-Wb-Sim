@@ -26,7 +26,7 @@
 //     このモデルの学習には "b" のある自己対戦（td selfplay の既定）が要る
 //   npm run td -- check --model m.json --data d.jsonl
 //     td selfplay --check 1 で書いた "z"（探索の補正）と、このファイルの計算で "x"・"b" から出した補正を比べる（"x" は 4 桁に丸めてあるので少しずれる）
-//   npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001] [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--v1Only 0] [--best 0]  [--bestOn end,after] [--seat both] [--base default|zero|search]
+//   npm run td -- train --model m0.json --data d0.jsonl[,d1.jsonl] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001] [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--v1Only 0] [--best 0]  [--bestOn end,after] [--seat both] [--base default|zero|search] [--searchTarget 0] [--searchMix 0.5]
 //     --base default なら、出発点の評価 S を基準の重み DEFAULT_WEIGHTS のもの（自己対戦の "sd"。svwb td selfplay --sDefault 1 で書く）にして学び、
 //     書き出すモデルの baseWeights を基準の重みにする（探索はこのモデルで、自分の評価だけを基準の重みにして打つ。読みの中の相手は探索の既定の重みのまま）。
 //     --base zero なら S を 0 にする（手で作った評価を使わず、補正だけで点数を付ける）。--base search なら探索の既定の重み（baseWeights なし）。
@@ -45,6 +45,11 @@
 //     （本物の次の自分のターンの最初の局面からの λ 収益）にして、--imaginedWeight の重み（既定 1。0 なら読まない）で学ぶ。
 //     確かめ用の交差エントロピーは今までどおり end・after の局面だけで測り、想像の局面は別に出す。
 //     --bestOn end,imagined なら、--best の判定をターン末と想像の局面（探索が点数に使う局面）の交差エントロピーで行う（既定 end,after）。
+//     --searchTarget m（既定 0）なら、λ 収益の次の局面の予測 V_{t+1} の代わりに (1 - m) × V_{t+1} + m × 探索の値 を使う（TD-Leaf と同じ考え）。
+//     探索の値は td selfplay --searchValue 1 で書いた、そのターンに探索が選んだ並びの値を勝つ確率にしたもの
+//     （(1 - --searchMix) × 相手のターンを読んだ想像の局面の平均 qr + --searchMix × ターン末の局面 qe。--searchMix の既定 0.5 は探索の rescoreMix と同じ）。
+//     ターン末の局面はそのターンの、自分のターンの最初の局面は同じターンのターン末の局面の値を使い、ランダムに打った局面と探索しなかったターンは予測のまま。
+//     探索の値は自己対戦のモデルのもので、エポックごとに計算し直さない。docs/ai-notes.md「補正の学習の目標に探索の値を使う」
 //     想像の局面を学ぶと after の予測が少し悪くなり、既定の判定では学習前が選ばれた（docs/ai-notes.md の同じ節）。
 //     docs/ai-notes.md「読みの中の相手のずれを学習で直す・資源の介入」
 //   npm run td -- ivcheck --model m1.json --data d0.jsonl[,d1.jsonl] [--holdout 0] [--opp <デッキ名>] [--min 30]
@@ -378,6 +383,12 @@ interface Sample {
   b?: [BoardCard[], BoardCard[]];
   /** 自己対戦のモデルの補正（評価の点数の単位。td selfplay --check 1 のときだけ。npm run td -- check で使う） */
   z?: number;
+  /**
+   * 探索の値の材料（td selfplay --searchValue 1 のときのターン末の局面だけ。自己対戦のモデルで見た勝つ確率）。
+   * qe はこの局面、qr はそのターンに選んだ並びを探索が相手のターンまで読んだ想像の局面（引き直しごと）の平均。train --searchTarget で使う
+   */
+  qe?: number;
+  qr?: number;
 }
 
 interface GameRecord {
@@ -417,7 +428,7 @@ const isCmp = (r: GameRecord | CmpRecord): r is CmpRecord => "cmp" in r;
 // ---- train ----
 
 /** 学習用にまとめた局面 */
-interface Dataset {
+export interface Dataset {
   /** 局面 i の入力は idx・val の off[i]〜off[i+1] */
   off: Int32Array;
   idx: Int32Array;
@@ -442,6 +453,11 @@ interface Dataset {
   board?: BoardRows;
   /** 局面 i の試合（読んだ順の通し番号。介入の試合も 1 試合と数える） */
   game: Int32Array;
+  /**
+   * 局面 i の探索の値（そのターンに探索が選んだ並びの値を勝つ確率にしたもの。(1 - searchMix) × qr + searchMix × qe。無ければ NaN）。
+   * ターン末の局面は自分の "qe"・"qr"、自分のターンの最初の局面は同じターンのターン末の局面のもの（ランダムに打った局面には無い）
+   */
+  q: Float64Array;
 }
 
 type IvZone = "hand" | "drawn" | "board" | "oppBoard" | "res" | "oppRes";
@@ -558,6 +574,8 @@ interface LoadOptions {
   skipGame?: (r: GameRecord) => boolean;
   /** 偽を返した席の局面は読まない（train の --seat） */
   useSeat?: SeatFilter;
+  /** 探索の値の、ターン末の局面の勝つ確率 qe の割合（train の --searchMix。既定 0.5 は探索の rescoreMix と同じ） */
+  searchMix?: number;
 }
 
 /** 試合 r の席 p の局面を読むか（--seat） */
@@ -577,9 +595,11 @@ function seatFilter(args: Args): SeatFilter | undefined {
   };
 }
 
-function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: number) => boolean, board?: CompiledBoard, opts: LoadOptions = {}): Dataset {
+export function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: number) => boolean, board?: CompiledBoard, opts: LoadOptions = {}): Dataset {
   const imaginedWeight = opts.imaginedWeight ?? 1;
+  const searchMix = opts.searchMix ?? 0.5;
   const off = new Grow(i32), idx = new Grow(i32), val = new Grow(f32), s = new Grow(f64), sd = new Grow(f64), next = new Grow(i32), outcome = new Grow(f64);
+  const q = new Grow(f64);
   const cards = board ? new BoardGrow(board) : null;
   const explored = new Grow(u8), hold = new Grow(u8), phase = new Grow(u8), weight = new Grow(f64), anchor = new Grow(i32), game = new Grow(i32);
   off.push(0);
@@ -626,13 +646,19 @@ function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: num
           hold.push(isHold);
           phase.push(x.ph);
           const w = r.iv ? ivWeight : 1;
+          // 探索の値。ターンの最初の局面には、同じターンのターン末の局面のものを入れる（ランダムに打った局面は除く）
+          const qv = x.ph === 0 && x.qe !== undefined && x.qr !== undefined ? (1 - searchMix) * x.qr + searchMix * x.qe : NaN;
+          q.push(qv);
           if (x.ph === 2) {
             anchor.push(prev);
             weight.push(w * imaginedWeight);
           } else {
             anchor.push(-1);
             weight.push(w);
-            if (prev >= 0) next.buf[prev] = i;
+            if (prev >= 0) {
+              next.buf[prev] = i;
+              if (x.ph === 0 && phase.buf[prev] === 1 && !explored.buf[prev]) q.buf[prev] = qv;
+            }
             prev = i;
           }
         }
@@ -666,6 +692,7 @@ function loadData(files: string[], holdout: number, ivWeight = 1, keep?: (i: num
     pairs,
     ...(cards ? { board: cards.done() } : {}),
     game: game.done(),
+    q: q.done(),
   };
 }
 
@@ -823,16 +850,20 @@ function predictAll(net: CompiledValueNet, d: SparseRows & { s: Float64Array }, 
   return v;
 }
 
-/** λ 収益（局面 i の目標）。次の局面がランダムに打った局面なら、その局面の予測で切る。想像の局面は、直前のターン末の局面と同じ目標 */
-function lambdaReturns(d: Dataset, v: Float64Array, lambda: number): Float64Array {
+/**
+ * λ 収益（局面 i の目標）。次の局面がランダムに打った局面なら、その局面の予測で切る。想像の局面は、直前のターン末の局面と同じ目標。
+ * searchTarget m > 0 なら、次の局面 j の予測 v[j] の代わりに (1 - m) × v[j] + m × 探索の値 q[j] を使う（q[j] が無ければ v[j]。train --searchTarget）
+ */
+export function lambdaReturns(d: Dataset, v: Float64Array, lambda: number, searchTarget = 0): Float64Array {
   const g = new Float64Array(v.length);
+  const valueAt = (j: number): number => (searchTarget > 0 && !Number.isNaN(d.q[j]!) ? (1 - searchTarget) * v[j]! + searchTarget * d.q[j]! : v[j]!);
   // 各列の局面は添字の順に並んでいるので、後ろから計算すれば次の局面の目標は計算済み
   for (let i = v.length - 1; i >= 0; i--) {
     if (d.anchor[i]! >= 0) continue;
     const j = d.next[i]!;
     if (j < 0) g[i] = d.outcome[i]!;
-    else if (d.explored[j]) g[i] = v[j]!;
-    else g[i] = (1 - lambda) * v[j]! + lambda * g[j]!;
+    else if (d.explored[j]) g[i] = valueAt(j);
+    else g[i] = (1 - lambda) * valueAt(j) + lambda * g[j]!;
   }
   for (let i = 0; i < v.length; i++) {
     const a = d.anchor[i]!;
@@ -872,6 +903,29 @@ function holdoutLoss(d: Dataset, v: Float64Array, phases: ReadonlySet<number> = 
     n++;
   }
   return sum / Math.max(1, n);
+}
+
+/**
+ * 確かめ用の局面（ランダムに打った局面を除く）のうち探索の値のあるもの（ターン末・ターンの最初）で、探索の値とモデルの予測 v の、
+ * 勝敗に対する交差エントロピーと、平均の差（探索の値 − 予測。探索がどれだけ楽観しているか）。探索の値のある局面が無ければ null
+ */
+function searchReport(d: Dataset, v: Float64Array): string | null {
+  const parts: string[] = [];
+  for (const [name, ph] of [["end", 0], ["after", 1]] as const) {
+    let n = 0, lq = 0, lv = 0, diff = 0;
+    for (let i = 0; i < v.length; i++) {
+      if (!d.holdout[i] || d.explored[i] || d.phase[i] !== ph || Number.isNaN(d.q[i]!)) continue;
+      n++;
+      lq += bce(d.q[i]!, d.outcome[i]!);
+      lv += bce(v[i]!, d.outcome[i]!);
+      diff += d.q[i]! - v[i]!;
+    }
+    if (n === 0) continue;
+    const pct = (x: number) => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(2)}%`;
+    parts.push(`${name}(${n}) 勝敗の交差エントロピー 探索の値 ${(lq / n).toFixed(4)}・予測 ${(lv / n).toFixed(4)}、探索の値 − 予測 ${pct(diff / n)}`);
+  }
+  const all = d.q.reduce((x, y) => x + (Number.isNaN(y) ? 0 : 1), 0);
+  return parts.length > 0 ? `探索の値のある局面 ${all} / ${parts.join(" / ")}` : null;
 }
 
 /**
@@ -957,6 +1011,10 @@ function train(args: Args): number {
   );
   const cmpWeight = numArg(args, "cmpWeight", 0);
   const cmpBatch = numArg(args, "cmpBatch", 16);
+  // --searchTarget m: λ 収益の次の局面の予測に、探索の値（td selfplay --searchValue 1）を割合 m で混ぜる。--searchMix はその中のターン末の割合
+  const searchTarget = numArg(args, "searchTarget", 0);
+  const searchMix = numArg(args, "searchMix", 0.5);
+  if (!(searchTarget >= 0 && searchTarget <= 1) || !(searchMix >= 0 && searchMix <= 1)) throw new Error("--searchTarget・--searchMix は 0〜1");
   // --base default|zero|search: 出発点の評価（書き出すモデルの baseWeights）を変えて学ぶ。省略すると元のモデルのまま
   const baseArg = args.get("base");
   const baseWeights =
@@ -980,7 +1038,7 @@ function train(args: Args): number {
   const skipGame = excludeGames(model, args.get("exclude"));
   // --seat learner: td selfplay --frozen の学ぶ側の局面だけで学ぶ（狙い撃ちの相手を学ばせる）
   const useSeat = seatFilter(args);
-  const d = withBase(loadData(files, holdout, ivWeight, keep, compiled0.board, { imaginedWeight, ivRes, ...(skipGame ? { skipGame } : {}), ...(useSeat ? { useSeat } : {}) }), baseWeights);
+  const d = withBase(loadData(files, holdout, ivWeight, keep, compiled0.board, { imaginedWeight, ivRes, searchMix, ...(skipGame ? { skipGame } : {}), ...(useSeat ? { useSeat } : {}) }), baseWeights);
   if (baseArg !== undefined) console.log(`出発点の評価: ${baseArg}（S は ${({ s: '"s"', sd: '"sd"', zero: "0" } as const)[sSourceOf(baseWeights)]}）`);
   const n = d.s.length;
   const nImagined = d.anchor.reduce((x, a) => x + (a >= 0 ? 1 : 0), 0);
@@ -1273,14 +1331,19 @@ function train(args: Args): number {
   // 最後に出す補正の大きさも、書き出す重みの予測のときに足した値を使う（計算し直しても同じ値。docs/ai-notes.md「td train を速くする」）
   const abs0 = { sum: 0 };
   const v0 = predictAll(current(), d, abs0);
-  report("学習前", d, v0, lambdaReturns(d, v0, lambda));
+  if (searchTarget > 0 || d.q.some((x) => !Number.isNaN(x))) {
+    const line = searchReport(d, v0);
+    if (searchTarget > 0 && line === null) throw new Error("--searchTarget には探索の値のある自己対戦（svwb td selfplay --searchValue 1）が要ります");
+    if (line) console.log(`探索の値（--searchTarget ${searchTarget}、--searchMix ${searchMix}）: ${line}`);
+  }
+  report("学習前", d, v0, lambdaReturns(d, v0, lambda, searchTarget));
   if (cmp) console.log(`学習前: ${cmpReport(cmp, predictAll(current(), cmp))}`);
   // --best 1: 確かめ用の局面の勝敗の交差エントロピーが一番小さかったエポックの重み
   let best = { loss: holdoutLoss(d, v0, bestOn), epoch: 0, params: keepBest ? params.slice() : params, abs: abs0.sum };
   /** 今の重みの全局面の予測と、補正の大きさの和 */
   let last = { v: v0, abs: abs0.sum };
   for (let epoch = 0; epoch < epochs; epoch++) {
-    const targets = lambdaReturns(d, last.v, lambda);
+    const targets = lambdaReturns(d, last.v, lambda, searchTarget);
     // 並べ替え（Fisher-Yates）
     for (let i = trainIdx.length - 1; i > 0; i--) {
       const j = Math.floor(nextFloat(holder) * (i + 1));
@@ -1366,7 +1429,7 @@ function train(args: Args): number {
     const abs = { sum: 0 };
     const v = predictAll(current(), d, abs);
     last = { v, abs: abs.sum };
-    report(`エポック ${epoch + 1}（学習の TD ${(lossSum / trainIdx.length).toFixed(4)}、a ${params[oA]!.toFixed(4)}、c ${params[oC]!.toFixed(3)}）`, d, v, lambdaReturns(d, v, lambda));
+    report(`エポック ${epoch + 1}（学習の TD ${(lossSum / trainIdx.length).toFixed(4)}、a ${params[oA]!.toFixed(4)}、c ${params[oC]!.toFixed(3)}）`, d, v, lambdaReturns(d, v, lambda, searchTarget));
     if (cmp) console.log(`エポック ${epoch + 1}（学習の打ち比べ ${(cmpLoss / Math.max(1, trainGroups.length)).toFixed(4)}）: ${cmpReport(cmp, predictAll(current(), cmp))}`);
     const loss = holdoutLoss(d, v, bestOn);
     if (keepBest && loss < best.loss) best = { loss, epoch: epoch + 1, params: params.slice(), abs: abs.sum };
