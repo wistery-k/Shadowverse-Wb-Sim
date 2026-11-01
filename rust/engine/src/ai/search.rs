@@ -2941,18 +2941,10 @@ pub fn simulate_opponent_turn(
     s.unwrap_or_else(|| state.clone())
 }
 
-/// 相手のターンをビームサーチで打つ版（SearchOptions.opponentSearch）。
-/// 相手のターン中の選択待ちなど、並びの外の手は貪欲法で進める
-pub fn simulate_opponent_turn_by_search(
-    state: &GameState,
-    p: PlayerIndex,
-    rng: &mut Rng,
-    env: &Env,
-) -> GameState {
-    let opts = env.opts;
-    let q = opponent(p);
+/// 読みの中の相手のビームの設定（simulate_opponent_turn_by_search・trace_opponent_turn）
+fn opponent_search_options(opts: &SearchOptions) -> SearchOptions {
     let os = opts.opponent_search;
-    let opp_opts = SearchOptions {
+    SearchOptions {
         allow: None,
         extra_eval: if os.is_some_and(|o| o.extra_eval) {
             opts.opp_extra_eval
@@ -2971,7 +2963,166 @@ pub fn simulate_opponent_turn_by_search(
         best_first: 0,
         potential: None,
         ..opts.clone()
+    }
+}
+
+/// 相手のターンの読み（read_once）を、相手のビームが選んだ並びを k 手目で打ち切りながら追った記録（SearchAgent::read_trace。svwb read-gap）
+pub struct ReadTrace {
+    /// 相手のビームを打った局面（相手のターンの最初。ターン開始時の選択待ちを済ませた後）。相手のビームまで届かなかったら None
+    pub opp_root: Option<Rc<GameState>>,
+    /// 相手のビームが選んだ並び（手と、その後の局面。chain でまとめた手は 1 つ）。何もせずにターンを終える並びなら空
+    pub steps: Vec<(Action, Rc<GameState>)>,
+    /// 並びの後に合流する相打ちを打ったか
+    pub settled: bool,
+    /// 打ち切った局面（そこで相手がターンを終え、自分の次のターンの最初まで進めたもの）。[0] は相手が何もせずにターンを終えたもの、
+    /// [k] は並びの k 手目まで打ったもの、settled なら最後は合流する相打ちの後。相手のビームまで届かなかったら読んだ後の局面 1 つ
+    pub cuts: Vec<GameState>,
+    /// cuts の点数（想像の局面として。読み直しと同じ）。残った PP の分を引いたもの
+    pub imagined: Vec<f64>,
+    /// cuts を自分のターンの最初（ValuePhase::After。想像の局面の入力 imagined が 0 で、楽観を直さない）で採点した点数
+    pub after: Vec<f64>,
+    /// read_values と同じ読みの点数（imagined の最後と同じになるはず）
+    pub full: f64,
+}
+
+/// 相手のターンの最後まで進める（simulate_opponent_turn_by_search の、相手のビームの後と同じ。自分の手番に戻るか決着したら止める）
+fn finish_opponent_turn(state: GameState, p: PlayerIndex, rng: &mut Rng, env: &Env) -> GameState {
+    let q = opponent(p);
+    let mut cur = state;
+    for _ in 0..80 {
+        if cur.phase == Phase::Ended || (cur.pending.is_none() && cur.active == p) {
+            break;
+        }
+        let a = if cur.pending.is_none() && cur.active == q {
+            Action::EndTurn
+        } else {
+            choose_greedy(&cur, &legal_actions(&cur), rng, true, env.policy_w, false)
+        };
+        match try_apply_action(&cur, &a) {
+            Some(next) => cur = next,
+            None => break,
+        }
+    }
+    cur
+}
+
+/// start（自分のターン末を決定化した局面）から相手のターンを simulate_opponent_turn_by_search と同じに読み、
+/// 相手のビームが選んだ並びを 0〜全部の手で打ち切った局面を採点する（leftover は引く残り PP の分）
+fn trace_opponent_turn(pl: &Planner, start: &GameState, rng: &mut Rng, leftover: f64) -> ReadTrace {
+    let env = pl.env;
+    let p = pl.p;
+    let q = opponent(p);
+    let opp_opts = opponent_search_options(env.opts);
+    let opp_env = Env {
+        opts: &opp_opts,
+        w: env.opp_w,
+        opp_w: env.opp_w,
+        policy_w: env.policy_w,
     };
+    let score = |s: &GameState| -> (f64, f64) {
+        let (e, x) = pl.parts(s, ValuePhase::After);
+        (pl.eval_after(s) - leftover, e + x - leftover)
+    };
+    let mut out = ReadTrace {
+        opp_root: None,
+        steps: Vec::new(),
+        settled: false,
+        cuts: Vec::new(),
+        imagined: Vec::new(),
+        after: Vec::new(),
+        full: 0.0,
+    };
+    // 相手のビームの前まで（simulate_opponent_turn_by_search と同じ）
+    let mut cur = start.clone();
+    let mut ended = false;
+    let mut root: Option<GameState> = None;
+    for _ in 0..80 {
+        if cur.phase == Phase::Ended {
+            break;
+        }
+        if cur.pending.is_none() && cur.active == p {
+            if ended {
+                break;
+            }
+            match try_apply_action(&cur, &Action::EndTurn) {
+                Some(next) => cur = next,
+                None => break,
+            }
+            ended = true;
+            continue;
+        }
+        if ended && cur.pending.is_none() && cur.active == q {
+            root = Some(cur.clone());
+            break;
+        }
+        let a = choose_greedy(&cur, &legal_actions(&cur), rng, true, env.policy_w, false);
+        match try_apply_action(&cur, &a) {
+            Some(next) => cur = next,
+            None => break,
+        }
+    }
+    let Some(root) = root else {
+        let (i, a) = score(&cur);
+        out.imagined.push(i);
+        out.after.push(a);
+        out.cuts.push(cur);
+        return out;
+    };
+    let root = Rc::new(root);
+    let (pl_q, terminals, bests) = turn_end_bests(&root, q, &opp_env, false);
+    let mut best: Option<usize> = None;
+    for &(_, i) in &bests {
+        if best.is_none_or(|b| terminals[i].value > terminals[b].value) {
+            best = Some(i);
+        }
+    }
+    let steps = best
+        .map(|i| pl_q.steps_of(terminals[i].path))
+        .unwrap_or_default();
+    if steps
+        .last()
+        .is_some_and(|(a, _)| !matches!(a, Action::EndTurn))
+    {
+        out.steps = steps;
+    }
+    // 打ち切る局面: 何もしない・k 手目まで・合流する相打ちの後
+    let mut tops: Vec<GameState> = vec![(*root).clone()];
+    tops.extend(out.steps.iter().map(|(_, s)| (**s).clone()));
+    if let Some((_, last)) = out.steps.last() {
+        if env.opts.settle_trades {
+            if let Some(settled) = settle_converging_trades_with(last, q, env.opts.dominance) {
+                out.settled = true;
+                tops.push(settled);
+            }
+        }
+    }
+    for t in tops {
+        let cut = if t.phase == Phase::Ended {
+            t
+        } else {
+            let mut r = Rng { state: rng.state };
+            finish_opponent_turn(t, p, &mut r, env)
+        };
+        let (i, a) = score(&cut);
+        out.imagined.push(i);
+        out.after.push(a);
+        out.cuts.push(cut);
+    }
+    out.opp_root = Some(root);
+    out
+}
+
+/// 相手のターンをビームサーチで打つ版（SearchOptions.opponentSearch）。
+/// 相手のターン中の選択待ちなど、並びの外の手は貪欲法で進める
+pub fn simulate_opponent_turn_by_search(
+    state: &GameState,
+    p: PlayerIndex,
+    rng: &mut Rng,
+    env: &Env,
+) -> GameState {
+    let opts = env.opts;
+    let q = opponent(p);
+    let opp_opts = opponent_search_options(opts);
     // 読みの中の相手は、自分の評価の重みでなく方策の重み（policy_weights。既定は同じ）で打つ
     let opp_env = Env {
         opts: &opp_opts,
@@ -3360,6 +3511,64 @@ impl SearchAgent {
                 read_once(&pl, &d, &mut r).0 - leftover
             })
             .collect()
+    }
+
+    /// read_values の引き直し seed 1 つを、相手のビームが選んだ並びを k 手目で打ち切りながら読む（svwb read-gap。打つ手は変わらない）。
+    /// 試合が終わった局面なら None。full は read_values の同じ seed の点数
+    pub fn read_trace(&self, end: &GameState, p: PlayerIndex, seed: u32) -> Option<ReadTrace> {
+        if end.phase == Phase::Ended {
+            return None;
+        }
+        let env = self.env();
+        let pl = Planner {
+            env: &env,
+            p,
+            root: Rc::new(end.clone()),
+            steps: Vec::new(),
+            plays_only: false,
+        };
+        let settled = pl.settle(end);
+        let base = settled.as_ref().unwrap_or(end);
+        let leftover = pl.leftover(end);
+        let mut r = Rng::new(seed);
+        let d = determinize(base, p, &mut r, self.opts.peek_opp_hand);
+        let mut r_full = Rng { state: r.state };
+        let full = read_once(&pl, &d, &mut r_full).0 - leftover;
+        let mut tr = trace_opponent_turn(&pl, &d, &mut r, leftover);
+        tr.full = full;
+        Some(tr)
+    }
+
+    /// turn_end_value と同じ局面（合流する相打ちとターン終了時の処理の後）を、phase の局面として採点した点数（svwb read-gap。
+    /// ValuePhase::End なら turn_end_value と同じ）
+    pub fn turn_end_phase_value(&self, end: &GameState, p: PlayerIndex, phase: ValuePhase) -> f64 {
+        let env = self.env();
+        let pl = Planner {
+            env: &env,
+            p,
+            root: Rc::new(end.clone()),
+            steps: Vec::new(),
+            plays_only: false,
+        };
+        let settled = pl.settle(end);
+        let base = settled.as_ref().unwrap_or(end);
+        let resolved = resolve_turn_end(base);
+        let (e, x) = pl.parts(resolved.as_ref().unwrap_or(base), phase);
+        e + x - pl.leftover(end) - pl.expiring(end)
+    }
+
+    /// 局面 s を p から見て、phase の局面として採点した点数（手で作った評価と評価に足す項の和。svwb read-gap）
+    pub fn phase_value(&self, s: &GameState, p: PlayerIndex, phase: ValuePhase) -> f64 {
+        let env = self.env();
+        let pl = Planner {
+            env: &env,
+            p,
+            root: Rc::new(s.clone()),
+            steps: Vec::new(),
+            plays_only: false,
+        };
+        let (e, x) = pl.parts(s, phase);
+        e + x
     }
 
     /// p のターン末の局面 end から 2 ターン先まで読んだ点数（測るための道具。runner/two_turn.rs。打つ手は変わらない）。
