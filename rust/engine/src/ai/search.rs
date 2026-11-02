@@ -11,7 +11,7 @@ use super::converging::{
     converging_attacks, dominated_attack, settle_converging_trade_steps,
     settle_converging_trades_with,
 };
-use super::determinize::determinize_read;
+use super::determinize::{determinize_apart, determinize_read};
 use super::eval::{evaluate_with, EvalWeights};
 use super::exact_lethal::{search_exact_lethal, sure_lethal_options};
 use super::fusion::{excessive_fusion, fuse_root_chains, last_words_to_hand};
@@ -442,6 +442,9 @@ pub struct SearchOptions {
     pub opp_hand_samples: usize,
     /// oppHandSamples で引き直す相手の手札を、読み直すどの終局面でも同じ並びにする（手どうしの差のぶれを減らす）
     pub opp_hand_common: bool,
+    /// 読み直しの決定化で、自分の山札を別の乱数で並べ直す（determinize_apart）。引く手と引かない手の終局面（自分の山札の枚数が違う）でも、
+    /// 同じ引き直しの種なら相手の手札が同じになる（oppHandCommon をどの手でも成り立たせる。docs/ai-notes.md「錬金釜を置くと点数が下がる理由」）
+    pub read_own_deck_apart: bool,
     pub peek_opp_hand: bool,
     /// 相手のターンの始めに、伏せた手札をカード 1 枚にしたら相手が勝てたカード（持っていればリーサル）を調べ、
     /// 相手がそのターンに勝たなければ、そのとき手札にあった伏せたカードの決定化から外す（lethalRead、既定 false。ai/hand_read.rs。
@@ -553,6 +556,8 @@ impl Default for SearchOptions {
             two_turn_gate: None,
             opp_hand_samples: 12,
             opp_hand_common: true,
+            // 2026-11-02 から（6400 試合で 50.6% ± 0.40。docs/ai-notes.md「錬金釜を置くと点数が下がる理由」）
+            read_own_deck_apart: true,
             peek_opp_hand: false,
             lethal_read: false,
             hand_reading: None,
@@ -1962,13 +1967,7 @@ pub fn plan_turn_traced(
                     let (na0, nb0) = (lg_a.len(), lg_b.len());
                     for &seed2 in &mine {
                         let mut r2 = Rng::new(seed2);
-                        let d = determinize_read(
-                            base,
-                            p,
-                            &mut r2,
-                            opts.peek_opp_hand,
-                            opts.hand_reading.as_deref(),
-                        );
+                        let d = read_determinize(base, p, &mut r2, opts);
                         let (v, after) = read_once(&pl, &d, &mut r2);
                         read_xs.push((wr, v - left));
                         read_w += wr;
@@ -1986,13 +1985,7 @@ pub fn plan_turn_traced(
                             let wb = w / theirs.len().max(1) as f64;
                             for seed2 in theirs {
                                 let mut r2 = Rng::new(seed2);
-                                let d = determinize_read(
-                                    base,
-                                    p,
-                                    &mut r2,
-                                    opts.peek_opp_hand,
-                                    opts.hand_reading.as_deref(),
-                                );
+                                let d = read_determinize(base, p, &mut r2, opts);
                                 let (v, _) = read_once(&pl, &d, &mut r2);
                                 lg_b.push((wb, v - left));
                             }
@@ -2000,13 +1993,7 @@ pub fn plan_turn_traced(
                         if let Some(ae) = &alt_env {
                             for &seed2 in &mine {
                                 let mut r2 = Rng::new(seed2);
-                                let d = determinize_read(
-                                    base,
-                                    p,
-                                    &mut r2,
-                                    opts.peek_opp_hand,
-                                    opts.hand_reading.as_deref(),
-                                );
+                                let d = read_determinize(base, p, &mut r2, opts);
                                 let (v, _) = read_once_with(&pl, ae, &d, &mut r2);
                                 lg_alt.push((wr, v - left));
                             }
@@ -2061,13 +2048,7 @@ pub fn plan_turn_traced(
             // 記録用に、引き直し seed で 1 回読んだ点数（相手は opp_env の設定のビームで打つ）
             let read_seed = |seed: u32, opp_env: &Env| -> f64 {
                 let mut r = Rng::new(seed);
-                let mut d = determinize_read(
-                    base,
-                    p,
-                    &mut r,
-                    opts.peek_opp_hand,
-                    opts.hand_reading.as_deref(),
-                );
+                let mut d = read_determinize(base, p, &mut r, opts);
                 if opts.resample_draws {
                     resample_own_draws(&mut d, root, p, &mut r);
                 }
@@ -2113,13 +2094,7 @@ pub fn plan_turn_traced(
                 }
             } else {
                 for _ in 0..opts.opp_hand_samples {
-                    let d = determinize_read(
-                        base,
-                        p,
-                        rng,
-                        opts.peek_opp_hand,
-                        opts.hand_reading.as_deref(),
-                    );
+                    let d = read_determinize(base, p, rng, opts);
                     let (v, after) = read_once(&pl, &d, rng);
                     xs.push((1.0, v));
                     two_of(&after, rng);
@@ -2353,17 +2328,26 @@ struct RaceRead {
     rng: u32,
 }
 
+/// 相手のターンを読む前の決定化（読み直し・読みの記録で使う。readOwnDeckApart なら自分の山札を別の乱数で並べ直す）
+fn read_determinize(
+    base: &GameState,
+    p: PlayerIndex,
+    rng: &mut Rng,
+    opts: &SearchOptions,
+) -> GameState {
+    let reading = opts.hand_reading.as_deref();
+    if opts.read_own_deck_apart {
+        determinize_apart(base, p, rng, opts.peek_opp_hand, reading)
+    } else {
+        determinize_read(base, p, rng, opts.peek_opp_hand, reading)
+    }
+}
+
 /// 相手の手札の引き直し（oppHandCommon。r はその引き直しの種で作った乱数で、読んだ後の状態になる）で、
 /// base から相手のターンを読んだ点数と、読んだ後の局面
 fn read_common(pl: &Planner, base: &GameState, root: &GameState, r: &mut Rng) -> (f64, GameState) {
     let opts = pl.opts();
-    let mut d = determinize_read(
-        base,
-        pl.p,
-        r,
-        opts.peek_opp_hand,
-        opts.hand_reading.as_deref(),
-    );
+    let mut d = read_determinize(base, pl.p, r, opts);
     if opts.resample_draws {
         resample_own_draws(&mut d, root, pl.p, r);
     }
@@ -3605,13 +3589,7 @@ impl SearchAgent {
             .iter()
             .map(|&seed| {
                 let mut r = Rng::new(seed);
-                let d = determinize_read(
-                    base,
-                    p,
-                    &mut r,
-                    self.opts.peek_opp_hand,
-                    self.opts.hand_reading.as_deref(),
-                );
+                let d = read_determinize(base, p, &mut r, &self.opts);
                 read_once(&pl, &d, &mut r).0 - leftover
             })
             .collect()
@@ -3642,13 +3620,7 @@ impl SearchAgent {
         let base = settled.as_ref().unwrap_or(end);
         let leftover = pl.leftover(end);
         let mut r = Rng::new(seed);
-        let d = determinize_read(
-            base,
-            p,
-            &mut r,
-            self.opts.peek_opp_hand,
-            self.opts.hand_reading.as_deref(),
-        );
+        let d = read_determinize(base, p, &mut r, &self.opts);
         let mut r_full = Rng { state: r.state };
         let full = read_once(&pl, &d, &mut r_full).0 - leftover;
         let mut tr = trace_opponent_turn(&pl, &d, &mut Rng { state: r.state }, leftover);
@@ -3738,13 +3710,7 @@ impl SearchAgent {
         let base = settled.as_ref().unwrap_or(end);
         let leftover = pl.leftover(end);
         let mut r = Rng::new(seed);
-        let d = determinize_read(
-            base,
-            p,
-            &mut r,
-            self.opts.peek_opp_hand,
-            self.opts.hand_reading.as_deref(),
-        );
+        let d = read_determinize(base, p, &mut r, &self.opts);
         let (v, after) = read_once(&pl, &d, &mut r);
         let read = v - leftover;
         if after.phase == Phase::Ended || after.active != p || after.pending.is_some() {

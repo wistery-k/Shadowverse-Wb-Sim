@@ -299,6 +299,7 @@ pub fn search_options(
             "lethalRead" => o.lethal_read = flag(k, v)?,
             "oppFuse" => o.opp_fuse = flag(k, v)?,
             "oppHandCommon" => o.opp_hand_common = flag(k, v)?,
+            "readOwnDeckApart" => o.read_own_deck_apart = flag(k, v)?,
             "reuseAgree" => o.reuse_agree = flag(k, v)?,
             "resampleDraws" => o.resample_draws = flag(k, v)?,
             "drawFirst" => o.draw_first = flag(k, v)?,
