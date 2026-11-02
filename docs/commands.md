@@ -300,6 +300,7 @@ npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth
 npm run svwb -- read-log --out 記録.jsonl [--games 49] [--start 0] [--opts '<設定の JSON>'] [--b 12] [--alt-opp '{"beamWidth":8,"maxDepth":8}']
 npm run svwb -- read-gap --out 記録.jsonl [--games 49] [--start 0] [--opts '<設定の JSON>'] [--samples 12] [--depths 1,2,3,4,5,6,7]
 npm run svwb -- lethal-read --out 記録.jsonl [--games 49] [--start 0] [--opts '<設定の JSON>'] [--decide]
+npm run svwb -- lethal-diff --out 記録.jsonl [--games 1600] [--start 0] [--opts '<設定の JSON>'] [--samples 6] [--playouts 64] [--replays リプレイ.jsonl]
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI。
@@ -371,6 +372,10 @@ npm run svwb -- lethal-read --out 記録.jsonl [--games 49] [--start 0] [--opts 
   （`lethalRead` が決定化から外すカード。`rust/engine/src/ai/hand_read.rs`）を調べ、見つかれば、その枚数・本当の手札にあったか・そのターンに勝ったか・
   見る側の次のターンの最初に外せる枠の数を 1 行（JSON）ずつ書く。`--decide` なら両方の席を `lethalRead` にして打ち、各ターンの最初の手番で読みが効いているとき、
   読みなしの AI が選ぶ手・並びと比べた行も書く（行の項目は `lethal_read.rs` の先頭。docs/ai-notes.md「見逃したリーサルから相手の手札を絞る」）
+- `lethal-diff`: `compare -- <games> '{"lethalRead":true,...}' '{...}'` と同じ試合（鏡）を打ち直し、A の試合と B どうしの試合（lethalRead が無ければ打たれた試合）が
+  最初に食い違う手・AI の乱数が最初に食い違う手、読みが効いた A のターンの最初の手番ごとの手の分布（読みあり・読みなし・別の種の読みなしで `--samples` 回ずつ）を書き、
+  同じ種で読みありと読みなしの手が違った組を `--playouts` 回ずつ打ち比べる（手札・場は本当の局面のまま、山札の順番と局面の乱数を並べ直して最後まで打つ）。
+  `--replays` なら食い違う試合のリプレイを compare `--replays` と同じ形で書く（行の項目は `lethal_diff.rs` の先頭。docs/ai-notes.md「見逃したリーサルから相手の手札を絞る」）
 
 ## td
 
