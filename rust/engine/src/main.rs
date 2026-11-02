@@ -167,7 +167,7 @@ fn main() {
             cmd @ ("compare" | "rhino-compare" | "deck-compare" | "mulligan-compare"
             | "mulligan-data" | "td" | "yardstick" | "human-plan-value" | "meta"
             | "deep-gap" | "profile" | "two-turn" | "draw-stability" | "fuse-gap"
-            | "defer-playout" | "beam-gap" | "read-log" | "read-gap"),
+            | "defer-playout" | "beam-gap" | "read-log" | "read-gap" | "lethal-read"),
         ) => {
             let rest = &args[1..];
             let r = match cmd {
@@ -188,6 +188,7 @@ fn main() {
                 "profile" => runner::profile::main(rest),
                 "read-log" => runner::read_log::main(rest),
                 "read-gap" => runner::read_gap::main(rest),
+                "lethal-read" => runner::lethal_read::main(rest),
                 _ => runner::td::main(rest),
             };
             if let Err(e) = r {
@@ -196,7 +197,7 @@ fn main() {
             }
         }
         _ => {
-            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | mulligan-data … | td selfplay … | yardstick … | human-plan-value … | deep-gap … | two-turn … | draw-stability … | fuse-gap … | defer-playout … | beam-gap … | profile … | read-log … | read-gap …（rust/README.md）");
+            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | mulligan-data … | td selfplay … | yardstick … | human-plan-value … | deep-gap … | two-turn … | draw-stability … | fuse-gap … | defer-playout … | beam-gap … | profile … | read-log … | read-gap … | lethal-read …（rust/README.md）");
             std::process::exit(2);
         }
     }

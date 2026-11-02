@@ -299,6 +299,7 @@ npm run svwb -- defer-playout --dir <記録のディレクトリ> --opts '<回�
 npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth":4096,"potentialNet":null}'] [--variants '{"名前":{設定},…}'] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl] [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl] [--inputs 学習のデータ.jsonl]
 npm run svwb -- read-log --out 記録.jsonl [--games 49] [--start 0] [--opts '<設定の JSON>'] [--b 12] [--alt-opp '{"beamWidth":8,"maxDepth":8}']
 npm run svwb -- read-gap --out 記録.jsonl [--games 49] [--start 0] [--opts '<設定の JSON>'] [--samples 12] [--depths 1,2,3,4,5,6,7]
+npm run svwb -- lethal-read --out 記録.jsonl [--games 49] [--start 0] [--opts '<設定の JSON>'] [--decide]
 ```
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI。
@@ -366,6 +367,10 @@ npm run svwb -- read-gap --out 記録.jsonl [--games 49] [--start 0] [--opts '<�
   打ち切って自分の次のターンの最初まで進めた局面の点数（想像の局面と、楽観を直す入力を 0 にした自分のターンの最初）と局面の特徴、
   `--depths` なら相手のビームの深さだけを変えて読んだ点数も書く。本物の次の自分のターンの最初の点数（`"type":"start"`）と試合の結果も書く。打つ手は変わらない。
   ターン末の点数と読んだ点数の差が相手のターンのどこで生まれるかを測る用（docs/ai-notes.md「相手のターンの読みのギャップがどこで生まれるか」）
+- `lethal-read`: `read-log` と同じ試合を打ち、手番の側のターンの始めごとに、相手（見る側）から見て「伏せた手札をそのカード 1 枚にしたら、手番の側がそのターンに勝てる」カード
+  （`lethalRead` が決定化から外すカード。`rust/engine/src/ai/hand_read.rs`）を調べ、見つかれば、その枚数・本当の手札にあったか・そのターンに勝ったか・
+  見る側の次のターンの最初に外せる枠の数を 1 行（JSON）ずつ書く。`--decide` なら両方の席を `lethalRead` にして打ち、各ターンの最初の手番で読みが効いているとき、
+  読みなしの AI が選ぶ手・並びと比べた行も書く（行の項目は `lethal_read.rs` の先頭。docs/ai-notes.md「見逃したリーサルから相手の手札を絞る」）
 
 ## td
 
@@ -535,6 +540,10 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
 - `perPlan`: 数（既定 0 で使わない）。ビームの各深さで、同じ「手の組」（手札から出したカード・進化・超進化・能力・エクストラPP の組。攻撃・融合・選ぶ手は数えない）の局面をまずこの数まで残し、余った枠を点数の順に埋める。攻撃先・融合の素材だけが違う並びが枠を埋めて、別のカードを使う手順が切られるのを防ぐ（2026-10-26。docs/ai-notes.md「手の組ごとにビームの枠を設ける」）
 - 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`
+- `lethalRead`: 真偽（既定 false。2026-11-02）。相手のターンの始めに、伏せた手札をカード 1 枚にしたら相手が勝てたカード（持っていればリーサル）を調べ、
+  相手がそのターンに勝たなければ、そのとき手札にあった伏せたカードには、決定化でそのカードを配らない（後から引いたカードには配る。どのカードを出したかは分からないので、
+  伏せたカードが手札から出るたびに外せる枠を 1 つ減らす）。相手の手番の局面を見せる対戦（`play_match` を使う compare・rhino-compare・deck-compare 等）でだけ効き、
+  ブラウザの対戦・TD の自己対戦などでは何もしない（`rust/engine/src/ai/hand_read.rs`。docs/ai-notes.md「見逃したリーサルから相手の手札を絞る」）
 - `deferFuse`: 真偽（既定 true。2026-10-29 に今の形で既定に）。次のターン以降に回せる融合（作ったカードがターン末まで手札に残り、その融合を除いて打ち直しても手札のほかが同じになるもの。
   融合しないと手札が上限（9 枚）になるもの、ターン終了時の処理が変わるもの（手札の枚数で引くかどうかが決まるエースのクレスト等）は除く）を打たない。並びの選び方と点数は変えず（融合した終局面の点数のまま）、選んだ並びから回せる融合を除いて打つ。除いて何も残らなければ、ターン末の点数に入れている合流する相打ちを打つ（docs/ai-notes.md「使わない融合を次のターン以降に回す」）
 - `deferFuseKeepSet`: 真偽（既定 false。2026-10-29）。`deferFuse` で、手で作った評価が上がる融合（手札の α・β・γ の種類が増える）は回さない

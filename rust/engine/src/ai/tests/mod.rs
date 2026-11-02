@@ -17,6 +17,7 @@ mod draw_split;
 mod eval;
 mod fuse_minimal;
 mod fuse_root;
+mod hand_read;
 mod keys;
 mod lethal;
 mod mulligan;

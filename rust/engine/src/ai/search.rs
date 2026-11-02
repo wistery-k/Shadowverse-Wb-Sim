@@ -11,11 +11,12 @@ use super::converging::{
     converging_attacks, dominated_attack, settle_converging_trade_steps,
     settle_converging_trades_with,
 };
-use super::determinize::determinize;
+use super::determinize::determinize_read;
 use super::eval::{evaluate_with, EvalWeights};
 use super::exact_lethal::{search_exact_lethal, sure_lethal_options};
 use super::fusion::{excessive_fusion, fuse_root_chains, last_words_to_hand};
 use super::greedy::{choose_greedy, value_after};
+use super::hand_read::{lethal_threats, HandReading, OppHandTracker};
 use super::keys::{hand_eq_noid, state_eq, visible_eq, TurnOrderMap, TurnOrderSet};
 use super::lethal::{
     find_lethal, search_lethal, LethalOptions, LethalSearch, DEFAULT_LETHAL_OPTIONS,
@@ -442,6 +443,12 @@ pub struct SearchOptions {
     /// oppHandSamples で引き直す相手の手札を、読み直すどの終局面でも同じ並びにする（手どうしの差のぶれを減らす）
     pub opp_hand_common: bool,
     pub peek_opp_hand: bool,
+    /// 相手のターンの始めに、伏せた手札をカード 1 枚にしたら相手が勝てたカード（持っていればリーサル）を調べ、
+    /// 相手がそのターンに勝たなければ、そのとき手札にあった伏せたカードの決定化から外す（lethalRead、既定 false。ai/hand_read.rs。
+    /// docs/ai-notes.md「見逃したリーサルから相手の手札を絞る」）。相手の手番の局面を Agent::observe で見せる対戦（play_match）でだけ効く
+    pub lethal_read: bool,
+    /// 決定化で相手の伏せた手札の枠ごとに外すカード（lethalRead のとき、SearchAgent が手番ごとに入れ直す。設定の JSON では渡さない）
+    pub hand_reading: Option<Arc<HandReading>>,
     pub opp_fuse: bool,
     pub danger_rescore: usize,
     /// 上位の手を読み直した点数に、ターン末の点数をこの割合で混ぜる（0 なら読み直した点数だけ。既定 0.5、2026-10-22）
@@ -547,6 +554,8 @@ impl Default for SearchOptions {
             opp_hand_samples: 12,
             opp_hand_common: true,
             peek_opp_hand: false,
+            lethal_read: false,
+            hand_reading: None,
             opp_fuse: false,
             danger_rescore: 0,
             rescore_mix: 0.5,
@@ -1953,7 +1962,13 @@ pub fn plan_turn_traced(
                     let (na0, nb0) = (lg_a.len(), lg_b.len());
                     for &seed2 in &mine {
                         let mut r2 = Rng::new(seed2);
-                        let d = determinize(base, p, &mut r2, opts.peek_opp_hand);
+                        let d = determinize_read(
+                            base,
+                            p,
+                            &mut r2,
+                            opts.peek_opp_hand,
+                            opts.hand_reading.as_deref(),
+                        );
                         let (v, after) = read_once(&pl, &d, &mut r2);
                         read_xs.push((wr, v - left));
                         read_w += wr;
@@ -1971,7 +1986,13 @@ pub fn plan_turn_traced(
                             let wb = w / theirs.len().max(1) as f64;
                             for seed2 in theirs {
                                 let mut r2 = Rng::new(seed2);
-                                let d = determinize(base, p, &mut r2, opts.peek_opp_hand);
+                                let d = determinize_read(
+                                    base,
+                                    p,
+                                    &mut r2,
+                                    opts.peek_opp_hand,
+                                    opts.hand_reading.as_deref(),
+                                );
                                 let (v, _) = read_once(&pl, &d, &mut r2);
                                 lg_b.push((wb, v - left));
                             }
@@ -1979,7 +2000,13 @@ pub fn plan_turn_traced(
                         if let Some(ae) = &alt_env {
                             for &seed2 in &mine {
                                 let mut r2 = Rng::new(seed2);
-                                let d = determinize(base, p, &mut r2, opts.peek_opp_hand);
+                                let d = determinize_read(
+                                    base,
+                                    p,
+                                    &mut r2,
+                                    opts.peek_opp_hand,
+                                    opts.hand_reading.as_deref(),
+                                );
                                 let (v, _) = read_once_with(&pl, ae, &d, &mut r2);
                                 lg_alt.push((wr, v - left));
                             }
@@ -2034,7 +2061,13 @@ pub fn plan_turn_traced(
             // 記録用に、引き直し seed で 1 回読んだ点数（相手は opp_env の設定のビームで打つ）
             let read_seed = |seed: u32, opp_env: &Env| -> f64 {
                 let mut r = Rng::new(seed);
-                let mut d = determinize(base, p, &mut r, opts.peek_opp_hand);
+                let mut d = determinize_read(
+                    base,
+                    p,
+                    &mut r,
+                    opts.peek_opp_hand,
+                    opts.hand_reading.as_deref(),
+                );
                 if opts.resample_draws {
                     resample_own_draws(&mut d, root, p, &mut r);
                 }
@@ -2080,7 +2113,13 @@ pub fn plan_turn_traced(
                 }
             } else {
                 for _ in 0..opts.opp_hand_samples {
-                    let d = determinize(base, p, rng, opts.peek_opp_hand);
+                    let d = determinize_read(
+                        base,
+                        p,
+                        rng,
+                        opts.peek_opp_hand,
+                        opts.hand_reading.as_deref(),
+                    );
                     let (v, after) = read_once(&pl, &d, rng);
                     xs.push((1.0, v));
                     two_of(&after, rng);
@@ -2318,7 +2357,13 @@ struct RaceRead {
 /// base から相手のターンを読んだ点数と、読んだ後の局面
 fn read_common(pl: &Planner, base: &GameState, root: &GameState, r: &mut Rng) -> (f64, GameState) {
     let opts = pl.opts();
-    let mut d = determinize(base, pl.p, r, opts.peek_opp_hand);
+    let mut d = determinize_read(
+        base,
+        pl.p,
+        r,
+        opts.peek_opp_hand,
+        opts.hand_reading.as_deref(),
+    );
     if opts.resample_draws {
         resample_own_draws(&mut d, root, pl.p, r);
     }
@@ -3207,6 +3252,10 @@ pub struct SearchAgent {
     plans: [Option<PlanState>; 2],
     /// 最後に選んだ並びの想像の局面（record_reads のとき）
     reads: [Vec<Rc<GameState>>; 2],
+    /// lethalRead: 席ごとの、相手の伏せた手札の読み（readers[v] は v から見た相手の手札）
+    readers: [OppHandTracker; 2],
+    /// lethalRead: この AI が手を選んだ席
+    seats: [bool; 2],
 }
 
 impl SearchAgent {
@@ -3232,7 +3281,47 @@ impl SearchAgent {
             default_w: EvalWeights::new(ad.default_weights.clone()),
             plans: [None, None],
             reads: [Vec::new(), Vec::new()],
+            readers: Default::default(),
+            seats: [false, false],
         }
+    }
+
+    /// lethalRead: viewer から見た相手の伏せた手札の読みを、局面 s で更新する（相手のターンの始めなら、持っていればリーサルのカードを調べる）
+    fn track_hand(&mut self, s: &GameState, viewer: PlayerIndex) {
+        let mut tr = std::mem::take(&mut self.readers[viewer]);
+        tr.observe(s, viewer, |t| self.opp_lethal_threats(t, viewer));
+        self.readers[viewer] = tr;
+    }
+
+    /// lethalRead: 自分（p）の手番の局面 real で読みを更新し、決定化に使う読みを入れ直す
+    fn refresh_hand_reading(&mut self, real: &GameState, p: PlayerIndex) {
+        if !self.opts.lethal_read {
+            return;
+        }
+        self.seats[p] = true;
+        self.track_hand(real, p);
+        self.opts.hand_reading = self.readers[p].reading(real, p).map(Arc::new);
+    }
+
+    /// 局面 s（相手 q = opponent(viewer) のターンの始め）で、q の伏せた手札をカード 1 枚にしたら q が勝てるカード
+    /// （このAI が自分の手番で使うのと同じリーサル探索。ai/hand_read.rs の lethal_threats）
+    pub fn opp_lethal_threats(&self, s: &GameState, viewer: PlayerIndex) -> Vec<CardIdx> {
+        let opts = &self.opts;
+        let lo = LethalOptions {
+            ward_blocked: opts.lethal_ward_blocked,
+            expand_choices: opts.lethal_expand_choices,
+            ..DEFAULT_LETHAL_OPTIONS
+        };
+        let exact_states = opts.lethal_exact_states;
+        let search = |root: &GameState, q: PlayerIndex| {
+            search_lethal(root, q, &lo).or_else(|| {
+                (exact_states > 0)
+                    .then(|| search_exact_lethal(root, q, &sure_lethal_options(exact_states)))
+                    .flatten()
+            })
+        };
+        let seed = (s.turn as u32).wrapping_mul(0x9e37_79b9) ^ 0x5bd1_e995 ^ viewer as u32;
+        lethal_threats(s, viewer, seed, lo.samples, &search)
     }
 
     /// p が最後に選んだ並びの、相手のターンを読んだ後の想像の局面（record_reads のとき）を取り出す。取り出すと空になる
@@ -3313,7 +3402,13 @@ impl SearchAgent {
         // 読み直した手の、choose_action の totals と同じ順（決定化ごとに plan_turn が返した順で、初めて出たところ）
         let mut totals: Vec<usize> = Vec::new();
         for sample in 0..opts.samples {
-            let det = Rc::new(determinize(real, p, rng, opts.peek_opp_hand));
+            let det = Rc::new(determinize_read(
+                real,
+                p,
+                rng,
+                opts.peek_opp_hand,
+                opts.hand_reading.as_deref(),
+            ));
             let mut trace = PlanTrace::default();
             let plans = plan_turn_traced(&det, p, &env, rng, true, Some(&mut trace));
             roots.push((*det).clone());
@@ -3510,7 +3605,13 @@ impl SearchAgent {
             .iter()
             .map(|&seed| {
                 let mut r = Rng::new(seed);
-                let d = determinize(base, p, &mut r, self.opts.peek_opp_hand);
+                let d = determinize_read(
+                    base,
+                    p,
+                    &mut r,
+                    self.opts.peek_opp_hand,
+                    self.opts.hand_reading.as_deref(),
+                );
                 read_once(&pl, &d, &mut r).0 - leftover
             })
             .collect()
@@ -3541,7 +3642,13 @@ impl SearchAgent {
         let base = settled.as_ref().unwrap_or(end);
         let leftover = pl.leftover(end);
         let mut r = Rng::new(seed);
-        let d = determinize(base, p, &mut r, self.opts.peek_opp_hand);
+        let d = determinize_read(
+            base,
+            p,
+            &mut r,
+            self.opts.peek_opp_hand,
+            self.opts.hand_reading.as_deref(),
+        );
         let mut r_full = Rng { state: r.state };
         let full = read_once(&pl, &d, &mut r_full).0 - leftover;
         let mut tr = trace_opponent_turn(&pl, &d, &mut Rng { state: r.state }, leftover);
@@ -3631,7 +3738,13 @@ impl SearchAgent {
         let base = settled.as_ref().unwrap_or(end);
         let leftover = pl.leftover(end);
         let mut r = Rng::new(seed);
-        let d = determinize(base, p, &mut r, self.opts.peek_opp_hand);
+        let d = determinize_read(
+            base,
+            p,
+            &mut r,
+            self.opts.peek_opp_hand,
+            self.opts.hand_reading.as_deref(),
+        );
         let (v, after) = read_once(&pl, &d, &mut r);
         let read = v - leftover;
         if after.phase == Phase::Ended || after.active != p || after.pending.is_some() {
@@ -4000,10 +4113,24 @@ fn return_all_copies(
 
 impl Agent for SearchAgent {
     fn think(&mut self, real: &GameState, legal: &[Action], rng: &mut Rng) -> Option<Thought> {
+        self.refresh_hand_reading(real, acting_player(real));
         self.think_with(real, legal, rng, None)
     }
 
+    fn observe(&mut self, state: &GameState) {
+        if !self.opts.lethal_read {
+            return;
+        }
+        let actor = acting_player(state);
+        for v in 0..2 {
+            if self.seats[v] && v != actor {
+                self.track_hand(state, v);
+            }
+        }
+    }
+
     fn choose_action(&mut self, real: &GameState, legal: &[Action], rng: &mut Rng) -> Action {
+        self.refresh_hand_reading(real, acting_player(real));
         let first = &legal[0];
         if legal.len() == 1 {
             return first.clone();
@@ -4158,7 +4285,13 @@ impl Agent for SearchAgent {
         };
         let mut totals: Vec<Total> = Vec::new();
         for _ in 0..opts.samples {
-            let det = Rc::new(determinize(real, p, rng, opts.peek_opp_hand));
+            let det = Rc::new(determinize_read(
+                real,
+                p,
+                rng,
+                opts.peek_opp_hand,
+                opts.hand_reading.as_deref(),
+            ));
             for (k, sample) in plan_turn(&det, p, &env, rng, true) {
                 match totals.iter_mut().find(|t| t.action == k) {
                     Some(t) => {

@@ -1,5 +1,6 @@
 //! 情報集合の determinization（src/ai/determinize.ts）。視点のプレイヤーから見て矛盾しない「ありうる局面」を作る。
 
+use super::hand_read::HandReading;
 use super::Rng;
 use crate::data::CardIdx;
 use crate::state::*;
@@ -54,6 +55,19 @@ pub fn determinize(
     rng: &mut Rng,
     peek_opp_hand: bool,
 ) -> GameState {
+    determinize_read(state, viewer, rng, peek_opp_hand, None)
+}
+
+/// determinize と同じ。reading があれば、その枠（相手の伏せた手札の iid）には外したカード以外を配る
+/// （lethalRead。ai/hand_read.rs。外すカードの多い枠から、並べ直した候補のうち外さない最初のカードを取る）。
+/// reading が None なら determinize と同じ局面・同じ乱数の使い方
+pub fn determinize_read(
+    state: &GameState,
+    viewer: PlayerIndex,
+    rng: &mut Rng,
+    peek_opp_hand: bool,
+    reading: Option<&HandReading>,
+) -> GameState {
     let _p = crate::prof::scope(crate::prof::Sec::Determinize);
     let mut s = state.clone();
     let o = opponent(viewer);
@@ -81,6 +95,18 @@ pub fn determinize(
         let Some(hint) = &h.drawn_by else { continue };
         if let Some(idx) = pool.iter().position(|&c| matches_hint(c, hint)) {
             assigned.push((h.iid, pool.remove(idx)));
+        }
+    }
+    if let Some(rd) = reading {
+        for (iid, ex) in &rd.excluded {
+            if assigned.iter().any(|(x, _)| x == iid)
+                || !hidden.iter().any(|&i| opp.hand[i].iid == *iid)
+            {
+                continue;
+            }
+            if let Some(idx) = pool.iter().position(|c| !ex.contains(c)) {
+                assigned.push((*iid, pool.remove(idx)));
+            }
         }
     }
     let mut k = 0;
