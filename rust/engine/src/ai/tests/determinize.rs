@@ -1,7 +1,7 @@
 //! determinization（tests/ai.test.ts の「determinization」）
 
 use super::*;
-use crate::ai::determinize::determinize;
+use crate::ai::determinize::{determinize, determinize_apart};
 use crate::data::{CardFilter, CardType};
 
 /// 両者がマリガンを済ませた局面
@@ -201,4 +201,45 @@ fn hidden_token_in_hand_is_shuffled() {
         d.players[opp].hand.last().map(|h| h.card) != Some(fairy)
     });
     assert!(moved);
+}
+
+/// determinize_apart: 自分の山札の枚数が違う局面どうしでも、同じ種なら相手の手札・山札と局面の乱数が同じになる
+/// （determinize は自分の山札を先に並べ直すので、枚数が違うと相手の分が変わる）。自分の山札の中身は変えない
+#[test]
+fn apart_keeps_opponent_deal_when_own_deck_size_differs() {
+    let s = after_mulligan();
+    let viewer = s.active;
+    let opp = opponent(viewer);
+    let mut t = s.clone();
+    let drawn = t.players[viewer].deck.make_mut().remove(0);
+    let h = t.new_hand_card(drawn.card, Some(drawn.iid));
+    t.players[viewer].hand.make_mut().push(h);
+    let opp_part = |st: &GameState| {
+        let pl = &st.players[opp];
+        (
+            pl.hand.iter().map(|h| h.card).collect::<Vec<_>>(),
+            pl.deck.iter().map(|r| r.card).collect::<Vec<_>>(),
+            st.rng,
+        )
+    };
+    let mut same = 0;
+    for seed in 1..=20 {
+        let a = determinize_apart(&s, viewer, &mut Rng::new(seed), false);
+        let b = determinize_apart(&t, viewer, &mut Rng::new(seed), false);
+        assert_eq!(opp_part(&a), opp_part(&b));
+        let own = |st: &GameState| {
+            let mut v: Vec<Iid> = st.players[viewer].deck.iter().map(|r| r.iid).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(own(&a), own(&s));
+        assert_eq!(own(&b), own(&t));
+        if opp_part(&determinize(&s, viewer, &mut Rng::new(seed), false))
+            == opp_part(&determinize(&t, viewer, &mut Rng::new(seed), false))
+        {
+            same += 1;
+        }
+    }
+    // 前の決定化は、枚数が 1 枚違うと相手の手札が変わる
+    assert!(same < 20, "{same}");
 }
