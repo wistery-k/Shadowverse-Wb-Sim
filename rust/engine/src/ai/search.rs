@@ -549,7 +549,8 @@ impl Default for SearchOptions {
             two_turn_gate: None,
             opp_hand_samples: 12,
             opp_hand_common: true,
-            read_own_deck_apart: false,
+            // 2026-11-02 から（6400 試合で 50.6% ± 0.40。docs/ai-notes.md「錬金釜を置くと点数が下がる理由」）
+            read_own_deck_apart: true,
             peek_opp_hand: false,
             opp_fuse: false,
             danger_rescore: 0,

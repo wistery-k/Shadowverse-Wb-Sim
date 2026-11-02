@@ -535,7 +535,7 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
 - `perPlan`: 数（既定 0 で使わない）。ビームの各深さで、同じ「手の組」（手札から出したカード・進化・超進化・能力・エクストラPP の組。攻撃・融合・選ぶ手は数えない）の局面をまずこの数まで残し、余った枠を点数の順に埋める。攻撃先・融合の素材だけが違う並びが枠を埋めて、別のカードを使う手順が切られるのを防ぐ（2026-10-26。docs/ai-notes.md「手の組ごとにビームの枠を設ける」）
 - 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`
-- `readOwnDeckApart`: 真偽（既定 false。2026-11-02）。相手のターンを読む前の決定化で、自分の山札を別の乱数で並べ直す（`determinize_apart`）。
+- `readOwnDeckApart`: 真偽（既定 true。2026-11-02 から。それより前は false）。相手のターンを読む前の決定化で、自分の山札を別の乱数で並べ直す（`determinize_apart`）。
   今の決定化は自分の山札を先に並べ直す（枚数 − 1 回乱数を使う）ので、自分の山札の枚数が違う終局面どうし（引く手と引かない手）では、同じ引き直しの種でも相手の手札が全部変わり、
   `oppHandCommon` が成り立たない。true なら同じ種で相手の手札・山札と局面の乱数がそろう（読み直し・`read_values` 等の読みだけ。自分のターンのビームを打つ決定化は変えない。
   docs/ai-notes.md「錬金釜を置くと点数が下がる理由」）
