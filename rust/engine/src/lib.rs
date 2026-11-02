@@ -17,6 +17,7 @@ pub mod golden;
 pub mod jsnum;
 pub mod json;
 pub mod prof;
+pub mod replay_index;
 pub mod runner;
 pub mod sim;
 pub mod state;

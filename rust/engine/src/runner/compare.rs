@@ -1,6 +1,6 @@
 //! 探索 AI の設定 A と B を対戦させる（TypeScript 版 scripts/compare-main.ts。npm run compare と同じ試合・同じ出力）。
 //!
-//!   svwb compare <試合数> '<Aの設定JSON>' '<Bの設定JSON>' [最初の試合番号] [Bのデッキ名] [--no-mirror] [--decks <7 つのデッキ>]
+//!   svwb compare <試合数> '<Aの設定JSON>' '<Bの設定JSON>' [最初の試合番号] [Bのデッキ名] [--no-mirror] [--decks <7 つのデッキ>] [--replays <ファイル>]
 //!
 //! 同じデッキの組で席とデッキを入れ替えて 2 試合ずつ行い、A の勝率とデッキごとの A の勝率を出す。
 //! 2 試合の組ごとの A の勝ち数（2・1・0）の数と、組のばらつきから求めた標準誤差も出す。
@@ -11,6 +11,8 @@
 //! td selfplay --decks と同じ）で打つ。学習した補正の知らないカードの入ったデッキで、補正どうしを比べる用
 //! （docs/ai-notes.md「カードの重みを属性とカードごとの残りに分ける」）。デフォルトデッキと違うデッキのマリガンは、
 //! 返し方ごとに引き直しを試して選ぶ（td selfplay と同じ。マリガンのモデルはデフォルトデッキしか知らない）。
+//! `--replays` なら、試合ごとにデッキ・シード・行動の列を JSON Lines で書く（1 行の形は runner/mod.rs の ReplayRecord。
+//! npm run dev の「リプレイ検索」タブで読む）。打つ手は変わらない。
 
 use super::deck_compare::read_deck;
 use super::options::compare_options;
@@ -60,6 +62,20 @@ pub fn play_compare_game(
     swap: bool,
     mirror: bool,
 ) -> (String, bool) {
+    let (deck, won, _) = play_compare_game_with(a, b, decks, g, swap, mirror, None);
+    (deck, won)
+}
+
+/// play_compare_game と同じ試合。labels（A・B の名前）があれば、リプレイ検索用の 1 行（ReplayRecord）も返す
+pub fn play_compare_game_with(
+    a: &SearchOptions,
+    b: &SearchOptions,
+    decks: &[&'static Deck],
+    g: u32,
+    swap: bool,
+    mirror: bool,
+    labels: Option<[&str; 2]>,
+) -> (String, bool, Option<String>) {
     let (a_seat, seats, seed) = compare_setup(decks, g, swap, mirror);
     // デフォルトデッキと違うデッキ（--decks）では、デッキごとのモデルを使うマリガン（model・weights）の代わりに、
     // 返し方ごとに引き直しを試して選ぶ
@@ -77,16 +93,35 @@ pub fn play_compare_game(
     } else {
         [&mut b, &mut a]
     };
+    let mut log = Vec::new();
     let end = play_match(
         &mut agents,
         [&seats[0].cards, &seats[1].cards],
         seed,
-        |_, _| {},
+        |_, a| {
+            if labels.is_some() {
+                log.push(a.clone());
+            }
+        },
     );
     let winner = end
         .winner
         .unwrap_or_else(|| panic!("勝者がいません（試合 {g}）"));
-    (seats[a_seat].name.clone(), winner == a_seat)
+    let replay = labels.map(|[la, lb]| {
+        let agents = if a_seat == 0 { [la, lb] } else { [lb, la] };
+        super::ReplayRecord {
+            source: "compare",
+            g,
+            names: [&seats[0].name, &seats[1].name],
+            agents,
+            decks: [&seats[0].cards, &seats[1].cards],
+            seed,
+            end: &end,
+            actions: &log,
+        }
+        .line()
+    });
+    (seats[a_seat].name.clone(), winner == a_seat, replay)
 }
 
 fn number_arg(v: Option<&String>, def: f64) -> Result<u32, String> {
@@ -136,6 +171,16 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         .filter(|s| *s != "--no-mirror")
         .cloned()
         .collect();
+    // リプレイ検索用に、試合ごとのデッキ・シード・行動の列を書くファイル（--replays）
+    let mut replays_path = None;
+    if let Some(i) = argv.iter().position(|s| s == "--replays") {
+        replays_path = Some(
+            argv.get(i + 1)
+                .ok_or("--replays の後に書き出すファイルを渡します")?
+                .clone(),
+        );
+        argv.drain(i..i + 2);
+    }
     let mut deck_list = None;
     if let Some(i) = argv.iter().position(|s| s == "--decks") {
         deck_list = Some(
@@ -174,15 +219,32 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         .flat_map(|k| [(start + k, false), (start + k, true)])
         .filter(|&(g, swap)| vs.is_none_or(|v| &compare_pair(&decks, g, swap).1.name == v))
         .collect();
+    let mut replays = replays_path
+        .as_ref()
+        .map(|p| std::fs::File::create(p).map_err(|e| format!("{p} に書けません: {e}")))
+        .transpose()?;
+    let la = format!("A {a_text}");
+    let lb = format!("B {b_text}");
+    let labels = replays.as_ref().map(|_| [la.as_str(), lb.as_str()]);
     let results = parallel_map(
         &tasks,
-        |&(g, swap), _| play_compare_game(&a, &b, &decks, g, swap, mirror),
-        |_, _, _, _| {},
+        |&(g, swap), _| play_compare_game_with(&a, &b, &decks, g, swap, mirror, labels),
+        |_, _, r, _| {
+            if let (Some(f), Some(line)) = (replays.as_mut(), r.2.as_ref()) {
+                use std::io::Write;
+                writeln!(f, "{line}").unwrap_or_else(|e| {
+                    panic!(
+                        "{} に書けません: {e}",
+                        replays_path.as_deref().unwrap_or("")
+                    )
+                });
+            }
+        },
     );
     let n = results.len();
     let mut wins = 0;
     let mut per_deck = Tally::default();
-    for (deck, won) in &results {
+    for (deck, won, _) in &results {
         wins += *won as u32;
         per_deck.add(deck, *won);
     }
@@ -255,5 +317,53 @@ mod tests {
         let x = play_compare_game(&o, &o, &decks, 0, false, true);
         let y = play_compare_game(&o, &o, &decks, 0, true, true);
         assert_ne!(x.1, y.1);
+    }
+
+    /// --replays の行（デッキ・シード・行動の列）から打ち直すと、同じ勝者になる
+    #[test]
+    fn replay_line_replays_the_same_game() {
+        use crate::json::Json;
+        let decks = compare_decks();
+        let o = super::super::options::compare_options(r#"{"beamWidth":8}"#).unwrap();
+        let (_, a_won, line) =
+            play_compare_game_with(&o, &o, &decks, 3, true, true, Some(["A", "B"]));
+        let v = Json::parse(&line.expect("リプレイの行")).unwrap();
+        let ids = |d: &Json| -> Vec<crate::data::CardIdx> {
+            let Json::Arr(xs) = d else {
+                panic!("デッキ")
+            };
+            xs.iter()
+                .map(|x| match x {
+                    Json::Str(id) => data().card_by_id[id.as_str()],
+                    _ => panic!("カードID"),
+                })
+                .collect()
+        };
+        let Some(Json::Arr(ds)) = v.get("decks") else {
+            panic!("decks")
+        };
+        let Some(Json::Arr(acts)) = v.get("actions") else {
+            panic!("actions")
+        };
+        let acts: Vec<_> = acts
+            .iter()
+            .map(|a| crate::state_json::action_from_json(a).unwrap())
+            .collect();
+        let Some(Json::Num(seed)) = v.get("seed") else {
+            panic!("seed")
+        };
+        let (d0, d1) = (ids(&ds[0]), ids(&ds[1]));
+        let idx = crate::replay_index::replay_index([&d0, &d1], *seed as u32, &acts).unwrap();
+        assert_eq!(idx.get("winner"), v.get("winner"));
+        // A の席（席とデッキを入れ替えた方）
+        let (a_seat, _, _) = compare_setup(&decks, 3, true, true);
+        let Some(Json::Arr(agents)) = v.get("agents") else {
+            panic!("agents")
+        };
+        assert_eq!(agents[a_seat], Json::Str("A".into()));
+        assert_eq!(
+            v.get("winner"),
+            Some(&Json::Num(if a_won { a_seat } else { 1 - a_seat } as f64))
+        );
     }
 }
