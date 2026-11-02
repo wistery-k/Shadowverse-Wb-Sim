@@ -18,6 +18,11 @@ interface Props {
   onClose: () => void;
   /** 今の局面をサンドボックスで開く */
   onSandbox?: ((state: GameState, label: string) => void) | undefined;
+  /** 開いたときの局面（行動の添字）と、下に表示するプレイヤー（リプレイ検索で見つけたターンから開く） */
+  initialStep?: number;
+  initialBottom?: PlayerIndex;
+  /** 戻るボタンの文言 */
+  backLabel?: string;
 }
 
 const SPEEDS = [
@@ -26,7 +31,7 @@ const SPEEDS = [
   { ms: 200, label: "速い" },
 ];
 
-export function Replay({ record, entrants, onClose, onSandbox }: Props) {
+export function Replay({ record, entrants, onClose, onSandbox, initialStep, initialBottom, backLabel }: Props) {
   const actions = record.actions ?? [];
   const states = useMemo(() => replayStates(seatDecks(record, entrants), record.seed, actions), [record, entrants]);
   const classes = useMemo(() => leaderClasses(states[0]!), [states]);
@@ -42,12 +47,12 @@ export function Replay({ record, entrants, onClose, onSandbox }: Props) {
   const turnStarts = useMemo(() => [0, ...actions.flatMap((a, i) => (a.type === "endTurn" ? [i + 1] : []))], [actions]);
 
   const last = states.length - 1;
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(() => Math.max(0, Math.min(states.length - 1, initialStep ?? 0)));
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(SPEEDS[1]!.ms);
   const [detail, setDetail] = useState<string | null>(null);
   // 下に表示するプレイヤー（表示だけの入れ替え）
-  const [bottom, setBottom] = useState<PlayerIndex>(0);
+  const [bottom, setBottom] = useState<PlayerIndex>(initialBottom ?? 0);
   const go = (s: number) => setStep(Math.max(0, Math.min(last, s)));
   const branch = useBranchRuns();
   const thoughts = useThoughts();
@@ -208,7 +213,7 @@ export function Replay({ record, entrants, onClose, onSandbox }: Props) {
     <div class="replay" ref={rootRef}>
       <div class="banner">
         <button type="button" onClick={onClose}>
-          ← 結果に戻る
+          {backLabel ?? "← 結果に戻る"}
         </button>
         <span>
           {names[0]} vs {names[1]} / 勝者: {winnerName} / {record.turns} ターン / seed {record.seed}

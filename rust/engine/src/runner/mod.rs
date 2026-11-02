@@ -25,7 +25,9 @@ pub mod td;
 pub mod two_turn;
 pub mod yardstick;
 
-use crate::data::{data, Deck};
+use crate::data::{data, CardIdx, Deck};
+use crate::json::Json;
+use crate::state::{card, Action, GameState};
 
 /// 比較・自己対戦に使わないデフォルトデッキ（クラスごとに 1 つにするため）
 pub const EXCLUDED_DECKS: [&str; 1] = ["ランプドラゴン"];
@@ -77,5 +79,56 @@ impl Tally {
             .map(|(k, [w, t])| format!("{k} {w}/{t}"))
             .collect::<Vec<_>>()
             .join(", ")
+    }
+}
+
+/// リプレイ検索（npm run dev の「リプレイ検索」タブ。src/replays）で読む、1 試合の記録の 1 行（`--replays`）。
+/// `npm run game --json`・`rhino-compare --record` と同じ項目（seed・agents・decks・winner・actions）に、
+/// 書いたランナー（source）・試合番号（g）・デッキの名前（names）・ターン数（turns）を足したもの。
+/// 打ち直すにはデッキ（カードの並び順を含む）・シード・行動の列があればよい（エンジンは決定的）
+pub struct ReplayRecord<'a> {
+    pub source: &'a str,
+    pub g: u32,
+    pub names: [&'a str; 2],
+    pub agents: [&'a str; 2],
+    pub decks: [&'a [CardIdx]; 2],
+    pub seed: u32,
+    pub end: &'a GameState,
+    pub actions: &'a [Action],
+}
+
+impl ReplayRecord<'_> {
+    pub fn line(&self) -> String {
+        let strs = |xs: [&str; 2]| Json::Arr(xs.iter().map(|x| Json::Str(x.to_string())).collect());
+        let ids =
+            |d: &[CardIdx]| Json::Arr(d.iter().map(|&c| Json::Str(card(c).id.clone())).collect());
+        Json::Obj(vec![
+            ("kind".into(), Json::Str("replay".into())),
+            ("version".into(), Json::Num(1.0)),
+            ("source".into(), Json::Str(self.source.into())),
+            ("g".into(), Json::Num(self.g as f64)),
+            ("names".into(), strs(self.names)),
+            ("agents".into(), strs(self.agents)),
+            ("seed".into(), Json::Num(self.seed as f64)),
+            (
+                "decks".into(),
+                Json::Arr(vec![ids(self.decks[0]), ids(self.decks[1])]),
+            ),
+            (
+                "winner".into(),
+                self.end.winner.map_or(Json::Null, |w| Json::Num(w as f64)),
+            ),
+            ("turns".into(), Json::Num(self.end.turn as f64)),
+            (
+                "actions".into(),
+                Json::Arr(
+                    self.actions
+                        .iter()
+                        .map(crate::state_json::action_to_json)
+                        .collect(),
+                ),
+            ),
+        ])
+        .stringify()
     }
 }

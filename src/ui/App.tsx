@@ -6,6 +6,7 @@ import { DeckSelect, resolveDeck, type DeckChoice } from "./DeckSelect";
 import { Decks } from "./Decks";
 import { Game } from "./Game";
 import { HumanCompare, loadHumanRecords, saveHumanRecords, type HumanMatchChoice } from "./HumanCompare";
+import { ReplaySearch } from "./ReplaySearch";
 import { Sandbox, type SandboxIncoming } from "./Sandbox";
 import { Simulate } from "./Simulate";
 import { loadDecks, saveDecks, type SavedDeck } from "./storage";
@@ -41,7 +42,7 @@ function saveSetup(setup: Setup): void {
   }
 }
 
-type Tab = "play" | "decks" | "sim" | "compare" | "sandbox";
+type Tab = "play" | "decks" | "sim" | "compare" | "sandbox" | "replays";
 
 /**
  * サンドボックス（好きな局面を作って AI に考えさせる）は、ゲームの実際の対戦の局面を入れて手を聞く
@@ -49,16 +50,26 @@ type Tab = "play" | "decks" | "sim" | "compare" | "sandbox";
  */
 const SANDBOX = import.meta.env.DEV;
 
+/** リプレイ検索（手元の自己対戦の記録から条件に合うターンを探す）は、手元のファイルを読むので開発サーバーだけで出す */
+const REPLAY_SEARCH = import.meta.env.DEV;
+
 const TABS: readonly [Tab, string][] = [
   ["play", "対戦"],
   ["decks", "デッキ"],
   ["sim", "AI対戦"],
   ["compare", "人間との比較"],
   ...(SANDBOX ? [["sandbox", "サンドボックス"] as [Tab, string]] : []),
+  ...(REPLAY_SEARCH ? [["replays", "リプレイ検索"] as [Tab, string]] : []),
 ];
 
 export function App() {
-  const [tab, setTab] = useState<Tab>("play");
+  const [tab, setTabState] = useState<Tab>("play");
+  // リプレイ検索は、最初に開くまで作らない（開くと手元のファイルの一覧を取りに行く）
+  const [replaysOpened, setReplaysOpened] = useState(false);
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    if (t === "replays") setReplaysOpened(true);
+  };
   // サンドボックスに開く局面（リプレイの「サンドボックスで開く」）
   const [sandboxIncoming, setSandboxIncoming] = useState<SandboxIncoming | null>(null);
   const [saved, setSaved] = useState<SavedDeck[]>(() => loadDecks());
@@ -135,6 +146,12 @@ export function App() {
             <Sandbox saved={saved} incoming={sandboxIncoming} />
           </div>
         )}
+        {/* リプレイ検索も、読み込んだ試合と検索結果を残すため隠すだけにする */}
+        {REPLAY_SEARCH && replaysOpened && (
+          <div hidden={!!game || tab !== "replays"}>
+            <ReplaySearch {...(SANDBOX ? { onSandbox: openSandbox } : {})} />
+          </div>
+        )}
         {game ? (
           <Game
             initial={game.state}
@@ -147,7 +164,7 @@ export function App() {
           />
         ) : tab === "decks" ? (
           <Decks decks={saved} onChange={updateDecks} />
-        ) : tab === "sim" || tab === "sandbox" ? null : tab === "compare" ? (
+        ) : tab === "sim" || tab === "sandbox" || tab === "replays" ? null : tab === "compare" ? (
           <HumanCompare onStart={startCompare} saveError={compareError} />
         ) : (
           <div class="setup panel">

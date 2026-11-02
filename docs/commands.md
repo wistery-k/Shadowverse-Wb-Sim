@@ -20,7 +20,7 @@
 
 | コマンド | 何をするか | 本体 |
 |---|---|---|
-| `npm run dev` | 開発サーバー（Vite の引数をそのまま渡せる。例: `-- --host`） | `vite` |
+| `npm run dev` | 開発サーバー（Vite の引数をそのまま渡せる。例: `-- --host`）。サンドボックスとリプレイ検索（下）のタブはここだけで出る | `vite` |
 | `npm run build` / `preview` / `typecheck` / `test` | 本番ビルド / ビルド結果の確認 / 型チェック / テスト（`test` は Vitest の引数を渡せる。例: `-- src/engine`） | |
 | `npm run wasm` | エンジンの WASM を作る（引数なし） | `scripts/build-wasm.mjs` |
 | `npm run cards` | `data/raw/*.json` からカードデータを作る（引数なし） | `scripts/convert-cards.ts` |
@@ -120,11 +120,12 @@ npm run diverge -- --a <記録のディレクトリ A> --b <記録のディレ�
 ## compare
 
 ```sh
-npm run compare -- [試合数 28] ['<A の設定>' '{}'] ['<B の設定>' '{}'] [最初の試合番号 0] [B のデッキ]
+npm run compare -- [試合数 28] ['<A の設定>' '{}'] ['<B の設定>' '{}'] [最初の試合番号 0] [B のデッキ] [--no-mirror] [--decks <7 つのデッキ>] [--replays 記録.jsonl]
 ```
 
 引数は名前なしで、この順に書く。1 試合番号ごとに席とデッキを入れ替えて 2 試合打つので、試合数 105 なら 210 試合。
 A の勝率と、A のデッキごとの勝率を出す。5 番目にデッキ名を書くと、B がそのデッキの試合だけ行う。設定の JSON は下の「探索 AI の設定」。
+`--replays` で、試合ごとのデッキ・シード・行動の列を JSON Lines で書く（下の「リプレイ検索」で読む。打つ手は変わらない）。
 
 例: `npm run compare -- 105 '{}' '{"lethal":false}'`
 
@@ -284,7 +285,7 @@ npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mul
 npm run svwb -- mulligan-data --games 6000 [--start 0] [--seed 1] [--flip 0.5] --out d.jsonl
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
                 [--sampling classic|default] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
-                [--sDefault 0] [--searchValue 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>']
+                [--sDefault 0] [--searchValue 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--replays r.jsonl]
 npm run svwb -- deep-gap play --out gap.jsonl [--games 100] [--start 0] [--deep '<設定の JSON>'] [--k 4] [--evalSeeds 48] [--turns 1-30]
 npm run svwb -- deep-gap rollout --in gap.jsonl[,…] --out roll.jsonl [--top 200] [--random 200] [--seed 1] [--m 48]
 npm run svwb -- deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 30] [--only <内訳の一部>] [--skipDecks <デッキ>,…] [--sort gap|rollout] [--listOnly 1]
@@ -318,6 +319,8 @@ npm run svwb -- read-gap --out 記録.jsonl [--games 49] [--start 0] [--opts '<�
   （手で作った項を外した補正を、同じ自己対戦から学ぶ。docs/ai-notes.md「評価関数の手作りの項を外す」）。
   `--searchValue 1` で、ターン末の局面に探索の値の材料（`"qe"`・`"qr"`。そのターンに選んだ並びのターン末と、相手のターンを読んだ後の勝つ確率）も書く（打つ手は変わらない）。
   `td train --searchTarget` がこれを読む（docs/ai-notes.md「補正の学習の目標に探索の値を使う」）
+  `--replays r.jsonl` で、もとの試合（介入した試合・打ち比べは除く）ごとに、デッキ・シード・行動の列も別のファイルに書く
+  （下の「リプレイ検索」で読む。打つ手は変わらない。`--out` の学習用の行には行動の列が無いので、それだけではリプレイにできない）
 - `deep-gap`: 今の既定の AI どうしの自己対戦（`ai-play` と同じ試合）の、自分のターンの最初の局面ごとに、試合のターンと深い読み（`--deep`。既定は
   ビーム 2048（今の既定が幅 512 になる 2026-10-26 までは 512）・読み直す最初の手 8・最初の手ごとの終局面 3・相手の手札の引き直し 48・相手のターンのビーム 32。読む深さは今の既定と同じで、広く・多く読む）のターンを比べる。
   食い違った局面は、手番の側から見た決定化を `--k` 通り作って両方に打たせ、深い読みの点数（別の引き直し `--evalSeeds` 通り。引き直しごとに勝率にしてから平均する）で見た勝率の差と、
@@ -466,6 +469,31 @@ zcat /mnt/project-files/data/selfplay/<名前>/f0.jsonl.gz | head -c 500
 - 展開したら `logs/<名前>/MANIFEST.md` を読む（何の実験か、どのファイルがあるか、モデルの sha256）
 - `npm run td` は `.jsonl.gz` をそのまま読めない。学習・分析に使うときは `zcat` でスクラッチに展開してから渡す
 - 分けたアーカイブは、どれから展開してもよい
+
+## リプレイ検索（開発サーバー npm run dev だけ）
+
+`npm run dev` で開いた画面の「リプレイ検索」タブで、記録した試合から条件に合うターンを探し、そのターンのリプレイを開く
+（公開サイトには出さない。画面のモジュールは `vite build` で空のものに置き換わる）。リプレイからは、その局面の打ち比べ・AI の考え・
+「サンドボックスで開く」が使える。
+
+- **読める記録**: `td selfplay --replays`・`compare --replays` の JSON Lines（1 行 1 試合。形は `rust/engine/src/runner/mod.rs` の `ReplayRecord`）、
+  `rhino-compare --record` の `.json`、`npm run game -- … --json` の `.json`。gzip（`.gz`）のままでも読める。
+  試合はエンジンで打ち直すので、記録したときとエンジンの版（カードの能力など）が違うと、打てない手のある試合は読めず、勝者が変わった試合は印が付く
+- **手元のフォルダ**: 開発サーバーが環境変数 `SVWB_REPLAY_DIRS`（区切りは Linux・macOS は `:`、Windows は `;`）のフォルダの下を探して一覧に出す。
+  無ければ `~/svwb-data` とリポジトリの `replays/`。一覧に出るのは、始めの部分が試合の記録らしいファイルだけ（自己対戦の学習用の行は出ない）。
+  画面の「ほかのファイルを選んで読む」で、どこのファイルでも読める
+  （例: `SVWB_REPLAY_DIRS=/mnt/project-files/logs npm run dev`）
+- **条件**: 自分・相手のクラスとデッキ名、先攻・後攻、勝ち・負けで絞り、「いつ（このターン・次のターン・前の自分のターン・これより前の自分のターンのどれか…）に
+  誰が何をした（プレイした・進化させた・攻撃した・場に出た・場から離れた・次のターンを越えて場に残った・場にいた・手札にあった・エクストラPPを使った・勝った（リーサル）・
+  数値（体力・PP＋エクストラPP・手札の枚数など）」を全部満たすターンを探す。1 試合は両方のプレイヤーの視点で調べる。込み入った条件は JavaScript の式でも書ける（画面に説明）
+- **打ち直しと検索**: ブラウザの Web Worker（`src/replays/worker.ts`）がエンジンの `replayIndex`（`rust/engine/src/replay_index.rs`。ターンごとの始めと終わりの様子と、
+  そのターンに起きたこと）で打ち直して持ち、検索のたびに全部の Worker で探す。条件の意味は `src/replays/query.ts`
+
+```sh
+npm run svwb -- td selfplay --model data/value-net.json --games 200 --out ~/svwb-data/sp1/d.jsonl --replays ~/svwb-data/sp1/r.jsonl
+npm run compare -- 50 '{}' '{"beamWidth":32}' 0 --replays ~/svwb-data/cmp1/r.jsonl
+npm run dev   # 「リプレイ検索」タブで ~/svwb-data の下の r.jsonl を選んで読み込む
+```
 
 ## cloud/gcp.sh（クラウドの Spot VM で回す）
 

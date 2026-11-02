@@ -17,6 +17,7 @@ use svwb_engine::ai::{Agent, Rng};
 use svwb_engine::data::{data, CardIdx};
 use svwb_engine::game::{attack_reach, attack_targets, fusion_candidates};
 use svwb_engine::json::Json;
+use svwb_engine::replay_index::replay_index;
 use svwb_engine::sim::branch_playout;
 use svwb_engine::state::Iid;
 use svwb_engine::state_json::{action_from_json, action_to_json, state_from_json, state_to_json};
@@ -376,6 +377,24 @@ fn dispatch(req: &Json) -> R<Json> {
                 Some(t) => thought_json(&t),
                 None => Json::Null,
             }
+        }
+        "replayIndex" => {
+            // リプレイ検索（src/replays）: 記録した試合を打ち直したターンごとのまとめ（svwb_engine::replay_index）
+            let Json::Arr(decks) = field(req, "decks")? else {
+                return Err(Fail::Error("decks は 2 つのデッキの配列".into()));
+            };
+            let [a, b] = decks.as_slice() else {
+                return Err(Fail::Error("decks は 2 つのデッキの配列".into()));
+            };
+            let (a, b) = (deck(a)?, deck(b)?);
+            let Json::Arr(acts) = field(req, "actions")? else {
+                return Err(Fail::Error("actions は行動の配列".into()));
+            };
+            let acts = acts
+                .iter()
+                .map(action_from_json)
+                .collect::<Result<Vec<_>, _>>()?;
+            replay_index([&a, &b], uint(req, "seed")?, &acts)?
         }
         "resetCaches" => {
             reset_exact_lethal_cache();

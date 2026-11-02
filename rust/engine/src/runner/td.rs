@@ -1,6 +1,6 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--searchValue 0] [--sampling classic|default] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--searchValue 0] [--sampling classic|default] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--replays r0.jsonl] --out d0.jsonl
 //!
 //! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・幅 128、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
 //! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
@@ -65,6 +65,9 @@
 //! --sDefault 1 なら、各局面に基準の重み（DEFAULT_WEIGHTS。探索用に足した項の無い重み）での手で作った評価も書く（"sd"）。打つ手は変わらない。
 //! `npm run td -- train --base default` で、S の代わりにこれを出発点の評価にして補正を学ぶ（手で作った項を外した補正を、同じ自己対戦から学ぶ。
 //! docs/ai-notes.md「評価関数の手作りの項を外す」）
+//!
+//! --replays <ファイル> なら、もとの試合（介入した試合と打ち比べは除く）ごとに、デッキ・シード・行動の列を JSON Lines で書く
+//! （1 行の形は runner/mod.rs の ReplayRecord。npm run dev の「リプレイ検索」タブで読む）。打つ手は変わらない。
 //!
 //! --check 1 なら、各局面にモデルの補正の値（評価の点数の単位）も書く（"z"）。`npm run td -- check` で、学習側（scripts/valueNet.ts）が
 //! "x" と "b" から出す補正が探索の補正と同じかを確かめる（場のカードのネットワークを変えたとき用）。
@@ -142,6 +145,8 @@ struct Model {
     search_value: bool,
     /// 固定した相手の設定（--frozen）。あれば、学ぶ側でない席はこの設定で打つ
     frozen: Option<SearchOptions>,
+    /// もとの試合（介入していない試合）の行動の列も書く（--replays。リプレイ検索用。打つ手は変わらない）
+    replays: bool,
 }
 
 fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Model, String> {
@@ -183,6 +188,7 @@ fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Mo
         imagined: 0,
         search_value: false,
         frozen: None,
+        replays: false,
     })
 }
 
@@ -202,6 +208,8 @@ struct Summary {
     groups: usize,
     /// 学ぶ側の席（--frozen のときだけ）
     learner: Option<PlayerIndex>,
+    /// もとの試合のリプレイの 1 行（--replays のときだけ）
+    replay: Option<String>,
 }
 
 /// 局面 1 つ（{"ph":…,"s":…,"x":[…],"v":[…]}、ランダムに打った局面は "ex":1、board なら場のカードの属性 "b"、--sDefault なら基準の重みの評価 "sd" も）。
@@ -472,6 +480,8 @@ struct Played {
     branch: Option<(GameState, usize)>,
     /// 介入する局面で、そのターンの始めに引いた手札の iid（1 ターン目は手札のすべて）
     drawn: Vec<Iid>,
+    /// 打った行動の列（m.replays のときだけ。もとの試合なら最初の局面から打ち直せる）
+    actions: Vec<Action>,
 }
 
 /// state から最後まで打ち、各自分のターンの最初とターン末の局面を記録する。
@@ -517,6 +527,7 @@ fn play_out(
     let mut drawn: Vec<Iid> = Vec::new();
     // 介入するプレイヤーの、相手のターンの間の山札（ターンの始めに引いたカードを見分ける）
     let mut pre_deck: Vec<Iid> = Vec::new();
+    let mut log: Vec<Action> = Vec::new();
     let mut n = 0;
     while state.phase != Phase::Ended {
         n += 1;
@@ -624,6 +635,9 @@ fn play_out(
             }
         }
         state = apply_action(&state, &action);
+        if m.replays {
+            log.push(action);
+        }
     }
     Played {
         state,
@@ -632,6 +646,7 @@ fn play_out(
         explored,
         branch,
         drawn,
+        actions: log,
     }
 }
 
@@ -973,6 +988,24 @@ fn play_one(
             res_ivs += 1;
         }
     }
+    // もとの試合のリプレイ（--replays）。介入した試合は途中の局面を書き換えているので、行動の列だけでは打ち直せない（書かない）
+    let replay = m.replays.then(|| {
+        let agent = |p: PlayerIndex| match learner {
+            Some(l) if l != p => "td-frozen",
+            _ => "td",
+        };
+        super::ReplayRecord {
+            source: "td selfplay",
+            g,
+            names: [&names[0], &names[1]],
+            agents: [agent(0), agent(1)],
+            decks: [&pair[0].cards, &pair[1].cards],
+            seed,
+            end: &base.state,
+            actions: &base.actions,
+        }
+        .line()
+    });
     Summary {
         line,
         decks: names,
@@ -984,6 +1017,7 @@ fn play_one(
         res_ivs,
         groups,
         learner,
+        replay,
     }
 }
 
@@ -1125,6 +1159,12 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
         println!("相手は {}（挑戦する側 {} 個）", v.name, decks.len());
     }
     let mut file = std::fs::File::create(out).map_err(|e| format!("{out} に書けません: {e}"))?;
+    // リプレイ検索用の行動の列（--replays）
+    let replays_path = arg(args, "replays");
+    let mut replays_file = replays_path
+        .map(|p| std::fs::File::create(p).map_err(|e| format!("{p} に書けません: {e}")))
+        .transpose()?;
+    m.replays = replays_file.is_some();
     let t0 = Instant::now();
     let tasks: Vec<u32> = (0..games as u32).map(|k| start as u32 + k).collect();
     let mut summaries = parallel_map(
@@ -1144,6 +1184,11 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
         },
         |done, total, r, _| {
             writeln!(file, "{}", r.line).unwrap_or_else(|e| panic!("{out} に書けません: {e}"));
+            if let (Some(f), Some(line)) = (replays_file.as_mut(), r.replay.as_ref()) {
+                writeln!(f, "{line}").unwrap_or_else(|e| {
+                    panic!("{} に書けません: {e}", replays_path.unwrap_or_default())
+                });
+            }
             if done % 100 == 0 || done == total {
                 println!(
                     "{done}/{total} 試合 {}s/試合",
@@ -1154,6 +1199,7 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     );
     for r in &mut summaries {
         r.line = String::new();
+        r.replay = None;
     }
     let n = summaries.len();
     let samples: usize = summaries.iter().map(|r| r.samples).sum();

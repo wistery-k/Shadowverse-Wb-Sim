@@ -1,0 +1,97 @@
+/* リプレイ検索（開発サーバーだけのタブ。src/ui/ReplaySearch.tsx が読み込む。vite build には入らない） */
+.replay-search,
+.replay-search-main,
+.replay-open {
+  display: grid;
+  /* 長い行（再現のコマンド等）で画面より広がらないようにする */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+/* display: grid が hidden 属性より強いので、隠すときは明示する（リプレイを開いている間の検索画面） */
+.replay-search-main[hidden] {
+  display: none;
+}
+.replay-files {
+  display: grid;
+  gap: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+  font-size: 13px;
+}
+.replay-files details > label.check {
+  margin-left: 24px;
+}
+label.check.inline {
+  display: inline-flex;
+}
+.replay-files .muted,
+.replay-results .muted {
+  margin-left: 6px;
+}
+.replay-status ul {
+  margin: 4px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+}
+.problems-inline {
+  color: var(--target);
+}
+.conds {
+  display: grid;
+  gap: 6px;
+}
+.cond-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.cond-row.negated {
+  border-style: dashed;
+}
+.cond-row input[type="number"] {
+  width: 5em;
+}
+.cond-row .card-input {
+  min-width: 16em;
+}
+.expr {
+  margin-top: 8px;
+}
+.expr-help {
+  font-size: 12px;
+  margin: 4px 0 0;
+  padding-left: 20px;
+}
+.replay-results {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.replay-results th,
+.replay-results td {
+  padding: 3px 8px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+.replay-results td.played {
+  white-space: normal;
+  min-width: 12em;
+}
+.replay-results tbody tr {
+  cursor: pointer;
+}
+.replay-results tbody tr:hover {
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+}
+.replay-results tr.win td:last-child {
+  color: var(--div-win);
+  font-weight: bold;
+}
+.replay-results tr.lose td:last-child {
+  color: var(--div-lose);
+  font-weight: bold;
+}
