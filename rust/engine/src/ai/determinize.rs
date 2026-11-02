@@ -59,7 +59,7 @@ pub fn determinize(
 }
 
 /// determinize と同じ。reading があれば、その枠（相手の伏せた手札の iid）には外したカード以外を配る
-/// （lethalRead。ai/hand_read.rs。外すカードの多い枠から、並べ直した候補のうち外さない最初のカードを取る）。
+/// （lethalRead。ai/hand_read.rs。外すカードの多い枠から、並べ直した候補のうち外さない最初のカードを取り、残りを並べ直して、ほかの伏せた枠と山札に配る）。
 /// reading が None なら determinize と同じ局面・同じ乱数の使い方
 pub fn determinize_read(
     state: &GameState,
@@ -98,6 +98,7 @@ pub fn determinize_read(
         }
     }
     if let Some(rd) = reading {
+        let mut skipped = false;
         for (iid, ex) in &rd.excluded {
             if assigned.iter().any(|(x, _)| x == iid)
                 || !hidden.iter().any(|&i| opp.hand[i].iid == *iid)
@@ -106,7 +107,14 @@ pub fn determinize_read(
             }
             if let Some(idx) = pool.iter().position(|c| !ex.contains(c)) {
                 assigned.push((*iid, pool.remove(idx)));
+                skipped |= idx > 0;
             }
+        }
+        // 飛ばしたカード（外したカード）は候補の前のほうに残るので、並べ直す。並べ直さないと、外したカードが
+        // ほかの伏せた枠や山札の一番上に寄る（相手が次に引くカードになりやすい）。飛ばさなかったときは、
+        // 残りはそのままで偏らず、読みが無いときと同じ配り方になる
+        if skipped {
+            rng.shuffle(&mut pool);
         }
     }
     let mut k = 0;

@@ -109,6 +109,44 @@ fn determinize_read_keeps_excluded_cards_out_of_the_slots() {
 }
 
 #[test]
+fn determinize_read_spreads_excluded_cards_evenly() {
+    let s = royal_turn_start(None);
+    let albert = id(ALBERT);
+    let hand: Vec<Iid> = s.players[0].hand.iter().map(|h| h.iid).collect();
+    let c = hand.len() - 1;
+    // 最後の 1 枠を残して、アルベールを外す
+    let reading = HandReading {
+        excluded: hand[..c].iter().map(|&i| (i, vec![albert])).collect(),
+    };
+    let pl = &s.players[0];
+    let n = pl.hand.len() + pl.deck.len();
+    let m = pl
+        .hand
+        .iter()
+        .map(|h| h.card)
+        .chain(pl.deck.iter().map(|r| r.card))
+        .filter(|&x| x == albert)
+        .count();
+    assert_eq!(m, 3);
+    // 外したアルベールは、残りの枠と山札のどこにも同じ割合で来る（外した枠に配らなかった分が、残りの枠や山札の一番上に寄らない）
+    let want = m as f64 / (n - c) as f64;
+    let trials = 4000;
+    let (mut free, mut top) = (0, 0);
+    for seed in 0..trials {
+        let d = determinize_read(&s, 1, &mut Rng::new(seed), false, Some(&reading));
+        free += (d.players[0].hand[c].card == albert) as usize;
+        top += (d.players[0].deck[0].card == albert) as usize;
+    }
+    for (name, k) in [("残りの枠", free), ("山札の一番上", top)] {
+        let got = k as f64 / trials as f64;
+        assert!(
+            (got - want).abs() < 0.025,
+            "{name}: {got} （{want} のはず）"
+        );
+    }
+}
+
+#[test]
 fn tracker_drops_the_oldest_slots_when_hidden_cards_leave() {
     let s = royal_turn_start(None);
     let albert = id(ALBERT);
