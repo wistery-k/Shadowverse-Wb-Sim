@@ -56,9 +56,33 @@ pub fn determinize(
 ) -> GameState {
     let _p = crate::prof::scope(crate::prof::Sec::Determinize);
     let mut s = state.clone();
-    let o = opponent(viewer);
     rng.shuffle(s.players[viewer].deck.make_mut());
+    redeal_hidden(&mut s, viewer, rng, peek_opp_hand);
+    s
+}
 
+/// determinize と同じ並べ直しを、viewer の山札だけ別の乱数で行う（読み直しの readOwnDeckApart）。
+/// 最初に rng から 1 つ取った種で viewer の山札を並べ直し、相手の分と局面の乱数は rng の続きで作る。
+/// rng の進み方が viewer の山札の枚数によらないので、同じ種なら、山札の枚数が違う局面どうし（引いた手と引かない手の終局面）でも
+/// 相手の手札・山札と局面の乱数が同じになる（determinize は viewer の山札を先に並べ直すので、枚数が 1 枚違うと相手の手札が全部変わる。
+/// docs/ai-notes.md「錬金釜を置くと点数が下がる理由」）
+pub fn determinize_apart(
+    state: &GameState,
+    viewer: PlayerIndex,
+    rng: &mut Rng,
+    peek_opp_hand: bool,
+) -> GameState {
+    let _p = crate::prof::scope(crate::prof::Sec::Determinize);
+    let own = rng.int(u32::MAX as usize) as u32;
+    let mut s = state.clone();
+    redeal_hidden(&mut s, viewer, rng, peek_opp_hand);
+    Rng::new(own).shuffle(s.players[viewer].deck.make_mut());
+    s
+}
+
+/// 相手の伏せた手札・山札の中身と順番、相手が捨てたカード、局面の乱数を rng で作り直す（determinize の viewer の山札の後の部分）
+fn redeal_hidden(s: &mut GameState, viewer: PlayerIndex, rng: &mut Rng, peek_opp_hand: bool) {
+    let o = opponent(viewer);
     let hidden: Vec<usize> = if peek_opp_hand {
         Vec::new()
     } else {
@@ -111,5 +135,4 @@ pub fn determinize(
     let a = rng.int(1 << 30) as f64;
     let b = rng.int(4) as f64;
     s.rng = (a * 4.0 + b).floor() as u32;
-    s
 }
