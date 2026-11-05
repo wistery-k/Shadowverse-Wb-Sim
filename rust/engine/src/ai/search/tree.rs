@@ -63,7 +63,7 @@ pub struct TreeSearch {
     pub upper: Option<Arc<UpperTable>>,
     /// 表の値に掛ける倍率
     pub upper_scale: f64,
-    /// 広げられる局面の伸びしろの上側の下限（0 より大きければ、広げられる局面はいつまでも決まったとみなさず、予算まで広げ続ける）
+    /// 広げられる局面の伸びしろの上側の下限（楽観の値に少なくともこれだけの余裕を持たせる。とても大きくすると、どの局面も広げる）
     pub upper_min: f64,
     /// bstar で区別する上位の最初の手の数（今の読み直しの rescoreTop に合わせて 4）
     pub top_k: usize,
