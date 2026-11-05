@@ -382,7 +382,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut from = 0u32;
     let mut every = 1usize;
     let mut ref_text = r#"{"beamWidth":4096,"potentialNet":null}"#.to_string();
-    let mut variants_text = r#"{"w128":{"beamWidth":128},"w512":{}}"#.to_string();
+    let mut variants_text = r#"{"w128":{"beamWidth":128},"w256":{}}"#.to_string();
     let mut sample = 0usize;
     let mut nodes_path: Option<String> = None;
     let mut out_path: Option<String> = None;

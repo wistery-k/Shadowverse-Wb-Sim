@@ -558,12 +558,12 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
   `upperMin`（伸びしろの上側の下限、既定 0）・`eps`（bstar で決まったとみなす楽観 − 悲観の幅、既定 0）・`stop`（a0・bstar で区別がついたら予算の前に止める、既定 true）・
   `c`・`temp`（mcts の探索の定数と事前の重みの温度、既定 1・5）・`lazy`（案 A'。a0 だけ。下限と上限のネットワークのファイル。子を予想だけで山に入れ、正確な採点を山から出すまで後回しにする）。
   比べ方は上の `tree-gap`（docs/ai-notes.md「自分のターンの探索を B*・MCTS に」）
-- `potentialNet`: 見込みのネットワークのファイルの場所か `null`（使わない）。既定は `data/potential-net.json`（2026-10-30 から。ビームの幅の既定も 512 → 128）。
+- `potentialNet`: 見込みのネットワークのファイルの場所か `null`（使わない）。既定は `data/potential-net.json`（2026-10-30 から。ビームの幅の既定も 512 → 128。2026-11-05 から幅 256）。
   ターン途中の局面から届くターン末の点数の最大と、そこで終えた点数の差を当てる小さなネットワーク（`rust/engine/src/ai/potential.rs`）の出力に
   `potentialWeight`（既定 1）を掛けて、`beamKey` と同じく並べ替えのキー（と `bestFirst` の優先度）にだけ足す（読みの中の相手のビームには効かない）。
   学び方は上の「potential」（docs/ai-notes.md「ターン途中の見込みを学ぶ」）。
   `potentialDrawSplit`（真偽、既定 false）を true にすると、drawSplit の組み直しのビームにも見込みを使う（重くなり、勝率は同じ）。
-  2026-10-30 より前の既定は `{"beamWidth":512,"potentialNet":null}`
+  2026-10-30 より前の既定は `{"beamWidth":512,"potentialNet":null}`、2026-10-30〜11-04 の既定は `{"beamWidth":128}`
 - `perPlan`: 数（既定 0 で使わない）。ビームの各深さで、同じ「手の組」（手札から出したカード・進化・超進化・能力・エクストラPP の組。攻撃・融合・選ぶ手は数えない）の局面をまずこの数まで残し、余った枠を点数の順に埋める。攻撃先・融合の素材だけが違う並びが枠を埋めて、別のカードを使う手順が切られるのを防ぐ（2026-10-26。docs/ai-notes.md「手の組ごとにビームの枠を設ける」）
 - 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
   `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`
