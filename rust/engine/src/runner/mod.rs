@@ -24,6 +24,7 @@ pub mod read_gap;
 pub mod read_log;
 pub mod rhino_compare;
 pub mod td;
+pub mod tree_gap;
 pub mod two_turn;
 pub mod yardstick;
 

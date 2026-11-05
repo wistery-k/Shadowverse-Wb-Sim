@@ -38,7 +38,7 @@
 | `npm run profile` | デッキごとの 1 試合の時間と、思考の処理ごとの時間の内訳（下） | `scripts/profile.mjs`・`rust/engine/src/runner/profile.rs` |
 | `npm run svwb` | Rust 版の CLI（下） | `rust/engine/src/main.rs` |
 | `npm run td` | TD 学習のモデルの作成・学習・分析（下） | `scripts/td-main.ts` |
-| `npm run potential` | ターン途中の見込みのネットワーク（`potentialNet`）を学ぶ（下） | `scripts/potential-main.ts` |
+| `npm run potential` | ターン途中の見込みのネットワーク（`potentialNet`）と、木の探索の案 A' の下限と上限のネットワーク（`tree.lazy`）を学ぶ（下） | `scripts/potential-main.ts` |
 | `npm run pack-run` | PC で回した 1 回分の出力（自己対戦・モデル・ログ）を、共有フォルダに上げる `.tar.gz` にまとめる（下） | `scripts/pack-run-main.ts` |
 | `cloud/gcp.sh` | ジョブ（meta.sh 等）をクラウドの Spot VM で回す。使うたびにユーザーの承認が要る（下） | `cloud/gcp.sh`・`cloud/vm-startup.sh` |
 | `docker/remote-control` | Claude Code の Remote Control を Docker のコンテナの中で動かす。実験を回す既定の場所（使い方は本体の README.md） | `docker/remote-control/compose.yaml`・`Dockerfile` |
@@ -296,7 +296,9 @@ npm run svwb -- two-turn trace --only <局面> --cand <候補> [--r 0] [--seed 1
 npm run svwb -- draw-stability [--subject spellwitch] [--games 12] [--start 0] [--seeds 8] [--a '{}'] [--b '{"drawSplit":{}}']
 npm run svwb -- fuse-gap --dir <記録のディレクトリ> [--opts '<設定の JSON>'] [--out 結果.jsonl] [--show 10]
 npm run svwb -- defer-playout --dir <記録のディレクトリ> --opts '<回す版の設定>' [--cont '<設定>'] [--seeds 8] [--seedBase 0] [--out 結果.jsonl]
-npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth":4096,"potentialNet":null}'] [--variants '{"名前":{設定},…}'] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl] [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl] [--inputs 学習のデータ.jsonl]
+npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth":4096,"potentialNet":null}'] [--variants '{"名前":{設定},…}'] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl] [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl] [--inputs 学習のデータ.jsonl] [--marks 250,500,…]
+npm run svwb -- tree-gap upper-fit --nodes 局面.jsonl[,…] --tau 0.9 --out 表.json [--min 30] [--gBins 5]
+npm run svwb -- tree-gap report --runs 結果.jsonl[,…] [--tsv 表.tsv]
 npm run svwb -- read-log --out 記録.jsonl [--games 49] [--start 0] [--opts '<設定の JSON>'] [--b 12] [--alt-opp '{"beamWidth":8,"maxDepth":8}']
 npm run svwb -- read-gap --out 記録.jsonl [--games 49] [--start 0] [--opts '<設定の JSON>'] [--samples 12] [--depths 1,2,3,4,5,6,7]
 npm run svwb -- lethal-read --out 記録.jsonl [--games 49] [--start 0] [--opts '<設定の JSON>'] [--decide]
@@ -358,7 +360,14 @@ npm run svwb -- lethal-diff --out 記録.jsonl [--games 1600] [--start 0] [--opt
   基準のビームも時間がかかるので、同じ局面・同じ基準で前に書いた `--out` を `--refFrom` に渡すと、基準を打ち直さずにその結果を使う（`--sample` とは一緒に使えない）。
   `--inputs` なら、`--sample` で選んだ局面の見込みのネットワーク（`potentialNet`）の入力と、終えた点数・届いた最善を書く（学習のデータ）。
   設定は今の既定の上に重ねるので、2026-10-30 からは見込みが入る。見込みなしのビームは `"potentialNet":null` を書く（`--ref` の既定は見込みなしの幅 4096）
-  （docs/ai-notes.md「ターン途中の評価の見直し」）
+  （docs/ai-notes.md「ターン途中の評価の見直し」）。`--out` の行には、設定ごとに最初の手ごとの最善（`firsts`）、木の探索（設定の `tree`）なら `--marks` の予算ごとの
+  途中の最善（`marks`）、その局面で今の既定のリーサル探索が勝ちを見つけるか（`lethal`）も書く。`--nodes` の行には、学習した見込みの値（`pot`）と、その局面から先へ広げられるか（`open`）も書く
+- `tree-gap`: 自分のターンの木の探索（設定の `tree`）を今のビームと比べる道具（2026-11-05。`rust/engine/src/runner/tree_gap.rs`）。
+  `upper-fit` は `beam-gap --sample k --nodes` の行から、伸びしろ（その先で届いた最善 − そこで終えた点数）の上側の `--tau` 分位点の表（`rust/engine/src/ai/upper.rs`）を作る
+  （手数・使える PP・攻撃できる数・進化できるか・見込みの値の組ごと。データが `--min` 個に足りない組は粗い組に落とす）。
+  `report` は同じ局面で打った `beam-gap --out` をいくつか合わせ、どの設定（と予算ごとの途中）でも見つかった最善の最大と比べて、読んだ局面の数・差の平均・3 点以上劣る割合・
+  上位 4 つの最初の手の差・最善の手が上位 4 手に入る割合・見逃したリーサルを、設定と予算ごと・デッキごと・ターンごとに出す（`--tsv` は図を描く用）。
+  段階 1 の計測一式は `cloud/jobs/tree-gap.sh`（docs/ai-notes.md「自分のターンの探索を B*・MCTS に」）
 - `read-log`: `profile` と同じ試合（両方の席が `--opts` の設定）を打ち、考え直すたびに、相手のターンまで読み直した終局面ごとの最初の手・ターン末の点数・選ぶときの値と、
   相手の手札の引き直しごとの読みの点数を 1 行（JSON）ずつ書く。`--b` は、選ぶのに使ったのとは別の乱数の引き直しで読んだ点数（確かめ用の独立な読み）、
   `--alt-opp` は、同じ引き直しを相手のターンのビームの設定を変えて読んだ点数も書く。記録のための読みは選ぶ値にも乱数にも使わないので、打つ手は記録しないときと同じ
@@ -410,6 +419,8 @@ npm run potential -- train --data d1.jsonl[,d2.jsonl] --out model.json [--hidden
                        [--l2 0.000001] [--batch 256] [--scale 20] [--valid 160-199] [--seed 1]
                        [--groups depth|position]
 npm run svwb -- beam-gap --positions pos1.jsonl --refFrom rows1.jsonl --variants '{"w32":{"beamWidth":32,"potentialNet":null},"w32p":{"beamWidth":32,"potentialNet":"model.json"}}'
+npm run potential -- bounds --data d1.jsonl[,d2.jsonl] --out model.json [--tau 0.95] [--hidden 64] [--epochs 8] [--lr 0.001]
+                       [--l2 0.000001] [--batch 256] [--scale 50] [--valid 1180-1199] [--seed 1]
 ```
 
 `beam-gap --sample k --inputs` は、基準のビーム（既定は幅 4096）が残した途中の局面を局面ごとに k 個（と最善の並びの途中の局面）選び、
@@ -418,6 +429,10 @@ npm run svwb -- beam-gap --positions pos1.jsonl --refFrom rows1.jsonl --variants
 `--groups position` なら組を手数で分けず局面ごとにする（段を作らない探索 `bestFirst` 向けの試し。段のあるビームでは既定の `depth` がずっと良い）。
 `--valid` の範囲の試合（`game`）は学ばず、確かめの損失と「1 位の当たり」を出す。この 2 つは目安で、良し悪しは学びに使っていない試合の局面での
 `beam-gap`（`--positions` と `--refFrom` で基準のビームを打ち直さずに比べる）で決める。docs/ai-notes.md「ターン途中の見込みを学ぶ」
+
+`bounds` は同じデータから、木の探索の案 A'（設定の `tree.lazy`）が使う下限と上限のネットワーク（`rust/engine/src/ai/bounds.rs`）を学ぶ。
+そこで終えた点数の予想（2 乗誤差）と、伸びしろ max(0, 届いた最善 − 終えた点数) の `--tau` 分位点の予想（ピンボール損失）を、1 つの隠れ層から出す。
+確かめでは、終えた点数の予想の誤差と、伸びしろが予想以下の割合（`--tau` に近いはず）を出す（docs/ai-notes.md「自分のターンの探索を B*・MCTS に」）
 
 ## pack-run（PC で回した結果をクラウドから見られるようにする）
 
@@ -536,6 +551,13 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
 - `bestFirst`: 数（既定 0 で使わない。2026-10-30）。自分のターンのビームを、段を作らずに、優先度（ターン末の点数 + `beamKey` の伸びしろ）の高い局面から 1 つずつ広げる探索に替える。
   採点した局面の数がこの数に達したら広げるのをやめる（深さの上限は `maxDepth`）。同じ局面は段をまたいでまとめ、点数の高いほうを残す。`beamWidth` は使わない
   （drawSplit の組み直しにも効く。読みの中の相手のビームには効かない）
+- `tree`: `null`（既定。使わない）かオブジェクト（2026-11-05）。自分のターンのビームを、採点した局面の数の予算の中で次に広げる局面を 1 つずつ選ぶ木の探索に替える
+  （`rust/engine/src/ai/search/tree.rs`。drawSplit の組み直しと読みの中の相手のビームはビームのまま）。項目は
+  `mode`（`a0`: 楽観の値 = 終えた点数 + 伸びしろの上側 の高い局面から広げる、`bstar`: 最初の手ごとに悲観・楽観の値を持ち、上位 `k`（既定 4）の手と外の手の区別をつける B*、
+  `mcts`: 最大を戻す PUCT。既定 `bstar`）・`budget`（読んだ局面の数の予算、既定 2000）・`upper`（伸びしろの上側の表。`tree-gap upper-fit` が作る）・`upperScale`（表の値の倍率、既定 1）・
+  `upperMin`（伸びしろの上側の下限、既定 0）・`eps`（bstar で決まったとみなす楽観 − 悲観の幅、既定 0）・`stop`（a0・bstar で区別がついたら予算の前に止める、既定 true）・
+  `c`・`temp`（mcts の探索の定数と事前の重みの温度、既定 1・5）・`lazy`（案 A'。a0 だけ。下限と上限のネットワークのファイル。子を予想だけで山に入れ、正確な採点を山から出すまで後回しにする）。
+  比べ方は上の `tree-gap`（docs/ai-notes.md「自分のターンの探索を B*・MCTS に」）
 - `potentialNet`: 見込みのネットワークのファイルの場所か `null`（使わない）。既定は `data/potential-net.json`（2026-10-30 から。ビームの幅の既定も 512 → 128）。
   ターン途中の局面から届くターン末の点数の最大と、そこで終えた点数の差を当てる小さなネットワーク（`rust/engine/src/ai/potential.rs`）の出力に
   `potentialWeight`（既定 1）を掛けて、`beamKey` と同じく並べ替えのキー（と `bestFirst` の優先度）にだけ足す（読みの中の相手のビームには効かない）。

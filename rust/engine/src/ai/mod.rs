@@ -5,6 +5,7 @@
 
 pub mod aidata;
 pub mod beam_key;
+pub mod bounds;
 pub mod converging;
 pub mod damage_bound;
 pub mod determinize;
@@ -23,6 +24,7 @@ pub mod rhino;
 pub mod rhino_lethal;
 pub mod search;
 pub mod think;
+pub mod upper;
 pub mod valuenet;
 
 #[cfg(test)]

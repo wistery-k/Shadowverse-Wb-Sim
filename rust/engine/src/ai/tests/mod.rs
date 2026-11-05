@@ -30,6 +30,7 @@ mod rhino_bound;
 mod rhino_puzzles;
 mod search;
 mod think;
+mod tree;
 mod valuenet;
 
 use super::aidata::ai_data;

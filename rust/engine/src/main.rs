@@ -19,6 +19,7 @@
 //!   svwb fuse-gap --dir <記録> [--opts …]  AF ネメシスの手札の作ったカードをコアに戻した局面で、探索が手順を取りこぼすかを測る（runner/fuse_gap.rs）
 //!   svwb defer-playout --dir <記録> --opts …  融合を回す版の記録で、回した融合をその場でした場合と最後まで打ち比べる（runner/defer_playout.rs）
 //!   svwb beam-gap [--games 50] [--ref …] [--variants …] [--sample k --nodes …]  自分のターンのビームが広いビームの最善にどれだけ届くかを、幅・並べ替えごとに測る（runner/beam_gap.rs）
+//!   svwb tree-gap upper-fit|report …  自分のターンの木の探索の伸びしろの上側の表を作る・beam-gap の結果を合わせて採点数あたりの取りこぼしを比べる（runner/tree_gap.rs）
 //!   svwb yardstick [--opts …] [--games 1000] [--label …] [--record]  固定した相手との勝率（強さの物差し。docs/yardstick.md）
 //!   svwb profile [--games 49] [--opts …] [--json …] [--baseline …] [--report …]  デッキごとの 1 試合の時間と処理ごとの内訳（docs/profile.md。内訳は --features profile のビルドだけ）
 
@@ -167,8 +168,8 @@ fn main() {
             cmd @ ("compare" | "rhino-compare" | "deck-compare" | "mulligan-compare"
             | "mulligan-data" | "td" | "yardstick" | "human-plan-value" | "meta"
             | "deep-gap" | "profile" | "two-turn" | "draw-stability" | "fuse-gap"
-            | "defer-playout" | "beam-gap" | "read-log" | "read-gap" | "lethal-read"
-            | "lethal-diff"),
+            | "defer-playout" | "beam-gap" | "tree-gap" | "read-log" | "read-gap"
+            | "lethal-read" | "lethal-diff"),
         ) => {
             let rest = &args[1..];
             let r = match cmd {
@@ -185,6 +186,7 @@ fn main() {
                 "fuse-gap" => runner::fuse_gap::main(rest),
                 "defer-playout" => runner::defer_playout::main(rest),
                 "beam-gap" => runner::beam_gap::main(rest),
+                "tree-gap" => runner::tree_gap::main(rest),
                 "meta" => runner::meta::main(rest),
                 "profile" => runner::profile::main(rest),
                 "read-log" => runner::read_log::main(rest),
@@ -199,7 +201,7 @@ fn main() {
             }
         }
         _ => {
-            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | mulligan-data … | td selfplay … | yardstick … | human-plan-value … | deep-gap … | two-turn … | draw-stability … | fuse-gap … | defer-playout … | beam-gap … | profile … | read-log … | read-gap … | lethal-read … | lethal-diff …（rust/README.md）");
+            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | mulligan-data … | td selfplay … | yardstick … | human-plan-value … | deep-gap … | two-turn … | draw-stability … | fuse-gap … | defer-playout … | beam-gap … | tree-gap … | profile … | read-log … | read-gap … | lethal-read … | lethal-diff …（rust/README.md）");
             std::process::exit(2);
         }
     }
