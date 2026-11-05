@@ -3,7 +3,7 @@
 //!   svwb beam-gap [--games 50] [--from 0] [--ref '{"beamWidth":4096,"potentialNet":null}'] [--variants '{"名前":{設定},…}']
 //!                 [--every 1] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl]
 //!                 [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl]
-//!                 [--inputs 学習のデータ.jsonl]
+//!                 [--inputs 学習のデータ.jsonl] [--marks 250,500,1000,2000,4000,8000]
 //!
 //! 今の既定どうしの自己対戦（`sim::play_ai`、比較用の 7 デッキ）の、自分のターンの最初の局面（`--every k` なら k 局面に 1 つ）を集め、
 //! 視点のプレイヤーから決定化した局面で、基準の設定（`--ref`）と比べる設定（`--variants`）のビームを 1 回ずつ打つ（相手のターンは読まない）。
@@ -22,6 +22,11 @@
 //! `--inputs` なら、`--sample` で選んだ局面（段 1 以上）の見込みのネットワークの入力（ai/potential.rs）と、終えた点数・届いた最善を書く
 //! （1 行目は語彙と入力の並び。学習は npm run potential -- train）。
 //! docs/ai-notes.md「ターン途中の評価の見直し」
+//!
+//! `--out` の行には、設定ごとに最初の手ごとの最善（firsts）と、木の探索（設定の `tree`。ai/search/tree.rs）なら `--marks` の予算ごとの
+//! 途中の最善（marks）と、その局面でリーサル探索が勝ちを見つけるか（lethal）も書く。いくつかの `--out` を合わせた集計は
+//! `svwb tree-gap report`（runner/tree_gap.rs）。`--nodes` の行には、学習した見込みの値（pot）と、その局面から先へ広げられるか（open）も書く
+//! （伸びしろの上側の表を作る `svwb tree-gap upper-fit` が読む）。
 
 use super::human_plan::{is_start_of_turn, mean_se};
 use super::options::compare_options;
@@ -29,14 +34,16 @@ use super::parallel::parallel_map;
 use super::{fixed, seconds_since};
 use crate::ai::beam_key::{beam_features, BEAM_FEATURES};
 use crate::ai::determinize::determinize;
-use crate::ai::potential::{default_vocab, PotentialEncoder, P_SCALARS, P_ZONES};
+use crate::ai::potential::{
+    default_potential_net, default_vocab, PotentialEncoder, P_SCALARS, P_ZONES,
+};
 use crate::ai::search::{is_chance_step, BeamProbe, SearchAgent, SearchOptions};
 use crate::ai::{Agent, Rng};
 use crate::data::data;
 use crate::game::{acting_player, apply_legal};
 use crate::json::Json;
 use crate::sim::{ai_game_setup, play_ai};
-use crate::state::{Action, GameState, PlayerIndex};
+use crate::state::{Action, GameState, Phase, PlayerIndex};
 use crate::state_json::{action_to_json, state_from_json, state_to_json};
 use std::io::{BufRead, Write};
 use std::time::Instant;
@@ -60,10 +67,19 @@ struct Probe {
     first: String,
     actions: Vec<Action>,
     scored: u64,
+    /// 木の探索の lazy で予想だけした局面の数
+    predicted: u64,
     terminals: usize,
     dup: usize,
     secs: f64,
+    /// 最初の手ごとの最善（最初の手は JSON の文字列）
+    firsts: Vec<(String, f64)>,
+    /// 木の探索の、予算ごとの途中の最善
+    marks: Vec<Mark>,
 }
+
+/// 木の探索の、予算ごとの途中の最善（予算、その時点の採点の数・予想だけの数、最初の手ごとの最善）
+type Mark = (usize, usize, usize, Vec<(String, f64)>);
 
 struct Row {
     game: u32,
@@ -71,6 +87,8 @@ struct Row {
     deck: String,
     turn: i32,
     chance: bool,
+    /// リーサル探索（今の既定）がこの局面で勝ちを見つけるか
+    lethal: bool,
     reference: Probe,
     variants: Vec<Probe>,
     nodes: Vec<String>,
@@ -149,31 +167,47 @@ fn position_from_json(line: &str) -> Result<Position, String> {
     })
 }
 
+fn first_name(a: &Action) -> String {
+    action_to_json(a).stringify()
+}
+
+fn firsts_of(xs: &[(Action, f64)]) -> Vec<(String, f64)> {
+    xs.iter().map(|(a, v)| (first_name(a), *v)).collect()
+}
+
 fn probe(
     agent: &SearchAgent,
     s: &GameState,
     p: PlayerIndex,
     sample: usize,
+    marks: &[usize],
     rng: &mut Rng,
 ) -> (Probe, Option<BeamProbe>) {
     let t0 = Instant::now();
     let r = agent
-        .beam_probe(s, p, sample, rng)
+        .beam_probe(s, p, sample, marks, rng)
         .expect("ターンの最初の局面に並びがありません");
     let secs = seconds_since(t0);
     let first = r
         .best_actions
         .first()
-        .map_or("EndTurn".to_string(), |a| action_to_json(a).stringify());
+        .map_or("EndTurn".to_string(), first_name);
     (
         Probe {
             best: r.best,
             first,
             actions: r.best_actions.clone(),
             scored: r.scored,
+            predicted: r.predicted,
             terminals: r.terminals,
             dup: r.dup_states,
             secs,
+            firsts: firsts_of(&r.firsts),
+            marks: r
+                .marks
+                .iter()
+                .map(|m| (m.at, m.scored, m.predicted, firsts_of(&m.firsts)))
+                .collect(),
         },
         Some(r),
     )
@@ -192,9 +226,17 @@ fn has_chance(root: &GameState, actions: &[Action], p: PlayerIndex) -> bool {
     false
 }
 
-fn node_line(pos: &Position, turn: i32, n: &crate::ai::search::ProbeNode) -> String {
+fn node_line(
+    pos: &Position,
+    turn: i32,
+    max_depth: usize,
+    n: &crate::ai::search::ProbeNode,
+) -> String {
     let f = beam_features(&n.state, pos.p);
     let me = &n.state.players[pos.p];
+    let s = &n.state;
+    let actor = s.pending.as_ref().map(|pd| pd.player()).unwrap_or(s.active);
+    let open = s.phase != Phase::Ended && actor == pos.p && (n.depth as usize) < max_depth;
     let mut items: Vec<(String, Json)> = vec![
         ("game".into(), Json::Num(pos.game as f64)),
         ("k".into(), Json::Num(pos.k as f64)),
@@ -209,6 +251,11 @@ fn node_line(pos: &Position, turn: i32, n: &crate::ai::search::ProbeNode) -> Str
         ("maxPp".into(), Json::Num(me.max_pp as f64)),
         ("hand".into(), Json::Num(me.hand.len() as f64)),
         ("board".into(), Json::Num(me.board.len() as f64)),
+        ("open".into(), Json::Bool(open)),
+        (
+            "pot".into(),
+            Json::Num(default_potential_net().eval(&n.state, pos.p)),
+        ),
     ];
     for (name, x) in BEAM_FEATURES.iter().zip(f) {
         items.push(((*name).into(), Json::Num(x)));
@@ -232,9 +279,15 @@ fn ref_from_json(line: &str) -> Result<((u32, usize), Probe, bool), String> {
         },
         actions: Vec::new(),
         scored: num(r, "scored")? as u64,
+        predicted: num(r, "predicted").unwrap_or(0.0) as u64,
         terminals: num(r, "terminals")? as usize,
         dup: num(r, "dup")? as usize,
         secs: num(r, "secs")?,
+        firsts: match r.get("firsts") {
+            Some(f) => firsts_from_json(f)?,
+            None => Vec::new(),
+        },
+        marks: Vec::new(),
     };
     let chance = matches!(v.get("chance"), Some(Json::Bool(true)));
     Ok((
@@ -272,8 +325,25 @@ fn input_line(
     .stringify()
 }
 
+fn firsts_json(xs: &[(String, f64)]) -> Json {
+    Json::Obj(xs.iter().map(|(k, v)| (k.clone(), Json::Num(*v))).collect())
+}
+
+pub(super) fn firsts_from_json(v: &Json) -> Result<Vec<(String, f64)>, String> {
+    match v {
+        Json::Obj(xs) => xs
+            .iter()
+            .map(|(k, x)| match x {
+                Json::Num(x) => Ok((k.clone(), *x)),
+                _ => Err("firsts の値は数".to_string()),
+            })
+            .collect(),
+        _ => Err("firsts は最初の手から点数へのオブジェクト".into()),
+    }
+}
+
 fn probe_json(r: &Probe) -> Json {
-    Json::Obj(vec![
+    let mut items = vec![
         ("best".into(), Json::Num(r.best)),
         ("first".into(), Json::Str(r.first.clone())),
         ("len".into(), Json::Num(r.actions.len() as f64)),
@@ -281,7 +351,30 @@ fn probe_json(r: &Probe) -> Json {
         ("terminals".into(), Json::Num(r.terminals as f64)),
         ("dup".into(), Json::Num(r.dup as f64)),
         ("secs".into(), Json::Num(r.secs)),
-    ])
+        ("firsts".into(), firsts_json(&r.firsts)),
+    ];
+    if r.predicted > 0 {
+        items.push(("predicted".into(), Json::Num(r.predicted as f64)));
+    }
+    if !r.marks.is_empty() {
+        items.push((
+            "marks".into(),
+            Json::Arr(
+                r.marks
+                    .iter()
+                    .map(|(at, scored, predicted, f)| {
+                        Json::Obj(vec![
+                            ("at".into(), Json::Num(*at as f64)),
+                            ("scored".into(), Json::Num(*scored as f64)),
+                            ("predicted".into(), Json::Num(*predicted as f64)),
+                            ("firsts".into(), firsts_json(f)),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ));
+    }
+    Json::Obj(items)
 }
 
 pub fn main(argv: &[String]) -> Result<(), String> {
@@ -297,6 +390,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut save_path: Option<String> = None;
     let mut ref_from: Option<String> = None;
     let mut inputs_path: Option<String> = None;
+    let mut marks: Vec<usize> = Vec::new();
     let mut i = 0;
     while i < argv.len() {
         let v = argv.get(i + 1).cloned().ok_or("引数の値がありません")?;
@@ -313,6 +407,13 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             "--savePositions" => save_path = Some(v),
             "--refFrom" => ref_from = Some(v),
             "--inputs" => inputs_path = Some(v),
+            "--marks" => {
+                marks = v
+                    .split(',')
+                    .map(|x| x.trim().parse().map_err(|_| "--marks は 250,500 の形"))
+                    .collect::<Result<_, _>>()?;
+                marks.sort_unstable();
+            }
             k => return Err(format!("不明な引数: {k}（runner/beam_gap.rs）")),
         }
         i += 2;
@@ -411,10 +512,15 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                     &det,
                     p,
                     sample,
+                    &marks,
                     &mut rng,
                 );
                 let nodes = match &full {
-                    Some(f) => f.nodes.iter().map(|n| node_line(pos, turn, n)).collect(),
+                    Some(f) => f
+                        .nodes
+                        .iter()
+                        .map(|n| node_line(pos, turn, ref_opts.max_depth, n))
+                        .collect(),
                     None => Vec::new(),
                 };
                 if let (Some(f), true) = (&full, inputs_path.is_some()) {
@@ -433,14 +539,18 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             };
             let variants = variants
                 .iter()
-                .map(|(_, o, _)| probe(&SearchAgent::new(o.clone()), &det, p, 0, &mut rng).0)
+                .map(|(_, o, _)| {
+                    probe(&SearchAgent::new(o.clone()), &det, p, 0, &marks, &mut rng).0
+                })
                 .collect();
+            let lethal = SearchAgent::new(SearchOptions::default()).finds_lethal(&det, p);
             Ok(Row {
                 game: pos.game,
                 k: pos.k,
                 deck: pos.deck.clone(),
                 turn,
                 chance,
+                lethal,
                 reference,
                 variants,
                 nodes,
@@ -494,6 +604,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                 ("deck".into(), Json::Str(r.deck.clone())),
                 ("turn".into(), Json::Num(r.turn as f64)),
                 ("chance".into(), Json::Bool(r.chance)),
+                ("lethal".into(), Json::Bool(r.lethal)),
                 ("ref".into(), probe_json(&r.reference)),
                 (
                     "variants".into(),

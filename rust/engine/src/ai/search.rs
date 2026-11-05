@@ -42,6 +42,11 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
+mod tree;
+pub use tree::{
+    predicted_count, start_tree_marks, take_tree_marks, TreeMark, TreeMode, TreeSearch,
+};
+
 /// 評価関数に足す項（学習した補正・デッキ専用の AI 用）
 pub type ExtraEval = Arc<dyn Fn(&GameState, PlayerIndex, ValuePhase) -> f64 + Send + Sync>;
 /// 自分が打ってよい手か（ルールで禁じる手を探索から外す）
@@ -412,6 +417,9 @@ pub struct SearchOptions {
     /// （bestFirst。0 なら使わず、beamWidth のビーム）。同じ局面はターン全体でまとめ、点数の高いほうを残す。深さの上限は maxDepth。
     /// 自分のターンのビームだけに効く
     pub best_first: usize,
+    /// 層ごとのビームの代わりに、採点した局面の数の予算の中で次に広げる局面を 1 つずつ選ぶ木の探索（tree。None なら使わない。
+    /// ai/search/tree.rs の a0・bstar・mcts）。自分のターンのビームだけに効き、drawSplit の組み直し・読みの中の相手のビームはビームのまま
+    pub tree: Option<TreeSearch>,
     /// ビームで残す局面を選ぶ並べ替えのキーに足す、学習した見込み（potentialNet。ai/potential.rs）と、その倍率（potentialWeight）。
     /// beamKey と同じく、ターンを終える局面の点数には足さず、自分のターンのビームと bestFirst だけに効く（読みの中の相手には効かない）。
     /// 既定は data/potential-net.json（2026-10-30 から）
@@ -535,6 +543,7 @@ impl Default for SearchOptions {
             beam_pp: 0.0,
             beam_key: None,
             best_first: 0,
+            tree: None,
             potential: Some(default_potential_net()),
             potential_weight: 1.0,
             potential_draw_split: false,
@@ -1442,6 +1451,9 @@ impl<'a> Planner<'a> {
                 });
             }
         }
+        if let Some(ts) = opts.tree.as_ref() {
+            return self.tree_terminals(terminals, frontier, ts);
+        }
         if opts.best_first > 0 {
             return self.best_first_terminals(terminals, frontier);
         }
@@ -1790,6 +1802,7 @@ pub fn plan_turn_traced(
         beam_width: ds.beam_width,
         max_depth: ds.max_depth,
         draw_split: None,
+        tree: None,
         potential: opts.potential.clone().filter(|_| opts.potential_draw_split),
         ..opts.clone()
     });
@@ -2990,6 +3003,7 @@ fn opponent_search_options(opts: &SearchOptions) -> SearchOptions {
         per_plan: 0,
         beam_key: None,
         best_first: 0,
+        tree: None,
         potential: None,
         ..opts.clone()
     }
@@ -3315,6 +3329,25 @@ impl SearchAgent {
 }
 
 impl SearchAgent {
+    /// 調べもの用（svwb beam-gap）: 局面 s（決定化した局面。決定化し直さない）で、このAI のリーサル探索が p の勝てる並びを見つけるか
+    pub fn finds_lethal(&self, s: &GameState, p: PlayerIndex) -> bool {
+        let opts = &self.opts;
+        let lo = LethalOptions {
+            ward_blocked: opts.lethal_ward_blocked,
+            expand_choices: opts.lethal_expand_choices,
+            ..DEFAULT_LETHAL_OPTIONS
+        };
+        search_lethal(s, p, &lo)
+            .or_else(|| {
+                (opts.lethal_exact_states > 0)
+                    .then(|| {
+                        search_exact_lethal(s, p, &sure_lethal_options(opts.lethal_exact_states))
+                    })
+                    .flatten()
+            })
+            .is_some_and(|seq| !seq.is_empty())
+    }
+
     /// このターンに勝てる並びの最初の手（lethal のとき。見つからない・実際の局面で打てなければ None）
     pub(crate) fn lethal_action(
         &self,
@@ -3902,12 +3935,18 @@ pub struct BeamProbe {
     pub terminals: usize,
     /// 局面を採点した回数（残さなかった子の局面を含む）
     pub scored: u64,
+    /// 木の探索の lazy で、予想だけした局面の数
+    pub predicted: u64,
     /// 残した局面のうち、別の段で先に残した局面と同じもの（同じ局面をまとめるのは段の中だけなので、段をまたいで重なる）
     pub dup_states: usize,
     /// 残した局面のうち、段ごとの数（添字が段。0 は根の局面でターンを終える手）
     pub per_depth: Vec<usize>,
     /// 選んだ局面（beam_probe の sample）
     pub nodes: Vec<ProbeNode>,
+    /// 最初の手ごとの、ターン末の点数の最大（最初の手が出てきた順）
+    pub firsts: Vec<(Action, f64)>,
+    /// 木の探索（tree）の、予算ごとの途中の最善（beam_probe の marks。ビームなら空）
+    pub marks: Vec<TreeMark>,
 }
 
 /// BeamProbe の、残した局面 1 つ
@@ -3927,19 +3966,36 @@ pub struct ProbeNode {
 
 impl SearchAgent {
     /// 調べもの用（svwb beam-gap）: 局面 root で p のターンのビームを 1 回打つ（root を決定化せず、相手のターンは読まない）。
-    /// sample が 0 より大きければ、残した局面から乱数で sample 個と、最善の並びの途中の局面すべてを、その先で届いた最善と一緒に返す
+    /// sample が 0 より大きければ、残した局面から乱数で sample 個と、最善の並びの途中の局面すべてを、その先で届いた最善と一緒に返す。
+    /// 木の探索（tree）なら、予算 marks（昇順）ごとの途中の最善も返す
     pub fn beam_probe(
         &self,
         root: &GameState,
         p: PlayerIndex,
         sample: usize,
+        marks: &[usize],
         rng: &mut Rng,
     ) -> Option<BeamProbe> {
         let env = self.env();
         let root = Rc::new(root.clone());
         let before = SCORED.with(|c| c.get());
+        let predicted_before = predicted_count();
+        let use_marks = env.opts.tree.is_some() && !marks.is_empty();
+        if use_marks {
+            start_tree_marks(marks.to_vec());
+        }
         let (pl, terminals, bests) = turn_end_bests(&root, p, &env, env.opts.fuse_root);
+        let marks = if use_marks {
+            take_tree_marks()
+        } else {
+            Vec::new()
+        };
         let scored = SCORED.with(|c| c.get()) - before;
+        let predicted = predicted_count() - predicted_before;
+        let firsts: Vec<(Action, f64)> = bests
+            .iter()
+            .map(|(a, i)| (a.clone(), terminals[*i].value))
+            .collect();
         let bi = bests.iter().map(|&(_, i)| i).reduce(|b, i| {
             if terminals[i].value > terminals[b].value {
                 i
@@ -4008,9 +4064,12 @@ impl SearchAgent {
             best_actions: pl.steps_actions(terminals[bi].path),
             terminals: terminals.len(),
             scored,
+            predicted,
             dup_states,
             per_depth,
             nodes,
+            firsts,
+            marks,
         })
     }
 }

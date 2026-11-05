@@ -5,13 +5,16 @@
 
 use crate::ai::aidata::{weights_from, AI_DATA_JSON};
 use crate::ai::beam_key::{BeamKey, BEAM_FEATURES, N_BEAM_FEATURES};
+use crate::ai::bounds::BoundsNet;
 use crate::ai::mulligan::OppMulligan;
 use crate::ai::potential::PotentialNet;
 use crate::ai::rhino::{rhino_pass_lethal, rhino_search_options, RHINO_POTENTIAL};
 use crate::ai::search::{
     DrawSplit, ExtraEval, MulliganMode, OpponentSearch, OwnNextSearch, RescoreAverage, RescoreRace,
-    RolloutWeights, ScoreTurnEnd, SearchOptions, TwoTurnGate, DEFAULT_RESCORE_RACE,
+    RolloutWeights, ScoreTurnEnd, SearchOptions, TreeMode, TreeSearch, TwoTurnGate,
+    DEFAULT_RESCORE_RACE,
 };
+use crate::ai::upper::UpperTable;
 use crate::ai::valuenet::ValueNet;
 use crate::data::ClassId;
 use crate::json::Json;
@@ -107,6 +110,82 @@ fn flag(k: &str, v: &Json) -> Result<bool, String> {
         Json::Bool(b) => Ok(*b),
         _ => Err(format!("\"{k}\" は true か false: {}", v.stringify())),
     }
+}
+
+/// tree（自分のターンの木の探索。ai/search/tree.rs）: null か
+/// {"mode":"a0"|"bstar"|"mcts","budget":2000,"upper":"表.json","upperScale":1,"upperMin":0,"k":4,"eps":0,"stop":true,"c":1,"temp":5,
+/// "lazy":"下限と上限のネットワーク.json"}
+fn tree_search(v: &Json) -> Result<Option<TreeSearch>, String> {
+    let fields = match v {
+        Json::Null => return Ok(None),
+        Json::Obj(fields) => fields,
+        _ => {
+            return Err(format!(
+                "\"tree\" は null かオブジェクト: {}",
+                v.stringify()
+            ))
+        }
+    };
+    const KEYS: [&str; 11] = [
+        "lazy",
+        "mode",
+        "budget",
+        "upper",
+        "upperScale",
+        "upperMin",
+        "k",
+        "eps",
+        "stop",
+        "c",
+        "temp",
+    ];
+    if let Some((k, _)) = fields.iter().find(|(k, _)| !KEYS.contains(&k.as_str())) {
+        return Err(format!("tree の知らない項目: {k}"));
+    }
+    let mut t = TreeSearch::default();
+    for (k, x) in fields {
+        let name = format!("tree.{k}");
+        match k.as_str() {
+            "mode" => {
+                t.mode = match x {
+                    Json::Str(m) => TreeMode::from_name(m)
+                        .ok_or_else(|| format!("tree.mode は a0・bstar・mcts: {m}"))?,
+                    _ => return Err("tree.mode は a0・bstar・mcts".into()),
+                }
+            }
+            "budget" => t.budget = count(&name, x)?,
+            "upper" => {
+                t.upper = match x {
+                    Json::Null => None,
+                    Json::Str(path) => Some(Arc::new(UpperTable::load(path)?)),
+                    _ => return Err("tree.upper は伸びしろの表のファイルの場所か null".into()),
+                }
+            }
+            "upperScale" => t.upper_scale = number(&name, x)?,
+            "upperMin" => t.upper_min = number(&name, x)?,
+            "k" => t.top_k = count(&name, x)?,
+            "eps" => t.eps = number(&name, x)?,
+            "stop" => t.stop = flag(&name, x)?,
+            "c" => t.c_puct = number(&name, x)?,
+            "temp" => t.temp = number(&name, x)?,
+            "lazy" => {
+                t.lazy = match x {
+                    Json::Null => None,
+                    Json::Str(path) => Some(Arc::new(BoundsNet::load(path)?)),
+                    _ => {
+                        return Err(
+                            "tree.lazy は下限と上限のネットワークのファイルの場所か null".into(),
+                        )
+                    }
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+    if t.lazy.is_some() && t.mode != TreeMode::A0 {
+        return Err("tree.lazy は mode a0 でだけ使える".into());
+    }
+    Ok(Some(t))
 }
 
 /// beamKey（項の名前から重みへのオブジェクト。ai/beam_key.rs の BEAM_FEATURES。書かない項は 0）
@@ -312,6 +391,7 @@ pub fn search_options(
             "beamPp" => o.beam_pp = number(k, v)?,
             "beamKey" => o.beam_key = Some(beam_key(v)?),
             "bestFirst" => o.best_first = count(k, v)?,
+            "tree" => o.tree = tree_search(v)?,
             "potentialNet" => {
                 o.potential = match v {
                     Json::Str(path) => Some(Arc::new(PotentialNet::load(path)?)),
