@@ -127,7 +127,7 @@ pub fn play_ai(
 }
 
 /// 2 つの AI で 1 試合を最後まで打つ（TypeScript 版 src/sim/match.ts の playMatch。AI の乱数は seed から作る）。
-/// 各手で、打つ前の局面と選んだ手で visit を呼ぶ（勝者がいない終わり方は呼び出し側で確かめる）
+/// 各手で、打つ前の局面と選んだ手で visit を呼ぶ（勝者がいない終わり方は呼び出し側で確かめる）。手番でない側の AI には、打つ前の局面を observe で見せる
 pub fn play_match(
     agents: &mut [&mut dyn crate::ai::Agent; 2],
     decks: [&[CardIdx]; 2],
@@ -145,6 +145,7 @@ pub fn play_match(
         );
         let legal = legal_actions(&s);
         let actor = crate::game::acting_player(&s);
+        agents[1 - actor].observe(&s);
         let a = agents[actor].choose_action(&s, &legal, &mut rng);
         visit(&s, &a);
         s = apply_action(&s, &a);

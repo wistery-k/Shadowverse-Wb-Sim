@@ -224,8 +224,8 @@ fn apart_keeps_opponent_deal_when_own_deck_size_differs() {
     };
     let mut same = 0;
     for seed in 1..=20 {
-        let a = determinize_apart(&s, viewer, &mut Rng::new(seed), false);
-        let b = determinize_apart(&t, viewer, &mut Rng::new(seed), false);
+        let a = determinize_apart(&s, viewer, &mut Rng::new(seed), false, None);
+        let b = determinize_apart(&t, viewer, &mut Rng::new(seed), false, None);
         assert_eq!(opp_part(&a), opp_part(&b));
         let own = |st: &GameState| {
             let mut v: Vec<Iid> = st.players[viewer].deck.iter().map(|r| r.iid).collect();

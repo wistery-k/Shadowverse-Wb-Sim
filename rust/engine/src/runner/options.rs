@@ -296,6 +296,7 @@ pub fn search_options(
             "dominance" => o.dominance = flag(k, v)?,
             "reusePlan" => o.reuse_plan = flag(k, v)?,
             "peekOppHand" => o.peek_opp_hand = flag(k, v)?,
+            "lethalRead" => o.lethal_read = flag(k, v)?,
             "oppFuse" => o.opp_fuse = flag(k, v)?,
             "oppHandCommon" => o.opp_hand_common = flag(k, v)?,
             "readOwnDeckApart" => o.read_own_deck_apart = flag(k, v)?,

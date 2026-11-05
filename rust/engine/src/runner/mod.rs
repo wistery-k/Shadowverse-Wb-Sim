@@ -12,6 +12,8 @@ pub mod defer_playout;
 pub mod draw_stability;
 pub mod fuse_gap;
 pub mod human_plan;
+pub mod lethal_diff;
+pub mod lethal_read;
 pub mod meta;
 pub mod mulligan_compare;
 pub mod mulligan_data;
