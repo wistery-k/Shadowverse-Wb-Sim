@@ -7,6 +7,17 @@ meta.sh や自己対戦のような重いジョブを、Google Cloud の Spot VM
 実験を回す既定の場所はユーザーの PC の Docker コンテナ（`docker/remote-control`）で、`cloud/jobs/` のジョブもそこで回せる（下の「PC で回す」）。
 十分速く終わるものは Claude のクラウド環境（スレッド自身の環境）で回してよい。
 
+## 今は使っていない（2026-11-08 から）
+
+ユーザーの判断で当分使わないことにし、プロジェクト `shadowverse-wb-sim` の課金を外した（2026-11-08）。
+
+- 外す前に残っていたのはバケット `gs://shadowverse-wb-sim-runs` だけ（VM・ディスク・スナップショット・イメージ・静的 IP は全リージョンで 0）。
+  中身（`runs/` の 8 回分、307 ファイル・2.4GB。exploit1・exploit2・relearn7・relearn8 の自己対戦の棋譜を含む）は、ユーザーの PC の
+  `C:\Users\wk\Downloads\svwb-gcs-backup\runs\<名前>\` に丸ごと写した（sha256 はバケットのものと一致。中の `README.txt`・`SHA256SUMS.txt`）
+- 課金が外れているあいだ、`cloud/gcp.sh` は動かない（バケットの中身も、Google の扱いで消えることがある）
+- また使うとき: ユーザーがお支払い →「プロジェクトの管理」で請求先アカウントをつなぎ直す（クォータやサービスアカウントはプロジェクトに残る）。
+  サービスアカウントの鍵を消していれば、「準備」の「動かす側の準備」で作り直す。使うたびにユーザーの承認が要るのは同じ
+
 測った速さ（2026-10-25、共有フォルダの `logs/cloud-bench1`・`logs/cloud-scale1`）:
 
 - c3d-highcpu-180 で、ふるい・確かめの試合（deck-compare）が 0.0165 秒/試合、compare が 0.018 秒/試合。ユーザーの PC の 6〜7 倍で、
