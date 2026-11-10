@@ -1202,6 +1202,31 @@ function cmdStop(a: Args): number {
   return 0;
 }
 
+/** git の名前とメールが決まるか（決まらないと git commit が断る）。コンテナでは .env の GIT_AUTHOR_NAME 等で渡す */
+function checkGitIdent(): void {
+  for (const v of ["GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"]) {
+    const r = spawnSync("git", ["var", v], { cwd: REPO, encoding: "utf8" });
+    if (r.status !== 0) {
+      throw new Error(
+        "git の名前とメールが決まらないので、コミットできません。台帳には何も足していません。\n" +
+          "コンテナなら docker/remote-control/.env に GIT_AUTHOR_NAME・GIT_AUTHOR_EMAIL・GIT_COMMITTER_NAME・GIT_COMMITTER_EMAIL を書き、" +
+          "ホストで docker compose up -d を流してから、finish --commit を流し直す（docs/night.md「台帳の行のコミット」）",
+      );
+    }
+  }
+}
+
+/** この回の行のうち、作業ツリーの docs/ledger.jsonl にあって HEAD に無いものの数 */
+function uncommittedQueueRows(name: string): number {
+  const count = (text: string) => {
+    const l = parseLedger(text);
+    return [...l.runs, ...l.misses].filter((r) => (r as { queue?: string }).queue === name).length;
+  };
+  const work = existsSync(DEFAULT_LEDGER) ? count(readFileSync(DEFAULT_LEDGER, "utf8")) : 0;
+  const head = spawnSync("git", ["show", "HEAD:docs/ledger.jsonl"], { cwd: REPO, encoding: "utf8", maxBuffer: 1 << 30 });
+  return work - (head.status === 0 ? count(head.stdout) : 0);
+}
+
 /** 朝: ジョブごとに 1 行にまとめた行をリポジトリの台帳に足す（足した区切りは覚えておき、2 回足さない） */
 export function cmdFinish(a: Args): number {
   known(a, ["--commit", "--pack", "--ledger"], 1);
@@ -1214,6 +1239,12 @@ export function cmdFinish(a: Args): number {
   const mergedFile = join(dir, "merged.json");
   const merged = new Set<string>(existsSync(mergedFile) ? readJson<string[]>(mergedFile) : []);
   const target = a.opts.get("--ledger") ?? (process.env.SVWB_LEDGER || DEFAULT_LEDGER);
+  const commit = a.opts.has("--commit");
+  // コミットできないと分かっているなら、台帳に足す前に止める（足した後で止まると、足した行がコミットされずに残る）
+  if (commit) {
+    if (resolve(target) !== resolve(DEFAULT_LEDGER)) throw new Error("--commit はリポジトリの台帳（docs/ledger.jsonl）に足すときだけ");
+    checkGitIdent();
+  }
   const targetLedger = existsSync(target) ? parseLedger(readFileSync(target, "utf8")) : { runs: [], misses: [] };
   const existing = targetLedger.runs;
   const key = (r: { label: string; g: [number, number]; commit: string; kind: string }) => `${r.kind}\u0001${r.label}\u0001${r.g[0]}\u0001${r.g[1]}\u0001${r.commit}`;
@@ -1272,12 +1303,17 @@ export function cmdFinish(a: Args): number {
   }`;
   writeFileSync(join(dir, "summary.md"), `${summary}\n`);
   console.log(summary);
-  if (a.opts.has("--commit") && added > 0) {
-    if (resolve(target) !== resolve(DEFAULT_LEDGER)) throw new Error("--commit はリポジトリの台帳（docs/ledger.jsonl）に足したときだけ");
-    const msg = `台帳: 夜のキュー ${plan.name} の結果（${added} 行、${plan.commit}）`;
-    const r = spawnSync("git", ["commit", "-m", msg, "--", "docs/ledger.jsonl"], { cwd: REPO, stdio: "inherit" });
-    if (r.status !== 0) throw new Error("コミットできませんでした（git の名前とメールの設定を見る。docs/night.md）");
-    console.log(`コミットしました（${gitState().branch}）。push はしていません（コンテナからはできない。ホストで git push）`);
+  if (commit) {
+    // 今回足した行だけでなく、前の finish で足したがコミットできなかった行もコミットする（流し直せば済むように）
+    const pending = uncommittedQueueRows(plan.name);
+    if (pending > 0) {
+      const msg = `台帳: 夜のキュー ${plan.name} の結果（${pending} 行、${plan.commit}）`;
+      const r = spawnSync("git", ["commit", "-m", msg, "--", "docs/ledger.jsonl"], { cwd: REPO, stdio: "inherit" });
+      if (r.status !== 0) throw new Error("コミットできませんでした。直してから finish --commit を流し直す（足した行はそのままコミットする）");
+      console.log(`コミットしました（${gitState().branch}）。push はしていません（コンテナからはできない。ホストで git push）`);
+    } else {
+      console.log("コミットする行はありません");
+    }
   }
   if (a.opts.has("--pack")) {
     run("npm", ["run", "-s", "pack-run", "--", dir, "--name", plan.name, "--note", `夜のキュー ${plan.name}（${plan.commit}）`, "--only", "logs", "--force"]);
