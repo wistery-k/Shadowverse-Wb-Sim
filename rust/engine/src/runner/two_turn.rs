@@ -164,15 +164,15 @@ struct Edit {
     opp_sep: Option<i32>,
 }
 
-struct Scenario {
-    name: &'static str,
-    title: &'static str,
+pub(crate) struct Scenario {
+    pub(crate) name: &'static str,
+    pub(crate) title: &'static str,
     /// 何を確かめる局面か
-    note: &'static str,
+    pub(crate) note: &'static str,
     /// 自分・相手のデッキ
-    decks: [&'static str; 2],
+    pub(crate) decks: [&'static str; 2],
     /// 自己対戦のシード（試合が途中で終わったら次のシードを試す）
-    seed: u32,
+    pub(crate) seed: u32,
     /// 自分のターン数（このターンの最初まで打つ）
     turn: i32,
     /// 自分が先攻か（None ならどちらでも）
@@ -182,7 +182,7 @@ struct Scenario {
 }
 
 /// 手で作った局面の一覧
-const SCENARIOS: &[Scenario] = &[
+pub(crate) const SCENARIOS: &[Scenario] = &[
     Scenario {
         name: "dragon-genesis",
         title: "疾走ドラゴン: 次のターンのジェネシス（9 点の疾走）の射程に入れる",
@@ -1096,7 +1096,7 @@ fn set_hand(s: &mut GameState, p: PlayerIndex, hand: &[HandSpec]) -> Result<(), 
 }
 
 /// 手で作った局面（席 0 の自分のターンの最初）
-fn build(sc: &Scenario) -> Result<GameState, String> {
+pub(crate) fn build(sc: &Scenario) -> Result<GameState, String> {
     let d0 = deck_cards(sc.decks[0])?;
     let d1 = deck_cards(sc.decks[1])?;
     let mut base = None;

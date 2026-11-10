@@ -78,9 +78,10 @@ npm run svwb -- deep-gap play --out gap.jsonl --games 100  # 自己対戦の局�
 npm run svwb -- td selfplay --model m0.json --games 2000 --out d0.jsonl  # TD 学習の自己対戦（試合が終わった順に書く。--opp beam・--iv k・--sampling default は td.rs の先頭の説明）
 npm run svwb -- td selfplay --model l0.json --frozen '{}' --games 2000 --out x0.jsonl  # 片方の席を今の既定の AI に固定した自己対戦（狙い撃ちの相手を学ばせる。学習は td train --seat learner）
 npm run yardstick -- --opts '{}' --games 1000 --label 名前 --record    # 固定した相手との勝率を docs/yardstick.md の表に足す（強さの物差し。--ref strong で強い相手）
+npm run misses -- run --label 名前                         # 見落とし問題集（misses/）を 24 回ずつ解かせた正解率（docs/misses.md）
 ```
 
-- compare・yardstick は、回すたびに結果を実験の台帳 `docs/ledger.jsonl` に 1 行足す（`engine/src/runner/ledger.rs`。`--label` で名前、`--no-ledger` で書かない。
+- compare・yardstick・misses run は、回すたびに結果を実験の台帳 `docs/ledger.jsonl` に 1 行足す（`engine/src/runner/ledger.rs`。`--label` で名前、`--no-ledger` で書かない。
   形と表の作り方は `docs/ledger.md`）
 
 - 設定の JSON は `"valueNet"` に学習した補正のファイル、`"weights"` のオブジェクト・`"default"`・`"holdScale"`、
@@ -100,7 +101,7 @@ npm run yardstick -- --opts '{}' --games 1000 --label 名前 --record    # 固�
 - `engine/src/golden.rs`・`canonical.rs`・`sim.rs`・`main.rs`: ゴールデンテスト・計測・CLI
 - `engine/src/prof.rs`: 処理ごとの時間の計測（`--features profile` のときだけ働く。`svwb profile`）
 - `engine/src/replay_index.rs`: 記録した試合を打ち直したターンごとのまとめ（開発サーバーの「リプレイ検索」。WASM の `replayIndex`。形は `src/replays/types.ts`）
-- `engine/src/runner/`: 実験のランナー（compare・rhino-compare・deck-compare・meta・mulligan-compare・td selfplay・yardstick・human-plan-value・deep-gap・two-turn・defer-playout・beam-gap・profile。消したランナーは `docs/removed.md`）。`parallel.rs`（並列実行）、`ledger.rs`（実験の台帳に 1 行足す）、`options.rs`（設定の JSON）、
+- `engine/src/runner/`: 実験のランナー（compare・rhino-compare・deck-compare・meta・mulligan-compare・td selfplay・yardstick・human-plan-value・deep-gap・two-turn・defer-playout・beam-gap・profile・misses。消したランナーは `docs/removed.md`）。`parallel.rs`（並列実行）、`ledger.rs`（実験の台帳に 1 行足す）、`options.rs`（設定の JSON）、
   `json.rs`（項目の順番を保つ JSON）、`jsnum.rs`（JavaScript の `Number#toString`・`toPrecision`・`toFixed` と同じ数の書き方）
 - `engine/src/ai/`: AI。`registry.rs`（選べる AI の一覧）、`search.rs`（ターン単位のビームサーチ・相手のターンの読み）、`eval.rs`（評価関数）、
   `valuenet.rs`（学習した補正の推論。形・入力・学習は `docs/value-net.md`）、`lethal.rs`（リーサル探索）、`lethal_hint.rs`（対戦画面の「リーサル」表示）、`determinize.rs`、

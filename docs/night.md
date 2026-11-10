@@ -54,7 +54,7 @@ npm run night -- list
 
 ## ジョブのファイル
 
-1 行 1 ジョブで、svwb のコマンドと同じ形（`compare`・`yardstick`・`profile`。行の頭の `svwb` は書いても書かなくてもよい）。
+1 行 1 ジョブで、svwb のコマンドと同じ形（`compare`・`yardstick`・`profile`・`misses`。行の頭の `svwb` は書いても書かなくてもよい）。
 `#` から行の終わりまでは書き添え。上から順に回す。例:
 
 ```sh
@@ -68,7 +68,9 @@ profile --games 49
 - **compare**: `compare <試合数> '<A>' '<B>' [最初の試合番号] [B のデッキ] [--no-mirror] [--decks …] --label 名前`（`npm run compare` と同じ）
 - **yardstick**: `yardstick [--ref classic|strong] [--opts '<設定>'] [--games 1000] [--start 0] --label 名前`
 - **profile**（速さ）: `profile [--opts '<設定>'] [--games 49] [--start 0] [--rhino]`。結果は回のフォルダの `speed-<番号>.md`・`.json`（`svwb profile` の報告）
-- `--label` は compare・yardstick に要る（区切りの結果を後で足し合わせ、台帳を引くため）。比べの案ごとに付ける
+- **misses**（見落とし問題集、`docs/misses.md`）: `misses [run] [--opts '<設定>'] [--trials 24] [--seed 1] --label 名前`。分けずに 1 区切りで回す。
+  見込みの「1 試合」は、全部の問を 1 回ずつ解く秒（台帳の前の回から、問の数の違いを割り直して見込む）。`--only`・`--dir`・`--out` は使えない（問題集全体を解く）
+- `--label` は compare・yardstick・misses に要る（区切りの結果を後で足し合わせ、台帳を引くため）。比べの案ごとに付ける
 - 試合番号（シード）の範囲は、前の回と重ならないように選ぶ（同じ試合を 2 回数えない。`npm run ledger -- runs --grep <名前>` で前の範囲を見る）
 - キューでは使えない引数: `--no-ledger`（結果は台帳から集める）・`--replays`（区切りごとにファイルが替わる）・`yardstick --record`
   （物差しの表に足すのは、終わった後に足し合わせた数字で）・`profile --json/--report/--baseline/--record`（キューが回のフォルダに書く）
@@ -124,7 +126,7 @@ profile --games 49
 
 - キューは commit も push もしない。夜の間は、回のフォルダの `ledger.jsonl` にだけ書く（リポジトリの台帳を夜の間に触らないので、
   同じ `/workspace` でほかのスレッドが作業しても混ざらない）
-- 朝の `finish` が、ジョブの済んだ区切りを、試合番号の続いたまとまりごとに 1 行にまとめて、リポジトリの台帳（`docs/ledger.jsonl`）に足す。
+- 朝の `finish` が、ジョブの済んだ区切りを、試合番号の続いたまとまりごとに 1 行にまとめて、リポジトリの台帳（`docs/ledger.jsonl`）に足す（misses は区切りの行に `queue`・`chunks` を足してそのまま写す）。
   まとめた行は、同じ試合番号を 1 回で回したときと同じ勝ち数・組の数・誤差になる（組の勝率のばらつきから出し直す。クラウド環境で確かめた）。
   `queue`（回の名前）と `chunks`（区切りの数）が付き、`cmd` は 1 回で回すときのコマンド。区切りごとの行は回のフォルダに残る
 - 2 回 `finish` しても、同じ区切りは 2 回足さない（`merged.json`）。途中で止まった回は、済んだ分だけ足し、続きを回した後の `finish` で残りを足す
@@ -135,16 +137,17 @@ profile --games 49
 
 ## 定例（`night/routine.txt`）
 
-物差し 2 つと速さを測るジョブのファイル。既定を変えた後の夜に、キューの先頭に置く（毎晩でなくてよい）。PC で 20 分ほど。
+物差し 2 つと速さと見落とし問題集を測るジョブのファイル。既定を変えた後の夜に、キューの先頭に置く（毎晩でなくてよい）。PC で 20 分ほど。
 
 - 弱い相手の物差し `yardstick --ref classic` と強い相手の物差し `--ref strong` を、それぞれ g0〜3999（8000 試合。誤差 0.4〜0.5 ポイントほど）。
   台帳の名前は `定例-弱い相手`・`定例-強い相手`。前に物差しの表に足した g0〜999 の試合を含む
 - 速さ `profile --games 49`（`docs/profile.md` と同じ 98 試合）
-- 結果は `npm run ledger -- runs --label 定例` で引き、`docs/STATE.md` の「追う数字」を直す。物差しの表（`docs/yardstick.md`）に足すのは、採用した版だけ（今までどおり）
+- 見落とし問題集 `misses --trials 24 --seed 1`（台帳の名前は `定例-見落とし問題集`。PC で 1 分かからない）
+- 結果は `npm run ledger -- runs --label 定例`・`npm run ledger -- misses --label 定例` で引き、`docs/STATE.md` の「追う数字」を直す。物差しの表（`docs/yardstick.md`）に足すのは、採用した版だけ（今までどおり）
 
 ## 長い回（自己対戦・学習）を区切れるか（2026-11-10 に調べた）
 
-今のキューに入れられるのは compare・yardstick・profile だけ。自己対戦と学習は、今までどおり `cloud/jobs/relearn.sh` 等を回すと決めた夜に流す。
+今のキューに入れられるのは compare・yardstick・profile・misses だけ。自己対戦と学習は、今までどおり `cloud/jobs/relearn.sh` 等を回すと決めた夜に流す。
 
 - **`td selfplay`**: コマンドの中には再開の仕組みが無い（`--out` を最初から書き直し、終わった順に書く）。ただし試合は番号（`--start` から）とモデルで決まるので、
   番号の範囲で分けて別のファイルに書けば、1 回で回したのと同じ試合の集まりになる（6 試合を 1 回と 3＋3 で回し、行を並べ替えると一致した）。

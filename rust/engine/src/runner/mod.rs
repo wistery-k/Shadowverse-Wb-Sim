@@ -12,6 +12,7 @@ pub mod defer_playout;
 pub mod human_plan;
 pub mod ledger;
 pub mod meta;
+pub mod misses;
 pub mod mulligan_compare;
 pub mod mulligan_data;
 pub mod options;

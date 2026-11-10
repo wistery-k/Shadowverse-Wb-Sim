@@ -51,6 +51,9 @@ function run(over: Partial<RunRow> = {}): RunRow {
 
 const line = (x: unknown) => JSON.stringify(x);
 
+/** Rust の misses run が書く形の 1 行（runner/ledger.rs の misses_row_has_the_fields_in_order と同じ） */
+const MISSES_LINE = `{"v":1,"kind":"misses","date":"2026-11-10","at":"2026-11-10T09:00:00Z","commit":"bcb49c2","branch":"main","label":"定例","a":{},"problems":2,"set":"91c86c68","trials":24,"seed":1,"n":48,"passes":25,"rate":0.520833,"se":0.012,"perProblem":{"a":[24,24],"b":[1,24]},"seconds":5,"threads":4,"machine":"cloud","cmd":"misses run --label '定例'"}`;
+
 describe("台帳の読み込み", () => {
   it("回の行と採否の行を読み、形の合わない行は行番号つきで知らせる", () => {
     const decision = {
@@ -78,6 +81,15 @@ describe("台帳の読み込み", () => {
       "6 行目: 知らない kind: other",
       "7 行目: decision が合いません",
     ]);
+  });
+
+  it("見落とし問題集の行を読む（回の行とは別に）", () => {
+    const p = parseLedger([MISSES_LINE, line({ ...JSON.parse(MISSES_LINE), passes: 49 }), line(run())].join("\n"));
+    expect(p.misses).toHaveLength(1);
+    expect(p.misses[0]).toMatchObject({ label: "定例", problems: 2, rate: 0.520833, perProblem: { b: [1, 24] } });
+    expect(p.runs).toHaveLength(1);
+    expect(p.errors).toEqual(["2 行目: passes > n が合いません"]);
+    expect(filterRuns(p.misses, { label: "定" })).toHaveLength(1);
   });
 
   it("リポジトリの docs/ledger.jsonl は全部の行が形に合う", () => {
@@ -174,6 +186,16 @@ describe("npm run ledger", () => {
     out = [];
     expect(await main(["items", "--file", file, "--all"])).toBe(0);
     expect(out[0]?.split("\n")).toHaveLength(4);
+  });
+
+  it("misses は見落とし問題集の回の表を出す", async () => {
+    writeFileSync(file, `${MISSES_LINE}\n`, { flag: "a" });
+    expect(await main(["misses", "--file", file])).toBe(0);
+    expect(out[0]?.split("\n")).toHaveLength(3);
+    expect(out[0]).toContain("| 2026-11-10 | bcb49c2 | 定例 | `{}` | 2（91c86c68） | 24（乱数 1） | 52.08% | 1.20 | a 24/24、b 1/24 | 5 | cloud（4） |");
+    out = [];
+    expect(await main(["check", "--file", file])).toBe(0);
+    expect(out[0]).toContain("見落とし問題集 1 行");
   });
 
   it("check は形の合わない行があれば 1 を返す。知らない引数は 2", async () => {
