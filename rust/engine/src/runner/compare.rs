@@ -25,7 +25,6 @@ use super::{compare_decks, fixed, seconds_since, Tally};
 use crate::ai::search::{MulliganMode, SearchAgent, SearchOptions};
 use crate::ai::Agent;
 use crate::data::{data, Deck};
-use crate::sim::play_match;
 use std::time::Instant;
 
 /// 試合番号 g（swap で席とデッキを入れ替えた方）の A と B のデッキ
@@ -98,10 +97,17 @@ pub fn play_compare_game_with(
         [&mut b, &mut a]
     };
     let mut log = Vec::new();
-    let end = play_match(
+    // 確かめ用: 組の 2 試合目（swap）だけ乱数を 1 つずらす（SVWB_RNG_SKEW=ai / engine）
+    let skew = match std::env::var("SVWB_RNG_SKEW").as_deref() {
+        Ok("ai") if swap => crate::sim::RngSkew::Ai,
+        Ok("engine") if swap => crate::sim::RngSkew::Engine,
+        _ => crate::sim::RngSkew::None,
+    };
+    let end = crate::sim::play_match_skewed(
         &mut agents,
         [&seats[0].cards, &seats[1].cards],
         seed,
+        skew,
         |_, a| {
             if labels.is_some() {
                 log.push(a.clone());

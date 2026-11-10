@@ -132,12 +132,41 @@ pub fn play_match(
     agents: &mut [&mut dyn crate::ai::Agent; 2],
     decks: [&[CardIdx]; 2],
     seed: u32,
+    visit: impl FnMut(&GameState, &Action),
+) -> GameState {
+    play_match_skewed(agents, decks, seed, RngSkew::None, visit)
+}
+
+/// 確かめ用: 乱数を 1 つ余分に進めた試合（乱数のずれだけで勝敗がどれだけ変わるかを測る。compare の環境変数 SVWB_RNG_SKEW）
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RngSkew {
+    None,
+    /// AI の思考用の乱数を、試合の始めに 1 つ進める
+    Ai,
+    /// エンジンの乱数を、マリガンが終わった時点で 1 つ進める（山札の順番は変えない）
+    Engine,
+}
+
+/// play_match と同じ試合を、乱数を 1 つずらして打つ（RngSkew::None なら play_match と同じ）
+pub fn play_match_skewed(
+    agents: &mut [&mut dyn crate::ai::Agent; 2],
+    decks: [&[CardIdx]; 2],
+    seed: u32,
+    skew: RngSkew,
     mut visit: impl FnMut(&GameState, &Action),
 ) -> GameState {
     let mut s = create_game(decks, seed);
     let mut rng = crate::ai::Rng::new(seed ^ 0x9e3779b9);
+    if skew == RngSkew::Ai {
+        let _ = rng.int(2);
+    }
+    let mut engine_skewed = false;
     let mut actions = 0;
     while s.phase != Phase::Ended {
+        if skew == RngSkew::Engine && !engine_skewed && s.phase == Phase::Main {
+            let _ = s.rng_int(2);
+            engine_skewed = true;
+        }
         actions += 1;
         assert!(
             actions <= 10000,
