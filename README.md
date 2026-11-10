@@ -64,6 +64,8 @@ data/
   raw/        公式カード一覧APIのレスポンス（コミットしない）
 docs/
   rules.md    実装するルールの仕様メモ（出典付き）
+  STATE.md    AI の開発の今の状態（前提・今の既定・追う数字・次の実験・やめたこと）
+  ledger.jsonl 実験の台帳（compare・yardstick の回ごとの結果と、採否。ledger.md 参照）
   ai-notes.md AI の実験記録（今の AI・分かったこと・全部の節の索引）
   ai-notes/   AI の実験記録の詳しい記録（時期ごと）
   value-net.md 評価に使うネットワーク（学習した補正）の形・入力・出力・学習のまとめ

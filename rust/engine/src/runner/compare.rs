@@ -1,6 +1,7 @@
 //! 探索 AI の設定 A と B を対戦させる（TypeScript 版 scripts/compare-main.ts。npm run compare と同じ試合・同じ出力）。
 //!
 //!   svwb compare <試合数> '<Aの設定JSON>' '<Bの設定JSON>' [最初の試合番号] [Bのデッキ名] [--no-mirror] [--decks <7 つのデッキ>] [--replays <ファイル>]
+//!                [--label <名前>] [--no-ledger]
 //!
 //! 同じデッキの組で席とデッキを入れ替えて 2 試合ずつ行い、A の勝率とデッキごとの A の勝率を出す。
 //! 2 試合の組ごとの A の勝ち数（2・1・0）の数と、組のばらつきから求めた標準誤差も出す。
@@ -13,8 +14,10 @@
 //! 返し方ごとに引き直しを試して選ぶ（td selfplay と同じ。マリガンのモデルはデフォルトデッキしか知らない）。
 //! `--replays` なら、試合ごとにデッキ・シード・行動の列を JSON Lines で書く（1 行の形は runner/mod.rs の ReplayRecord。
 //! npm run dev の「リプレイ検索」タブで読む）。打つ手は変わらない。
+//! 回すたびに、結果を実験の台帳 `docs/ledger.jsonl` に 1 行足す（runner/ledger.rs。`--label <名前>` で名前を付け、`--no-ledger` で書かない）。
 
 use super::deck_compare::read_deck;
+use super::ledger;
 use super::options::compare_options;
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
@@ -165,12 +168,18 @@ pub fn pair_stats(tasks: &[(u32, bool)], won: &[bool]) -> ([u32; 3], f64) {
 }
 
 pub fn main(argv: &[String]) -> Result<(), String> {
+    let full_argv: Vec<String> = std::iter::once("compare".to_string())
+        .chain(argv.iter().cloned())
+        .collect();
     let mirror = !argv.iter().any(|s| s == "--no-mirror");
     let mut argv: Vec<String> = argv
         .iter()
         .filter(|s| *s != "--no-mirror")
         .cloned()
         .collect();
+    // 実験の台帳（docs/ledger.jsonl。runner/ledger.rs）: --label で名前を付ける、--no-ledger で書かない
+    let no_ledger = ledger::take_no_ledger(&mut argv);
+    let label = ledger::take_value(&mut argv, "--label")?.unwrap_or_default();
     // リプレイ検索用に、試合ごとのデッキ・シード・行動の列を書くファイル（--replays）
     let mut replays_path = None;
     if let Some(i) = argv.iter().position(|s| s == "--replays") {
@@ -266,6 +275,40 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             },
             fixed(se * 100.0, 2)
         );
+    }
+    if !no_ledger && n > 0 {
+        ledger::append(&ledger::Run {
+            kind: "compare",
+            argv: full_argv,
+            label,
+            a: a_text.to_string(),
+            b: b_text.to_string(),
+            extra: vec![
+                (
+                    "vs".into(),
+                    vs.map_or(crate::json::Json::Null, |v| {
+                        crate::json::Json::Str(v.clone())
+                    }),
+                ),
+                (
+                    "replays".into(),
+                    replays_path.as_ref().map_or(crate::json::Json::Null, |p| {
+                        crate::json::Json::Str(p.clone())
+                    }),
+                ),
+            ],
+            decks: decks.iter().map(|d| d.name.clone()).collect(),
+            mirror,
+            first: start,
+            last: start + games.max(1) - 1,
+            n: n as u32,
+            wins,
+            se,
+            se_kind: "pairs",
+            pairs: [c0, c1, c2],
+            per_deck: per_deck.0,
+            seconds: seconds_since(t0),
+        });
     }
     Ok(())
 }

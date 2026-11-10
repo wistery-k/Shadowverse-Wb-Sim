@@ -26,7 +26,7 @@ step() { # step <名前> <プロセス数> <1 プロセスのスレッド数> [G
   {
     time {
       for ((i = 0; i < procs; i++)); do
-        THREADS=$t GLIBC_TUNABLES=$tun $B compare "$per" '{}' '{}' $((i * per)) > "$W/scale/$name-$i.log" 2>&1 &
+        THREADS=$t GLIBC_TUNABLES=$tun $B compare "$per" '{}' '{}' $((i * per)) --no-ledger > "$W/scale/$name-$i.log" 2>&1 &
       done
       wait
     }

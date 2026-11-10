@@ -40,6 +40,7 @@
 | `npm run td` | TD 学習のモデルの作成・学習・分析（下） | `scripts/td-main.ts` |
 | `npm run potential` | ターン途中の見込みのネットワーク（`potentialNet`）と、木の探索の案 A' の下限と上限のネットワーク（`tree.lazy`）を学ぶ（下） | `scripts/potential-main.ts` |
 | `npm run pack-run` | PC で回した 1 回分の出力（自己対戦・モデル・ログ）を、共有フォルダに上げる `.tar.gz` にまとめる（下） | `scripts/pack-run-main.ts` |
+| `npm run ledger` | 実験の台帳（`docs/ledger.jsonl`）を表にする・採否の行を足す（下） | `scripts/ledger-main.ts` |
 | `cloud/gcp.sh` | ジョブ（meta.sh 等）をクラウドの Spot VM で回す。使うたびにユーザーの承認が要る（下） | `cloud/gcp.sh`・`cloud/vm-startup.sh` |
 | `docker/remote-control` | Claude Code の Remote Control を Docker のコンテナの中で動かす。実験を回す既定の場所（使い方は本体の README.md） | `docker/remote-control/compose.yaml`・`Dockerfile` |
 
@@ -121,11 +122,13 @@ npm run diverge -- --a <記録のディレクトリ A> --b <記録のディレ�
 
 ```sh
 npm run compare -- [試合数 28] ['<A の設定>' '{}'] ['<B の設定>' '{}'] [最初の試合番号 0] [B のデッキ] [--no-mirror] [--decks <7 つのデッキ>] [--replays 記録.jsonl]
+                   [--label 名前] [--no-ledger]
 ```
 
 引数は名前なしで、この順に書く。1 試合番号ごとに席とデッキを入れ替えて 2 試合打つので、試合数 105 なら 210 試合。
 A の勝率と、A のデッキごとの勝率を出す。5 番目にデッキ名を書くと、B がそのデッキの試合だけ行う。設定の JSON は下の「探索 AI の設定」。
 `--replays` で、試合ごとのデッキ・シード・行動の列を JSON Lines で書く（下の「リプレイ検索」で読む。打つ手は変わらない）。
+回すたびに、結果を実験の台帳 `docs/ledger.jsonl` に 1 行足す（下の「ledger」）。`--label` で名前を付け、`--no-ledger` で書かない（名前付きの引数は、どこに書いてもよい）。
 
 例: `npm run compare -- 105 '{}' '{"lethal":false}'`
 
@@ -238,7 +241,7 @@ AI は deck-compare と同じ（どちらの側も今の既定）。
 ## yardstick
 
 ```sh
-npm run yardstick -- [--ref classic|strong] [--opts '<設定>'] [--games 1000] [--start 0] [--label 名前] [--record]
+npm run yardstick -- [--ref classic|strong] [--opts '<設定>'] [--games 1000] [--start 0] [--label 名前] [--record] [--no-ledger]
 npm run yardstick -- fingerprint [--ref classic|strong]
 ```
 
@@ -246,6 +249,23 @@ npm run yardstick -- fingerprint [--ref classic|strong]
 `classic`（既定。学習した補正なしの 2026-10-16 の探索 AI。組の 2 試合は `compare --no-mirror` と同じく別のシード）と
 `strong`（2026-10-22 の既定の探索 AI。組の 2 試合は `compare` の既定と同じく同じシードで、その日の既定の AI はちょうど 50%）。
 `--record` で `docs/yardstick.md` のその相手の表に 1 行足す（`--label` が要る）。`fingerprint` は相手が変わっていないかの確認用。
+`--record` の有無にかかわらず、回すたびに実験の台帳 `docs/ledger.jsonl` に 1 行足す（`--no-ledger` で書かない）。
+
+## ledger
+
+```sh
+npm run ledger -- [runs] [--kind compare|yardstick] [--since 日付] [--until 日付] [--grep 文字列] [--label 文字列] [--last N]
+npm run ledger -- sum [runs と同じ絞り込み] [--any-commit]
+npm run ledger -- items [--all] [--grep 文字列] [--in-default]
+npm run ledger -- decide --item 名前 --decision 採用|不採用|保留|やめた [--in-default true|false] [--keys a,b]
+                         [--from-label 回の名前] [--vs 比べた相手] [--ref 記録の節] [--note メモ] [--date 日付]
+npm run ledger -- check
+```
+
+実験の台帳 `docs/ledger.jsonl`（1 行 1 件の JSON）を Markdown の表にする。`runs` は回の一覧、`sum` は同じ比べの回を足し合わせたもの、
+`items` は採否の行（項目ごとの今の判定。`--all` で全部）。`decide` は採否の行を足す（`--from-label` でその名前の回を足し合わせた結果を入れる）。
+`check` は全部の行が形に合うかを確かめる。どれも `--file` で別の台帳を読む（既定は環境変数 `SVWB_LEDGER` か `docs/ledger.jsonl`）。
+行の形と使い方は [ledger.md](ledger.md)。
 
 ## profile
 

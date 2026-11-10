@@ -29,7 +29,7 @@ step() {  # step <名前> <試合数> <並列数> <コマンド...>
 }
 
 for t in $((N / 4)) $((N / 2)) "$N"; do
-  step "compare-t$t" $((GAMES * 2)) "$t" $B compare "$GAMES" '{}' '{}' 0
+  step "compare-t$t" $((GAMES * 2)) "$t" $B compare "$GAMES" '{}' '{}' 0 --no-ledger
 done
 step "deck-t$N" $((DECK_GAMES * 6 * 2 * 2)) "$N" $B deck-compare --deck スペルウィッチ --variant '知恵の輝き-1,最果ての罪・サタン+1' --games "$DECK_GAMES"
 

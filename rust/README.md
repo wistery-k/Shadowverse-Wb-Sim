@@ -80,6 +80,9 @@ npm run svwb -- td selfplay --model l0.json --frozen '{}' --games 2000 --out x0.
 npm run yardstick -- --opts '{}' --games 1000 --label 名前 --record    # 固定した相手との勝率を docs/yardstick.md の表に足す（強さの物差し。--ref strong で強い相手）
 ```
 
+- compare・yardstick は、回すたびに結果を実験の台帳 `docs/ledger.jsonl` に 1 行足す（`engine/src/runner/ledger.rs`。`--label` で名前、`--no-ledger` で書かない。
+  形と表の作り方は `docs/ledger.md`）
+
 - 設定の JSON は `"valueNet"` に学習した補正のファイル、`"weights"` のオブジェクト・`"default"`・`"holdScale"`、
   リノセウス用 AI の `"potential"` 等を受け付ける。TypeScript 版とともに消した実験用の項目（序盤のターンを全探索する
   `"exhaustive"` 等）はエラーになる（既定の値なら受け付ける）。知らない項目もエラーにする
@@ -97,7 +100,7 @@ npm run yardstick -- --opts '{}' --games 1000 --label 名前 --record    # 固�
 - `engine/src/golden.rs`・`canonical.rs`・`sim.rs`・`main.rs`: ゴールデンテスト・計測・CLI
 - `engine/src/prof.rs`: 処理ごとの時間の計測（`--features profile` のときだけ働く。`svwb profile`）
 - `engine/src/replay_index.rs`: 記録した試合を打ち直したターンごとのまとめ（開発サーバーの「リプレイ検索」。WASM の `replayIndex`。形は `src/replays/types.ts`）
-- `engine/src/runner/`: 実験のランナー（compare・rhino-compare・deck-compare・meta・mulligan-compare・td selfplay・yardstick・human-plan-value・deep-gap・draw-stability・fuse-gap・defer-playout・beam-gap・tree-gap・profile・read-log・read-gap・lethal-read・lethal-diff）。`parallel.rs`（並列実行）、`options.rs`（設定の JSON）、
+- `engine/src/runner/`: 実験のランナー（compare・rhino-compare・deck-compare・meta・mulligan-compare・td selfplay・yardstick・human-plan-value・deep-gap・draw-stability・fuse-gap・defer-playout・beam-gap・tree-gap・profile・read-log・read-gap・lethal-read・lethal-diff）。`parallel.rs`（並列実行）、`ledger.rs`（実験の台帳に 1 行足す）、`options.rs`（設定の JSON）、
   `json.rs`（項目の順番を保つ JSON）、`jsnum.rs`（JavaScript の `Number#toString`・`toPrecision`・`toFixed` と同じ数の書き方）
 - `engine/src/ai/`: AI。`registry.rs`（選べる AI の一覧）、`search.rs`（ターン単位のビームサーチ・相手のターンの読み）、`eval.rs`（評価関数）、
   `valuenet.rs`（学習した補正の推論。形・入力・学習は `docs/value-net.md`）、`lethal.rs`（リーサル探索）、`lethal_hint.rs`（対戦画面の「リーサル」表示）、`determinize.rs`、
