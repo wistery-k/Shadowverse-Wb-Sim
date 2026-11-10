@@ -5,6 +5,8 @@
 //!
 //! - 書く先は既定で `docs/ledger.jsonl`（リポジトリの中。回した後に作業ブランチにコミットする）。環境変数 `SVWB_LEDGER` で別のファイルにできる
 //! - `--no-ledger` を付けた回は書かない（動くかの確かめなど）
+//! - コミットとブランチは、環境変数 `SVWB_COMMIT`・`SVWB_BRANCH` があればそれを書く（夜のキュー `npm run night` が、
+//!   組み立てたときのものを渡す。夜の間にチェックアウトが替わっても、行が回したコードを指すように）
 //! - 書けたときは何も出さない（出力は前と同じ）。書けなくても回の結果は失わない（標準出力に出したうえで、注意を出すだけ）
 //! - 足すだけで、前の行は書き換えない（`.gitattributes` の `merge=union` で、ブランチどうしで行を足し合っても衝突しない）
 
@@ -256,6 +258,14 @@ pub fn row_with(
     Json::Obj(items)
 }
 
+/// 環境変数 name が空でなければその値、無ければ f() の値
+fn env_or(name: &str, f: impl FnOnce() -> String) -> String {
+    match std::env::var(name) {
+        Ok(v) if !v.is_empty() => v,
+        _ => f(),
+    }
+}
+
 /// 台帳の 1 行（今の日付・コミット等を入れる）
 pub fn row(run: &Run) -> Json {
     use super::yardstick::{command_line, commit_label_excluding};
@@ -264,9 +274,13 @@ pub fn row(run: &Run) -> Json {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| utc_iso(d.as_secs()))
         .unwrap_or_else(|_| "?".into());
-    // 物差しの表の変更は数えない（yardstick --record は回した後に表を書き換える）
-    let commit = commit_label_excluding("docs/yardstick.md");
-    let branch = command_line("git", &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or("?".into());
+    // 物差しの表の変更は数えない（yardstick --record は回した後に表を書き換える）。夜のキューは組み立てたときのものを渡す
+    let commit = env_or("SVWB_COMMIT", || {
+        commit_label_excluding("docs/yardstick.md")
+    });
+    let branch = env_or("SVWB_BRANCH", || {
+        command_line("git", &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or("?".into())
+    });
     row_with(
         run,
         &date,

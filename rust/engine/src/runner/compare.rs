@@ -15,6 +15,7 @@
 //! `--replays` なら、試合ごとにデッキ・シード・行動の列を JSON Lines で書く（1 行の形は runner/mod.rs の ReplayRecord。
 //! npm run dev の「リプレイ検索」タブで読む）。打つ手は変わらない。
 //! 回すたびに、結果を実験の台帳 `docs/ledger.jsonl` に 1 行足す（runner/ledger.rs。`--label <名前>` で名前を付け、`--no-ledger` で書かない）。
+//! 試合数 0 なら設定とデッキを読むだけで終わる。
 
 use super::deck_compare::read_deck;
 use super::ledger;
@@ -228,6 +229,11 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         .flat_map(|k| [(start + k, false), (start + k, true)])
         .filter(|&(g, swap)| vs.is_none_or(|v| &compare_pair(&decks, g, swap).1.name == v))
         .collect();
+    // 0 試合なら設定とデッキを読むだけ（夜のキュー npm run night が、回す前に書き間違いを見つけるのに使う）
+    if tasks.is_empty() {
+        println!("試合がありません（設定とデッキは読めました）");
+        return Ok(());
+    }
     let mut replays = replays_path
         .as_ref()
         .map(|p| std::fs::File::create(p).map_err(|e| format!("{p} に書けません: {e}")))

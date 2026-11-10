@@ -41,6 +41,7 @@
 | `npm run potential` | ターン途中の見込みのネットワーク（`potentialNet`）と、木の探索の案 A' の下限と上限のネットワーク（`tree.lazy`）を学ぶ（下） | `scripts/potential-main.ts` |
 | `npm run pack-run` | PC で回した 1 回分の出力（自己対戦・モデル・ログ）を、共有フォルダに上げる `.tar.gz` にまとめる（下） | `scripts/pack-run-main.ts` |
 | `npm run ledger` | 実験の台帳（`docs/ledger.jsonl`）を表にする・採否の行を足す（下） | `scripts/ledger-main.ts` |
+| `npm run night` | 夜のキュー: ジョブを並べたファイルを 5〜10 分の区切りで回し、朝の時刻に止まり、続きから再開する（下） | `scripts/night-main.ts` |
 | `cloud/gcp.sh` | ジョブ（meta.sh 等）をクラウドの Spot VM で回す。使うたびにユーザーの承認が要る（下） | `cloud/gcp.sh`・`cloud/vm-startup.sh` |
 | `docker/remote-control` | Claude Code の Remote Control を Docker のコンテナの中で動かす。実験を回す既定の場所（使い方は本体の README.md） | `docker/remote-control/compose.yaml`・`Dockerfile` |
 
@@ -266,6 +267,18 @@ npm run ledger -- check
 `items` は採否の行（項目ごとの今の判定。`--all` で全部）。`decide` は採否の行を足す（`--from-label` でその名前の回を足し合わせた結果を入れる）。
 `check` は全部の行が形に合うかを確かめる。どれも `--file` で別の台帳を読む（既定は環境変数 `SVWB_LEDGER` か `docs/ledger.jsonl`）。
 行の形と使い方は [ledger.md](ledger.md)。
+
+## night
+
+```sh
+npm run night -- plan <ジョブのファイル> [--until 07:00] [--threads N] [--machine svwb-docker]   # ジョブの一覧と見込み（始めない）
+npm run night -- start <ジョブのファイル> --yes [--until 07:00] [--threads N]               # ユーザーが今夜回すと決めたら
+npm run night -- status | stop [--now] | resume --yes | finish --commit | list
+```
+
+PC で対戦を回す夜のキュー。ジョブのファイルは 1 行 1 ジョブで、svwb の `compare`・`yardstick`・`profile` と同じ形（`--label` が要る）。
+5〜10 分の区切りごとに結果を回のフォルダ（`~/svwb-data/night/<名前>/`）に残し、電源が切れても続きから回る。朝の `finish` がジョブごとに 1 行にまとめて台帳に足す。
+物差し 2 つと速さの定例は `night/routine.txt`。流れ・引数・止まり方・台帳のコミットのしかたは [night.md](night.md)（`npm run night -- help` にも引数の一覧）。
 
 ## profile
 
