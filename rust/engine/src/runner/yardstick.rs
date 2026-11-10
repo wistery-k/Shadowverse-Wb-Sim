@@ -4,13 +4,14 @@
 //! - 強い相手の物差し（`strong`）: 2026-10-22 の既定の探索 AI（補正 s2b・相手のターンを幅 16 で読む）を凍結したもの。
 //!   補正は `yardstick/strong-1-net.json`（data/value-net.json の写し）から読む
 //!
-//!   svwb yardstick [--ref classic|strong] [--opts '<設定JSON>'] [--games 1000] [--start 0] [--label 名前] [--record]
+//!   svwb yardstick [--ref classic|strong] [--opts '<設定JSON>'] [--games 1000] [--start 0] [--label 名前] [--record] [--no-ledger]
 //!   svwb yardstick fingerprint [--ref classic|strong]
 //!
 //! 試合の組み方とシードは compare と同じ（同じデッキの組で席とデッキを入れ替えて 2 試合ずつ。--games 1000 で 2000 試合）。
 //! 強い相手は組の 2 試合を同じシードで打つ（compare の既定の鏡。同じ AI どうしはちょうど 50%）。
 //! 弱い相手は表を前と比べられるよう、組の 2 試合を別のシードで打つ（compare の --no-mirror）。
 //! --opts は compare の設定と同じ形（`{}` で今の探索 AI の既定）。--record で `docs/yardstick.md` のその相手の表に 1 行足す。
+//! --record の有無にかかわらず、回すたびに実験の台帳 `docs/ledger.jsonl` に 1 行足す（runner/ledger.rs。--no-ledger で書かない）。
 //!
 //! 相手の設定（`reference_options`・`strong_reference_options`）は、探索 AI の既定や SEARCH_WEIGHTS を変えても動かないよう、設定と重みをここに書き写してある。
 //! それでもルール・カード能力・評価関数や探索のコード・マリガンのモデル等を変えると相手の手が変わるので、
@@ -19,6 +20,7 @@
 //! ルールの修正などで戻せないなら版（`VERSION`・`STRONG_VERSION`）を上げて指紋を書き直し、表を新しく始める（違う版の行どうしは比べない）。
 
 use super::compare::{compare_pair, compare_seed, pair_stats, play_compare_game};
+use super::ledger;
 use super::options::{compare_options, model_eval};
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
@@ -358,7 +360,7 @@ fn commit_label() -> String {
     commit_label_excluding("docs/yardstick.md")
 }
 
-/// 今のコミット（コミットしていない変更があれば末尾に "+"。記録の表 doc（リポジトリの根からの道）の変更は数えない）
+/// 今のコミット（コミットしていない変更があれば末尾に "+"。記録の表 doc（リポジトリの根からの道）と実験の台帳の変更は数えない）
 pub(crate) fn commit_label_excluding(doc: &str) -> String {
     let head = command_line("git", &["rev-parse", "--short=7", "HEAD"]).unwrap_or("?".into());
     let dirty = std::process::Command::new("git")
@@ -369,6 +371,7 @@ pub(crate) fn commit_label_excluding(doc: &str) -> String {
             "--",
             ":/",
             &format!(":(exclude,top){doc}"),
+            &format!(":(exclude,top){}", super::ledger::LEDGER_DOC),
         ])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
@@ -444,6 +447,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut start = 0u32;
     let mut label = String::new();
     let mut write = false;
+    let mut no_ledger = false;
     let only_fingerprint = argv.first().map(|s| s.as_str()) == Some("fingerprint");
     let mut i = only_fingerprint as usize;
     while i < argv.len() {
@@ -464,6 +468,11 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             "--label" if !only_fingerprint => label = value(i)?,
             "--record" if !only_fingerprint => {
                 write = true;
+                i += 1;
+                continue;
+            }
+            "--no-ledger" if !only_fingerprint => {
+                no_ledger = true;
                 i += 1;
                 continue;
             }
@@ -492,7 +501,8 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         return Err("比較用のデッキは 7 つの想定です".into());
     }
     let fp = fingerprint_of(r);
-    if fp != r.recorded() {
+    let fingerprint_ok = fp == r.recorded();
+    if !fingerprint_ok {
         let msg = format!(
             "{} の相手の手が変わっています（指紋 {fp}、記録してある指紋 {}）。src/runner/yardstick.rs の先頭の説明を見る",
             r.title(),
@@ -553,6 +563,38 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         );
     }
     println!("{}", per_deck.line());
+    if !no_ledger {
+        use crate::json::Json;
+        ledger::append(&ledger::Run {
+            kind: "yardstick",
+            argv: std::iter::once("yardstick".to_string())
+                .chain(argv.iter().cloned())
+                .collect(),
+            label: label.clone(),
+            a: opts_text.clone(),
+            b: match r {
+                Reference::Classic => "classic".into(),
+                Reference::Strong => "strong".into(),
+            },
+            extra: vec![
+                ("refVersion".into(), Json::Num(r.version() as f64)),
+                ("refFingerprint".into(), Json::Str(fp.clone())),
+                ("refFingerprintOk".into(), Json::Bool(fingerprint_ok)),
+                ("recorded".into(), Json::Bool(write)),
+            ],
+            decks: decks.iter().map(|d| d.name.clone()).collect(),
+            mirror,
+            first: start,
+            last: start + games - 1,
+            n: n as u32,
+            wins,
+            se,
+            se_kind: if mirror { "pairs" } else { "binomial" },
+            pairs,
+            per_deck: per_deck.0.clone(),
+            seconds: seconds_since(t0),
+        });
+    }
     if write {
         let date = command_line("date", &["+%Y-%m-%d"]).unwrap_or("?".into());
         let last = start + games - 1;
