@@ -129,7 +129,11 @@ profile --games 49
   `queue`（回の名前）と `chunks`（区切りの数）が付き、`cmd` は 1 回で回すときのコマンド。区切りごとの行は回のフォルダに残る
 - 2 回 `finish` しても、同じ区切りは 2 回足さない（`merged.json`）。途中で止まった回は、済んだ分だけ足し、続きを回した後の `finish` で残りを足す
 - `--commit` で `docs/ledger.jsonl` だけを、チェックアウトしているブランチにコミットする（ふつうはキューのブランチ。違えば `finish` の表に出るコミットで見分ける）。
-  コンテナには GitHub の認証情報が無いので、push はユーザーがホストで（`git push`）。コミットには、コンテナの `.env` の `GIT_AUTHOR_NAME` 等が要る
+  コンテナには GitHub の認証情報が無いので、push はユーザーがホストで（`git push`）
+- コミットには git の名前とメールが要る。コンテナでは `docker/remote-control/.env` に `GIT_AUTHOR_NAME`・`GIT_AUTHOR_EMAIL`・`GIT_COMMITTER_NAME`・
+  `GIT_COMMITTER_EMAIL` を書き、ホストで `docker compose up -d` を流しておく（2026-11-11 の初めての試しでは入っていなかった）。
+  `finish --commit` は台帳に足す前にこれを確かめ、決まらなければ何も足さずに止まる。足した後でコミットが失敗したときは、直して `finish --commit` を
+  流し直せば、前に足したこの回の行をコミットする
 - push されるまでは、`finish` が出す表（`summary.md`）の数字をスレッドに貼って使う。採否を決めるとき（`npm run ledger -- decide --from-label`）は、
   push された台帳から引き直す
 
