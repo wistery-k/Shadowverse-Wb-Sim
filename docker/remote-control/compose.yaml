@@ -15,7 +15,7 @@ services:
     # claude remote-control は最初の確認（フォルダの信頼など）に端末が要る。答えを覚えた後も端末があれば困らない
     tty: true
     stdin_open: true
-    # ネットワークが 10 分ほど切れると claude remote-control は終わるので、自動で立ち上げ直す
+    # claude remote-control は下の command の中で立ち上げ直す。これはそのほかで止まったとき（PC の再起動の後など）のため
     restart: unless-stopped
     env_file:
       - path: .env
@@ -34,13 +34,20 @@ services:
         target: /home/wk/svwb-data
         bind:
           create_host_path: false
+    # claude remote-control が終わっても（ネットワークが 10 分ほど切れた等）、コンテナは止めずに中で立ち上げ直す。
+    # コンテナが止まると、中で動いている夜のキュー（npm run night。docs/night.md）も止まるため
     command:
-      - claude
-      - remote-control
-      - --permission-mode
-      - ${CLAUDE_PERMISSION_MODE:-acceptEdits}
-      - --spawn
-      - ${CLAUDE_SPAWN:-same-dir}
+      - bash
+      - -c
+      - |
+        while :; do
+          claude remote-control --permission-mode "$$CLAUDE_PERMISSION_MODE" --spawn "$$CLAUDE_SPAWN"
+          echo "claude remote-control が終わりました（終わりの状態 $$?）。30 秒後に立ち上げ直します" >&2
+          sleep 30
+        done
+    environment:
+      CLAUDE_PERMISSION_MODE: ${CLAUDE_PERMISSION_MODE:-acceptEdits}
+      CLAUDE_SPAWN: ${CLAUDE_SPAWN:-same-dir}
 
 volumes:
   claude-config:

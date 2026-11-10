@@ -10,7 +10,11 @@ AI の実験（自己対戦・勝率比較など）は、既定でこのコン�
 - `Dockerfile`: Node 22・Rust（stable と `wasm32-unknown-unknown`。CI と同じ）・Claude Code（公式のインストーラ）を入れたイメージ
 - `entrypoint.sh`: 起動のたびに `~/svwb-data` の中のフォルダへのリンクを `~` に作る（下の「自己対戦などのデータ」）
 - `compose.yaml`: リポジトリを `/workspace` に、ホストの `~/svwb-data`（自己対戦などの置き場所）をコンテナの `~/svwb-data` に見せ、
-  ログイン情報と設定を名前付きボリュームに残し、`claude remote-control` を常駐させる
+  ログイン情報と設定を名前付きボリュームに残し、`claude remote-control` を常駐させる（終わっても、コンテナを止めずに中で立ち上げ直す）
+
+PC で対戦を回すのは、ユーザーが回すと決めた夜だけ。compare・yardstick は夜のキュー（`npm run night`、`docs/night.md`）で回す。
+キューはセッションから切り離して動くので、Remote Control のセッションが終わっても、`claude remote-control` が立ち上げ直っても続く
+（コンテナが止まると止まる。そのときは次の夜に `npm run night -- resume --yes`）。
 
 公式の説明: [Remote Control](https://code.claude.com/docs/en/remote-control)・[ログイン](https://code.claude.com/docs/en/authentication)・
 [dev container](https://code.claude.com/docs/en/devcontainer)（2026-10-26 に確認）
@@ -47,10 +51,11 @@ AI の実験（自己対戦・勝率比較など）は、既定でこのコン�
 3. 最初の確認に答える
 
    ```sh
-   docker compose run --rm rc
+   docker compose run --rm rc claude remote-control
    ```
 
-   `Trust /workspace? [y/N]` には `y`、Remote Control を有効にするかを聞かれたら `y` で答える。セッションの URL が出たら `Ctrl+C` で止める。
+   `Trust /workspace? [y/N]` には `y`、Remote Control を有効にするかを聞かれたら `y` で答える。セッションの URL が出たら `Ctrl+C` で止める
+   （`claude remote-control` を直接流す。引数なしの `docker compose run --rm rc` は、終わっても立ち上げ直す繰り返しの形で動く）。
    答えは設定のボリュームに残るので、次からは聞かれない
 
 4. 常駐させる
@@ -96,6 +101,7 @@ cd ~/Shadowverse-Wb-Sim/docker/remote-control && docker compose build && docker 
 | 止める | `docker compose down`（ログインと設定はボリュームに残る） |
 | 動かす | `docker compose up -d` |
 | 様子を見る | `docker compose logs -f` |
+| 夜のキューを手で始める・止める | `docker compose exec rc npm run night -- start <ジョブのファイル> --yes`・`docker compose exec rc npm run night -- stop`（`docs/night.md`） |
 | コンテナの中でシェルを開く | `docker compose exec rc bash` |
 | ログインし直す | `docker compose exec rc claude auth login` の後に `docker compose restart` |
 | Claude Code・Rust を新しくする | `docker compose build --pull --no-cache && docker compose up -d`（Claude Code は動いている間にも自分で更新する） |
@@ -119,7 +125,9 @@ cd ~/Shadowverse-Wb-Sim/docker/remote-control && docker compose build && docker 
   `CLAUDE_CODE_OAUTH_TOKEN`・`ANTHROPIC_BASE_URL`・`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`・`DISABLE_GROWTHBOOK`
   （公式の dev container の例は `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を入れているので、そこは真似しない）
 - 通信は外向きの HTTPS（443）だけで、ホストのポートは開けない。ネットワークが 10 分ほど切れると `claude remote-control` は終わるが、
-  `restart: unless-stopped` で立ち上げ直す
+  `compose.yaml` の `command` が 30 秒後にコンテナの中で立ち上げ直す（2026-11-10 から。前はコンテナごと立ち上げ直していて、中の夜のキューも止まった。
+  Claude のクラウド環境の Docker で、`claude` の代わりに 20 秒で終わる偽物を置いて、前の形ではコンテナが立ち上げ直ってキューが止まり、今の形では続くことを確かめた）。
+  この形にするには、`git pull` の後に一度 `docker compose up -d` を流してコンテナを作り直す（動いているセッションは切れる）
 - ログインには期限がある。期限が近いと起動時に `Your login expires in 3 days` と出る。切れるとセッションが進まなくなるので、ログインし直す
 - アカウントの設定で「信頼できるデバイス」を必須にしていると、ログインから 18 時間たつとセッションを見られなくなる。そのときもログインし直す
 - コンテナの中で `/workspace` と `~/svwb-data` 以外に書いたものは、コンテナを作り直す（`docker compose up -d` で設定が変わったとき、

@@ -30,15 +30,18 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
 8. **AI の強さの比較**: AI を変えたら `npm run sim -- --games 50 --agents <新>,<旧>` 等で勝率を比べてから採用する
    - 採用した版は `npm run yardstick -- --label <名前> --record` と `npm run yardstick -- --ref strong --label <名前> --record` で、固定した相手（弱い相手と強い相手）との勝率を `docs/yardstick.md` の表に足す（強さの物差し。相手が動いたら表の先頭の説明に従う）
 9. **AI の実験記録**: AI の改善で試したことと結果（不採用のものも）を残す。置き場所は 4 つ: 今の状態（前提・今の既定・追う数字・進行中と次の実験・やめたことと再開の条件）を `docs/STATE.md`（150 行まで）、回ごとの結果と採否を実験の台帳 `docs/ledger.jsonl`（形と引き方は `docs/ledger.md`）、今の AI の細部・判断のしかた・分かったこと・全部の節の索引を `docs/ai-notes.md`、時期ごとの詳しい記録を `docs/ai-notes/`。新しい実験の前に `docs/STATE.md` を読み、台帳を検索して（`npm run ledger -- items --grep <設定の名前>`・`npm run ledger -- runs --grep <文字列>`・`grep`）、要るものは本体の索引から詳しい記録を見る。同じことを繰り返さない
-   - `npm run compare`・`npm run yardstick` は回すたびに台帳に 1 行足す（`--label <名前>` で名前を付ける。動くかの確かめなど残さない回は `--no-ledger`）。増えた行は作業ブランチにコミットする。結果の数字は台帳から引き（同じ比べの回の合計は `npm run ledger -- sum`）、記録の文章に書き写すときも台帳と合わせる
+   - `npm run compare`・`npm run yardstick` は回すたびに台帳に 1 行足す（`--label <名前>` で名前を付ける。動くかの確かめなど残さない回は `--no-ledger`）。増えた行は作業ブランチにコミットする（夜のキューは、朝の `npm run night -- finish --commit` がジョブごとに 1 行にまとめて足し、台帳だけをコミットする。push はホストで。`docs/night.md`「台帳の行のコミット」）。結果の数字は台帳から引き（同じ比べの回の合計は `npm run ledger -- sum`）、記録の文章に書き写すときも台帳と合わせる
    - 採否を決めたら `npm run ledger -- decide` で台帳に 1 行足し、`docs/STATE.md` を直す。詳しい記録は `docs/ai-notes/` のいちばん新しいファイルの末尾に節として足し、本体の索引に 1 行足す。既定を変えたら本体の「今の AI」も直す（本体の「書き足し方」）
    - 判断は勝率（探索 AI どうしなら `npm run compare`、同じシードで席とデッキを入れ替える。要る試合数は、回す前に見込みの大きさから決める。目安は `docs/STATE.md`）で行う。ランナーは Rust（`npm run compare`・`npm run rhino-compare`・`npm run svwb -- td selfplay`。`rust/README.md`）。予測精度などの代わりの指標が良くても、勝率で確かめるまで採用しない（評価関数の学習は予測精度が上がったのに勝率は下がった）
    - 1 組 20 試合の勝率表は 1 マス ±10% ほどぶれる。小さな差で結論を出さない
    - **実験を回す場所**（ユーザー確認済み 2026-10-26。費用を抑えるため）:
-     1. 既定は、ユーザーの PC の Docker コンテナ（`docker/remote-control`。Remote Control のセッション `svwb-docker-…`、データは `~/svwb-data` の下）
+     1. 既定は、ユーザーの PC の Docker コンテナ（`docker/remote-control`。Remote Control のセッション `svwb-docker-…`、データは `~/svwb-data` の下）。
+        PC で回すのは夜だけで、ユーザーが「今夜は回す」と言った夜だけ（昼はゲームがカクつくので、短いものも回さない。2026-11-10）。
+        compare・yardstick・速さは夜のキュー（`npm run night`、`docs/night.md`）に並べて回す。承認は 1 晩分まとめて取る:
+        `npm run night -- plan <ファイル> --machine svwb-docker` のジョブの一覧と見込みを見せて「今夜これを回してよいか」を 1 回聞き、承認されたキューの中のジョブは 1 つずつ聞かない
      2. Google Cloud（`cloud/gcp.sh` の Spot VM など）は、所要時間や費用にかかわらず、使うたびにユーザーの承認を得てから使う。PC より速いことは承認なしで使う理由にならない。2026-11-08 から当分使わないことにして課金を外した（`cloud/README.md`「今は使っていない」）
      3. 十分速く終わるもの（小さく試す・短い確かめなど）は、Claude のクラウド環境（スレッド自身の環境。4 スレッドほどで、PC の 28 スレッドより何倍も遅い）で回してよい
-     - どこで回すときも、回す前に変更を作業ブランチに push し、所要時間を見積もる。見積もりが 1 時間以上なら、回す前にユーザーに確かめる
+     - どこで回すときも、回す前に変更を作業ブランチに push し、所要時間を見積もる。見積もりが 1 時間以上なら、回す前にユーザーに確かめる（PC の夜のキューは、1 晩分をまとめて 1 回）
    - ユーザーの PC で回した自己対戦・モデル・ログは、`npm run pack-run` でまとめたものを共有フォルダ（`/mnt/project-files/`）の `data/selfplay/<名前>/`・`data/models/<名前>/`・`logs/<名前>/` に展開して置く。各回の中身は `logs/<名前>/MANIFEST.md`（`docs/commands.md`「pack-run」）
    - ユーザーの PC の Docker コンテナ（`docker/remote-control`）で回すときは、自己対戦・モデル・ログ・`pack-run` の出力を `~/svwb-data/<名前>/` の下に置く（ホストの同じ場所に見える。`/workspace` と `~/svwb-data` 以外はコンテナを作り直すと消える）
 

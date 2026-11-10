@@ -1,0 +1,294 @@
+// 夜のキュー（scripts/night-main.ts・docs/night.md）。svwb の代わりに、台帳の行だけを書く偽物を回して、区切り・再開・止め方・まとめを確かめる
+
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { parseLedger, type RunRow } from "../scripts/ledger-main";
+import {
+  chunkJob,
+  combineRows,
+  estimate,
+  main,
+  parseJob,
+  parseJobs,
+  parseUntil,
+  readStatus,
+  runWorker,
+  shellLine,
+  shellWords,
+  wallClock,
+  type WorkerControl,
+} from "../scripts/night-main";
+
+describe("ジョブの行", () => {
+  it("シェルと同じ形で語に分け、台帳の cmd と同じ形に戻す", () => {
+    expect(shellWords(`compare 100 '{"beamWidth":128}' "{}" 0 --label 'a b' # 書き添え`)).toEqual([
+      "compare",
+      "100",
+      '{"beamWidth":128}',
+      "{}",
+      "0",
+      "--label",
+      "a b",
+    ]);
+    // rust/engine/src/runner/ledger.rs の shell_line のテストと同じ
+    expect(shellLine(["yardstick", "--opts", "{}", "--label", "it's"])).toBe(`yardstick --opts '{}' --label 'it'\\''s'`);
+    expect(shellWords(shellLine(["x", "it's", "定例", ""]))).toEqual(["x", "it's", "定例", ""]);
+  });
+
+  it("compare・yardstick・profile を読み、キューで使えない引数は断る", () => {
+    const c = parseJob(`compare 3000 '{"beamWidth":128}' '{}' 100000 リノセウスエルフ --no-mirror --label 幅 --est 0.1`, 1);
+    expect(c).toMatchObject({ label: "幅", games: 3000, start: 100000, est: 0.1 });
+    expect(c.spec).toEqual({ kind: "compare", a: '{"beamWidth":128}', b: "{}", vs: "リノセウスエルフ", noMirror: true, decks: null });
+    const y = parseJob("svwb yardstick --ref strong --games 4000 --label 強", 2);
+    expect(y).toMatchObject({ games: 4000, start: 0, spec: { kind: "yardstick", ref: "strong", opts: "{}" } });
+    expect(parseJob("profile", 3)).toMatchObject({ games: 49, label: "", spec: { kind: "profile", rhino: false } });
+    expect(() => parseJob("compare 100 '{}' '{}'", 1)).toThrow(/--label/);
+    expect(() => parseJob("compare 100 '{}' '{}' --label x --no-ledger", 1)).toThrow(/--no-ledger/);
+    expect(() => parseJob("yardstick --label x --record", 1)).toThrow(/--record/);
+    expect(() => parseJob("compare 100 '{beam}' '{}' --label x", 1)).toThrow(/JSON/);
+    expect(() => parseJob("td selfplay", 1)).toThrow(/compare・yardstick・profile/);
+    expect(() => parseJobs("# だけ\n\n")).toThrow(/ジョブがありません/);
+    expect(() => parseJobs("profile\nyardstick --ref weak --label x")).toThrow(/2 行目/);
+  });
+
+  it("区切りは大きさをそろえ、試合番号をすき間なく覆う", () => {
+    const job = parseJob("compare 1000 '{}' '{}' 500 --label x", 1);
+    // 1 試合 0.1 秒・1 区切り 60 秒なら 300 組まで → 4 区切りにして 250 組ずつ
+    const cs = chunkJob(job, 0.1, 60);
+    expect(cs.map((c) => [c.id, c.first, c.count])).toEqual([
+      ["1-1", 500, 250],
+      ["1-2", 750, 250],
+      ["1-3", 1000, 250],
+      ["1-4", 1250, 250],
+    ]);
+    const odd = chunkJob(parseJob("compare 7 '{}' '{}' --label x", 2), 1, 4);
+    expect(odd.map((c) => c.count)).toEqual([2, 2, 2, 1]);
+    expect(chunkJob(parseJob("profile --games 49", 3), 10, 1)).toHaveLength(1);
+  });
+
+  it("見込みは --est、台帳の同じ比べ・同じマシンの回、決めておいた値の順に使う", () => {
+    const job = parseJob("yardstick --ref strong --label x", 1);
+    const row = (over: Partial<RunRow>): RunRow =>
+      ({ kind: "yardstick", a: {}, b: "strong", machine: "svwb-docker", threads: 28, n: 2000, seconds: 200, date: "2026-11-05", cmd: "" }) as RunRow & typeof over;
+    expect(estimate(job, [], "svwb-docker", 28).perGame).toBeCloseTo(2.7 / 28);
+    expect(estimate(job, [{ ...row({}), seconds: 200 }], "svwb-docker", 28)).toMatchObject({ perGame: 0.1 });
+    // 並列数が違えば、スレッド秒で割り直す
+    expect(estimate(job, [{ ...row({}), seconds: 200, threads: 14 }], "svwb-docker", 28).perGame).toBeCloseTo(0.05);
+    // ほかのマシン・ほかの相手の回は使わない
+    expect(estimate(job, [{ ...row({}), machine: "vm" }, { ...row({}), b: "classic" }], "svwb-docker", 28).perGame).toBeCloseTo(2.7 / 28);
+    expect(estimate(parseJob("yardstick --ref strong --label x --est 0.3", 1), [row({})], "svwb-docker", 28).perGame).toBe(0.3);
+  });
+
+  it("--until は時刻帯の次のその時刻か、今からの長さ", () => {
+    // 2026-11-10T19:27:08Z は東京で 11-11 04:27:08
+    const now = Date.parse("2026-11-10T19:27:08Z");
+    expect(new Date(parseUntil("07:00", now, "Asia/Tokyo")).toISOString()).toBe("2026-11-10T22:00:00.000Z");
+    expect(new Date(parseUntil("04:00", now, "Asia/Tokyo")).toISOString()).toBe("2026-11-11T19:00:00.000Z");
+    expect(parseUntil("+90m", now, "Asia/Tokyo") - now).toBe(90 * 60 * 1000);
+    expect(wallClock(now, "Asia/Tokyo")).toMatchObject({ d: 11, h: 4, mi: 27 });
+    expect(() => parseUntil("朝", now, "Asia/Tokyo")).toThrow(/--until/);
+  });
+});
+
+/** 区切りの行（偽物の svwb が書く形） */
+function chunkRow(first: number, count: number, seKind: "pairs" | "binomial"): RunRow {
+  const pairs: [number, number, number] = [0, 0, 0];
+  let wins = 0;
+  for (let g = first; g < first + count; g++) {
+    const w = (g * 7) % 3;
+    pairs[w as 0 | 1 | 2]++;
+    wins += w;
+  }
+  return {
+    v: 1,
+    kind: seKind === "pairs" ? "compare" : "yardstick",
+    date: "2026-11-11",
+    at: `2026-11-11T00:00:${String(first % 60).padStart(2, "0")}Z`,
+    commit: "abc1234",
+    branch: "main",
+    label: "x",
+    a: {},
+    b: seKind === "pairs" ? {} : "classic",
+    decks: [],
+    mirror: seKind === "pairs",
+    g: [first, first + count - 1],
+    n: 2 * count,
+    wins,
+    rate: wins / (2 * count),
+    se: 0,
+    seKind,
+    pairs,
+    perDeck: { X: [wins, 2 * count] },
+    seconds: count,
+    perGame: 0.5,
+    threads: 4,
+    machine: "vm",
+    cmd: "",
+  };
+}
+
+describe("区切りの行をまとめる", () => {
+  it("1 回で回したときと同じ勝ち数・組・誤差になる", () => {
+    for (const seKind of ["pairs", "binomial"] as const) {
+      const whole = chunkRow(0, 90, seKind);
+      const c = combineRows([chunkRow(60, 30, seKind), chunkRow(0, 30, seKind), chunkRow(30, 30, seKind)], "compare 90", "n1");
+      expect(c).toMatchObject({ g: [0, 89], n: 180, wins: whole.wins, pairs: whole.pairs, perDeck: whole.perDeck, seconds: 90, queue: "n1", chunks: 3, cmd: "compare 90" });
+      const p = whole.wins / whole.n;
+      const m = 90;
+      const mean = (whole.pairs[1] * 0.5 + whole.pairs[2]) / m;
+      const v = (whole.pairs[0] * mean ** 2 + whole.pairs[1] * (0.5 - mean) ** 2 + whole.pairs[2] * (1 - mean) ** 2) / (m - 1);
+      const se = seKind === "pairs" ? Math.sqrt(v / m) : Math.sqrt((p * (1 - p)) / whole.n);
+      expect(c.se).toBeCloseTo(se, 6);
+      expect(c.at).toBe("2026-11-11T00:00:00Z");
+    }
+  });
+});
+
+/** svwb の代わり。台帳の行だけを書く（FAKE_FAIL の区切りは失敗、FAKE_HANG は 1 分待つ、FAKE_STOP_AT は終わった後に STOP を置く） */
+const FAKE = `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const argv = process.argv.slice(2);
+const shellLine = (a) => a.map((x) => (x !== "" && /^[A-Za-z0-9_./,:=+\\-@%]+$/.test(x) ? x : "'" + x.replace(/'/g, "'\\\\''") + "'")).join(" ");
+const flag = (n) => { const i = argv.indexOf(n); return i < 0 ? undefined : argv[i + 1]; };
+const kind = argv[0];
+let count, first, a, b;
+if (kind === "compare") { count = Number(argv[1]); a = JSON.parse(argv[2]); b = JSON.parse(argv[3]); first = Number(argv[4]); }
+else if (kind === "yardstick") { count = Number(flag("--games")); first = Number(flag("--start")); a = JSON.parse(flag("--opts")); b = flag("--ref"); }
+else if (kind === "profile") { fs.writeFileSync(flag("--json"), "{}"); fs.writeFileSync(flag("--report"), "# 速さ"); process.exit(0); }
+if (count === 0) process.exit(0);
+if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, shellLine(argv) + "\\n");
+if (String(first) === process.env.FAKE_FAIL) { console.error("わざと失敗"); process.exit(3); }
+const finish = () => {
+  const pairs = [0, 0, 0]; let wins = 0;
+  for (let g = first; g < first + count; g++) { const w = (g * 7) % 3; pairs[w]++; wins += w; }
+  const n = 2 * count;
+  const row = { v: 1, kind, date: "2026-11-11", at: "2026-11-11T00:00:00Z", commit: process.env.SVWB_COMMIT, branch: process.env.SVWB_BRANCH,
+    label: flag("--label"), a, b, decks: ["X"], mirror: true, g: [first, first + count - 1], n, wins, rate: wins / n, se: 0.01,
+    seKind: kind === "yardstick" && b === "classic" ? "binomial" : "pairs", pairs, perDeck: { X: [wins, n] }, seconds: count / 10, perGame: count / 10 / n,
+    threads: Number(process.env.THREADS), machine: process.env.SVWB_MACHINE, cmd: shellLine(argv) };
+  fs.appendFileSync(process.env.SVWB_LEDGER, JSON.stringify(row) + "\\n");
+  if (String(first) === process.env.FAKE_STOP_AT) fs.writeFileSync(path.join(path.dirname(process.env.SVWB_LEDGER), "STOP"), "");
+};
+if (String(first) === process.env.FAKE_HANG) setTimeout(finish, 60000); else finish();
+`;
+
+describe("区切って回す（偽物の svwb で）", () => {
+  let tmp = "";
+  let root = "";
+  let jobs = "";
+  let fake = "";
+  let fakeLog = "";
+  const env = ["FAKE_FAIL", "FAKE_HANG", "FAKE_STOP_AT", "FAKE_LOG"];
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "night-"));
+    root = join(tmp, "runs");
+    fake = join(tmp, "fake-svwb");
+    writeFileSync(fake, FAKE, { mode: 0o755 });
+    fakeLog = join(tmp, "calls.log");
+    process.env.FAKE_LOG = fakeLog;
+    jobs = join(tmp, "jobs.txt");
+    // 1 試合 0.5 秒・1 区切り 1 分 → compare 150 組は 50 組ずつ 3 区切り。物差しは 1 区切り
+    writeFileSync(
+      jobs,
+      ["# 試す", "compare 150 '{}' '{\"beamWidth\":8}' 0 --label 幅 --est 0.5", "yardstick --ref classic --games 40 --start 10 --label 弱 --est 0.5", "profile --games 2"].join("\n"),
+    );
+    vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    for (const k of env) delete process.env[k];
+    vi.restoreAllMocks();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const start = (...more: string[]) =>
+    main(["start", jobs, "--yes", "--root", root, "--name", "n1", "--bin", fake, "--allow-dirty", "--threads", "2", "--chunk-min", "1", "--until", "+2h", ...more]);
+  const resume = (...more: string[]) => main(["resume", "n1", "--yes", "--root", root, "--foreground", "--threads", "2", "--until", "+2h", ...more]);
+  const dir = () => join(root, "n1");
+  const calls = () => (existsSync(fakeLog) ? readFileSync(fakeLog, "utf8").trim().split("\n") : []);
+  const done = () => readdirSync(join(dir(), "done")).map((f) => f.replace(/\.json$/, "")).sort();
+
+  it("全部の区切りを回し、finish がジョブごとに 1 行にまとめて台帳に足す（2 回目は足さない）", async () => {
+    expect(await start("--foreground")).toBe(0);
+    expect(done()).toEqual(["1-1", "1-2", "1-3", "2-1", "3-1"]);
+    expect(calls()).toHaveLength(4);
+    expect(readStatus(dir())).toMatchObject({ state: "done" });
+    expect(existsSync(join(dir(), "speed-3.md"))).toBe(true);
+    const target = join(tmp, "ledger.jsonl");
+    writeFileSync(target, "");
+    expect(await main(["finish", "n1", "--root", root, "--ledger", target])).toBe(0);
+    const rows = parseLedger(readFileSync(target, "utf8")).runs as (RunRow & { queue: string; chunks: number })[];
+    expect(rows.map((r) => [r.label, r.g, r.n, r.chunks, r.queue])).toEqual([
+      ["幅", [0, 149], 300, 3, "n1"],
+      ["弱", [10, 49], 80, 1, "n1"],
+    ]);
+    expect(rows[0]?.cmd).toBe(`compare 150 '{}' '{"beamWidth":8}' 0 --label '幅'`);
+    expect(rows[1]?.seKind).toBe("binomial");
+    expect(rows[0]?.threads).toBe(2);
+    expect(await main(["finish", "n1", "--root", root, "--ledger", target])).toBe(0);
+    expect(parseLedger(readFileSync(target, "utf8")).runs).toHaveLength(2);
+  });
+
+  it("失敗した区切りの後はそのジョブを飛ばし、resume で続きから回す", async () => {
+    process.env.FAKE_FAIL = "50";
+    expect(await start("--foreground")).toBe(1);
+    expect(done()).toEqual(["1-1", "2-1", "3-1"]);
+    expect(readFileSync(join(dir(), "failed.json"), "utf8")).toContain("1-2");
+    delete process.env.FAKE_FAIL;
+    const before = calls().length;
+    expect(await resume()).toBe(0);
+    // 済んだ区切りは回さない
+    expect(calls().slice(before).map((c) => c.split(" ").slice(0, 5).join(" "))).toEqual(["compare 50 '{}' '{\"beamWidth\":8}' 50", "compare 50 '{}' '{\"beamWidth\":8}' 100"]);
+    expect(done()).toEqual(["1-1", "1-2", "1-3", "2-1", "3-1"]);
+  });
+
+  it("台帳に行があって印が無い区切り（行を書いた直後に電源が切れた）は回さない", async () => {
+    expect(await start("--foreground")).toBe(0);
+    unlinkSync(join(dir(), "done", "1-2.json"));
+    const before = calls().length;
+    expect(await resume()).toBe(0);
+    expect(calls().length).toBe(before);
+    expect(JSON.parse(readFileSync(join(dir(), "done", "1-2.json"), "utf8"))).toMatchObject({ recovered: true });
+  });
+
+  it("STOP があれば区切りの切れ目で止まる", async () => {
+    process.env.FAKE_STOP_AT = "50";
+    expect(await start("--foreground")).toBe(1);
+    expect(done()).toEqual(["1-1", "1-2"]);
+    expect(readStatus(dir())?.reason).toMatch(/手で止めた/);
+    // resume は STOP を消して続きから
+    expect(await resume()).toBe(0);
+    expect(done()).toEqual(["1-1", "1-2", "1-3", "2-1", "3-1"]);
+  });
+
+  it("止める時刻までに終わらない区切りは始めない", async () => {
+    // 50 組（100 試合）× 0.5 秒 = 50 秒の区切りを、残り 20 秒では始めない
+    expect(await start("--foreground", "--until", "+20s")).toBe(1);
+    expect(existsSync(join(dir(), "done"))).toBe(false);
+    expect(readStatus(dir())?.reason).toMatch(/止める時刻/);
+  });
+
+  it("すぐ止める（stop --now）と回していた区切りを捨て、resume で回し直す", async () => {
+    process.env.FAKE_HANG = "50";
+    expect(await start("--prepare-only")).toBe(0);
+    const ctl: WorkerControl = { stopNow: false };
+    const timer = setInterval(() => {
+      if (calls().length >= 2) {
+        ctl.stopNow = true;
+        ctl.kill?.();
+        clearInterval(timer);
+      }
+    }, 50);
+    const st = await runWorker(dir(), ctl);
+    expect(st.reason).toMatch(/すぐ止めた/);
+    expect(done()).toEqual(["1-1"]);
+    expect(parseLedger(readFileSync(join(dir(), "ledger.jsonl"), "utf8")).runs).toHaveLength(1);
+    delete process.env.FAKE_HANG;
+    expect(await resume()).toBe(0);
+    expect(done()).toEqual(["1-1", "1-2", "1-3", "2-1", "3-1"]);
+  });
+});

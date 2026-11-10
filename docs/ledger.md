@@ -23,6 +23,9 @@ AI の実験の結果を、1 行 1 件の JSON（JSON Lines）で残す台帳。
   （GitHub の画面で衝突と出たら、手元で main をマージして push する）
 - 書けたときは何も出さない（出力は前と同じ。ジョブが読む最後の行を変えないため）。書けなければ注意を出す（結果は失わない）
 - `cloud/jobs/` のジョブも、回したチェックアウトの `docs/ledger.jsonl` に足す（速さだけを測る `bench.sh`・`bench-scale.sh` は `--no-ledger`）
+- 夜のキュー（`npm run night`、[night.md](night.md)）は、区切りごとの行を回のフォルダの台帳（`SVWB_LEDGER`）に書き、朝の `finish` が
+  ジョブの続いた区切りを 1 行にまとめてこの台帳に足す（1 回で回したときと同じ勝ち数・組・誤差。`queue`・`chunks` が付く）。
+  コミットとブランチは環境変数 `SVWB_COMMIT`・`SVWB_BRANCH` で渡した、キューを組み立てたときのもの
 
 | 項目 | 中身 |
 | --- | --- |
@@ -44,7 +47,8 @@ AI の実験の結果を、1 行 1 件の JSON（JSON Lines）で残す台帳。
 | `perDeck` | A のデッキごとの [勝ち, 試合数] |
 | `seconds`・`perGame` | かかった時間（秒）と 1 試合あたり |
 | `threads`・`machine` | 並列数とマシン（環境変数 `SVWB_MACHINE`、無ければホスト名。PC の Docker は `svwb-docker`） |
-| `cmd` | 回したコマンド（`svwb` の後ろ。シェルにそのまま貼れる形） |
+| `cmd` | 回したコマンド（`svwb` の後ろ。シェルにそのまま貼れる形）。夜のキューのまとめた行は、1 回で回すときのコマンド |
+| `queue`・`chunks` | 夜のキューのまとめた行だけ: 回の名前と、まとめた区切りの数（`seconds` は区切りの和） |
 
 ### 採否の行（`decision`）: `npm run ledger -- decide` で足す
 

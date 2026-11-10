@@ -35,7 +35,8 @@
     "potential": "node scripts/vite-run.mjs scripts/potential-main.ts",
     "rust-data": "node scripts/vite-run.mjs scripts/rust-data-main.ts",
     "pack-run": "node scripts/vite-run.mjs scripts/pack-run-main.ts",
-    "ledger": "node scripts/ledger-main.ts"
+    "ledger": "node scripts/ledger-main.ts",
+    "night": "node scripts/night-main.ts"
   },
   "repository": {
     "type": "git",

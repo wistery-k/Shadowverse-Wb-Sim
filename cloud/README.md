@@ -169,6 +169,9 @@ cloud/gcp.sh run meta-r5 /mnt/project-files/notes/meta/meta.sh --hours 3 \
 
 ## PC で回す
 
+PC で回すのは、ユーザーが回すと決めた夜だけ（昼はゲームがカクつく。2026-11-10）。compare・yardstick・速さは夜のキュー（`npm run night`、
+`docs/night.md`）に並べる。`cloud/jobs/` のジョブはまだキューに入れられないので、回すと決めた夜に下のように流す（止まった段は、次に流したとき続きから）。
+
 `cloud/jobs/` のジョブは、`CLOUD_W` に作業フォルダを渡せば PC でもそのまま回る（Cloud Storage も VM も使わない）。
 Docker のコンテナ（`docker/remote-control`）では、作業フォルダを `~/svwb-data` の下に置く（ほかの場所はコンテナを作り直すと消える。
 ホストの同じ場所に見える）。リポジトリの一番上で:
