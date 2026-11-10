@@ -30,6 +30,7 @@
     "nightmare-compare": "node scripts/svwb.mjs rhino-compare --subject nightmare",
     "royal-compare": "node scripts/svwb.mjs rhino-compare --subject royal",
     "yardstick": "node scripts/svwb.mjs yardstick",
+    "misses": "node scripts/svwb.mjs misses",
     "profile": "node scripts/profile.mjs",
     "td": "node scripts/vite-run.mjs scripts/td-main.ts",
     "potential": "node scripts/vite-run.mjs scripts/potential-main.ts",

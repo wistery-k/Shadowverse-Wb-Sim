@@ -2,12 +2,13 @@
 //
 //   npm run ledger -- [runs] [--kind compare|yardstick] [--since 日付] [--until 日付] [--grep 文字列] [--label 文字列] [--last N]
 //   npm run ledger -- sum [runs と同じ絞り込み] [--any-commit]
+//   npm run ledger -- misses [--since 日付] [--until 日付] [--grep 文字列] [--label 文字列] [--last N]
 //   npm run ledger -- items [--all] [--grep 文字列] [--in-default]
 //   npm run ledger -- decide --item 名前 --decision 採用|不採用|保留|やめた [--in-default true|false] [--keys a,b]
 //                            [--from-label 回の名前] [--vs 比べた相手] [--ref 記録の節] [--note メモ] [--date 日付]
 //   npm run ledger -- check
 //
-// 回の行（compare・yardstick）は Rust のランナーが回すたびに書く（rust/engine/src/runner/ledger.rs）。
+// 回の行（compare・yardstick・misses）は Rust のランナーが回すたびに書く（rust/engine/src/runner/ledger.rs）。
 // 採否の行（decision）はこのスクリプトの decide で足す。どれも足すだけで、前の行は書き換えない。
 // 台帳のファイルは環境変数 SVWB_LEDGER か --file で替えられる。外部のコマンドは使わない。
 
@@ -87,11 +88,43 @@ export interface DecisionRow {
   source: "notes" | "runs" | "manual";
 }
 
-export type Row = RunRow | DecisionRow;
+/** 見落とし問題集（npm run misses -- run。docs/misses.md）の 1 回 */
+export interface MissesRow {
+  v: number;
+  kind: "misses";
+  date: string;
+  at: string;
+  commit: string;
+  branch: string;
+  label: string;
+  /** AI の設定（JSON） */
+  a: unknown;
+  /** 問の数と問題集の指紋（指紋の違う回の正解率は比べられない） */
+  problems: number;
+  set: string;
+  /** 1 問を打つ回数と乱数の元 */
+  trials: number;
+  seed: number;
+  /** 打った回数（問の数 × 回数）と合格した回数 */
+  n: number;
+  passes: number;
+  /** 正解率（問ごとの合格率の平均、0〜1）と標準誤差 */
+  rate: number | null;
+  se: number | null;
+  /** 問ごとの [合格, 回数] */
+  perProblem: Record<string, [number, number]>;
+  seconds: number;
+  threads: number;
+  machine: string;
+  cmd: string;
+}
+
+export type Row = RunRow | DecisionRow | MissesRow;
 
 export interface Parsed {
   runs: RunRow[];
   decisions: DecisionRow[];
+  misses: MissesRow[];
   errors: string[];
 }
 
@@ -140,9 +173,24 @@ function checkDecision(o: Obj): string[] {
   return bad;
 }
 
+function checkMisses(o: Obj): string[] {
+  const bad: string[] = [];
+  const need = (ok: boolean, key: string) => {
+    if (!ok) bad.push(key);
+  };
+  need(isDate(o.date), "date");
+  for (const k of ["at", "commit", "branch", "label", "set", "machine", "cmd"]) need(isStr(o[k]), k);
+  need("a" in o, "a");
+  for (const k of ["problems", "trials", "seed", "n", "passes", "seconds", "threads"]) need(isNum(o[k]), k);
+  for (const k of ["rate", "se"]) need(o[k] === null || isNum(o[k]), k);
+  need(isObj(o.perProblem) && Object.values(o.perProblem).every((x) => isNumArr(x, 2)), "perProblem");
+  if (isNum(o.n) && isNum(o.passes) && o.passes > o.n) bad.push("passes > n");
+  return bad;
+}
+
 /** 台帳の中身を読む。形の合わない行は errors に（行番号つきで）入れて飛ばす */
 export function parseLedger(text: string): Parsed {
-  const out: Parsed = { runs: [], decisions: [], errors: [] };
+  const out: Parsed = { runs: [], decisions: [], misses: [], errors: [] };
   text.split("\n").forEach((line, i) => {
     if (line.trim() === "") return;
     const at = `${i + 1} 行目`;
@@ -165,6 +213,10 @@ export function parseLedger(text: string): Parsed {
       const bad = checkDecision(o);
       if (bad.length > 0) out.errors.push(`${at}: ${bad.join("・")} が合いません`);
       else out.decisions.push(o as unknown as DecisionRow);
+    } else if (o.kind === "misses") {
+      const bad = checkMisses(o);
+      if (bad.length > 0) out.errors.push(`${at}: ${bad.join("・")} が合いません`);
+      else out.misses.push(o as unknown as MissesRow);
     } else {
       out.errors.push(`${at}: 知らない kind: ${String(o.kind)}`);
     }
@@ -184,7 +236,7 @@ export interface RunFilter {
   last?: number;
 }
 
-export function filterRuns(runs: RunRow[], f: RunFilter): RunRow[] {
+export function filterRuns<R extends RunRow | MissesRow>(runs: R[], f: RunFilter): R[] {
   const g = f.grep?.toLowerCase();
   let out = runs.filter(
     (r) =>
@@ -327,6 +379,28 @@ export function sumTable(sums: Sum[]): string {
   );
 }
 
+/** 見落とし問題集の回の表（問ごとの合格は「名前 合格/回数」） */
+export function missesTable(rows: MissesRow[]): string {
+  return markdownTable(
+    ["日付", "コミット", "名前", "設定", "問（指紋）", "回数", "正解率", "±", "問ごと", "秒", "マシン"],
+    rows.map((r) => [
+      r.date,
+      r.commit,
+      r.label,
+      `\`${optsText(r.a)}\``,
+      `${r.problems}（${r.set}）`,
+      `${r.trials}（乱数 ${r.seed}）`,
+      pct(r.rate),
+      pts(r.se),
+      Object.entries(r.perProblem)
+        .map(([k, [w, t]]) => `${k} ${w}/${t}`)
+        .join("、"),
+      r.seconds.toFixed(0),
+      `${r.machine}（${r.threads}）`,
+    ]),
+  );
+}
+
 /** 項目ごとの最後の行（今の判定）。all なら全部 */
 export function latestDecisions(rows: DecisionRow[], all: boolean): DecisionRow[] {
   if (all) return rows;
@@ -421,6 +495,7 @@ export function decisionRow(
 const USAGE = `使い方（docs/ledger.md）:
   npm run ledger -- [runs] [--kind compare|yardstick] [--since 日付] [--until 日付] [--grep 文字列] [--label 文字列] [--last N]
   npm run ledger -- sum [runs と同じ絞り込み] [--any-commit]
+  npm run ledger -- misses [--since 日付] [--until 日付] [--grep 文字列] [--label 文字列] [--last N]
   npm run ledger -- items [--all] [--grep 文字列] [--in-default]
   npm run ledger -- decide --item 名前 --decision 採用|不採用|保留|やめた [--in-default true|false] [--keys a,b]
                            [--from-label 回の名前] [--vs 比べた相手] [--ref 記録の節] [--note メモ] [--date 日付]
@@ -501,6 +576,10 @@ export async function main(argv: string[]): Promise<number> {
         known([...runFlags, "--any-commit"]);
         console.log(sumTable(groupRuns(filterRuns(ledger.runs, filter()), opts.has("--any-commit"))));
         return 0;
+      case "misses":
+        known(runFlags.filter((k) => k !== "--kind"));
+        console.log(missesTable(filterRuns(ledger.misses, filter())));
+        return 0;
       case "items": {
         known(["--all", "--grep", "--in-default"]);
         const g = opts.get("--grep")?.toLowerCase();
@@ -540,7 +619,9 @@ export async function main(argv: string[]): Promise<number> {
       }
       case "check":
         known([]);
-        console.log(`${file}: 回 ${ledger.runs.length} 行・採否 ${ledger.decisions.length} 行・合わない行 ${ledger.errors.length}`);
+        console.log(
+          `${file}: 回 ${ledger.runs.length} 行・見落とし問題集 ${ledger.misses.length} 行・採否 ${ledger.decisions.length} 行・合わない行 ${ledger.errors.length}`,
+        );
         return ledger.errors.length > 0 ? 1 : 0;
       default:
         throw new Error(`知らないサブコマンド: ${cmd}`);

@@ -1,4 +1,4 @@
-//! 実験の台帳: compare・yardstick を回すたびに、結果を `docs/ledger.jsonl` に 1 行（JSON）足す。
+//! 実験の台帳: compare・yardstick・見落とし問題集（misses run）を回すたびに、結果を `docs/ledger.jsonl` に 1 行（JSON）足す。
 //!
 //! 結果の数字を記録の文章に書き写さずに済むように、また同じ比べの回を後から足し合わせられるようにするため（2026-11-10 から）。
 //! 1 行の形は `docs/ledger.md`。表にするのは `npm run ledger`（`scripts/ledger-main.ts`）。
@@ -266,8 +266,8 @@ fn env_or(name: &str, f: impl FnOnce() -> String) -> String {
     }
 }
 
-/// 台帳の 1 行（今の日付・コミット等を入れる）
-pub fn row(run: &Run) -> Json {
+/// 回した日付・時刻・コミット・ブランチ（今のもの。夜のキューは環境変数で渡す）
+fn now_context() -> (String, String, String, String) {
     use super::yardstick::{command_line, commit_label_excluding};
     let date = command_line("date", &["+%Y-%m-%d"]).unwrap_or("?".into());
     let at = std::time::SystemTime::now()
@@ -281,6 +281,12 @@ pub fn row(run: &Run) -> Json {
     let branch = env_or("SVWB_BRANCH", || {
         command_line("git", &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or("?".into())
     });
+    (date, at, commit, branch)
+}
+
+/// 台帳の 1 行（今の日付・コミット等を入れる）
+pub fn row(run: &Run) -> Json {
+    let (date, at, commit, branch) = now_context();
     row_with(
         run,
         &date,
@@ -292,11 +298,114 @@ pub fn row(run: &Run) -> Json {
     )
 }
 
+/// 見落とし問題集の 1 回（`svwb misses run`。runner/misses.rs）
+pub struct MissesRun {
+    /// 実行のコマンド（`svwb` の後ろ）
+    pub argv: Vec<String>,
+    pub label: String,
+    /// AI の設定の JSON の文字列（渡したまま）
+    pub a: String,
+    /// 問の数と、問題集の指紋（問の名前と中身。問を足す・直すと変わる。指紋の違う回の正解率は比べられない）
+    pub problems: u32,
+    pub set: String,
+    /// 1 問を打つ回数と、乱数の元
+    pub trials: u32,
+    pub seed: u32,
+    /// 打った回数（問の数 × 回数）と、合格した回数
+    pub n: u32,
+    pub passes: u32,
+    /// 正解率（問ごとの合格率の平均）と、その標準誤差（0〜1。問ごとの合格率のぶれから。問題集は決まったものとして）
+    pub rate: f64,
+    pub se: f64,
+    /// 問ごとの [合格, 回数]（問の名前の順）
+    pub per: Vec<(String, [u32; 2])>,
+    pub seconds: f64,
+}
+
+/// 見落とし問題集の 1 回の台帳の行（日付・時刻・コミット・ブランチ・マシンを渡す形。試すため）
+#[allow(clippy::too_many_arguments)]
+pub fn misses_row_with(
+    run: &MissesRun,
+    date: &str,
+    at: &str,
+    commit: &str,
+    branch: &str,
+    machine: &str,
+    threads: usize,
+) -> Json {
+    let a = opts_json(&run.a);
+    let files = file_fingerprints(&[&a]);
+    let num = |x: f64| Json::Num(x);
+    let s = |x: &str| Json::Str(x.to_string());
+    let round = |x: f64| {
+        if x.is_finite() {
+            num((x * 1e6).round() / 1e6)
+        } else {
+            Json::Null
+        }
+    };
+    let mut items: Vec<(String, Json)> = vec![
+        ("v".into(), num(LEDGER_VERSION as f64)),
+        ("kind".into(), s("misses")),
+        ("date".into(), s(date)),
+        ("at".into(), s(at)),
+        ("commit".into(), s(commit)),
+        ("branch".into(), s(branch)),
+        ("label".into(), s(&run.label)),
+        ("a".into(), a),
+    ];
+    if !files.is_empty() {
+        items.push(("files".into(), Json::Obj(files)));
+    }
+    items.extend([
+        ("problems".into(), num(run.problems as f64)),
+        ("set".into(), s(&run.set)),
+        ("trials".into(), num(run.trials as f64)),
+        ("seed".into(), num(run.seed as f64)),
+        ("n".into(), num(run.n as f64)),
+        ("passes".into(), num(run.passes as f64)),
+        ("rate".into(), round(run.rate)),
+        ("se".into(), round(run.se)),
+        (
+            "perProblem".into(),
+            Json::Obj(
+                run.per
+                    .iter()
+                    .map(|(k, [w, t])| (k.clone(), Json::Arr(vec![num(*w as f64), num(*t as f64)])))
+                    .collect(),
+            ),
+        ),
+        ("seconds".into(), round((run.seconds * 10.0).round() / 10.0)),
+        ("threads".into(), num(threads as f64)),
+        ("machine".into(), s(machine)),
+        ("cmd".into(), s(&shell_line(&run.argv))),
+    ]);
+    Json::Obj(items)
+}
+
+/// 見落とし問題集の 1 回を台帳に足す（書けなければ注意を出すだけ）
+pub fn append_misses(run: &MissesRun) {
+    let (date, at, commit, branch) = now_context();
+    append_line(&misses_row_with(
+        run,
+        &date,
+        &at,
+        &commit,
+        &branch,
+        &machine(),
+        thread_count(),
+    ));
+}
+
 /// 台帳に 1 行足す（書けなければ注意を出すだけ）
 pub fn append(run: &Run) {
+    append_line(&row(run));
+}
+
+fn append_line(row: &Json) {
     use std::io::Write;
     let path = ledger_path();
-    let line = row(run).stringify() + "\n";
+    let line = row.stringify() + "\n";
     let res = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -368,6 +477,44 @@ mod tests {
         );
         // 1 行に収まる
         assert!(!text.contains('\n'));
+    }
+
+    #[test]
+    fn misses_row_has_the_fields_in_order() {
+        let m = MissesRun {
+            argv: vec![
+                "misses".into(),
+                "run".into(),
+                "--label".into(),
+                "定例".into(),
+            ],
+            label: "定例".into(),
+            a: "{}".into(),
+            problems: 2,
+            set: "91c86c68".into(),
+            trials: 24,
+            seed: 1,
+            n: 48,
+            passes: 25,
+            rate: 0.520833,
+            se: 0.012,
+            per: vec![("a".into(), [24, 24]), ("b".into(), [1, 24])],
+            seconds: 5.04,
+        };
+        let text = misses_row_with(
+            &m,
+            "2026-11-10",
+            "2026-11-10T09:00:00Z",
+            "bcb49c2",
+            "main",
+            "cloud",
+            4,
+        )
+        .stringify();
+        assert_eq!(
+            text,
+            r#"{"v":1,"kind":"misses","date":"2026-11-10","at":"2026-11-10T09:00:00Z","commit":"bcb49c2","branch":"main","label":"定例","a":{},"problems":2,"set":"91c86c68","trials":24,"seed":1,"n":48,"passes":25,"rate":0.520833,"se":0.012,"perProblem":{"a":[24,24],"b":[1,24]},"seconds":5,"threads":4,"machine":"cloud","cmd":"misses run --label '定例'"}"#
+        );
     }
 
     #[test]

@@ -38,22 +38,22 @@ use std::io::Write;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::Instant;
 
-type Subject = (&'static str, &'static str, &'static str, u32);
+pub(crate) type Subject = (&'static str, &'static str, &'static str, u32);
 
 /// 人間の記録 1 試合
-struct Record {
-    subject: Subject,
-    deck: String,
-    g: u32,
-    seat: PlayerIndex,
+pub(crate) struct Record {
+    pub(crate) subject: Subject,
+    pub(crate) deck: String,
+    pub(crate) g: u32,
+    pub(crate) seat: PlayerIndex,
     won: bool,
     /// 同じ試合を打ち直した記録を分けるため（対戦を終えた日時）
     played_at: String,
-    actions: Vec<Action>,
+    pub(crate) actions: Vec<Action>,
 }
 
 impl Record {
-    fn key(&self) -> String {
+    pub(crate) fn key(&self) -> String {
         format!(
             "{}/{}/{}/{}/{}",
             self.subject.0, self.deck, self.g, self.seat, self.played_at
@@ -61,7 +61,7 @@ impl Record {
     }
 
     /// 試合の初期局面（src/sim/humanCompare.ts の compareMatch と同じ: シードは基準 + g × 13 + 席）
-    fn initial(&self) -> Result<(GameState, u32), String> {
+    pub(crate) fn initial(&self) -> Result<(GameState, u32), String> {
         let decks = &data().decks;
         let me = decks
             .iter()
@@ -82,7 +82,7 @@ impl Record {
 }
 
 /// 人間の記録の 1 行（version 2 の "human-compare" と、リノセウスエルフだけの頃の version 1 "rhino-compare-human"）
-fn parse_record(line: &str) -> Result<Record, String> {
+pub(crate) fn parse_record(line: &str) -> Result<Record, String> {
     let v = Json::parse(line)?;
     let kind = match v.get("kind") {
         Some(Json::Str(k)) => k.as_str(),
@@ -145,7 +145,7 @@ pub(crate) fn is_start_of_turn(s: &GameState) -> bool {
 }
 
 /// カードの名前（どの場所にも無ければ番号）
-fn name_of(s: &GameState, iid: Iid, viewer: PlayerIndex) -> String {
+pub(crate) fn name_of(s: &GameState, iid: Iid, viewer: PlayerIndex) -> String {
     if iid < 0 {
         let owner = (-iid - 1) as usize;
         return if owner == viewer {

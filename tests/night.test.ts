@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseLedger, type RunRow } from "../scripts/ledger-main";
+import { parseLedger, type MissesRow, type RunRow } from "../scripts/ledger-main";
 import {
   chunkJob,
   combineRows,
@@ -37,13 +37,18 @@ describe("ジョブの行", () => {
     expect(shellWords(shellLine(["x", "it's", "定例", ""]))).toEqual(["x", "it's", "定例", ""]);
   });
 
-  it("compare・yardstick・profile を読み、キューで使えない引数は断る", () => {
+  it("compare・yardstick・profile・misses を読み、キューで使えない引数は断る", () => {
     const c = parseJob(`compare 3000 '{"beamWidth":128}' '{}' 100000 リノセウスエルフ --no-mirror --label 幅 --est 0.1`, 1);
     expect(c).toMatchObject({ label: "幅", games: 3000, start: 100000, est: 0.1 });
     expect(c.spec).toEqual({ kind: "compare", a: '{"beamWidth":128}', b: "{}", vs: "リノセウスエルフ", noMirror: true, decks: null });
     const y = parseJob("svwb yardstick --ref strong --games 4000 --label 強", 2);
     expect(y).toMatchObject({ games: 4000, start: 0, spec: { kind: "yardstick", ref: "strong", opts: "{}" } });
     expect(parseJob("profile", 3)).toMatchObject({ games: 49, label: "", spec: { kind: "profile", rhino: false } });
+    expect(parseJob("misses run --trials 12 --seed 3 --label 定例", 4)).toMatchObject({ games: 12, start: 0, label: "定例", spec: { kind: "misses", opts: "{}", seed: 3 } });
+    expect(parseJob(`misses --opts '{"beamWidth":512}' --label x`, 4)).toMatchObject({ games: 24, spec: { kind: "misses", opts: '{"beamWidth":512}', seed: 1 } });
+    expect(() => parseJob("misses --trials 12", 1)).toThrow(/--label/);
+    expect(() => parseJob("misses --label x --only a", 1)).toThrow(/--only/);
+    expect(() => parseJob("misses --label x --no-ledger", 1)).toThrow(/--no-ledger/);
     expect(() => parseJob("compare 100 '{}' '{}'", 1)).toThrow(/--label/);
     expect(() => parseJob("compare 100 '{}' '{}' --label x --no-ledger", 1)).toThrow(/--no-ledger/);
     expect(() => parseJob("yardstick --label x --record", 1)).toThrow(/--record/);
@@ -66,6 +71,7 @@ describe("ジョブの行", () => {
     const odd = chunkJob(parseJob("compare 7 '{}' '{}' --label x", 2), 1, 4);
     expect(odd.map((c) => c.count)).toEqual([2, 2, 2, 1]);
     expect(chunkJob(parseJob("profile --games 49", 3), 10, 1)).toHaveLength(1);
+    expect(chunkJob(parseJob("misses --trials 48 --label x", 4), 10, 1).map((c) => [c.first, c.count])).toEqual([[0, 48]]);
   });
 
   it("見込みは --est、台帳の同じ比べ・同じマシンの回、決めておいた値の順に使う", () => {
@@ -78,6 +84,13 @@ describe("ジョブの行", () => {
     expect(estimate(job, [{ ...row({}), seconds: 200, threads: 14 }], "svwb-docker", 28).perGame).toBeCloseTo(0.05);
     // ほかのマシン・ほかの相手の回は使わない
     expect(estimate(job, [{ ...row({}), machine: "vm" }, { ...row({}), b: "classic" }], "svwb-docker", 28).perGame).toBeCloseTo(2.7 / 28);
+    // 見落とし問題集は、全部の問を 1 回ずつ解く秒。台帳の回の問の数が今と違えば、問の数で割り直す
+    const mjob = parseJob("misses --label x", 2);
+    const mrow = (over: Partial<MissesRow>): MissesRow =>
+      ({ kind: "misses", machine: "svwb-docker", threads: 28, trials: 24, seconds: 24, problems: 10, date: "2026-11-11" }) as MissesRow & typeof over;
+    expect(estimate(mjob, [], "svwb-docker", 28).perGame).toBeCloseTo(5.9 / 28);
+    expect(estimate(mjob, [], "svwb-docker", 28, [mrow({})]).perGame).toBeCloseTo(1);
+    expect(estimate(mjob, [], "svwb-docker", 28, [{ ...mrow({}), problems: 5 }, { ...mrow({}), problems: 10 }]).perGame).toBeCloseTo(1.5);
     expect(estimate(parseJob("yardstick --ref strong --label x --est 0.3", 1), [row({})], "svwb-docker", 28).perGame).toBe(0.3);
   });
 
@@ -158,6 +171,17 @@ let count, first, a, b;
 if (kind === "compare") { count = Number(argv[1]); a = JSON.parse(argv[2]); b = JSON.parse(argv[3]); first = Number(argv[4]); }
 else if (kind === "yardstick") { count = Number(flag("--games")); first = Number(flag("--start")); a = JSON.parse(flag("--opts")); b = flag("--ref"); }
 else if (kind === "profile") { fs.writeFileSync(flag("--json"), "{}"); fs.writeFileSync(flag("--report"), "# 速さ"); process.exit(0); }
+else if (kind === "misses") {
+  const trials = Number(flag("--trials"));
+  if (trials === 0) process.exit(0);
+  if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, shellLine(argv) + "\\n");
+  const row = { v: 1, kind, date: "2026-11-11", at: "2026-11-11T00:00:00Z", commit: process.env.SVWB_COMMIT, branch: process.env.SVWB_BRANCH,
+    label: flag("--label"), a: JSON.parse(flag("--opts")), problems: 2, set: "abcd1234", trials, seed: Number(flag("--seed")), n: 2 * trials, passes: trials,
+    rate: 0.5, se: 0.01, perProblem: { a: [trials, trials], b: [0, trials] }, seconds: trials / 10,
+    threads: Number(process.env.THREADS), machine: process.env.SVWB_MACHINE, cmd: shellLine(argv) };
+  fs.appendFileSync(process.env.SVWB_LEDGER, JSON.stringify(row) + "\\n");
+  process.exit(0);
+}
 if (count === 0) process.exit(0);
 if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, shellLine(argv) + "\\n");
 if (String(first) === process.env.FAKE_FAIL) { console.error("わざと失敗"); process.exit(3); }
@@ -191,10 +215,16 @@ describe("区切って回す（偽物の svwb で）", () => {
     fakeLog = join(tmp, "calls.log");
     process.env.FAKE_LOG = fakeLog;
     jobs = join(tmp, "jobs.txt");
-    // 1 試合 0.5 秒・1 区切り 1 分 → compare 150 組は 50 組ずつ 3 区切り。物差しは 1 区切り
+    // 1 試合 0.5 秒・1 区切り 1 分 → compare 150 組は 50 組ずつ 3 区切り。物差し・速さ・見落とし問題集は 1 区切り
     writeFileSync(
       jobs,
-      ["# 試す", "compare 150 '{}' '{\"beamWidth\":8}' 0 --label 幅 --est 0.5", "yardstick --ref classic --games 40 --start 10 --label 弱 --est 0.5", "profile --games 2"].join("\n"),
+      [
+        "# 試す",
+        "compare 150 '{}' '{\"beamWidth\":8}' 0 --label 幅 --est 0.5",
+        "yardstick --ref classic --games 40 --start 10 --label 弱 --est 0.5",
+        "profile --games 2",
+        "misses --trials 4 --label 問題集 --est 0.5",
+      ].join("\n"),
     );
     vi.spyOn(console, "log").mockImplementation(() => {});
   });
@@ -214,8 +244,9 @@ describe("区切って回す（偽物の svwb で）", () => {
 
   it("全部の区切りを回し、finish がジョブごとに 1 行にまとめて台帳に足す（2 回目は足さない）", async () => {
     expect(await start("--foreground")).toBe(0);
-    expect(done()).toEqual(["1-1", "1-2", "1-3", "2-1", "3-1"]);
-    expect(calls()).toHaveLength(4);
+    expect(done()).toEqual(["1-1", "1-2", "1-3", "2-1", "3-1", "4-1"]);
+    expect(calls()).toHaveLength(5);
+    expect(calls()[4]).toBe(`misses run --opts '{}' --trials 4 --seed 1 --label '問題集'`);
     expect(readStatus(dir())).toMatchObject({ state: "done" });
     expect(existsSync(join(dir(), "speed-3.md"))).toBe(true);
     const target = join(tmp, "ledger.jsonl");
@@ -229,21 +260,24 @@ describe("区切って回す（偽物の svwb で）", () => {
     expect(rows[0]?.cmd).toBe(`compare 150 '{}' '{"beamWidth":8}' 0 --label '幅'`);
     expect(rows[1]?.seKind).toBe("binomial");
     expect(rows[0]?.threads).toBe(2);
+    const misses = parseLedger(readFileSync(target, "utf8")).misses as (MissesRow & { queue: string; chunks: number })[];
+    expect(misses.map((r) => [r.label, r.trials, r.rate, r.queue, r.chunks])).toEqual([["問題集", 4, 0.5, "n1", 1]]);
     expect(await main(["finish", "n1", "--root", root, "--ledger", target])).toBe(0);
     expect(parseLedger(readFileSync(target, "utf8")).runs).toHaveLength(2);
+    expect(parseLedger(readFileSync(target, "utf8")).misses).toHaveLength(1);
   });
 
   it("失敗した区切りの後はそのジョブを飛ばし、resume で続きから回す", async () => {
     process.env.FAKE_FAIL = "50";
     expect(await start("--foreground")).toBe(1);
-    expect(done()).toEqual(["1-1", "2-1", "3-1"]);
+    expect(done()).toEqual(["1-1", "2-1", "3-1", "4-1"]);
     expect(readFileSync(join(dir(), "failed.json"), "utf8")).toContain("1-2");
     delete process.env.FAKE_FAIL;
     const before = calls().length;
     expect(await resume()).toBe(0);
     // 済んだ区切りは回さない
     expect(calls().slice(before).map((c) => c.split(" ").slice(0, 5).join(" "))).toEqual(["compare 50 '{}' '{\"beamWidth\":8}' 50", "compare 50 '{}' '{\"beamWidth\":8}' 100"]);
-    expect(done()).toEqual(["1-1", "1-2", "1-3", "2-1", "3-1"]);
+    expect(done()).toEqual(["1-1", "1-2", "1-3", "2-1", "3-1", "4-1"]);
   });
 
   it("台帳に行があって印が無い区切り（行を書いた直後に電源が切れた）は回さない", async () => {
@@ -262,7 +296,7 @@ describe("区切って回す（偽物の svwb で）", () => {
     expect(readStatus(dir())?.reason).toMatch(/手で止めた/);
     // resume は STOP を消して続きから
     expect(await resume()).toBe(0);
-    expect(done()).toEqual(["1-1", "1-2", "1-3", "2-1", "3-1"]);
+    expect(done()).toEqual(["1-1", "1-2", "1-3", "2-1", "3-1", "4-1"]);
   });
 
   it("止める時刻までに終わらない区切りは始めない", async () => {
@@ -289,6 +323,6 @@ describe("区切って回す（偽物の svwb で）", () => {
     expect(parseLedger(readFileSync(join(dir(), "ledger.jsonl"), "utf8")).runs).toHaveLength(1);
     delete process.env.FAKE_HANG;
     expect(await resume()).toBe(0);
-    expect(done()).toEqual(["1-1", "1-2", "1-3", "2-1", "3-1"]);
+    expect(done()).toEqual(["1-1", "1-2", "1-3", "2-1", "3-1", "4-1"]);
   });
 });
