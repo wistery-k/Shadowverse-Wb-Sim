@@ -231,42 +231,6 @@ fn fusion_at_hand_limit_is_kept() {
 }
 
 #[test]
-fn fusion_adding_destroy_kind_is_kept_with_keep_set() {
-    // PP 1 では α（コスト 5）を出せない。手札に β があるので、キャッスルにフューチャーで α を作ると α・β・γ の種類が増える（Ω の準備）。
-    // deferFuseKeepSet なら α を作る融合は回さず、なければ回す
-    let s = af_turn(
-        1,
-        &[
-            "キャッスルアーティファクト",
-            "フューチャー・コア",
-            "デストロイアーティファクトβ",
-        ],
-        &[],
-    );
-    let alpha = "デストロイアーティファクトα";
-    // keepSet は自分の評価の重みの手で作った評価で比べるので、重みを探索 AI の既定にして見る
-    // （S = 0 の補正が既定なら既定の weights は全部 0 で、keepSet は効かない）
-    let keep = candidates_with(
-        &s,
-        SearchOptions {
-            defer_fuse_keep_set: true,
-            weights: None,
-            policy_weights: None,
-            ..deferred()
-        },
-    );
-    assert!(
-        keep.iter().any(|(_, hand, _)| hand.contains(&alpha)),
-        "{keep:?}"
-    );
-    let plain = candidates(&s);
-    assert!(
-        plain.iter().all(|(_, hand, _)| !hand.contains(&alpha)),
-        "{plain:?}"
-    );
-}
-
-#[test]
 fn fusion_that_lets_ace_crest_draw_is_kept() {
     // 新たなる少女・エースのクレストは、ターン終了時に手札が 5 枚以下なら 1 枚引き、6 枚以上なら回復する。
     // 融合で手札を 6 枚から 5 枚にすれば引けるので、その融合は回さない（2026-10-29、ユーザーの指摘）

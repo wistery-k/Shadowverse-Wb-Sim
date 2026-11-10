@@ -1,22 +1,18 @@
 //! 設定の JSON（compare の A・B、rhino-compare の --opts）を探索 AI の設定にする。
 //!
 //! TypeScript 版と同じく、`"valueNet"` に学習した評価の補正のファイルを渡すと、重みをそのモデルの出発点にして補正を足す
-//! （scripts/valueNetOption.ts）。TypeScript 版とともに消した実験用の項目（exhaustive 等）は、既定の値のときだけ受け付ける。
+//! （scripts/valueNetOption.ts）。消した実験用の項目（TypeScript 版とともに消した exhaustive 等と、2026-11-10 に消した tree 等。
+//! docs/removed.md）は、既定の値（使わないときの値）のときだけ受け付ける。
 
 use crate::ai::aidata::{weights_from, AI_DATA_JSON};
-use crate::ai::beam_key::{BeamKey, BEAM_FEATURES, N_BEAM_FEATURES};
-use crate::ai::bounds::BoundsNet;
 use crate::ai::mulligan::OppMulligan;
 use crate::ai::potential::PotentialNet;
-use crate::ai::rhino::{rhino_pass_lethal, rhino_search_options, RHINO_POTENTIAL};
+use crate::ai::rhino::{rhino_search_options, RHINO_POTENTIAL};
 use crate::ai::search::{
-    DrawSplit, ExtraEval, MulliganMode, OpponentSearch, OwnNextSearch, RescoreAverage, RescoreRace,
-    RolloutWeights, ScoreTurnEnd, SearchOptions, TreeMode, TreeSearch, TwoTurnGate,
+    DrawSplit, ExtraEval, MulliganMode, OpponentSearch, RescoreRace, RolloutWeights, SearchOptions,
     DEFAULT_RESCORE_RACE,
 };
-use crate::ai::upper::UpperTable;
 use crate::ai::valuenet::ValueNet;
-use crate::data::ClassId;
 use crate::json::Json;
 use std::sync::{Arc, OnceLock};
 
@@ -112,104 +108,50 @@ fn flag(k: &str, v: &Json) -> Result<bool, String> {
     }
 }
 
-/// tree（自分のターンの木の探索。ai/search/tree.rs）: null か
-/// {"mode":"a0"|"bstar"|"mcts","budget":2000,"upper":"表.json","upperScale":1,"upperMin":0,"k":4,"eps":0,"stop":true,"c":1,"temp":5,
-/// "lazy":"下限と上限のネットワーク.json"}
-fn tree_search(v: &Json) -> Result<Option<TreeSearch>, String> {
-    let fields = match v {
-        Json::Null => return Ok(None),
-        Json::Obj(fields) => fields,
-        _ => {
-            return Err(format!(
-                "\"tree\" は null かオブジェクト: {}",
-                v.stringify()
-            ))
-        }
-    };
-    const KEYS: [&str; 11] = [
-        "lazy",
-        "mode",
-        "budget",
-        "upper",
-        "upperScale",
-        "upperMin",
-        "k",
-        "eps",
-        "stop",
-        "c",
-        "temp",
-    ];
-    if let Some((k, _)) = fields.iter().find(|(k, _)| !KEYS.contains(&k.as_str())) {
-        return Err(format!("tree の知らない項目: {k}"));
-    }
-    let mut t = TreeSearch::default();
-    for (k, x) in fields {
-        let name = format!("tree.{k}");
-        match k.as_str() {
-            "mode" => {
-                t.mode = match x {
-                    Json::Str(m) => TreeMode::from_name(m)
-                        .ok_or_else(|| format!("tree.mode は a0・bstar・mcts: {m}"))?,
-                    _ => return Err("tree.mode は a0・bstar・mcts".into()),
-                }
-            }
-            "budget" => t.budget = count(&name, x)?,
-            "upper" => {
-                t.upper = match x {
-                    Json::Null => None,
-                    Json::Str(path) => Some(Arc::new(UpperTable::load(path)?)),
-                    _ => return Err("tree.upper は伸びしろの表のファイルの場所か null".into()),
-                }
-            }
-            "upperScale" => t.upper_scale = number(&name, x)?,
-            "upperMin" => t.upper_min = number(&name, x)?,
-            "k" => t.top_k = count(&name, x)?,
-            "eps" => t.eps = number(&name, x)?,
-            "stop" => t.stop = flag(&name, x)?,
-            "c" => t.c_puct = number(&name, x)?,
-            "temp" => t.temp = number(&name, x)?,
-            "lazy" => {
-                t.lazy = match x {
-                    Json::Null => None,
-                    Json::Str(path) => Some(Arc::new(BoundsNet::load(path)?)),
-                    _ => {
-                        return Err(
-                            "tree.lazy は下限と上限のネットワークのファイルの場所か null".into(),
-                        )
-                    }
-                }
-            }
-            _ => unreachable!(),
-        }
-    }
-    if t.lazy.is_some() && t.mode != TreeMode::A0 {
-        return Err("tree.lazy は mode a0 でだけ使える".into());
-    }
-    Ok(Some(t))
-}
+/// 2026-11-10 に消した実験用の項目（docs/removed.md）と、使わないときの値。この値なら何もせず、ほかの値は受け付けない。
+/// nextLethalRange・passLethalWard・beamKey は使わないときの値が無い（書かなければ使わない）ので、書けば受け付けない
+const REMOVED: [(&str, &str); 24] = [
+    ("chainFuse", "false"),
+    ("deferFuseKeepSet", "false"),
+    ("fuseRoot", "false"),
+    ("scoreTurnEnd", "\"all\""),
+    ("nextLethal", "0"),
+    ("nextLethalRange", ""),
+    ("passLethal", "0"),
+    ("passLethalWard", ""),
+    ("beamPp", "0"),
+    ("beamKey", ""),
+    ("bestFirst", "0"),
+    ("tree", "null"),
+    ("potentialDrawSplit", "false"),
+    ("attackLater", "0"),
+    ("perPlan", "0"),
+    ("ownNext", "null"),
+    ("twoTurnGate", "null"),
+    ("lethalRead", "false"),
+    ("oppFuse", "false"),
+    ("dangerRescore", "0"),
+    ("rescoreAverage", "\"score\""),
+    ("reuseAgree", "false"),
+    ("resampleDraws", "false"),
+    ("drawFirst", "false"),
+];
 
-/// beamKey（項の名前から重みへのオブジェクト。ai/beam_key.rs の BEAM_FEATURES。書かない項は 0）
-fn beam_key(v: &Json) -> Result<BeamKey, String> {
-    let Json::Obj(items) = v else {
-        return Err(format!(
-            "\"beamKey\" は項の名前から重みへのオブジェクト: {}",
+/// 消した項目 k の値 v を確かめる（使わないときの値なら Ok）
+fn removed_option(k: &str, v: &Json) -> Result<(), String> {
+    match REMOVED.iter().find(|(name, _)| *name == k) {
+        Some((_, off)) if !off.is_empty() && v.stringify() == *off => Ok(()),
+        Some((_, off)) if !off.is_empty() => Err(format!(
+            "\"{k}\" は消した実験用の項目です（docs/removed.md）。使わないときの値 {off} だけを受け付けます: {}",
             v.stringify()
-        ));
-    };
-    let mut w = [0.0; N_BEAM_FEATURES];
-    for (k, x) in items {
-        let i = BEAM_FEATURES.iter().position(|f| f == k).ok_or_else(|| {
-            format!(
-                "\"beamKey\" の項は {} のどれか: {k}",
-                BEAM_FEATURES.join("・")
-            )
-        })?;
-        w[i] = number(k, x)?;
+        )),
+        _ => Err(format!(
+            "\"{k}\" は消した実験用の項目です（docs/removed.md）"
+        )),
     }
-    Ok(BeamKey(w))
 }
 
-/// カード名の配列（mulliganKeep・mulliganReturn）
+/// カード名の配列（mulliganKeep・mulliganReturn）/// カード名の配列（mulliganKeep・mulliganReturn）
 fn card_names(k: &str, v: &Json) -> Result<Vec<crate::data::CardIdx>, String> {
     let Json::Arr(xs) = v else {
         return Err(format!("\"{k}\" はカード名の配列: {}", v.stringify()));
@@ -258,26 +200,12 @@ pub fn search_options(
             "planCandidates" => o.plan_candidates = count(k, v)?,
             "perFirst" => o.per_first = count(k, v)?,
             "oppHandSamples" => o.opp_hand_samples = count(k, v)?,
-            "dangerRescore" => o.danger_rescore = count(k, v)?,
             "rescoreMix" => {
                 let x = number(k, v)?;
                 if !(0.0..=1.0).contains(&x) {
                     return Err(format!("\"rescoreMix\" は 0 以上 1 以下: {x}"));
                 }
                 o.rescore_mix = x;
-            }
-            "rescoreAverage" => {
-                o.rescore_average = match v {
-                    Json::Str(s) if s == "score" => RescoreAverage::Score,
-                    Json::Str(s) if s == "winProb" => RescoreAverage::WinProb,
-                    Json::Str(s) if s == "decidedWinProb" => RescoreAverage::DecidedWinProb,
-                    _ => {
-                        return Err(format!(
-                            "\"rescoreAverage\" は score / winProb / decidedWinProb: {}",
-                            v.stringify()
-                        ))
-                    }
-                }
             }
             "rescoreRace" => {
                 o.rescore_race = match v {
@@ -364,34 +292,19 @@ pub fn search_options(
             "dedup" => o.dedup = flag(k, v)?,
             "sameHandOnce" => o.same_hand_once = flag(k, v)?,
             "chain" => o.chain = flag(k, v)?,
-            "chainFuse" => o.chain_fuse = flag(k, v)?,
             "deferFuse" => o.defer_fuse = flag(k, v)?,
-            "deferFuseKeepSet" => o.defer_fuse_keep_set = flag(k, v)?,
             "deferFuseHand" => o.defer_fuse_hand = count(k, v)?,
             "deferFuseLastWords" => o.defer_fuse_last_words = flag(k, v)?,
             "fuseMinimal" => o.fuse_minimal = flag(k, v)?,
-            "fuseRoot" => o.fuse_root = flag(k, v)?,
             "settleTrades" => o.settle_trades = flag(k, v)?,
             "dominance" => o.dominance = flag(k, v)?,
             "reusePlan" => o.reuse_plan = flag(k, v)?,
             "peekOppHand" => o.peek_opp_hand = flag(k, v)?,
-            "lethalRead" => o.lethal_read = flag(k, v)?,
-            "oppFuse" => o.opp_fuse = flag(k, v)?,
             "oppHandCommon" => o.opp_hand_common = flag(k, v)?,
             "readOwnDeckApart" => o.read_own_deck_apart = flag(k, v)?,
-            "reuseAgree" => o.reuse_agree = flag(k, v)?,
-            "resampleDraws" => o.resample_draws = flag(k, v)?,
-            "drawFirst" => o.draw_first = flag(k, v)?,
-            "nextLethal" => o.next_lethal = number(k, v)?,
             "lethalWardBlocked" => o.lethal_ward_blocked = number(k, v)?,
             "lethalExpandChoices" => o.lethal_expand_choices = flag(k, v)?,
             "lethalExactStates" => o.lethal_exact_states = number(k, v)? as i64,
-            "nextLethalRange" => o.next_lethal_range = Some(number(k, v)?),
-            "passLethal" => o.pass_lethal = count(k, v)?,
-            "beamPp" => o.beam_pp = number(k, v)?,
-            "beamKey" => o.beam_key = Some(beam_key(v)?),
-            "bestFirst" => o.best_first = count(k, v)?,
-            "tree" => o.tree = tree_search(v)?,
             "potentialNet" => {
                 o.potential = match v {
                     Json::Str(path) => Some(Arc::new(PotentialNet::load(path)?)),
@@ -405,22 +318,6 @@ pub fn search_options(
                 };
             }
             "potentialWeight" => o.potential_weight = number(k, v)?,
-            "potentialDrawSplit" => o.potential_draw_split = flag(k, v)?,
-            "attackLater" => o.attack_later = count(k, v)?,
-            "perPlan" => o.per_plan = count(k, v)?,
-            "scoreTurnEnd" => {
-                o.score_turn_end = match v {
-                    Json::Str(s) if s == "none" => ScoreTurnEnd::None,
-                    Json::Str(s) if s == "terminal" => ScoreTurnEnd::Terminal,
-                    Json::Str(s) if s == "all" => ScoreTurnEnd::All,
-                    _ => {
-                        return Err(format!(
-                            "\"scoreTurnEnd\" は none / terminal / all: {}",
-                            v.stringify()
-                        ))
-                    }
-                }
-            }
             "mulligan" => {
                 o.mulligan = match v {
                     Json::Str(s) if s == "model" => MulliganMode::Model,
@@ -472,42 +369,6 @@ pub fn search_options(
                     }
                 }
             }
-            "ownNext" => {
-                o.own_next = match v {
-                    Json::Null => None,
-                    Json::Obj(_) => Some(OwnNextSearch {
-                        beam_width: count(
-                            "ownNext.beamWidth",
-                            v.get("beamWidth")
-                                .ok_or("\"ownNext\" には beamWidth を書きます")?,
-                        )?,
-                        max_depth: match v.get("maxDepth") {
-                            None => 8,
-                            Some(x) => count("ownNext.maxDepth", x)?,
-                        },
-                        mix: match v.get("mix") {
-                            None => 1.0,
-                            Some(Json::Num(x)) if (0.0..=1.0).contains(x) => *x,
-                            Some(x) => {
-                                return Err(format!(
-                                    "\"ownNext.mix\" は 0〜1 の数: {}",
-                                    x.stringify()
-                                ))
-                            }
-                        },
-                        reply: match v.get("reply") {
-                            None => false,
-                            Some(x) => flag("ownNext.reply", x)?,
-                        },
-                    }),
-                    _ => {
-                        return Err(format!(
-                            "\"ownNext\" は null かオブジェクト: {}",
-                            v.stringify()
-                        ))
-                    }
-                }
-            }
             "drawSplit" => {
                 o.draw_split = match v {
                     Json::Null => None,
@@ -526,6 +387,15 @@ pub fn search_options(
                         {
                             return Err(format!("drawSplit の知らない項目: {k}"));
                         }
+                        // 消した項目（docs/removed.md）は使わないときの値だけを受け付ける
+                        for (name, off) in [("stratify", Json::Bool(false)), ("class", Json::Null)]
+                        {
+                            if v.get(name).is_some_and(|x| *x != off) {
+                                return Err(format!(
+                                    "drawSplit.{name} は消した実験用の項目です（docs/removed.md）"
+                                ));
+                            }
+                        }
                         let opt = |name: &str, def: usize| -> Result<usize, String> {
                             match v.get(name) {
                                 None => Ok(def),
@@ -537,63 +407,15 @@ pub fn search_options(
                             beam_width: opt("beamWidth", 128)?,
                             max_depth: opt("maxDepth", 16)?,
                             root_draws: opt("rootDraws", 2)?,
-                            stratify: match v.get("stratify") {
-                                None => false,
-                                Some(x) => flag("drawSplit.stratify", x)?,
-                            },
                             enumerate: match v.get("enumerate") {
                                 None => false,
                                 Some(x) => flag("drawSplit.enumerate", x)?,
-                            },
-                            class: match v.get("class") {
-                                None | Some(Json::Null) => None,
-                                Some(Json::Str(name)) => Some(
-                                    ClassId::ALL
-                                        .into_iter()
-                                        .find(|c| c.name() == name)
-                                        .ok_or_else(|| {
-                                            format!("drawSplit.class が違います: {name}")
-                                        })?,
-                                ),
-                                Some(x) => {
-                                    return Err(format!(
-                                        "drawSplit.class はクラスの名前（\"witch\" 等）: {}",
-                                        x.stringify()
-                                    ))
-                                }
                             },
                         })
                     }
                     _ => {
                         return Err(format!(
                             "\"drawSplit\" は null かオブジェクト: {}",
-                            v.stringify()
-                        ))
-                    }
-                }
-            }
-            "twoTurnGate" => {
-                o.two_turn_gate = match v {
-                    Json::Null => None,
-                    Json::Obj(_) => Some(TwoTurnGate {
-                        beam_width: match v.get("beamWidth") {
-                            None => 16,
-                            Some(x) => count("twoTurnGate.beamWidth", x)?,
-                        },
-                        max_depth: match v.get("maxDepth") {
-                            None => 8,
-                            Some(x) => count("twoTurnGate.maxDepth", x)?,
-                        },
-                        threshold: number(
-                            "twoTurnGate.threshold",
-                            v.get("threshold").ok_or(
-                                "\"twoTurnGate\" には threshold（勝率の差、ポイント）を書きます",
-                            )?,
-                        )?,
-                    }),
-                    _ => {
-                        return Err(format!(
-                            "\"twoTurnGate\" は null かオブジェクト: {}",
                             v.stringify()
                         ))
                     }
@@ -640,6 +462,8 @@ pub fn search_options(
                     "\"{k}\" は未対応です（TypeScript 版とともに消した実験用の項目）"
                 ))
             }
+            // 2026-11-10 に消した実験用の項目（使わないときの値なら何もしない）
+            _ if REMOVED.iter().any(|(name, _)| *name == k) => removed_option(k, v)?,
             _ => return Err(format!("未知の設定の項目: \"{k}\"")),
         }
     }
@@ -747,16 +571,12 @@ pub fn rhino_options(
             ))
         }
     };
-    let mut search = search_options(
+    let search = search_options(
         raw,
         model,
         rhino_search_options(potential, learned.clone()),
-        &["potential", "extraEval", "passLethalWard"],
+        &["potential", "extraEval"],
     )?;
-    // passLethal で選ぶ終局面に、守護への見積もりのダメージがこの値以上あることを求める
-    if let Some(v) = raw.get("passLethalWard") {
-        search.pass_lethal_search = Some(rhino_pass_lethal(number("passLethalWard", v)? as i32));
-    }
     // 補正を替えた・外したときは、エルフの手番と同じ評価の重みにする（既定の補正の出発点の重みは使わない）
     let plain = match raw.get("extraEval") {
         None => SearchOptions {
@@ -803,29 +623,33 @@ mod tests {
             0.25
         );
         assert!(compare_options(r#"{"rescoreMix":1.5}"#).is_err());
-        use crate::ai::search::RescoreAverage;
-        assert_eq!(
-            compare_options("{}").unwrap().rescore_average,
-            RescoreAverage::Score
-        );
-        for (name, want) in [
-            ("score", RescoreAverage::Score),
-            ("winProb", RescoreAverage::WinProb),
-            ("decidedWinProb", RescoreAverage::DecidedWinProb),
+        // 消した実験用の項目は、使わないときの値だけを受け付ける
+        for ok in [
+            r#"{"rescoreAverage":"score","tree":null,"nextLethal":0,"scoreTurnEnd":"all"}"#,
+            r#"{"drawSplit":{"stratify":false,"class":null}}"#,
         ] {
-            let raw = format!(r#"{{"rescoreAverage":"{name}"}}"#);
-            assert_eq!(compare_options(&raw).unwrap().rescore_average, want);
+            assert!(compare_options(ok).is_ok(), "{ok}");
         }
-        assert!(compare_options(r#"{"rescoreAverage":"mean"}"#).is_err());
+        for ng in [
+            r#"{"rescoreAverage":"winProb"}"#,
+            r#"{"tree":{"mode":"a0"}}"#,
+            r#"{"nextLethal":10}"#,
+            r#"{"beamKey":{}}"#,
+            r#"{"drawSplit":{"stratify":true}}"#,
+        ] {
+            assert!(compare_options(ng).is_err(), "{ng}");
+        }
         assert!(compare_options(r#"{"exhaustive":{"untilTurn":5,"maxStates":100}}"#).is_err());
         assert!(compare_options(r#"{"exhaustive":null,"valueNet":false}"#)
             .unwrap()
             .extra_eval
             .is_none());
-        let (raw, _) = rhino_compare_options(r#"{"potential":0,"nextLethal":10}"#).unwrap();
-        assert_eq!(raw.stringify(), r#"{"potential":0,"nextLethal":10}"#);
+        let (raw, _) = rhino_compare_options(r#"{"potential":0,"perFirst":3}"#).unwrap();
+        assert_eq!(raw.stringify(), r#"{"potential":0,"perFirst":3}"#);
         let (search, plain) = rhino_options(&raw, None).unwrap();
-        assert_eq!(search.next_lethal, 10.0);
+        assert_eq!(search.per_first, 3);
         assert!(!search.lethal && search.extra_eval.is_some() && plain.extra_eval.is_some());
+        let (raw, _) = rhino_compare_options(r#"{"passLethalWard":2}"#).unwrap();
+        assert!(rhino_options(&raw, None).is_err());
     }
 }

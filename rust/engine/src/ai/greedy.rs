@@ -38,38 +38,13 @@ fn value_after_extra_pp(s: &GameState, p: PlayerIndex, w: &EvalWeights) -> f64 {
     best
 }
 
-fn value_after_fuse(s: &GameState, a: &Action, p: PlayerIndex, w: &EvalWeights) -> f64 {
-    let own = value_after(s, a, p, w, 0);
-    let Some(next) = try_apply_action(s, a) else {
-        return own;
-    };
-    if next.phase == Phase::Ended || next.pending.is_some() || next.active != p {
-        return own;
-    }
-    let mut best = own;
-    for b in legal_actions(&next) {
-        if matches!(b, Action::EndTurn | Action::ExtraPp | Action::Fuse { .. }) {
-            continue;
-        }
-        best = best.max(value_after(&next, &b, p, w, 0));
-    }
-    best
-}
-
-fn best_action(
-    s: &GameState,
-    legal: &[Action],
-    p: PlayerIndex,
-    w: &EvalWeights,
-    fuse_follow_up: bool,
-) -> Action {
+fn best_action(s: &GameState, legal: &[Action], p: PlayerIndex, w: &EvalWeights) -> Action {
     let mut best: Option<&Action> = None;
     let mut best_value = f64::NEG_INFINITY;
     for a in legal {
         let value = match a {
             Action::EndTurn => continue,
             Action::ExtraPp => value_after_extra_pp(s, p, w),
-            Action::Fuse { .. } if fuse_follow_up => value_after_fuse(s, a, p, w),
             _ => value_after(s, a, p, w, 0),
         };
         if value > best_value {
@@ -115,7 +90,6 @@ pub fn choose_greedy(
     rng: &mut Rng,
     omniscient: bool,
     w: &EvalWeights,
-    fuse_follow_up: bool,
 ) -> Action {
     let _p = crate::prof::scope(crate::prof::Sec::Greedy);
     let first = &legal[0];
@@ -146,26 +120,18 @@ pub fn choose_greedy(
         }
         return best.clone();
     }
-    best_action(s, legal, p, w, fuse_follow_up)
+    best_action(s, legal, p, w)
 }
 
 /// 貪欲法の AI。omniscient は探索の中で相手の手番を進めるとき用（見えない情報を使う）
 pub struct GreedyAgent {
     pub omniscient: bool,
     pub weights: EvalWeights,
-    pub fuse_follow_up: bool,
 }
 
 impl Agent for GreedyAgent {
     fn choose_action(&mut self, state: &GameState, legal: &[Action], rng: &mut Rng) -> Action {
-        choose_greedy(
-            state,
-            legal,
-            rng,
-            self.omniscient,
-            &self.weights,
-            self.fuse_follow_up,
-        )
+        choose_greedy(state, legal, rng, self.omniscient, &self.weights)
     }
 }
 
@@ -196,6 +162,6 @@ impl Agent for TunedGreedyAgent {
                 self.weights.len() - 1
             }
         };
-        choose_greedy(state, legal, rng, false, &self.weights[i].1, false)
+        choose_greedy(state, legal, rng, false, &self.weights[i].1)
     }
 }

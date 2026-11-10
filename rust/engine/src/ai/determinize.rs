@@ -1,6 +1,5 @@
 //! 情報集合の determinization（src/ai/determinize.ts）。視点のプレイヤーから見て矛盾しない「ありうる局面」を作る。
 
-use super::hand_read::HandReading;
 use super::Rng;
 use crate::data::CardIdx;
 use crate::state::*;
@@ -55,23 +54,10 @@ pub fn determinize(
     rng: &mut Rng,
     peek_opp_hand: bool,
 ) -> GameState {
-    determinize_read(state, viewer, rng, peek_opp_hand, None)
-}
-
-/// determinize と同じ。reading があれば、その枠（相手の伏せた手札の iid）には外したカード以外を配る
-/// （lethalRead。ai/hand_read.rs。外すカードの多い枠から、並べ直した候補のうち外さない最初のカードを取り、残りを並べ直して、ほかの伏せた枠と山札に配る）。
-/// reading が None なら determinize と同じ局面・同じ乱数の使い方
-pub fn determinize_read(
-    state: &GameState,
-    viewer: PlayerIndex,
-    rng: &mut Rng,
-    peek_opp_hand: bool,
-    reading: Option<&HandReading>,
-) -> GameState {
     let _p = crate::prof::scope(crate::prof::Sec::Determinize);
     let mut s = state.clone();
     rng.shuffle(s.players[viewer].deck.make_mut());
-    redeal_hidden(&mut s, viewer, rng, peek_opp_hand, reading);
+    redeal_hidden(&mut s, viewer, rng, peek_opp_hand);
     s
 }
 
@@ -79,30 +65,23 @@ pub fn determinize_read(
 /// 最初に rng から 1 つ取った種で viewer の山札を並べ直し、相手の分と局面の乱数は rng の続きで作る。
 /// rng の進み方が viewer の山札の枚数によらないので、同じ種なら、山札の枚数が違う局面どうし（引いた手と引かない手の終局面）でも
 /// 相手の手札・山札と局面の乱数が同じになる（determinize は viewer の山札を先に並べ直すので、枚数が 1 枚違うと相手の手札が全部変わる。
-/// docs/ai-notes.md「錬金釜を置くと点数が下がる理由」）。reading は determinize_read と同じ
+/// docs/ai-notes.md「錬金釜を置くと点数が下がる理由」）
 pub fn determinize_apart(
     state: &GameState,
     viewer: PlayerIndex,
     rng: &mut Rng,
     peek_opp_hand: bool,
-    reading: Option<&HandReading>,
 ) -> GameState {
     let _p = crate::prof::scope(crate::prof::Sec::Determinize);
     let own = rng.int(u32::MAX as usize) as u32;
     let mut s = state.clone();
-    redeal_hidden(&mut s, viewer, rng, peek_opp_hand, reading);
+    redeal_hidden(&mut s, viewer, rng, peek_opp_hand);
     Rng::new(own).shuffle(s.players[viewer].deck.make_mut());
     s
 }
 
 /// 相手の伏せた手札・山札の中身と順番、相手が捨てたカード、局面の乱数を rng で作り直す（determinize の viewer の山札の後の部分）
-fn redeal_hidden(
-    s: &mut GameState,
-    viewer: PlayerIndex,
-    rng: &mut Rng,
-    peek_opp_hand: bool,
-    reading: Option<&HandReading>,
-) {
+fn redeal_hidden(s: &mut GameState, viewer: PlayerIndex, rng: &mut Rng, peek_opp_hand: bool) {
     let o = opponent(viewer);
     let hidden: Vec<usize> = if peek_opp_hand {
         Vec::new()
@@ -126,26 +105,6 @@ fn redeal_hidden(
         let Some(hint) = &h.drawn_by else { continue };
         if let Some(idx) = pool.iter().position(|&c| matches_hint(c, hint)) {
             assigned.push((h.iid, pool.remove(idx)));
-        }
-    }
-    if let Some(rd) = reading {
-        let mut skipped = false;
-        for (iid, ex) in &rd.excluded {
-            if assigned.iter().any(|(x, _)| x == iid)
-                || !hidden.iter().any(|&i| opp.hand[i].iid == *iid)
-            {
-                continue;
-            }
-            if let Some(idx) = pool.iter().position(|c| !ex.contains(c)) {
-                assigned.push((*iid, pool.remove(idx)));
-                skipped |= idx > 0;
-            }
-        }
-        // 飛ばしたカード（外したカード）は候補の前のほうに残るので、並べ直す。並べ直さないと、外したカードが
-        // ほかの伏せた枠や山札の一番上に寄る（相手が次に引くカードになりやすい）。飛ばさなかったときは、
-        // 残りはそのままで偏らず、読みが無いときと同じ配り方になる
-        if skipped {
-            rng.shuffle(&mut pool);
         }
     }
     let mut k = 0;
