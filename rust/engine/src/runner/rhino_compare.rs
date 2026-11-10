@@ -9,17 +9,13 @@
 //! --record を付けると、試合ごとに npm run game の --json と同じ形（seed・agents・decks・winner・actions）を
 //! <ディレクトリ>/<相手デッキ>-g<g>-s<席>.json に書く（npm run think-at・npm run diverge で調べる）
 
-use super::deep_gap::{describe, multiset_minus, steps_of, used_of};
 use super::options::{rhino_compare_options, rhino_options, search_options};
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
 use crate::ai::exact_lethal::exact_lethal_counts;
 use crate::ai::registry::search_classic_options;
 use crate::ai::rhino::RhinoAgent;
-use crate::ai::search::{
-    record_two_turn_gate, reset_two_turn_gate_counts, take_two_turn_gate_events,
-    two_turn_gate_counts, SearchAgent, SearchOptions,
-};
+use crate::ai::search::{SearchAgent, SearchOptions};
 use crate::ai::Agent;
 use crate::data::{data, Deck};
 use crate::game::{acting_player, legal_actions, try_apply_action};
@@ -85,10 +81,6 @@ struct Outcome {
     jeanne: u32,
     jeanne_tokens: u32,
     exact_found: u32,
-    /// twoTurnGate を確かめた回数と、手を変えた回数（使わない設定なら 0）
-    gate: (u32, u32),
-    /// twoTurnGate で手を変えた場面（局面の説明・今の 1 位の手・変えた先の手）
-    gate_events: Vec<Json>,
     /// 比べるデッキが打ったカードを引く手（自分の山札が減る手）の数と、そのうち後ドロー
     /// （そのターンの最初の局面でも打てたのに、ほかの手の後で打った）の数
     draws: (u32, u32),
@@ -223,8 +215,6 @@ fn play_one(
     let seed = seed_base + t.g * 13 + t.seat as u32;
     let mut a = agent.create();
     let mut o = SearchAgent::new(opp_options.clone());
-    reset_two_turn_gate_counts();
-    record_two_turn_gate(true);
     let decks = if t.seat == 0 {
         [&me.cards[..], &opp.cards[..]]
     } else {
@@ -374,46 +364,9 @@ fn play_one(
         jeanne,
         jeanne_tokens,
         exact_found: exact_lethal_counts().1,
-        gate: two_turn_gate_counts(),
-        gate_events: gate_events_json(subject.1, &t.deck, seat),
         draws,
         af,
     }
-}
-
-/// このスレッドで残した twoTurnGate の場面を JSON にする（me・opp_deck は比べるデッキ・相手のデッキの名前、seat は比べるデッキの席）
-fn gate_events_json(me: &str, opp_deck: &str, seat: usize) -> Vec<Json> {
-    let events = take_two_turn_gate_events();
-    record_two_turn_gate(false);
-    events
-        .iter()
-        .map(|e| {
-            let s = &*e.root;
-            let mut decks = [String::new(), String::new()];
-            decks[seat] = me.to_string();
-            decks[1 - seat] = opp_deck.to_string();
-            let strs = |v: Vec<String>| Json::Arr(v.into_iter().map(Json::Str).collect());
-            let used_a = used_of(s, &e.a.0);
-            let used_b = used_of(s, &e.b.0);
-            let side = |x: &(Vec<Action>, f64, f64), used: &[String]| {
-                Json::Obj(vec![
-                    ("steps".into(), strs(steps_of(s, &x.0, e.p))),
-                    ("used".into(), strs(used.to_vec())),
-                    ("value".into(), Json::Num((x.1 * 10.0).round() / 10.0)),
-                    ("two".into(), Json::Num((x.2 * 10.0).round() / 10.0)),
-                ])
-            };
-            Json::Obj(vec![
-                ("turn".into(), Json::Num(s.players[e.p].turn_count as f64)),
-                ("first".into(), Json::Bool(s.first == e.p)),
-                ("describe".into(), strs(describe(s, e.p, &decks))),
-                ("a".into(), side(&e.a, &used_a)),
-                ("b".into(), side(&e.b, &used_b)),
-                ("aOnly".into(), strs(multiset_minus(&used_a, &used_b))),
-                ("bOnly".into(), strs(multiset_minus(&used_b, &used_a))),
-            ])
-        })
-        .collect()
 }
 
 pub fn main(argv: &[String]) -> Result<(), String> {
@@ -616,16 +569,6 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         "カードを引く手 {drawn} 回、そのうち後ドロー（ターンの最初から打てたのに、ほかの手の後で打った） {late} 回（{}%）",
         fixed(late as f64 / drawn.max(1) as f64 * 100.0, 1)
     );
-    let gate_seen: u32 = results.iter().map(|r| r.gate.0).sum();
-    if gate_seen > 0 {
-        let changed: Vec<&Outcome> = results.iter().filter(|r| r.gate.1 > 0).collect();
-        println!(
-            "2 ターン読みで手を変えた回数 {}（確かめた {gate_seen}）、手を変えた試合 {}/{n}（そのうち勝ち {}）",
-            results.iter().map(|r| r.gate.1).sum::<u32>(),
-            changed.len(),
-            changed.iter().filter(|r| r.won).count()
-        );
-    }
     if let Some(given) = &given {
         let human_wins = given.iter().filter(|m| m.won == Some(true)).count();
         println!(
@@ -659,17 +602,6 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                 ("won".into(), Json::Bool(r.won)),
                 ("exactFound".into(), Json::Num(r.exact_found as f64)),
             ]);
-            let line = match line {
-                Json::Obj(mut v) if r.gate.0 > 0 => {
-                    v.push(("gateSeen".into(), Json::Num(r.gate.0 as f64)));
-                    v.push(("gateFired".into(), Json::Num(r.gate.1 as f64)));
-                    if !r.gate_events.is_empty() {
-                        v.push(("gateEvents".into(), Json::Arr(r.gate_events.clone())));
-                    }
-                    Json::Obj(v)
-                }
-                x => x,
-            };
             text.push_str(&line.stringify());
             text.push('\n');
         }

@@ -313,17 +313,11 @@ npm run svwb -- two-turn show [--only <局面>,…] [--sandbox <フォルダ>]
 npm run svwb -- two-turn run --out tt.jsonl [--only <局面>,…] [--m 64] [--reads 4] [--twos 2] [--nextBeam 256] [--seed 1] [--opts '<設定の JSON>']
 npm run svwb -- two-turn report tt.jsonl… [--only <局面>,…]
 npm run svwb -- two-turn trace --only <局面> --cand <候補> [--r 0] [--seed 1] [--opts '<設定の JSON>']
-npm run svwb -- draw-stability [--subject spellwitch] [--games 12] [--start 0] [--seeds 8] [--a '{}'] [--b '{"drawSplit":{}}']
-npm run svwb -- fuse-gap --dir <記録のディレクトリ> [--opts '<設定の JSON>'] [--out 結果.jsonl] [--show 10]
 npm run svwb -- defer-playout --dir <記録のディレクトリ> --opts '<回す版の設定>' [--cont '<設定>'] [--seeds 8] [--seedBase 0] [--out 結果.jsonl]
-npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth":4096,"potentialNet":null}'] [--variants '{"名前":{設定},…}'] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl] [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl] [--inputs 学習のデータ.jsonl] [--marks 250,500,…]
-npm run svwb -- tree-gap upper-fit --nodes 局面.jsonl[,…] --tau 0.9 --out 表.json [--min 30] [--gBins 5]
-npm run svwb -- tree-gap report --runs 結果.jsonl[,…] [--tsv 表.tsv]
-npm run svwb -- read-log --out 記録.jsonl [--games 49] [--start 0] [--opts '<設定の JSON>'] [--b 12] [--alt-opp '{"beamWidth":8,"maxDepth":8}']
-npm run svwb -- read-gap --out 記録.jsonl [--games 49] [--start 0] [--opts '<設定の JSON>'] [--samples 12] [--depths 1,2,3,4,5,6,7]
-npm run svwb -- lethal-read --out 記録.jsonl [--games 49] [--start 0] [--opts '<設定の JSON>'] [--decide]
-npm run svwb -- lethal-diff --out 記録.jsonl [--games 1600] [--start 0] [--opts '<設定の JSON>'] [--samples 6] [--playouts 64] [--replays リプレイ.jsonl]
+npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth":4096,"potentialNet":null}'] [--variants '{"名前":{設定},…}'] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl] [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl] [--inputs 学習のデータ.jsonl]
 ```
+
+draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・lethal-diff は 2026-11-10 に消した（docs/removed.md。戻し方もそこに書いてある）。
 
 - `mulligan-compare`: マリガンの設定 A と B を同じシードの試合で打ち比べる（7 デッキ × 相手 6 デッキ × 席 2 × `--games`）。相手は今の探索 AI。
   `'{}'` は今の既定（`turn1`・3 ターン）。2026-10-26 より前の既定の手札の形のモデルは `'{"mulligan":"model"}'`。
@@ -353,20 +347,12 @@ npm run svwb -- lethal-diff --out 記録.jsonl [--games 1600] [--start 0] [--opt
   Markdown で出す。どれも出力に済んだ試合・局面があれば飛ばす。各引数の意味は `rust/engine/src/runner/deep_gap.rs` の先頭。
   `report` の局面の中身は、`--only`（内訳の名前の一部。例: `ビームが届かない`）・`--skipDecks`（手番の側のデッキ）で絞れる。`--listOnly 1` はまとめを出さず、
   デッキごとに 1 行 1 局面の表（両方のターンで使ったものの違いつき）と各局面の中身だけを出す（一覧の例: 共有フォルダの `notes/beam-miss/beam-miss.md`）
-  クラウドで回すジョブは `cloud/jobs/deep-gap.sh`（`DANGER_CMP` を付けると `dangerRescore` と今の既定の compare も回す。docs/ai-notes.md「深い読みと食い違う局面を集める」）
+  クラウドで回すジョブは `cloud/jobs/deep-gap.sh`（docs/ai-notes.md「深い読みと食い違う局面を集める」）
 - `two-turn`: 2 ターン以上の計画が効きそうな、手で作った局面（`rust/engine/src/runner/two_turn.rs` の `SCENARIOS` に書いたものだけ。外から局面を入れる口はない）で、
   今の AI と計画の候補（最初の何手かを決める・カードを出さない 等を付けた AI）を打ち比べる。`show` は局面と候補、`run` は相手の手札・山札の決定化 `--m` 通りごとに全候補を打ち、
   AI の点数・読み直し・次の自分のターン末（幅 `--nextBeam`）・2 ターン読み・次のターンのリーサル・最後まで打った勝ち負けを 1 行ずつ追記する（済んだものは飛ばす）。
   `report` は今の AI との対の差を Markdown で出す。`trace` は 1 通りの候補のターンと、その後の試合を全部出す。`--opts` は候補のターンを打つ AI の設定（compare の設定と同じ形）。
   docs/ai-notes.md「2 ターン以上の計画が効きそうな局面を手で作って比べる」
-- `draw-stability`: 比べるデッキ（`--subject`。rhino-compare と同じ名前）と他の 6 デッキを今の既定の探索 AI どうしで打ち（rhino-compare と同じ組み方・シード）、
-  比べるデッキの各ターンの最初の局面を集める。各局面で設定 A・B の探索 AI に `--seeds` 通りの乱数で手を選ばせ、最も多く選ばれたものの割合（そろい方）と、全部同じだった局面の割合を、
-  最初の 1 手と、選んだ並びの最初に引く手・ランダムな手まで（引いた後の手は比べない。順番は問わない）について出す。最初の 1 手が引く手・ランダムな手を先に打つかどうかで割れた局面の割合と、
-  1 回考える時間も出す。カードを引く手を今打てる局面とそうでない局面に分ける（同じ局面での手のぶれ。docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）
-- `fuse-gap`: `rhino-compare --subject af --record <ディレクトリ>` で書いた試合を打ち直し、AFネメシスの側の自分のターンの最初の局面ごとに、手札の作ったカードを素材のコアに戻した局面を作る
-  （キャッスル → パスト 2 枚、アタック → フューチャー 2 枚、α → パスト 2 枚＋フューチャー、β・γ → パスト 2 枚＋フューチャー 2 枚。戻すと手札が上限を超える局面は飛ばす）。
-  元の局面と戻した局面を `--opts` の設定のビーム（相手のターンは読まない）で読み、見つかった並びの点数を比べる。融合は PP を使わないので、戻した局面の最大は元以上になるはずで、
-  戻した局面のほうが低ければ、コアを手札に残したことで探索が取りこぼした分。まとめと、差の大きい `--show` 局面の中身（両方の並び）を出す（docs/ai-notes.md「融合を回した局面で探索が取りこぼすか」）
 - `defer-playout`: 融合を回す版（`deferFuse`）で `rhino-compare --subject af --record <ディレクトリ>` で書いた試合を打ち直し、AFネメシスの側がターン終了を打った局面ごとに、
   `--opts` から `deferFuse` だけを外した AI に同じ局面から打たせる。ターン終了まで融合だけを打つなら、それが回した融合。「そのままターンを終える」と「その融合をしてから終える」を、
   同じ乱数（相手の手札・山札の並べ直しと AI の乱数）で `--seeds` 通り最後まで打ち、勝ち数を比べる。分かれ目の後は自分を `--cont`（既定は `--opts`）、相手を今の既定の探索 AI で打つ。
@@ -376,35 +362,12 @@ npm run svwb -- lethal-diff --out 記録.jsonl [--games 1600] [--start 0] [--opt
   基準の設定（`--ref`）と比べる設定（`--variants`。名前から設定へのオブジェクト）のビームを 1 回ずつ打つ（相手のターンは読まない）。設定ごとに、ターン末の点数の最大が基準より低い局面の割合・
   平均の差・最善の最初の手が違う割合・採点した局面の数・1 局面の時間・段をまたいで同じ局面の割合を、全部・基準の最善の並びに引く手やランダムな手が無い局面・デッキごとに出す
   （勝ち負けの点の付く局面は数えない）。`--sample k` なら、基準のビームが残した局面から局面ごとに k 個と最善の並びの途中の局面すべてを、そこでターンを終えた点数・その先で届いた最善・
-  伸びしろの項（`beamKey` の項）と一緒に `--nodes` に書く（`beamKey` の重みを決める用）。自己対戦は時間がかかるので、`--savePositions` で書いた局面を次から `--positions` で読める。
+  伸びしろの項（`rust/engine/src/ai/beam_key.rs`）と一緒に `--nodes` に書く。自己対戦は時間がかかるので、`--savePositions` で書いた局面を次から `--positions` で読める。
   基準のビームも時間がかかるので、同じ局面・同じ基準で前に書いた `--out` を `--refFrom` に渡すと、基準を打ち直さずにその結果を使う（`--sample` とは一緒に使えない）。
   `--inputs` なら、`--sample` で選んだ局面の見込みのネットワーク（`potentialNet`）の入力と、終えた点数・届いた最善を書く（学習のデータ）。
   設定は今の既定の上に重ねるので、2026-10-30 からは見込みが入る。見込みなしのビームは `"potentialNet":null` を書く（`--ref` の既定は見込みなしの幅 4096）
-  （docs/ai-notes.md「ターン途中の評価の見直し」）。`--out` の行には、設定ごとに最初の手ごとの最善（`firsts`）、木の探索（設定の `tree`）なら `--marks` の予算ごとの
-  途中の最善（`marks`）、その局面で今の既定のリーサル探索が勝ちを見つけるか（`lethal`）も書く。`--nodes` の行には、学習した見込みの値（`pot`）と、その局面から先へ広げられるか（`open`）も書く
-- `tree-gap`: 自分のターンの木の探索（設定の `tree`）を今のビームと比べる道具（2026-11-05。`rust/engine/src/runner/tree_gap.rs`）。
-  `upper-fit` は `beam-gap --sample k --nodes` の行から、伸びしろ（その先で届いた最善 − そこで終えた点数）の上側の `--tau` 分位点の表（`rust/engine/src/ai/upper.rs`）を作る
-  （手数・使える PP・攻撃できる数・進化できるか・見込みの値の組ごと。データが `--min` 個に足りない組は粗い組に落とす）。
-  `report` は同じ局面で打った `beam-gap --out` をいくつか合わせ、どの設定（と予算ごとの途中）でも見つかった最善の最大と比べて、読んだ局面の数・差の平均・3 点以上劣る割合・
-  上位 4 つの最初の手の差・最善の手が上位 4 手に入る割合・見逃したリーサルを、設定と予算ごと・デッキごと・ターンごとに出す（`--tsv` は図を描く用）。
-  段階 1 の計測一式は `cloud/jobs/tree-gap.sh`（docs/ai-notes.md「自分のターンの探索を B*・MCTS に」）
-- `read-log`: `profile` と同じ試合（両方の席が `--opts` の設定）を打ち、考え直すたびに、相手のターンまで読み直した終局面ごとの最初の手・ターン末の点数・選ぶときの値と、
-  相手の手札の引き直しごとの読みの点数を 1 行（JSON）ずつ書く。`--b` は、選ぶのに使ったのとは別の乱数の引き直しで読んだ点数（確かめ用の独立な読み）、
-  `--alt-opp` は、同じ引き直しを相手のターンのビームの設定を変えて読んだ点数も書く。記録のための読みは選ぶ値にも乱数にも使わないので、打つ手は記録しないときと同じ
-  （時間は 1.8 倍ほど）。読みを途中で打ち切る決まりを、試合を打たずに試す用（docs/ai-notes.md「読み直しの記録で、見込みのない候補を途中で打ち切る」）
-- `read-gap`: `read-log` と同じ試合を打ち、自分のターン終了を打つ直前の局面（本物のターン末）ごとに、ターン末の点数と、相手の手札を `--samples` 通り引き直して
-  （選ぶのとは別の乱数）相手のターンを読み直しと同じに読んだ記録を 1 行（JSON）ずつ書く。読みごとに、相手のビームが選んだ並びを 0 手（何もせずにターンを終える）・1 手・…・全部で
-  打ち切って自分の次のターンの最初まで進めた局面の点数（想像の局面と、楽観を直す入力を 0 にした自分のターンの最初）と局面の特徴、
-  `--depths` なら相手のビームの深さだけを変えて読んだ点数も書く。本物の次の自分のターンの最初の点数（`"type":"start"`）と試合の結果も書く。打つ手は変わらない。
-  ターン末の点数と読んだ点数の差が相手のターンのどこで生まれるかを測る用（docs/ai-notes.md「相手のターンの読みのギャップがどこで生まれるか」）
-- `lethal-read`: `read-log` と同じ試合を打ち、手番の側のターンの始めごとに、相手（見る側）から見て「伏せた手札をそのカード 1 枚にしたら、手番の側がそのターンに勝てる」カード
-  （`lethalRead` が決定化から外すカード。`rust/engine/src/ai/hand_read.rs`）を調べ、見つかれば、その枚数・本当の手札にあったか・そのターンに勝ったか・
-  見る側の次のターンの最初に外せる枠の数を 1 行（JSON）ずつ書く。`--decide` なら両方の席を `lethalRead` にして打ち、各ターンの最初の手番で読みが効いているとき、
-  読みなしの AI が選ぶ手・並びと比べた行も書く（行の項目は `lethal_read.rs` の先頭。docs/ai-notes.md「見逃したリーサルから相手の手札を絞る」）
-- `lethal-diff`: `compare -- <games> '{"lethalRead":true,...}' '{...}'` と同じ試合（鏡）を打ち直し、A の試合と B どうしの試合（lethalRead が無ければ打たれた試合）が
-  最初に食い違う手・AI の乱数が最初に食い違う手、読みが効いた A のターンの最初の手番ごとの手の分布（読みあり・読みなし・別の種の読みなしで `--samples` 回ずつ）を書き、
-  同じ種で読みありと読みなしの手が違った組を `--playouts` 回ずつ打ち比べる（手札・場は本当の局面のまま、山札の順番と局面の乱数を並べ直して最後まで打つ）。
-  `--replays` なら食い違う試合のリプレイを compare `--replays` と同じ形で書く（行の項目は `lethal_diff.rs` の先頭。docs/ai-notes.md「見逃したリーサルから相手の手札を絞る」）
+  （docs/ai-notes.md「ターン途中の評価の見直し」）。`--out` の行には、設定ごとに最初の手ごとの最善（`firsts`）と、
+  その局面で今の既定のリーサル探索が勝ちを見つけるか（`lethal`）も書く。`--nodes` の行には、学習した見込みの値（`pot`）と、その局面から先へ広げられるか（`open`）も書く
 
 ## td
 
@@ -437,22 +400,14 @@ npm run td -- eval --model a.json,b.json --data d.jsonl [--cards <カード名,�
 npm run svwb -- beam-gap --games 200 --variants '{"w32":{"beamWidth":32,"potentialNet":null}}' --sample 100 --inputs d1.jsonl --savePositions pos1.jsonl --out rows1.jsonl
 npm run potential -- train --data d1.jsonl[,d2.jsonl] --out model.json [--hidden 64] [--epochs 8] [--T 5] [--lr 0.001]
                        [--l2 0.000001] [--batch 256] [--scale 20] [--valid 160-199] [--seed 1]
-                       [--groups depth|position]
 npm run svwb -- beam-gap --positions pos1.jsonl --refFrom rows1.jsonl --variants '{"w32":{"beamWidth":32,"potentialNet":null},"w32p":{"beamWidth":32,"potentialNet":"model.json"}}'
-npm run potential -- bounds --data d1.jsonl[,d2.jsonl] --out model.json [--tau 0.95] [--hidden 64] [--epochs 8] [--lr 0.001]
-                       [--l2 0.000001] [--batch 256] [--scale 50] [--valid 1180-1199] [--seed 1]
 ```
 
 `beam-gap --sample k --inputs` は、基準のビーム（既定は幅 4096）が残した途中の局面を局面ごとに k 個（と最善の並びの途中の局面）選び、
 見込みのネットワークの入力・そこでターンを終えた点数・そこから届いた最善を書く。`train` は同じ局面・同じ手数の局面の組ごとに、
 「終えた点数 + 見込み」の順位が届いた最善の順位に合うように学ぶ（ListNet。`--T` は softmax の温度で点数の単位）。
-`--groups position` なら組を手数で分けず局面ごとにする（段を作らない探索 `bestFirst` 向けの試し。段のあるビームでは既定の `depth` がずっと良い）。
 `--valid` の範囲の試合（`game`）は学ばず、確かめの損失と「1 位の当たり」を出す。この 2 つは目安で、良し悪しは学びに使っていない試合の局面での
 `beam-gap`（`--positions` と `--refFrom` で基準のビームを打ち直さずに比べる）で決める。docs/ai-notes.md「ターン途中の見込みを学ぶ」
-
-`bounds` は同じデータから、木の探索の案 A'（設定の `tree.lazy`）が使う下限と上限のネットワーク（`rust/engine/src/ai/bounds.rs`）を学ぶ。
-そこで終えた点数の予想（2 乗誤差）と、伸びしろ max(0, 届いた最善 − 終えた点数) の `--tau` 分位点の予想（ピンボール損失）を、1 つの隠れ層から出す。
-確かめでは、終えた点数の予想の誤差と、伸びしろが予想以下の割合（`--tau` に近いはず）を出す（docs/ai-notes.md「自分のターンの探索を B*・MCTS に」）
 
 ## pack-run（PC で回した結果をクラウドから見られるようにする）
 
@@ -560,44 +515,24 @@ Docker コンテナ（`docker/remote-control`）で、ジョブは `CLOUD_W=<フ
 ## 探索 AI の設定（compare の A・B、rhino-compare・yardstick の `--opts`）
 
 JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知らない項目はエラーになる。項目の意味は `rust/engine/src/ai/search.rs` の `SearchOptions`。
+2026-11-10 に消した実験用の項目（`tree`・`bestFirst`・`beamKey`・`nextLethal` 等。一覧と戻し方は docs/removed.md）は、使わないときの値（`null`・`0`・`false` 等）なら
+受け付けて何もせず、ほかの値はエラーになる。
 
-- 数: `samples`・`beamWidth`・`maxDepth`・`rescoreTop`・`planCandidates`・`perFirst`・`oppHandSamples`・`dangerRescore`・`mulliganSamples`・`mulliganTurns`・`mulliganRolloutBeam`・`nextLethal`・`beamPp`
-- `attackLater`: 数（既定 0 で使わない）。今のビームに加えて、攻撃以外の手（自分の場が埋まっているときは攻撃も）で手順を作り、攻撃は貪欲に済ませた後の点数で並べるビームを、この幅で打つ（2026-10-26。docs/ai-notes.md「攻撃を後にまとめるビーム」）
-- `beamKey`: 項の名前から重みへのオブジェクト（既定は無し。2026-10-30）。ビームで残す局面を選ぶ並べ替えのキーに、伸びしろの項と重みの積の和を足す
-  （ターンを終える局面の点数には足さない）。項は `pp`（残り PP）・`usablePp`（手札のカードのコストの組で残り PP 以下の和の最大）・`attack`（まだ攻撃できる自分のフォロワーの攻撃力の和）・
-  `attackers`（その数）・`evolve`・`superEvolve`（このターンにまだ進化・超進化できるか）・`extraPp`（エクストラPP がまだ使えるか）。自分のターンのビーム（drawSplit の組み直しを含む）だけに効き、
-  読みの中の相手のビームには効かない（`beamPp` は読みの中の相手にも効く）。点数の高い局面が残らないことがあるので、段ごとに、最初の手ごとの残らなかった局面の点数の最大も終局面の候補にする
-  （`rust/engine/src/ai/beam_key.rs`。docs/ai-notes.md「ターン途中の評価の見直し」）
-- `bestFirst`: 数（既定 0 で使わない。2026-10-30）。自分のターンのビームを、段を作らずに、優先度（ターン末の点数 + `beamKey` の伸びしろ）の高い局面から 1 つずつ広げる探索に替える。
-  採点した局面の数がこの数に達したら広げるのをやめる（深さの上限は `maxDepth`）。同じ局面は段をまたいでまとめ、点数の高いほうを残す。`beamWidth` は使わない
-  （drawSplit の組み直しにも効く。読みの中の相手のビームには効かない）
-- `tree`: `null`（既定。使わない）かオブジェクト（2026-11-05）。自分のターンのビームを、採点した局面の数の予算の中で次に広げる局面を 1 つずつ選ぶ木の探索に替える
-  （`rust/engine/src/ai/search/tree.rs`。drawSplit の組み直しと読みの中の相手のビームはビームのまま）。項目は
-  `mode`（`a0`: 楽観の値 = 終えた点数 + 伸びしろの上側 の高い局面から広げる、`bstar`: 最初の手ごとに悲観・楽観の値を持ち、上位 `k`（既定 4）の手と外の手の区別をつける B*、
-  `mcts`: 最大を戻す PUCT。既定 `bstar`）・`budget`（読んだ局面の数の予算、既定 2000）・`upper`（伸びしろの上側の表。`tree-gap upper-fit` が作る）・`upperScale`（表の値の倍率、既定 1）・
-  `upperMin`（伸びしろの上側の下限、既定 0）・`eps`（bstar で決まったとみなす楽観 − 悲観の幅、既定 0）・`stop`（a0・bstar で区別がついたら予算の前に止める、既定 true）・
-  `c`・`temp`（mcts の探索の定数と事前の重みの温度、既定 1・5）・`lazy`（案 A'。a0 だけ。下限と上限のネットワークのファイル。子を予想だけで山に入れ、正確な採点を山から出すまで後回しにする）。
-  比べ方は上の `tree-gap`（docs/ai-notes.md「自分のターンの探索を B*・MCTS に」）
+- 数: `samples`・`beamWidth`・`maxDepth`・`rescoreTop`・`planCandidates`・`perFirst`・`oppHandSamples`・`mulliganSamples`・`mulliganTurns`・`mulliganRolloutBeam`
 - `potentialNet`: 見込みのネットワークのファイルの場所か `null`（使わない）。既定は `data/potential-net.json`（2026-10-30 から。ビームの幅の既定も 512 → 128。2026-11-05 から幅 256）。
   ターン途中の局面から届くターン末の点数の最大と、そこで終えた点数の差を当てる小さなネットワーク（`rust/engine/src/ai/potential.rs`）の出力に
-  `potentialWeight`（既定 1）を掛けて、`beamKey` と同じく並べ替えのキー（と `bestFirst` の優先度）にだけ足す（読みの中の相手のビームには効かない）。
+  `potentialWeight`（既定 1）を掛けて、ビームで残す局面を選ぶ並べ替えのキーにだけ足す（ターンを終える局面の点数には足さない。drawSplit の組み直しと読みの中の相手のビームには効かない）。
+  点数の高い局面が残らないことがあるので、段ごとに、最初の手ごとの残らなかった局面の点数の最大も終局面の候補にする。
   学び方は上の「potential」（docs/ai-notes.md「ターン途中の見込みを学ぶ」）。
-  `potentialDrawSplit`（真偽、既定 false）を true にすると、drawSplit の組み直しのビームにも見込みを使う（重くなり、勝率は同じ）。
   2026-10-30 より前の既定は `{"beamWidth":512,"potentialNet":null}`、2026-10-30〜11-04 の既定は `{"beamWidth":128}`
-- `perPlan`: 数（既定 0 で使わない）。ビームの各深さで、同じ「手の組」（手札から出したカード・進化・超進化・能力・エクストラPP の組。攻撃・融合・選ぶ手は数えない）の局面をまずこの数まで残し、余った枠を点数の順に埋める。攻撃先・融合の素材だけが違う並びが枠を埋めて、別のカードを使う手順が切られるのを防ぐ（2026-10-26。docs/ai-notes.md「手の組ごとにビームの枠を設ける」）
-- 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`chainFuse`・`settleTrades`・`dominance`・`reusePlan`・
-  `peekOppHand`・`oppFuse`・`oppHandCommon`・`reuseAgree`・`resampleDraws`・`drawFirst`
+- 真偽: `lethal`・`mulliganStatic`・`mulliganNet`・`dedup`・`sameHandOnce`・`chain`・`settleTrades`・`dominance`・`reusePlan`・
+  `peekOppHand`・`oppHandCommon`
 - `readOwnDeckApart`: 真偽（既定 true。2026-11-02 から。それより前は false）。相手のターンを読む前の決定化で、自分の山札を別の乱数で並べ直す（`determinize_apart`）。
   今の決定化は自分の山札を先に並べ直す（枚数 − 1 回乱数を使う）ので、自分の山札の枚数が違う終局面どうし（引く手と引かない手）では、同じ引き直しの種でも相手の手札が全部変わり、
   `oppHandCommon` が成り立たない。true なら同じ種で相手の手札・山札と局面の乱数がそろう（読み直し・`read_values` 等の読みだけ。自分のターンのビームを打つ決定化は変えない。
   docs/ai-notes.md「錬金釜を置くと点数が下がる理由」）
-- `lethalRead`: 真偽（既定 false。2026-11-02）。相手のターンの始めに、伏せた手札をカード 1 枚にしたら相手が勝てたカード（持っていればリーサル）を調べ、
-  相手がそのターンに勝たなければ、そのとき手札にあった伏せたカードには、決定化でそのカードを配らない（後から引いたカードには配る。どのカードを出したかは分からないので、
-  伏せたカードが手札から出るたびに外せる枠を 1 つ減らす）。相手の手番の局面を見せる対戦（`play_match` を使う compare・rhino-compare・deck-compare 等）でだけ効き、
-  ブラウザの対戦・TD の自己対戦などでは何もしない（`rust/engine/src/ai/hand_read.rs`。docs/ai-notes.md「見逃したリーサルから相手の手札を絞る」）
 - `deferFuse`: 真偽（既定 true。2026-10-29 に今の形で既定に）。次のターン以降に回せる融合（作ったカードがターン末まで手札に残り、その融合を除いて打ち直しても手札のほかが同じになるもの。
   融合しないと手札が上限（9 枚）になるもの、ターン終了時の処理が変わるもの（手札の枚数で引くかどうかが決まるエースのクレスト等）は除く）を打たない。並びの選び方と点数は変えず（融合した終局面の点数のまま）、選んだ並びから回せる融合を除いて打つ。除いて何も残らなければ、ターン末の点数に入れている合流する相打ちを打つ（docs/ai-notes.md「使わない融合を次のターン以降に回す」）
-- `deferFuseKeepSet`: 真偽（既定 false。2026-10-29）。`deferFuse` で、手で作った評価が上がる融合（手札の α・β・γ の種類が増える）は回さない
 - `deferFuseHand`: 数（既定 8。2026-10-29）。`deferFuse` で回したあとのターン末の手札の枚数の上限。回すと手札がこれより多くなる融合は回さない
 - `deferFuseLastWords`: 真偽（既定 true。2026-10-29）。`deferFuse` で、自分の場のフォロワーのラストワードが手札に加える・引く枚数（ビビッドインベンター・イリスのコア等）だけ
   `deferFuseHand` を下げる（相手のターンに破壊されると、次のターンの最初に引くカードが溢れる）
@@ -605,17 +540,12 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
   素材のうち 2 枚を先に融合して作ったカードを使えば別の 1 枚を除いても同じになる融合（キャッスルにコア 3 枚 → γ など）、結果が融合前の融合先か素材と同じになる融合
   （カードを捨てるだけ。アタックに γ → γ など。融合で手札の外に何か起きる（遺産の砲撃が場にある等）ときは残す）。結果は、手札が融合先と素材だけの局面で実際に融合して確かめる
   （`rust/engine/src/ai/fusion.rs`。フューチャー 2・パスト 2・キャッスル・アタックの手札で、融合の手が 44 通りから 16 通りになる）
-- `fuseRoot`: 真偽（既定 false。2026-10-29）。自分のターンの並びを選ぶとき、融合だけで作れて今の PP で出せる、コストが最も高いカード（融合で変わった手札のカード）を
-  先に作った局面からもビームを打ち、その終局面（並びは先にする融合から）も候補にする。融合が 2 回以上要るときだけ（1 回で作れるものは今のビームでも見落とさない）。
-  コストが同じカードが何種類もあれば（デストロイアーティファクトα・β・γ）、種類ごとに 3 種類まで。相手のターンの読みの中のビームでは使わない
-  （docs/ai-notes.md「長い融合の並びの取りこぼしを直す」）
 - `drawSplit`: `null`（使わない）か `{"samples": 4, "beamWidth": 128, "maxDepth": 16, "rootDraws": 2}`（書かない項目はこの値。`{}` でも使う）。
   既定は `{"enumerate": true, "beamWidth": 8}`（`DEFAULT_DRAW_SPLIT`。2026-10-28 にスペルウィッチだけで使い始め、同じ日にどのクラスでも使うようにした。組み直しの幅は 2026-10-31 に 32 から 8 に。`'{}'` の探索 AI はこれを使い、`{"drawSplit":{}}` は別の設定になる）。
   読み直す並びを、自分の山札から引く手・ランダムな手の直前で区切り、山札の順番と局面の乱数を `samples` 通り作り直して、その手を打った後の残りを幅 `beamWidth`・深さ `maxDepth` のビームで組み直し、
   それぞれ相手のターンを読んで平均する。今打てる引く手が読み直す上位の手に無ければ、`rootDraws` 個まで候補に足す（2026-10-28。docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）。
-  `"stratify": true` なら、作り直しごとの山札の一番上のカードを層別に選ぶ（山札をカードの種類・カードの順に並べ、乱数で決めた位置から等間隔に `samples` 枚。既定 false）。
   `"enumerate": true` なら、区切る手が自分の山札の枚数を変える手のとき、`samples` 通りの代わりに山札の一番上のカードを山札にある種類ごとに全部試し、その種類の枚数の割合で重みを付けて平均する
-  （2 枚目からは乱数で並べ直したまま。既定 false）。`"class": "witch"` 等なら、自分のデッキがそのクラスのときだけ使う
+  （2 枚目からは乱数で並べ直したまま。既定 false）
 - `rescoreMix`: 0〜1 の数。上位の手を相手のターンまで読み直した点数に、ターン末の点数をこの割合で混ぜる（既定 0.5。0 で 2026-10-22 より前の読み方）
 - `rescoreRace`: `null`（使わない。2026-10-30 より前）か `{"first": 3, "step": 3, "z": 2, "delta": 10, "reentry": 0, "lethalGuard": true}`（既定。書かない項目はこの値）。
   読み直す上位の手のうち、drawSplit で区切らない・決着していない終局面は、相手の手札の引き直しを `first` 通り、その後 `step` 通り読むたびに選ぶ値の見込みを比べ、
@@ -623,8 +553,6 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
   `reentry` が数なら、読み終えた手のいちばん高い点数が、落とした終局面の落としたときの見込みよりその数以上低ければ、その終局面も残りを読んで戻す（`null` で戻さない）。
   `lethalGuard` なら、読んだ引き直しのどれかで相手のリーサルを受けた終局面があるうちは落とさない。
   残った終局面の点数は全部読んだときと同じ（docs/ai-notes.md「読み直しの記録で、見込みのない候補を途中で打ち切る」）
-- `rescoreAverage`: `"score"`（既定）・`"winProb"`・`"decidedWinProb"`。読み直しで、相手の手札の引き直し（drawSplit で区切ったときは作り直した引きも）ごとに読んだ点数をまとめる方法。`"score"` は点数のまま平均する（相手のリーサルを受けた引き直しは −1e6 点のまま入る）。`"winProb"` は引き直しごとに勝率 σ(a·点数)（a は既定の学習した補正のもの）にしてから平均して点数に戻し、相手のリーサルを「その引き直しでは勝率 0」として数える。`"decidedWinProb"` は決着した（相手のリーサルを受けた・自分が勝った）引き直しがある終局面だけ `"winProb"`、ほかは `"score"`
-- `scoreTurnEnd`: `"none"`・`"terminal"`・`"all"`
 - `mulligan`: `"turn1"`（既定。引き直した後、`mulliganTurns`（既定 3）ターン目の自分のターンの終わりまで、0 なら自分の 1 ターン目の最初まで、
   貪欲法か幅 `mulliganRolloutBeam` のビームで進めてから採点する）・`"model"`（手札の形のモデル。2026-10-26 より前の既定）・`"weights"`・`"cost"`・`"sample"`・`"keep"`（1 枚も返さない。比べ用）
 - `mulliganKeep`: カード名の配列。初手にあれば 1 枚目を必ず残す（`model`・`weights`・`cost` の判断の後で直す。`turn1` では効かない）

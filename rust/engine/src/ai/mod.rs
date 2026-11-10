@@ -5,7 +5,6 @@
 
 pub mod aidata;
 pub mod beam_key;
-pub mod bounds;
 pub mod converging;
 pub mod damage_bound;
 pub mod determinize;
@@ -13,7 +12,6 @@ pub mod eval;
 pub mod exact_lethal;
 pub mod fusion;
 pub mod greedy;
-pub mod hand_read;
 pub mod keys;
 pub mod lethal;
 pub mod lethal_hint;
@@ -24,7 +22,6 @@ pub mod rhino;
 pub mod rhino_lethal;
 pub mod search;
 pub mod think;
-pub mod upper;
 pub mod valuenet;
 
 #[cfg(test)]
@@ -62,10 +59,6 @@ impl Rng {
 /// AI の共通インターフェース（src/ai/types.ts の Agent）
 pub trait Agent {
     fn choose_action(&mut self, state: &GameState, legal: &[Action], rng: &mut Rng) -> Action;
-
-    /// 自分の手番でない局面（相手の手番・相手の選択待ち）を見せる。相手のターンの出来事から相手の手札を読む AI（lethalRead）が使う。
-    /// 見せるのは play_match だけ（ほかの対戦の進め方では呼ばない）。既定は何もしない
-    fn observe(&mut self, _state: &GameState) {}
 
     /// この局面での考え（比べた手と点数の内訳。think.rs）。choose_action と同じ乱数の使い方で同じ手を選ぶ。
     /// 考えを示せない AI・局面（マリガン、打てる手が 1 つ）は None

@@ -5,7 +5,6 @@
 //! 実験用の設定（reanimateGuard・turn1ExtraPp の never/keepTurn2・マリガンの evoBonus 等）は Rust 版に移していないので、
 //! そのテストも移していない。
 
-mod attack_later;
 mod beam;
 mod converging;
 mod damage_bound;
@@ -16,21 +15,16 @@ mod doomed;
 mod draw_split;
 mod eval;
 mod fuse_minimal;
-mod fuse_root;
-mod hand_read;
 mod keys;
 mod lethal;
 mod mulligan;
-mod per_plan;
 mod potential;
-mod rescore_average;
 mod rescore_race;
 mod rhino;
 mod rhino_bound;
 mod rhino_puzzles;
 mod search;
 mod think;
-mod tree;
 mod valuenet;
 
 use super::aidata::ai_data;
@@ -197,7 +191,6 @@ pub fn greedy_base() -> GreedyAgent {
     GreedyAgent {
         omniscient: false,
         weights: default_weights(),
-        fuse_follow_up: false,
     }
 }
 

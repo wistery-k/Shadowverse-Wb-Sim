@@ -2,35 +2,24 @@
 // docs/ai-notes.md「ターン途中の見込みを学ぶ」
 //
 //   npm run potential -- train --data d1.jsonl[,d2.jsonl] --out model.json [--hidden 64] [--epochs 8] [--T 5] [--lr 0.001]
-//                          [--l2 0.000001] [--batch 256] [--scale 20] [--valid 160-199] [--seed 1] [--groups depth|position]
+//                          [--l2 0.000001] [--batch 256] [--scale 20] [--valid 160-199] [--seed 1]
 //
 // データは svwb beam-gap --sample k --inputs の JSON Lines（1 行目は語彙と入力の並び、2 行目からは途中の局面 1 つずつ）。
 // 同じ局面・同じ段（試合・局面・手数）の途中の局面の組ごとに、キー = そこでターンを終えた点数 v + 見込み g(x) の softmax(キー / T) が、
 // 幅の広いビームでその途中の局面から届いた最善 y の softmax(y / T) に近づくように学ぶ（ListNet）。
 // ネットワークは入力 → 隠れ層 1 つ（ReLU）→ 出力。学ぶ間は出力の重みを小さく持ち、scale 倍して書き出す。
-// --groups position なら、組を段に分けず局面ごとにする（手数の違う局面どうしも比べられるように学ぶ。段を作らない探索 bestFirst 向けの試し）。
 // 重みは有効数字 7 桁で書き出す（ファイルを小さくする。data/potential-net.json もこの形）。
 // --valid の範囲の試合は学ばず、確かめに使う（損失と、組の中で届いた最善が最大の局面をキーで 1 位にした割合）。
 // この 2 つは目安で、採用は beam-gap（学びに使っていない局面での取りこぼし）で決める。
-//
-//   npm run potential -- bounds --data d1.jsonl[,d2.jsonl] --out model.json [--tau 0.95] [--hidden 64] [--epochs 8] [--lr 0.001]
-//                          [--l2 0.000001] [--batch 256] [--scale 50] [--valid 1180-1199] [--seed 1]
-//
-// 自分のターンの木の探索の案 A'（rust/engine/src/ai/search/tree.rs の lazy）が使う、下限と上限のネットワーク（rust/engine/src/ai/bounds.rs）を学ぶ。
-// 同じデータで、そこで終えた点数 v の予想（2 乗誤差）と、伸びしろ max(0, y − v) の tau 分位点の予想（ピンボール損失）を 1 つの隠れ層から出す。
-// 確かめでは、v の予想の誤差と、伸びしろが予想以下の割合（tau に近いはず）を出す。
 
 import { closeSync, openSync, readSync, writeFileSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 
 const USAGE = `使い方: npm run potential -- train --data d1.jsonl[,d2.jsonl] --out model.json [--hidden 64] [--epochs 8] [--T 5]
-  [--lr 0.001] [--l2 0.000001] [--batch 256] [--scale 20] [--valid 160-199] [--seed 1] [--groups depth|position]
-  npm run potential -- bounds --data d1.jsonl[,d2.jsonl] --out model.json [--tau 0.95] [--hidden 64] [--epochs 8] [--lr 0.001]
-  [--l2 0.000001] [--batch 256] [--scale 50] [--valid 1180-1199] [--seed 1]（docs/commands.md の「potential」）`;
+  [--lr 0.001] [--l2 0.000001] [--batch 256] [--scale 20] [--valid 160-199] [--seed 1]（docs/commands.md の「potential」）`;
 
 export async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
-  if (cmd === "bounds") return boundsMain(rest);
   if (cmd !== "train") {
     console.error(USAGE);
     return 2;
@@ -40,9 +29,7 @@ export async function main(argv: string[]): Promise<number> {
   const data = loadPotentialData(need(args, "data").split(","));
   const [lo, hi] = need(args, "valid", "160-199").split("-").map(Number);
   if (lo === undefined || hi === undefined || !Number.isFinite(lo) || !Number.isFinite(hi)) throw new Error("--valid は 160-199 の形");
-  const groupsBy = need(args, "groups", "depth");
-  if (groupsBy !== "depth" && groupsBy !== "position") throw new Error("--groups は depth か position");
-  const { train, valid } = makeGroups(data, (game) => game >= lo && game <= hi, groupsBy === "depth");
+  const { train, valid } = makeGroups(data, (game) => game >= lo && game <= hi);
   console.log(`${data.v.length} 局面・入力 ${data.nIn}、学びの組 ${train.length}・確かめの組 ${valid.length}（読み込み ${((Date.now() - t0) / 1000).toFixed(0)}s）`);
   const opts: TrainOptions = {
     hidden: num(args, "hidden", 64),
@@ -222,13 +209,13 @@ export function loadPotentialData(files: string[]): PotentialData {
 }
 
 /**
- * 途中の局面を組（同じ局面・同じ段。byDepth が false なら同じ局面）にまとめ、届いた最善が 2 通り以上ある組だけを
+ * 途中の局面を組（同じ局面・同じ段）にまとめ、届いた最善が 2 通り以上ある組だけを
  * 学び・確かめに分けて返す（組は途中の局面の添字の配列）
  */
-export function makeGroups(d: PotentialData, isValid: (game: number) => boolean, byDepth = true): { train: Int32Array[]; valid: Int32Array[] } {
+export function makeGroups(d: PotentialData, isValid: (game: number) => boolean): { train: Int32Array[]; valid: Int32Array[] } {
   const m = new Map<string, number[]>();
   d.position.forEach((pos, i) => {
-    const g = byDepth ? `${pos}/${d.depth[i]!}` : pos;
+    const g = `${pos}/${d.depth[i]!}`;
     const a = m.get(g);
     if (a) a.push(i);
     else m.set(g, [i]);
@@ -435,216 +422,5 @@ export function trainPotential(d: PotentialData, train: Int32Array[], valid: Int
     b1: Array.from(p.b1, round),
     w2: Array.from(p.w2, (x) => round(x * opts.scale)),
     b2: 0,
-  };
-}
-
-function parseRange(s: string): [number, number] {
-  const [lo, hi] = s.split("-").map(Number);
-  if (lo === undefined || hi === undefined || !Number.isFinite(lo) || !Number.isFinite(hi)) throw new Error("--valid は 160-199 の形");
-  return [lo, hi];
-}
-
-async function boundsMain(rest: string[]): Promise<number> {
-  const args = parseArgs(rest);
-  const t0 = Date.now();
-  const data = loadPotentialData(need(args, "data").split(","));
-  const [lo, hi] = parseRange(need(args, "valid", "1180-1199"));
-  const opts: BoundsOptions = {
-    tau: num(args, "tau", 0.95),
-    hidden: num(args, "hidden", 64),
-    epochs: num(args, "epochs", 8),
-    lr: num(args, "lr", 0.001),
-    l2: num(args, "l2", 1e-6),
-    batch: num(args, "batch", 256),
-    scale: num(args, "scale", 50),
-    seed: num(args, "seed", 1),
-  };
-  const isValid = (game: number): boolean => game >= lo && game <= hi;
-  console.log(`${data.v.length} 局面・入力 ${data.nIn}（読み込み ${((Date.now() - t0) / 1000).toFixed(0)}s）`);
-  const model = trainBounds(data, isValid, opts, (line) => console.log(`${line}（${((Date.now() - t0) / 1000).toFixed(0)}s）`));
-  const out = need(args, "out");
-  writeFileSync(out, JSON.stringify(model));
-  console.log(`書いた: ${out}`);
-  return 0;
-}
-
-export interface BoundsOptions {
-  /** 伸びしろの分位点 */
-  tau: number;
-  hidden: number;
-  epochs: number;
-  lr: number;
-  l2: number;
-  batch: number;
-  /** 出力の単位（点数） */
-  scale: number;
-  seed: number;
-}
-
-/** モデルのファイルの形（rust/engine/src/ai/bounds.rs の RawBoundsNet） */
-export interface BoundsNetModel {
-  kind: "bounds-net";
-  version: 1;
-  vocab: string[];
-  zones: string[];
-  scalars: string[];
-  hidden: number;
-  w1: number[];
-  b1: number[];
-  wv: number[];
-  bv: number;
-  wu: number[];
-  bu: number;
-  scale: number;
-  tau: number;
-}
-
-interface BoundsParams {
-  H: number;
-  w1: Float64Array;
-  b1: Float64Array;
-  wv: Float64Array;
-  wu: Float64Array;
-  /** [bv, bu] */
-  b2: Float64Array;
-}
-
-const softplus = (x: number): number => (x > 20 ? x : Math.log1p(Math.exp(x)));
-const sigmoid = (x: number): number => 1 / (1 + Math.exp(-x));
-
-/** 局面 r の隠れ層の入力 z を書き、出力（scale で割った v の予想と、softplus の前の伸びしろ）を返す */
-function boundsForward(d: PotentialData, p: BoundsParams, r: number, z: Float64Array): [number, number] {
-  const H = p.H;
-  z.set(p.b1);
-  for (let e = d.rowPtr[r]!; e < d.rowPtr[r + 1]!; e++) {
-    const o = d.idx[e]! * H, x = d.val[e]!;
-    for (let j = 0; j < H; j++) z[j]! += x * p.w1[o + j]!;
-  }
-  let ov = p.b2[0]!, ou = p.b2[1]!;
-  for (let j = 0; j < H; j++) {
-    if (z[j]! > 0) {
-      ov += z[j]! * p.wv[j]!;
-      ou += z[j]! * p.wu[j]!;
-    }
-  }
-  return [ov, ou];
-}
-
-/** 確かめ: v の予想の誤差（2 乗平均の平方根・絶対値の平均）、伸びしろが予想以下の割合、予想した伸びしろの平均 */
-export function evaluateBounds(d: PotentialData, rows: Int32Array, p: BoundsParams, scale: number): { rmse: number; mae: number; covered: number; meanU: number } {
-  const z = new Float64Array(p.H);
-  let se = 0, ae = 0, cov = 0, su = 0;
-  for (const r of rows) {
-    const [ov, ou] = boundsForward(d, p, r, z);
-    const vh = scale * ov, uh = scale * softplus(ou);
-    const err = vh - d.v[r]!;
-    se += err * err;
-    ae += Math.abs(err);
-    if (Math.max(0, d.y[r]! - d.v[r]!) <= uh + 1e-9) cov++;
-    su += uh;
-  }
-  const n = Math.max(1, rows.length);
-  return { rmse: Math.sqrt(se / n), mae: ae / n, covered: cov / n, meanU: su / n };
-}
-
-export function trainBounds(d: PotentialData, isValid: (game: number) => boolean, opts: BoundsOptions, log: (line: string) => void): BoundsNetModel {
-  const rand = mulberry32(opts.seed);
-  const H = opts.hidden, D = d.nIn, S = opts.scale;
-  const all = Int32Array.from({ length: d.v.length }, (_, i) => i);
-  const train = all.filter((r) => !isValid(d.game[r]!));
-  const valid = all.filter((r) => isValid(d.game[r]!));
-  // 出力の切片は、v の平均と伸びしろの tau 分位点から始める
-  let vMean = 0;
-  for (const r of train) vMean += d.v[r]!;
-  vMean /= Math.max(1, train.length);
-  const hs = Array.from(train, (r) => Math.max(0, d.y[r]! - d.v[r]!)).sort((a, b) => a - b);
-  const hq = hs.length > 0 ? hs[Math.min(hs.length - 1, Math.floor(opts.tau * hs.length))]! : 1;
-  const u0 = Math.max(0.05, hq / S);
-  const p: BoundsParams = {
-    H,
-    w1: Float64Array.from({ length: D * H }, () => gaussian(rand) * 0.05),
-    b1: new Float64Array(H),
-    wv: Float64Array.from({ length: H }, () => (gaussian(rand) * 0.1) / Math.sqrt(H)),
-    wu: Float64Array.from({ length: H }, () => (gaussian(rand) * 0.1) / Math.sqrt(H)),
-    b2: Float64Array.from([vMean / S, Math.log(Math.expm1(u0))]),
-  };
-  const params = [p.w1, p.b1, p.wv, p.wu, p.b2];
-  const grads = params.map((a) => new Float64Array(a.length));
-  const m1 = params.map((a) => new Float64Array(a.length));
-  const m2 = params.map((a) => new Float64Array(a.length));
-  const [gw1, gb1, gwv, gwu, gb2] = grads as [Float64Array, Float64Array, Float64Array, Float64Array, Float64Array];
-  const report = (label: string): void => {
-    if (valid.length === 0) return log(label);
-    const r = evaluateBounds(d, valid, p, S);
-    log(`${label} 確かめ: v の誤差 ${r.rmse.toFixed(2)}（絶対値の平均 ${r.mae.toFixed(2)}）、伸びしろが予想以下 ${(r.covered * 100).toFixed(1)}%、予想した伸びしろの平均 ${r.meanU.toFixed(2)}`);
-  };
-  log(`学び ${train.length} 局面・確かめ ${valid.length} 局面、v の平均 ${vMean.toFixed(2)}、伸びしろの ${opts.tau} 分位点 ${hq.toFixed(2)}`);
-  report("学ぶ前");
-  const z = new Float64Array(H);
-  let step = 0;
-  const order = Int32Array.from(train);
-  for (let ep = 0; ep < opts.epochs; ep++) {
-    for (let i = order.length - 1; i > 0; i--) {
-      const j = Math.floor(rand() * (i + 1));
-      [order[i], order[j]] = [order[j]!, order[i]!];
-    }
-    let lossSum = 0;
-    for (let b0 = 0; b0 < order.length; b0 += opts.batch) {
-      const b1 = Math.min(order.length, b0 + opts.batch);
-      for (const g of grads) g.fill(0);
-      const nb = b1 - b0;
-      for (let bi = b0; bi < b1; bi++) {
-        const r = order[bi]!;
-        const [ov, ou] = boundsForward(d, p, r, z);
-        const v = d.v[r]!, h = Math.max(0, d.y[r]! - v);
-        const ev = ov - v / S;
-        const sp = softplus(ou);
-        const eu = h / S - sp;
-        const ind = eu < 0 ? 1 : 0;
-        lossSum += 0.5 * ev * ev + eu * (opts.tau - ind);
-        const dov = ev / nb;
-        const dou = (-(opts.tau - ind) * sigmoid(ou)) / nb;
-        gb2[0]! += dov;
-        gb2[1]! += dou;
-        for (let j = 0; j < H; j++) {
-          if (z[j]! <= 0) continue;
-          gwv[j]! += z[j]! * dov;
-          gwu[j]! += z[j]! * dou;
-          const dh = dov * p.wv[j]! + dou * p.wu[j]!;
-          gb1[j]! += dh;
-          for (let e = d.rowPtr[r]!; e < d.rowPtr[r + 1]!; e++) gw1[d.idx[e]! * H + j]! += d.val[e]! * dh;
-        }
-      }
-      step++;
-      const c1 = 1 - 0.9 ** step, c2 = 1 - 0.999 ** step;
-      params.forEach((w, k) => {
-        const g = grads[k]!, a = m1[k]!, s = m2[k]!;
-        const l2 = w === p.b1 || w === p.b2 ? 0 : opts.l2;
-        for (let q = 0; q < w.length; q++) {
-          const gq = g[q]! + l2 * w[q]!;
-          a[q] = 0.9 * a[q]! + 0.1 * gq;
-          s[q] = 0.999 * s[q]! + 0.001 * gq * gq;
-          w[q]! -= (opts.lr * (a[q]! / c1)) / (Math.sqrt(s[q]! / c2) + 1e-8);
-        }
-      });
-    }
-    report(`${ep + 1} 回目 学びの損失 ${(lossSum / Math.max(1, order.length)).toFixed(4)}`);
-  }
-  const round = (x: number): number => Number(x.toPrecision(7));
-  return {
-    kind: "bounds-net",
-    version: 1,
-    vocab: d.vocab,
-    zones: d.zones,
-    scalars: d.scalars,
-    hidden: H,
-    w1: Array.from(p.w1, round),
-    b1: Array.from(p.b1, round),
-    wv: Array.from(p.wv, round),
-    bv: round(p.b2[0]!),
-    wu: Array.from(p.wu, round),
-    bu: round(p.b2[1]!),
-    scale: S,
-    tau: opts.tau,
   };
 }

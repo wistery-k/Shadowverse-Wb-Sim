@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { evaluateBounds, evaluatePotential, loadPotentialData, main, makeGroups, trainBounds, trainPotential } from "../scripts/potential-main";
+import { evaluatePotential, loadPotentialData, main, makeGroups, trainPotential } from "../scripts/potential-main";
 
 const HEAD = { vocab: ["a", "b"], zones: ["hand"], scalars: ["pp"] };
 
@@ -79,38 +79,5 @@ describe("見込みの学習（scripts/potential-main.ts）", () => {
     expect(await main(["train", "--data", f, "--out", out, "--hidden", "4", "--epochs", "1", "--valid", "15-19"])).toBe(0);
     const m: unknown = JSON.parse(readFileSync(out, "utf8"));
     expect(m).toMatchObject({ kind: "potential-net", version: 1, vocab: HEAD.vocab, zones: HEAD.zones, scalars: HEAD.scalars, hidden: 4, b2: 0 });
-  });
-
-  it("下限と上限のネットワーク: 終えた点数を当て、伸びしろの分位点は tau の割合を覆う", () => {
-    const f = join(dir, "d.jsonl");
-    writeFileSync(f, lines(200).join("\n"));
-    const d = loadPotentialData([f]);
-    const isValid = (g: number): boolean => g >= 160;
-    const opts = { tau: 0.9, hidden: 8, epochs: 30, lr: 0.01, l2: 0, batch: 32, scale: 10, seed: 1 };
-    const model = trainBounds(d, isValid, opts, () => {});
-    expect(model).toMatchObject({ kind: "bounds-net", version: 1, hidden: 8, scale: 10, tau: 0.9 });
-    const p = {
-      H: 8,
-      w1: Float64Array.from(model.w1),
-      b1: Float64Array.from(model.b1),
-      wv: Float64Array.from(model.wv),
-      wu: Float64Array.from(model.wu),
-      b2: Float64Array.from([model.bv, model.bu]),
-    };
-    const rows = Int32Array.from({ length: d.v.length }, (_, i) => i).filter((r) => isValid(d.game[r]!));
-    const r = evaluateBounds(d, rows, p, opts.scale);
-    // v は入力に無い乱数なので当たらず（一様分布 0〜10 の標準偏差 2.9）、伸びしろは 10 × 残り PP で入力から分かる
-    expect(r.rmse).toBeLessThan(3.5);
-    expect(r.covered).toBeGreaterThan(0.75);
-    expect(r.covered).toBeLessThan(0.99);
-  });
-
-  it("npm run potential -- bounds がモデルを書き出す", async () => {
-    const f = join(dir, "d.jsonl"), out = join(dir, "b.json");
-    writeFileSync(f, lines(20).join("\n"));
-    vi.spyOn(console, "log").mockImplementation(() => {});
-    expect(await main(["bounds", "--data", f, "--out", out, "--hidden", "4", "--epochs", "1", "--valid", "15-19"])).toBe(0);
-    const m: unknown = JSON.parse(readFileSync(out, "utf8"));
-    expect(m).toMatchObject({ kind: "bounds-net", version: 1, vocab: HEAD.vocab, hidden: 4, tau: 0.95, scale: 50 });
   });
 });

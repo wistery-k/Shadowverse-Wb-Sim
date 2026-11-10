@@ -341,17 +341,6 @@ thread_local! {
     static COUNTS: RefCell<(u32, u32)> = const { RefCell::new((0, 0)) };
 }
 
-/// f を、全探索のメモと数を空にして呼び、終わったら元に戻す（相手の手札を仮に置いた局面を調べても、
-/// 本当の手番の全探索のターンあたりの上限・メモ・集計の数を使わないため。ai/hand_read.rs）
-pub fn with_isolated_cache<T>(f: impl FnOnce() -> T) -> T {
-    let caches = CACHES.with(|c| std::mem::take(&mut *c.borrow_mut()));
-    let counts = COUNTS.with(|c| *c.borrow());
-    let r = f();
-    CACHES.with(|c| *c.borrow_mut() = caches);
-    COUNTS.with(|c| *c.borrow_mut() = counts);
-    r
-}
-
 /// 全探索をした回数と、リーサルを見つけた回数
 pub fn exact_lethal_counts() -> (u32, u32) {
     COUNTS.with(|c| *c.borrow())

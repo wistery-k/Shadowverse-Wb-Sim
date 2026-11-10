@@ -1,14 +1,14 @@
-//! ビームで残す局面を選ぶ並べ替えに足す「伸びしろ」の項（`beamKey`、2026-10-30）。
+//! ビームの途中の局面の「伸びしろ」の項（2026-10-30）。学習した見込み（potentialNet。ai/potential.rs）の入力と、`svwb beam-gap` の書き出しに使う。
 //!
 //! ビームは途中の局面を「そこでターンを終えたら」の点数（ターン末の点数）で並べて残す。この点数は、その局面から届くターン末の最善の下限で、
 //! まだ使っていない PP・攻撃・進化（このターンのうちにしか使えない資源）がある局面ほど低く見える。
-//! ここで数える項に重みを掛けた和を、並べ替えのキーにだけ足す（ターンを終える局面の点数には足さない）。
+//! 項に手で決めた重みを掛けて並べ替えのキーに足す設定（beamKey）は、学習した見込みに置き換えたので 2026-11-10 に消した（docs/removed.md）。
 //! 調べ方は `svwb beam-gap`（runner/beam_gap.rs）、記録は docs/ai-notes.md「ターン途中の評価の見直し」。
 
 use crate::game::{can_attack_followers, can_attack_leader};
 use crate::state::{hand_cost, opponent, Evolve, GameState, Phase, PlayerIndex};
 
-/// 項の名前（設定の JSON の `beamKey` のキー。並びは beam_features の値の並び）
+/// 項の名前（並びは beam_features の値の並び）
 pub const BEAM_FEATURES: [&str; 7] = [
     // 残り PP
     "pp",
@@ -71,16 +71,4 @@ pub fn beam_features(s: &GameState, p: PlayerIndex) -> [f64; N_BEAM_FEATURES] {
         f[6] = 1.0;
     }
     f
-}
-
-/// 並べ替えのキーに足す項の重み（`beamKey`。BEAM_FEATURES の並び）
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BeamKey(pub [f64; N_BEAM_FEATURES]);
-
-impl BeamKey {
-    /// 局面 s の p の伸びしろ（重みと項の積の和）
-    pub fn bonus(&self, s: &GameState, p: PlayerIndex) -> f64 {
-        let f = beam_features(s, p);
-        self.0.iter().zip(f).map(|(w, x)| w * x).sum()
-    }
 }

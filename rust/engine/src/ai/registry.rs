@@ -51,7 +51,6 @@ pub fn create_agent(name: &str) -> Option<Box<dyn Agent>> {
         "greedy-base" => Box::new(GreedyAgent {
             omniscient: false,
             weights: EvalWeights::new(ai_data().default_weights.clone()),
-            fuse_follow_up: false,
         }),
         "random" => Box::new(RandomAgent),
         _ => return None,
