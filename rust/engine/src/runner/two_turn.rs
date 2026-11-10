@@ -38,6 +38,7 @@ use crate::ai::{Agent, Rng};
 use crate::data::{data, CardIdx, BARRIER};
 use crate::game::{acting_player, apply_legal, create_game, legal_actions};
 use crate::json::Json;
+use crate::sim::MatchRng;
 use crate::state::{leader_id, opponent, Action, Evolve, GameState, Phase, PlayerIndex};
 use crate::state_json::{state_from_json, state_to_json};
 use serde_json::{json, Value};
@@ -1002,7 +1003,7 @@ fn self_play_to(
         SearchAgent::new(SearchOptions::default()),
         SearchAgent::new(SearchOptions::default()),
     ];
-    let mut rng = Rng::new(seed ^ 0x9e3779b9);
+    let mut rng = MatchRng::new(seed);
     for _ in 0..5000 {
         if s.phase == Phase::Ended {
             return None;
@@ -1020,7 +1021,7 @@ fn self_play_to(
         }
         let legal = legal_actions(&s);
         let actor = acting_player(&s);
-        let a = agents[actor].choose_action(&s, &legal, &mut rng);
+        let a = rng.choose(&mut agents[actor], &s, &legal);
         s = apply_legal(&s, &a);
     }
     None
@@ -1839,7 +1840,8 @@ fn trace(argv: &[String]) -> Result<(), String> {
     reset_exact_lethal_cache();
     let mut a0 = SearchAgent::new(SearchOptions::default());
     let mut a1 = SearchAgent::new(SearchOptions::default());
-    let mut rng = Rng::new(mix(base_seed, 30_000 + r));
+    let x = mix(base_seed, 30_000 + r);
+    let mut rng = MatchRng::with_shared(x, x);
     let mut s = apply_legal(&end, &Action::EndTurn);
     let mut last_turn = -1;
     for _ in 0..10000 {
@@ -1860,9 +1862,9 @@ fn trace(argv: &[String]) -> Result<(), String> {
         let legal = legal_actions(&s);
         let actor = acting_player(&s);
         let a = if actor == 0 {
-            a0.choose_action(&s, &legal, &mut rng)
+            rng.choose(&mut a0, &s, &legal)
         } else {
-            a1.choose_action(&s, &legal, &mut rng)
+            rng.choose(&mut a1, &s, &legal)
         };
         println!("- {}", super::human_plan::step_text(&s, &a, p));
         s = apply_legal(&s, &a);

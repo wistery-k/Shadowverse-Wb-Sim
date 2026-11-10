@@ -126,7 +126,76 @@ pub fn play_ai(
     play_match(agents, [&decks[0], &decks[1]], seed, visit)
 }
 
-/// 2 つの AI で 1 試合を最後まで打つ（TypeScript 版 src/sim/match.ts の playMatch。AI の乱数は seed から作る）。
+/// 試合の中で AI に渡す思考用の乱数（TypeScript 版 src/sim/match.ts の playFrom と同じ）。
+///
+/// 判断ごとに、試合のシード・席・ターン・そのターンでその席が何回目の判断かから作る（2026-11-10 から）。
+/// 片方の席の AI が乱数を使う数を変えても、もう片方の席の乱数は変わらず、組の 2 試合（鏡）で同じ局面なら同じ乱数になる。
+/// `Agent::sequential_rng` の AI（物差しの相手）には、1 試合に 1 本の乱数（シード ^ 0x9e3779b9）をその AI たちが順に使う古い取り方で渡す
+pub struct MatchRng {
+    seed: u32,
+    shared: crate::ai::Rng,
+    turn: i32,
+    counts: [u32; 2],
+    cur: crate::ai::Rng,
+}
+
+impl MatchRng {
+    /// 試合のシード seed の乱数（古い取り方の 1 本は seed ^ 0x9e3779b9 から）
+    pub fn new(seed: u32) -> MatchRng {
+        MatchRng::with_shared(seed, seed ^ 0x9e3779b9)
+    }
+
+    /// 判断ごとの乱数を seed から、古い取り方の 1 本を shared から作る（打ち進め等で、前から 1 本を Rng::new(shared) で作っていたもの）
+    pub fn with_shared(seed: u32, shared: u32) -> MatchRng {
+        MatchRng {
+            seed,
+            shared: crate::ai::Rng::new(shared),
+            turn: i32::MIN,
+            counts: [0, 0],
+            cur: crate::ai::Rng::new(0),
+        }
+    }
+
+    /// 局面 s で actor が判断するときの乱数（判断ごとに 1 回呼ぶ）。sequential なら古い取り方の 1 本
+    pub fn next(
+        &mut self,
+        s: &GameState,
+        actor: PlayerIndex,
+        sequential: bool,
+    ) -> &mut crate::ai::Rng {
+        if s.turn != self.turn {
+            self.turn = s.turn;
+            self.counts = [0, 0];
+        }
+        let k = self.counts[actor];
+        self.counts[actor] += 1;
+        if sequential {
+            return &mut self.shared;
+        }
+        self.cur = crate::ai::Rng::new(crate::ai::seed_of(&[
+            crate::ai::purpose::DECISION,
+            self.seed,
+            actor as u32,
+            s.turn as u32,
+            k,
+        ]));
+        &mut self.cur
+    }
+
+    /// 局面 s で手番の側の agent に手を選ばせる
+    pub fn choose(
+        &mut self,
+        agent: &mut dyn crate::ai::Agent,
+        s: &GameState,
+        legal: &[Action],
+    ) -> Action {
+        let actor = crate::game::acting_player(s);
+        let rng = self.next(s, actor, agent.sequential_rng());
+        agent.choose_action(s, legal, rng)
+    }
+}
+
+/// 2 つの AI で 1 試合を最後まで打つ（TypeScript 版 src/sim/match.ts の playMatch。AI の乱数は seed から MatchRng で作る）。
 /// 各手で、打つ前の局面と選んだ手で visit を呼ぶ（勝者がいない終わり方は呼び出し側で確かめる）
 pub fn play_match(
     agents: &mut [&mut dyn crate::ai::Agent; 2],
@@ -135,7 +204,7 @@ pub fn play_match(
     mut visit: impl FnMut(&GameState, &Action),
 ) -> GameState {
     let mut s = create_game(decks, seed);
-    let mut rng = crate::ai::Rng::new(seed ^ 0x9e3779b9);
+    let mut rng = MatchRng::new(seed);
     let mut actions = 0;
     while s.phase != Phase::Ended {
         actions += 1;
@@ -145,7 +214,7 @@ pub fn play_match(
         );
         let legal = legal_actions(&s);
         let actor = crate::game::acting_player(&s);
-        let a = agents[actor].choose_action(&s, &legal, &mut rng);
+        let a = rng.choose(&mut *agents[actor], &s, &legal);
         visit(&s, &a);
         s = apply_action(&s, &a);
     }
@@ -155,7 +224,8 @@ pub fn play_match(
 /// 打ち比べ（リプレイの「この局面で別の手を打ったら」）の 1 試合。
 /// 手番のプレイヤーから見えない情報（相手の手札・山札の中身、山札の順番、乱数の状態）を seed で並べ直した局面で first を打ち、
 /// 残りを agents で最後まで対戦させて、終わった局面を返す。
-/// 同じ seed なら first が違っても並べ直し方と AI の乱数は同じ（手の違いだけを比べるため）。first がその局面で打てなければ None
+/// 同じ seed なら first が違っても並べ直し方と AI の乱数は同じ（手の違いだけを比べるため。AI の乱数は MatchRng で、
+/// 判断ごとに席・ターン・そのターンで何回目の判断かから作る）。first がその局面で打てなければ None
 pub fn branch_playout(
     start: &GameState,
     first: &Action,
@@ -169,7 +239,7 @@ pub fn branch_playout(
         return None;
     }
     let mut s = crate::game::apply_legal(&det, first);
-    let mut rng = crate::ai::Rng::new(seed ^ 0x9e3779b9);
+    let mut rng = MatchRng::new(seed);
     let mut actions = 0;
     while s.phase != Phase::Ended {
         actions += 1;
@@ -179,7 +249,7 @@ pub fn branch_playout(
         );
         let legal = legal_actions(&s);
         let actor = crate::game::acting_player(&s);
-        let a = agents[actor].choose_action(&s, &legal, &mut rng);
+        let a = rng.choose(&mut *agents[actor], &s, &legal);
         s = apply_action(&s, &a);
     }
     Some(s)

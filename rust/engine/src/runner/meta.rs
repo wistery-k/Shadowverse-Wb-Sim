@@ -47,6 +47,7 @@ use crate::ai::valuenet::ValueNet;
 use crate::ai::{Agent, Rng};
 use crate::data::{data, CardIdx, ClassId};
 use crate::game::{acting_player, apply_action, create_game, legal_actions};
+use crate::sim::MatchRng;
 use crate::state::{card, GameState, Iid, Phase, PlayerIndex};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -453,7 +454,7 @@ fn draw_turn(rng: &mut Rng) -> i32 {
 fn finish(make: MakeAgent, mut s: GameState, seed: u32) -> PlayerIndex {
     reset_exact_lethal_cache();
     let mut agents = [make(0), make(1)];
-    let mut rng = Rng::new(seed);
+    let mut rng = MatchRng::with_shared(seed, seed);
     let mut n = 0;
     while s.phase != Phase::Ended {
         n += 1;
@@ -463,7 +464,7 @@ fn finish(make: MakeAgent, mut s: GameState, seed: u32) -> PlayerIndex {
         );
         let legal = legal_actions(&s);
         let actor = acting_player(&s);
-        let a = agents[actor].choose_action(&s, &legal, &mut rng);
+        let a = rng.choose(&mut *agents[actor], &s, &legal);
         s = apply_action(&s, &a);
     }
     s.winner
@@ -481,7 +482,7 @@ fn play_game(
     reset_exact_lethal_cache();
     let mut agents = [make(0), make(1)];
     let mut s = create_game(decks, seed);
-    let mut rng = Rng::new(seed ^ 0x9e3779b9);
+    let mut rng = MatchRng::new(seed);
     // 介入する側の、相手のターンの間の山札（ターンの始めに引いたカードを見分ける）
     let mut pre_deck: [Vec<Iid>; 2] = [Vec::new(), Vec::new()];
     let mut seen = [-1, -1];
@@ -521,7 +522,7 @@ fn play_game(
                 }
             }
         }
-        let a = agents[actor].choose_action(&s, &legal, &mut rng);
+        let a = rng.choose(&mut *agents[actor], &s, &legal);
         s = apply_action(&s, &a);
     }
     let winner = s

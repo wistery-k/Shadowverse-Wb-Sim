@@ -302,6 +302,7 @@ pub fn search_options(
             "peekOppHand" => o.peek_opp_hand = flag(k, v)?,
             "oppHandCommon" => o.opp_hand_common = flag(k, v)?,
             "readOwnDeckApart" => o.read_own_deck_apart = flag(k, v)?,
+            "sequentialRng" => o.sequential_rng = flag(k, v)?,
             "lethalWardBlocked" => o.lethal_ward_blocked = number(k, v)?,
             "lethalExpandChoices" => o.lethal_expand_choices = flag(k, v)?,
             "lethalExactStates" => o.lethal_exact_states = number(k, v)? as i64,

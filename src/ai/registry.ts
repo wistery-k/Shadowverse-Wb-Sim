@@ -11,8 +11,13 @@ import type { Agent } from "./types";
  */
 function wasmAgent(name: string): Agent {
   let handle: { generation: number; id: number } | null = null;
+  let sequential: boolean | undefined;
   return {
     name,
+    get sequentialRng() {
+      sequential ??= callEngine({ f: "agentSequentialRng", name }) as boolean;
+      return sequential;
+    },
     chooseAction(state, legal, rng) {
       const generation = engineGeneration();
       if (handle?.generation !== generation) handle = { generation, id: callEngine({ f: "agentNew", name }) as number };

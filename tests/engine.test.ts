@@ -11,6 +11,7 @@ import {
   parseStaticAbilities,
   playCost,
   rngFrom,
+  seedOf,
   tryApplyAction,
   type Action,
   type FollowerOnBoard,
@@ -18,6 +19,7 @@ import {
   type PlayerIndex,
 } from "../src/engine";
 import { agentOf } from "../src/ai/registry";
+import type { Agent } from "../src/ai/types";
 
 const randomAgent = agentOf("random");
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
@@ -539,6 +541,45 @@ describe("ランダム自己対戦", () => {
     const a = playMatch([randomAgent, randomAgent], { decks, seed: 7 });
     const b = playMatch([randomAgent, randomAgent], { decks, seed: 7 });
     expect(a.final).toEqual(b.final);
+  });
+});
+
+describe("AI の思考用の乱数", () => {
+  it("seedOf は Rust 版の seed_of と同じ値（rust/engine/src/ai/tests/match_rng.rs）", () => {
+    expect(seedOf([])).toBe(1947474976);
+    expect(seedOf([1, 2, 3])).toBe(756444049);
+    expect(seedOf([1, -1 >>> 0, 0, 7, 2])).toBe(1785051801);
+  });
+
+  /** 渡された乱数から 1 つ取って手を選び、さらに extra 個取る AI。受け取った乱数の状態を残す */
+  const recorder = (extra: number, sequentialRng: boolean) => {
+    const seen: number[] = [];
+    const agent: Agent = {
+      name: "recorder",
+      sequentialRng,
+      chooseAction(_state, legal, rng) {
+        seen.push(rng.state);
+        const a = legal[rng.int(legal.length)]!;
+        for (let i = 0; i < extra; i++) rng.int(2);
+        return a;
+      },
+    };
+    return { agent, seen };
+  };
+  const seat0View = (extra: number, sequential: boolean) => {
+    const a = recorder(0, sequential);
+    const b = recorder(extra, sequential);
+    const r = playMatch([a.agent, b.agent], { decks: [DEFAULT_DECKS[0]!.cards, DEFAULT_DECKS[1]!.cards], seed: 3 });
+    return { seen: a.seen, winner: r.winner };
+  };
+
+  it("判断ごとに作るので、相手の席が乱数を使う数を変えても自分の席の乱数は変わらない", () => {
+    const base = seat0View(0, false);
+    expect(base.seen.length).toBeGreaterThan(10);
+    expect(new Set(base.seen).size).toBe(base.seen.length);
+    expect(seat0View(3, false)).toEqual(base);
+    // 古い取り方（1 試合に 1 本を両方の席が順に使う）では変わる
+    expect(seat0View(3, true).seen).not.toEqual(seat0View(0, true).seen);
   });
 });
 

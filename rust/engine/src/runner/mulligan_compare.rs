@@ -18,9 +18,10 @@ use crate::ai::exact_lethal::reset_exact_lethal_cache;
 use crate::ai::lethal::reset_lethal;
 use crate::ai::rhino::{rhino_search_options, RhinoAgent, RHINO_POTENTIAL};
 use crate::ai::search::{SearchAgent, SearchOptions};
-use crate::ai::{Agent, Rng};
+use crate::ai::Agent;
 use crate::data::Deck;
 use crate::game::{acting_player, apply_action, create_game, legal_actions};
+use crate::sim::MatchRng;
 use crate::state::*;
 use std::time::Instant;
 
@@ -65,7 +66,7 @@ fn play(
     let mut me = subject_agent(subject, rhino);
     let mut opp = SearchAgent::new(SearchOptions::default());
     let mut s = create_game([&decks[0].cards, &decks[1].cards], seed);
-    let mut rng = Rng::new(seed ^ 0x9e3779b9);
+    let mut rng = MatchRng::new(seed);
     let mut mulligan: Option<Action> = None;
     let mut actions = 0;
     while s.phase != Phase::Ended {
@@ -77,9 +78,9 @@ fn play(
         let legal = legal_actions(&s);
         let actor = acting_player(&s);
         let a = if actor == subject_seat {
-            me.choose_action(&s, &legal, &mut rng)
+            rng.choose(&mut *me, &s, &legal)
         } else {
-            opp.choose_action(&s, &legal, &mut rng)
+            rng.choose(&mut opp, &s, &legal)
         };
         if actor == subject_seat && matches!(a, Action::Mulligan { .. }) {
             if stop == Some(&a) {

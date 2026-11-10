@@ -8,6 +8,7 @@ import {
   invariantViolations,
   legalActions,
   rngFrom,
+  seedOf,
   type Action,
   type GameState,
   type PlayerIndex,
@@ -37,10 +38,28 @@ export function playMatch(agents: [Agent, Agent], opts: MatchOptions): MatchResu
   return playFrom(agents, createGame({ decks: opts.decks, seed: opts.seed }), opts);
 }
 
-/** 途中の局面から最後まで対戦させる（AI の乱数は seed から作る。decks は使わない） */
+/** 思考用の乱数の用途「試合の中の判断」（rust/engine/src/ai/mod.rs の purpose::DECISION） */
+const DECISION = 1;
+
+/**
+ * 途中の局面から最後まで対戦させる（decks は使わない）。AI の思考用の乱数は、判断ごとに seed・席・ターン・そのターンでその席が何回目の判断かから作る
+ * （rust/engine/src/sim.rs の MatchRng と同じ。2026-11-10 から）。sequentialRng の AI には、1 試合に 1 本の乱数を順に使う古い取り方で渡す
+ */
 export function playFrom(agents: [Agent, Agent], start: GameState, opts: Omit<MatchOptions, "decks">): MatchResult {
   let state = start;
-  const agentRng = rngFrom({ rng: (opts.seed ^ 0x9e3779b9) >>> 0 });
+  const shared = rngFrom({ rng: (opts.seed ^ 0x9e3779b9) >>> 0 });
+  let turn: number | null = null;
+  let counts = [0, 0];
+  const rngFor = (actor: PlayerIndex, sequential: boolean) => {
+    if (state.turn !== turn) {
+      turn = state.turn;
+      counts = [0, 0];
+    }
+    const k = counts[actor] ?? 0;
+    counts[actor] = k + 1;
+    if (sequential) return shared;
+    return rngFrom({ rng: seedOf([DECISION, opts.seed >>> 0, actor, state.turn >>> 0, k]) });
+  };
   const maxActions = opts.maxActions ?? 10000;
   let actions = 0;
   const log: Action[] | undefined = opts.record ? [] : undefined;
@@ -49,7 +68,8 @@ export function playFrom(agents: [Agent, Agent], start: GameState, opts: Omit<Ma
     if (++actions > maxActions) throw new Error(`アクション数が上限 ${maxActions} を超えました`);
     const legal = legalActions(state);
     const actor = actingPlayer(state);
-    const action = agents[actor].chooseAction(state, legal, agentRng);
+    const agent = agents[actor];
+    const action = agent.chooseAction(state, legal, rngFor(actor, agent.sequentialRng ?? false));
     log?.push(action);
     state = applyAction(state, action);
     if (opts.checkInvariants) {
