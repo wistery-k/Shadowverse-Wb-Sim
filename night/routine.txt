@@ -10,5 +10,5 @@ yardstick --ref strong --opts '{}' --games 4000 --start 0 --label 定例-強い�
 # 速さ（docs/profile.md と同じ 98 試合。デッキごとの 1 試合の時間は回のフォルダの speed-3.md）
 profile --games 49
 
-# 見落とし問題集（docs/misses.md）。misses/ の問を 24 回ずつ解かせた正解率。10 問でクラウド環境（4 スレッド）30 秒ほど、PC はその数分の 1（問が増えればその分）
+# 見落とし問題集（docs/misses.md）。misses/ の問を 24 回ずつ解かせた正解率。9 問でクラウド環境（4 スレッド）30 秒ほど、PC はその数分の 1（問が増えればその分）
 misses --trials 24 --seed 1 --label 定例-見落とし問題集
