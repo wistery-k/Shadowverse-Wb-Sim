@@ -143,6 +143,8 @@ pub enum RngSkew {
     None,
     /// AI の思考用の乱数を、試合の始めに 1 つ進める
     Ai,
+    /// AI の思考用の乱数を、マリガンが終わった時点で 1 つ進める（マリガンの選び方は変えない）
+    AiMain,
     /// エンジンの乱数を、マリガンが終わった時点で 1 つ進める（山札の順番は変えない）
     Engine,
 }
@@ -160,12 +162,20 @@ pub fn play_match_skewed(
     if skew == RngSkew::Ai {
         let _ = rng.int(2);
     }
-    let mut engine_skewed = false;
+    let mut main_skewed = false;
     let mut actions = 0;
     while s.phase != Phase::Ended {
-        if skew == RngSkew::Engine && !engine_skewed && s.phase == Phase::Main {
-            let _ = s.rng_int(2);
-            engine_skewed = true;
+        if !main_skewed && s.phase == Phase::Main {
+            match skew {
+                RngSkew::Engine => {
+                    let _ = s.rng_int(2);
+                }
+                RngSkew::AiMain => {
+                    let _ = rng.int(2);
+                }
+                _ => {}
+            }
+            main_skewed = true;
         }
         actions += 1;
         assert!(

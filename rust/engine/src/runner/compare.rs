@@ -97,9 +97,10 @@ pub fn play_compare_game_with(
         [&mut b, &mut a]
     };
     let mut log = Vec::new();
-    // 確かめ用: 組の 2 試合目（swap）だけ乱数を 1 つずらす（SVWB_RNG_SKEW=ai / engine）
+    // 確かめ用: 組の 2 試合目（swap）だけ乱数を 1 つずらす（SVWB_RNG_SKEW=ai / ai-main / engine）
     let skew = match std::env::var("SVWB_RNG_SKEW").as_deref() {
         Ok("ai") if swap => crate::sim::RngSkew::Ai,
+        Ok("ai-main") if swap => crate::sim::RngSkew::AiMain,
         Ok("engine") if swap => crate::sim::RngSkew::Engine,
         _ => crate::sim::RngSkew::None,
     };
