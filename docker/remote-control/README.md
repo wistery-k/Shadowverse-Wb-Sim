@@ -117,7 +117,10 @@ cd ~/Shadowverse-Wb-Sim/docker/remote-control && docker compose build && docker 
 - `SVWB_DATA`: 自己対戦などの置き場所（ホストの場所）。既定は `~/svwb-data`
 - `CLAUDE_SPAWN`: 新しいセッションの作り方。既定は `same-dir`（どのセッションも `/workspace` で作業する）。`worktree` にすると
   セッションごとに git の worktree を作る（同時に複数のスレッドが作業しても混ざらないが、worktree ごとに Rust を作り直すので遅い）
-- コミットするなら `GIT_AUTHOR_NAME`・`GIT_AUTHOR_EMAIL`・`GIT_COMMITTER_NAME`・`GIT_COMMITTER_EMAIL`
+- コミットするなら `GIT_AUTHOR_NAME`・`GIT_AUTHOR_EMAIL`・`GIT_COMMITTER_NAME`・`GIT_COMMITTER_EMAIL`。夜のキューの `finish --commit` にも要る
+  （`docs/night.md`「台帳の行のコミット」）
+
+`.env` を書き換えたら、ホストで `docker compose up -d` を流してコンテナを作り直す（`.env` はコンテナを作るときに読む。動いているセッションと夜のキューは止まるので、回していない昼に）
 
 ## 気をつけること
 
