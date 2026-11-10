@@ -959,4 +959,9 @@ impl Agent for RhinoAgent {
         }
         self.search.choose_action(real, legal, rng)
     }
+
+    /// 中の探索 AI が古い取り方なら、試合の中でも古い取り方の乱数を受け取る（エルフの手番とそれ以外で同じ取り方の設定を渡す）
+    fn sequential_rng(&self) -> bool {
+        self.search.sequential_rng()
+    }
 }
