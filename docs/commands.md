@@ -35,6 +35,7 @@
 | `npm run deck-compare` | デッキのカードを入れ替えた案と元のデッキの勝率（下） | `rust/engine/src/runner/deck_compare.rs` |
 | `npm run meta` | 環境（デッキと使用率）のアジャスト合戦を 1 回りずつ回す（下） | `rust/engine/src/runner/meta.rs` |
 | `npm run yardstick` | 固定した相手との勝率（強さの物差し。下） | `rust/engine/src/runner/yardstick.rs` |
+| `npm run misses` | 見落とし問題集: 人間が見つけた AI のミスの局面を何度も解かせて正解率を出す・問を足す（下） | `rust/engine/src/runner/misses.rs` |
 | `npm run profile` | デッキごとの 1 試合の時間と、思考の処理ごとの時間の内訳（下） | `scripts/profile.mjs`・`rust/engine/src/runner/profile.rs` |
 | `npm run svwb` | Rust 版の CLI（下） | `rust/engine/src/main.rs` |
 | `npm run td` | TD 学習のモデルの作成・学習・分析（下） | `scripts/td-main.ts` |
@@ -252,18 +253,33 @@ npm run yardstick -- fingerprint [--ref classic|strong]
 `--record` で `docs/yardstick.md` のその相手の表に 1 行足す（`--label` が要る）。`fingerprint` は相手が変わっていないかの確認用。
 `--record` の有無にかかわらず、回すたびに実験の台帳 `docs/ledger.jsonl` に 1 行足す（`--no-ledger` で書かない）。
 
+## misses
+
+```sh
+npm run misses -- run [--opts '<設定>'] [--trials 24] [--seed 1] [--label 名前] [--no-ledger] [--lines 2] [--only 問,…] [--out 結果.jsonl]
+npm run misses -- add --id <問の名前> --pass '<合格の条件>' --title … --note … --source … [--agent search|rhino] [--no-run] [--force]
+                      (--replay <記録> [--line N | --key …] | --seed S --decks A,B [--agents a,b] | --two-turn <局面> | --state <局面.json>) (--turn T | --step N)
+npm run misses -- list | show <問>… | check
+```
+
+見落とし問題集（`misses/*.json`）。`run` は各問の局面から AI に手番の側のターンを `--trials` 回打たせ（AI の乱数だけを変える）、問ごとと全体の合格率（正解率）を出し、
+台帳に 1 行足す（`--only` の回と `--no-ledger` は書かない）。`--opts` は compare の設定と同じ形。`add` は記録した試合・今の AI で打ち直す試合・`two-turn` の局面・
+サンドボックスの書き出しから局面を取り出して問を書き、今の AI の合格を出す。`show` は問の中身、`check` は全部の問が読めて記録から打ち直せるか。
+局面はシミュレータの中の試合からだけ取り、このコマンドだけで使う（公開サイトに出さない）。問の形・合格の条件の書き方・ミスを指摘されたときの手順は [misses.md](misses.md)。
+
 ## ledger
 
 ```sh
 npm run ledger -- [runs] [--kind compare|yardstick] [--since 日付] [--until 日付] [--grep 文字列] [--label 文字列] [--last N]
 npm run ledger -- sum [runs と同じ絞り込み] [--any-commit]
+npm run ledger -- misses [--since 日付] [--until 日付] [--grep 文字列] [--label 文字列] [--last N]
 npm run ledger -- items [--all] [--grep 文字列] [--in-default]
 npm run ledger -- decide --item 名前 --decision 採用|不採用|保留|やめた [--in-default true|false] [--keys a,b]
                          [--from-label 回の名前] [--vs 比べた相手] [--ref 記録の節] [--note メモ] [--date 日付]
 npm run ledger -- check
 ```
 
-実験の台帳 `docs/ledger.jsonl`（1 行 1 件の JSON）を Markdown の表にする。`runs` は回の一覧、`sum` は同じ比べの回を足し合わせたもの、
+実験の台帳 `docs/ledger.jsonl`（1 行 1 件の JSON）を Markdown の表にする。`runs` は回の一覧、`sum` は同じ比べの回を足し合わせたもの、`misses` は見落とし問題集の回、
 `items` は採否の行（項目ごとの今の判定。`--all` で全部）。`decide` は採否の行を足す（`--from-label` でその名前の回を足し合わせた結果を入れる）。
 `check` は全部の行が形に合うかを確かめる。どれも `--file` で別の台帳を読む（既定は環境変数 `SVWB_LEDGER` か `docs/ledger.jsonl`）。
 行の形と使い方は [ledger.md](ledger.md)。
@@ -276,9 +292,9 @@ npm run night -- start <ジョブのファイル> --yes [--until 07:00] [--threa
 npm run night -- status | stop [--now] | resume --yes | finish --commit | list
 ```
 
-PC で対戦を回す夜のキュー。ジョブのファイルは 1 行 1 ジョブで、svwb の `compare`・`yardstick`・`profile` と同じ形（`--label` が要る）。
+PC で対戦を回す夜のキュー。ジョブのファイルは 1 行 1 ジョブで、svwb の `compare`・`yardstick`・`profile`・`misses` と同じ形（`--label` が要る）。
 5〜10 分の区切りごとに結果を回のフォルダ（`~/svwb-data/night/<名前>/`）に残し、電源が切れても続きから回る。朝の `finish` がジョブごとに 1 行にまとめて台帳に足す。
-物差し 2 つと速さの定例は `night/routine.txt`。流れ・引数・止まり方・台帳のコミットのしかたは [night.md](night.md)（`npm run night -- help` にも引数の一覧）。
+物差し 2 つと速さと見落とし問題集の定例は `night/routine.txt`。流れ・引数・止まり方・台帳のコミットのしかたは [night.md](night.md)（`npm run night -- help` にも引数の一覧）。
 
 ## profile
 
@@ -313,6 +329,7 @@ npm run svwb -- compare …                               # npm run compare と�
 npm run svwb -- rhino-compare …                         # npm run rhino-compare と同じ
 npm run svwb -- yardstick …                             # npm run yardstick と同じ
 npm run svwb -- profile …                               # デッキごとの 1 試合の時間（内訳は npm run profile か --features profile のビルド。上の「profile」）
+npm run svwb -- misses …                                # npm run misses と同じ（上の「misses」）
 npm run svwb -- meta …                                  # npm run meta と同じ
 npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mulligan":"sample"}'] [--b '{}'] [--decks <デッキ>,…] [--rhino]
 npm run svwb -- mulligan-data --games 6000 [--start 0] [--seed 1] [--flip 0.5] --out d.jsonl

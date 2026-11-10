@@ -8,7 +8,7 @@
 //   npm run night -- finish [名前] [--commit] [--pack] [--ledger 台帳]
 //   npm run night -- list
 //
-// - ジョブのファイルは 1 行 1 ジョブで、svwb のコマンドと同じ形（compare・yardstick・profile）。# から行の終わりまでは書き添え
+// - ジョブのファイルは 1 行 1 ジョブで、svwb のコマンドと同じ形（compare・yardstick・profile・misses）。# から行の終わりまでは書き添え
 // - 回は ~/svwb-data/night/<名前>/ に置く（環境変数 SVWB_NIGHT_DIR か --root で替えられる）。区切りが済むたびに印を書き、
 //   やり直したときは済んだ区切りを飛ばす。電源が切れても、失うのは回していた区切りだけ
 // - start・resume は、組み立てた svwb を回のフォルダに写し、セッションから切り離した worker を立てて、すぐに戻る。
@@ -35,7 +35,7 @@ import {
 import { availableParallelism, homedir, hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { DEFAULT_LEDGER, canonical, markdownTable, parseLedger, type RunRow } from "./ledger-main.ts";
+import { DEFAULT_LEDGER, canonical, markdownTable, parseLedger, type MissesRow, type RunRow } from "./ledger-main.ts";
 
 /** リポジトリの根 */
 export const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -48,7 +48,9 @@ const HARD_GRACE = 15 * 60;
 export type JobSpec =
   | { kind: "compare"; a: string; b: string; vs: string | null; noMirror: boolean; decks: string | null }
   | { kind: "yardstick"; ref: "classic" | "strong"; opts: string }
-  | { kind: "profile"; opts: string; rhino: boolean };
+  | { kind: "profile"; opts: string; rhino: boolean }
+  /** 見落とし問題集（docs/misses.md）。games は 1 問を打つ回数（--trials） */
+  | { kind: "misses"; opts: string; seed: number };
 
 export interface Job {
   /** ファイルの中のジョブの番号（1 から） */
@@ -57,7 +59,7 @@ export interface Job {
   line: string;
   /** 台帳の名前（--label）。profile は空でもよい */
   label: string;
-  /** 試合番号の数（1 つの番号で席とデッキを入れ替えて 2 試合）と、最初の番号 */
+  /** 試合番号の数（1 つの番号で席とデッキを入れ替えて 2 試合）と、最初の番号。misses は 1 問を打つ回数と 0 */
   games: number;
   start: number;
   /** --est: 1 試合の見込みの秒（回すマシン・並列数で。キューだけが読む） */
@@ -220,8 +222,23 @@ export function parseJob(line: string, index: number): Job {
       if (rest.length > 0) throw new Error(`知らない引数: ${rest.join(" ")}`);
       return { index, line: text, label, games, start, est, spec: { kind, opts, rhino } };
     }
+    case "misses": {
+      // 行の頭の run は書いても書かなくてもよい
+      if (rest[0] === "run") rest.splice(0, 1);
+      refuse(["--no-ledger"], "結果は台帳から集める");
+      refuse(["--only", "--dir", "--out"], "問題集全体を、決まった場所で解く");
+      const label = take("--label");
+      if (!label) throw new Error("--label で台帳の名前を付けます");
+      const opts = jsonObject(take("--opts") ?? "{}", "--opts");
+      const games = intOf(take("--trials") ?? "24", "--trials", 1);
+      const seed = intOf(take("--seed") ?? "1", "--seed", 0);
+      take("--lines");
+      noUnknown();
+      if (rest.length > 0) throw new Error(`知らない引数: ${rest.join(" ")}`);
+      return { index, line: text, label, games, start: 0, est, spec: { kind, opts, seed } };
+    }
     default:
-      throw new Error(`ジョブは compare・yardstick・profile のどれか: ${kind ?? "（空）"}`);
+      throw new Error(`ジョブは compare・yardstick・profile・misses のどれか: ${kind ?? "（空）"}`);
   }
 }
 
@@ -275,7 +292,14 @@ export function jobArgv(job: Job, first: number, count: number, dir: string): st
         "--report",
         join(dir, `speed-${job.index}.md`),
       ];
+    case "misses":
+      return ["misses", "run", "--opts", s.opts, "--trials", String(count), "--seed", String(s.seed), "--label", job.label];
   }
+}
+
+/** count（区切りの大きさ）が何試合か。misses は「全部の問を 1 回ずつ」を 1 と数える（見込みの 1 試合の秒も、その 1 回の秒） */
+export function unitsOf(job: Job, count: number): number {
+  return job.spec.kind === "misses" ? count : 2 * count;
 }
 
 /** ジョブの短い名前（表に出す） */
@@ -283,19 +307,23 @@ export function jobTitle(job: Job): string {
   const s = job.spec;
   if (s.kind === "compare") return `compare A ${s.a} 対 B ${s.b}${s.vs ? `（B は ${s.vs}）` : ""}${s.noMirror ? "（鏡なし）" : ""}`;
   if (s.kind === "yardstick") return `yardstick ${s.ref}${s.opts === "{}" ? "" : ` ${s.opts}`}`;
+  if (s.kind === "misses") return `misses（見落とし問題集）${s.opts === "{}" ? "" : ` ${s.opts}`}`;
   return `profile（速さ）${s.opts === "{}" ? "" : ` ${s.opts}`}${s.rhino ? " --rhino" : ""}`;
 }
 
 // ---------------------------------------------------------------- 見積もりと区切り
 
-type SpeedKey = "compare" | "classic" | "strong" | "profile";
+type SpeedKey = "compare" | "classic" | "strong" | "profile" | "misses";
 
-/** 決めておいた速さ（1 試合あたりのスレッド秒 = 1 試合の秒 × 並列数。今の既定の探索 AI で）。台帳に同じ比べ・同じマシンの回が無いときに使う */
+/** 決めておいた速さ（1 試合あたりのスレッド秒 = 1 試合の秒 × 並列数。今の既定の探索 AI で）。台帳に同じ比べ・同じマシンの回が無いときに使う。
+ * misses は全部の問を 1 回ずつ解く秒（10 問のとき。問が増えればその分かかる） */
 export const SPEEDS: Record<string, { threads: number; note: string; ts: Record<SpeedKey, number> }> = {
-  // ユーザーの PC（Core i7-14700F、28 スレッド。Docker の svwb-docker）。compare は 3200 試合 5 分ほど、物差しは docs/yardstick.md の「（PC）」の行
-  "svwb-docker": { threads: 28, note: "PC の決めておいた値", ts: { compare: 2.6, classic: 1.3, strong: 2.7, profile: 2.6 } },
-  // Claude のクラウド環境（4 スレッド）で 2026-11-10 に測った値（compare 0.50・弱い相手 0.21・強い相手 0.44 秒/試合、各 56 試合）。ほかのマシンもこれで見積もる
-  default: { threads: 4, note: "クラウド環境の決めておいた値", ts: { compare: 2.0, classic: 0.85, strong: 1.8, profile: 2.0 } },
+  // ユーザーの PC（Core i7-14700F、28 スレッド。Docker の svwb-docker）。compare は 3200 試合 5 分ほど、物差しは docs/yardstick.md の「（PC）」の行。
+  // misses は測っていないので、クラウド環境の値に compare の比（2.6 / 2.0）を掛けた
+  "svwb-docker": { threads: 28, note: "PC の決めておいた値", ts: { compare: 2.6, classic: 1.3, strong: 2.7, profile: 2.6, misses: 5.9 } },
+  // Claude のクラウド環境（4 スレッド）で 2026-11-10 に測った値（compare 0.50・弱い相手 0.21・強い相手 0.44 秒/試合、各 56 試合。
+  // misses は 10 問 × 24 回が 27 秒）。ほかのマシンもこれで見積もる
+  default: { threads: 4, note: "クラウド環境の決めておいた値", ts: { compare: 2.0, classic: 0.85, strong: 1.8, profile: 2.0, misses: 4.5 } },
 };
 
 export interface Estimate {
@@ -322,9 +350,20 @@ function sameComparison(job: Job, r: RunRow): boolean {
   return false;
 }
 
-/** 1 試合の秒を見積もる（--est → 台帳の同じ比べ・同じマシンの最近の回 → 決めておいた値） */
-export function estimate(job: Job, runs: RunRow[], machine: string, threads: number): Estimate {
+/** 1 試合の秒を見積もる（--est → 台帳の同じ比べ・同じマシンの最近の回 → 決めておいた値）。misses は全部の問を 1 回ずつ解く秒 */
+export function estimate(job: Job, runs: RunRow[], machine: string, threads: number, misses: MissesRow[] = []): Estimate {
   if (job.est !== null) return { perGame: job.est, source: "--est" };
+  const mhit = job.spec.kind === "misses" ? misses.filter((r) => r.machine === machine && r.trials > 0 && r.seconds > 0).slice(-5) : [];
+  const mlast = mhit[mhit.length - 1];
+  if (mlast) {
+    // 問の数が変わっていれば、問の数で割り直す
+    const now = mlast.problems;
+    const perRound = (r: MissesRow) => ((r.seconds / r.trials) * r.threads * now) / Math.max(1, r.problems);
+    return {
+      perGame: mhit.reduce((s, r) => s + perRound(r), 0) / mhit.length / threads,
+      source: `台帳（${machine}・${mlast.date}・${mhit.length} 回）`,
+    };
+  }
   const hit = runs.filter((r) => r.machine === machine && r.n > 0 && r.seconds > 0 && sameComparison(job, r)).slice(-5);
   if (hit.length > 0) {
     const last = hit[hit.length - 1];
@@ -341,6 +380,7 @@ export function estimate(job: Job, runs: RunRow[], machine: string, threads: num
   const s = job.spec;
   const key: SpeedKey = s.kind === "yardstick" ? s.ref : s.kind;
   const plain = s.kind === "compare" ? s.a === "{}" && s.b === "{}" && s.decks === null : s.opts === "{}";
+  if (s.kind === "misses") return { perGame: sp.ts.misses / threads, source: `${sp.note}（10 問のとき）` };
   return { perGame: sp.ts[key] / threads, source: `${sp.note}${plain ? "" : "（設定の違いは見ていない）"}` };
 }
 
@@ -353,9 +393,9 @@ export interface Chunk {
   count: number;
 }
 
-/** ジョブを、1 つが targetSec 秒ほどの区切りに分ける（大きさはそろえる。profile は分けない） */
+/** ジョブを、1 つが targetSec 秒ほどの区切りに分ける（大きさはそろえる。profile・misses は分けない） */
 export function chunkJob(job: Job, perGame: number, targetSec: number): Chunk[] {
-  const per = job.spec.kind === "profile" ? job.games : Math.max(1, Math.floor(targetSec / (2 * perGame)));
+  const per = job.spec.kind === "profile" || job.spec.kind === "misses" ? job.games : Math.max(1, Math.floor(targetSec / (2 * perGame)));
   const n = Math.ceil(job.games / per);
   const size = Math.ceil(job.games / n);
   const out: Chunk[] = [];
@@ -535,12 +575,25 @@ export function chunkRows(dir: string): RunRow[] {
   return existsSync(f) ? parseLedger(readFileSync(f, "utf8")).runs : [];
 }
 
+/** 回のフォルダの台帳の、見落とし問題集の行 */
+function chunkMisses(dir: string): MissesRow[] {
+  const f = join(dir, "ledger.jsonl");
+  return existsSync(f) ? parseLedger(readFileSync(f, "utf8")).misses : [];
+}
+
 /** 区切りの台帳の行（同じ引数で回した行） */
-function rowOf(rows: RunRow[], plan: Plan, dir: string, c: Chunk): RunRow | undefined {
+function rowOf<R extends { cmd: string }>(rows: R[], plan: Plan, dir: string, c: Chunk): R | undefined {
   const job = plan.jobs[c.job - 1];
   if (!job) return undefined;
   const cmd = shellLine(jobArgv(job, c.first, c.count, dir));
   return rows.find((r) => r.cmd === cmd);
+}
+
+/** 区切りの台帳の行（ジョブの種類に合わせて読む。profile は行を書かない） */
+function chunkRowOf(plan: Plan, dir: string, c: Chunk): RunRow | MissesRow | undefined {
+  const kind = plan.jobs[c.job - 1]?.spec.kind;
+  if (kind === "profile") return undefined;
+  return kind === "misses" ? rowOf(chunkMisses(dir), plan, dir, c) : rowOf(chunkRows(dir), plan, dir, c);
 }
 
 /** worker が動いていれば、その pid */
@@ -592,8 +645,9 @@ export function makePlanParts(
   machine: string,
   threads: number,
   chunkMin: number,
+  misses: MissesRow[] = [],
 ): { estimates: Estimate[]; chunks: Chunk[] } {
-  const estimates = jobs.map((j) => estimate(j, runs, machine, threads));
+  const estimates = jobs.map((j) => estimate(j, runs, machine, threads, misses));
   const chunks = jobs.flatMap((j, i) => chunkJob(j, estimates[i]?.perGame ?? 1, chunkMin * 60));
   return { estimates, chunks };
 }
@@ -601,7 +655,8 @@ export function makePlanParts(
 /** 区切りの見込みの秒（そのジョブで済んだ区切りがあれば、その速さで） */
 function chunkSeconds(c: Chunk, plan: Plan, measured: Map<number, number>): number {
   const perGame = measured.get(c.job) ?? plan.estimates[c.job - 1]?.perGame ?? 1;
-  return 2 * c.count * perGame;
+  const job = plan.jobs[c.job - 1];
+  return (job ? unitsOf(job, c.count) : 2 * c.count) * perGame;
 }
 
 /** ジョブごとの、同じスレッド数で済んだ区切りから測った 1 試合の秒 */
@@ -612,7 +667,7 @@ function measuredSpeed(plan: Pick<Plan, "jobs" | "chunks">, done: Map<string, Ma
       const m = done.get(c.id);
       return c.job === job.index && m !== undefined && !m.recovered && m.threads === threads;
     });
-    const games = cs.reduce((s, c) => s + 2 * c.count, 0);
+    const games = cs.reduce((s, c) => s + unitsOf(job, c.count), 0);
     const secs = cs.reduce((s, c) => s + (done.get(c.id)?.seconds ?? 0), 0);
     if (games > 0 && secs > 0) out.set(job.index, secs / games);
   }
@@ -634,10 +689,10 @@ export function planText(
   for (const [i, job] of plan.jobs.entries()) {
     const cs = plan.chunks.filter((c) => c.job === job.index && !done.has(c.id));
     const perGame = measured.get(job.index) ?? plan.estimates[i]?.perGame ?? 1;
-    const secs = cs.reduce((s, c) => s + 2 * c.count * perGame, 0);
+    const secs = cs.reduce((s, c) => s + unitsOf(job, c.count) * perGame, 0);
     for (const c of cs) {
-      if (cut === null && t + 2 * c.count * perGame * 1000 > o.until) cut = `ジョブ ${job.index} の区切り ${c.k}`;
-      t += 2 * c.count * perGame * 1000;
+      if (cut === null && t + unitsOf(job, c.count) * perGame * 1000 > o.until) cut = `ジョブ ${job.index} の区切り ${c.k}`;
+      t += unitsOf(job, c.count) * perGame * 1000;
     }
     total += secs;
     nChunks += cs.length;
@@ -647,9 +702,9 @@ export function planText(
       String(job.index),
       jobTitle(job),
       job.label,
-      cs.length === 0 ? "済み" : `${games * 2}（g${first}〜${first + games - 1}）`,
+      cs.length === 0 ? "済み" : job.spec.kind === "misses" ? `各問 ${games} 回` : `${games * 2}（g${first}〜${first + games - 1}）`,
       String(cs.length),
-      `${perGame.toFixed(3)} 秒`,
+      `${perGame.toFixed(3)} 秒${job.spec.kind === "misses" ? "（全問 1 回）" : ""}`,
       fmtDur(secs),
       cs.length === 0 ? "" : fmtClock(t, o.tz),
       measured.has(job.index) ? "この回で測った速さ" : (plan.estimates[i]?.source ?? ""),
@@ -742,6 +797,7 @@ export function statusText(dir: string): string {
   const pid = workerPid(dir);
   const done = markers(dir);
   const rows = chunkRows(dir);
+  const missesRows = chunkMisses(dir);
   const failed = existsSync(join(dir, "failed.json")) ? readJson<Record<string, string>>(join(dir, "failed.json")) : {};
   let state: string;
   if (pid !== null) {
@@ -758,10 +814,13 @@ export function statusText(dir: string): string {
     const cs = plan.chunks.filter((c) => c.job === job.index);
     const ds = cs.filter((c) => done.has(c.id));
     const secs = ds.reduce((s, c) => s + (done.get(c.id)?.seconds ?? 0), 0);
-    const games = ds.reduce((s, c) => s + 2 * c.count, 0);
+    const games = ds.reduce((s, c) => s + unitsOf(job, c.count), 0);
     let result = "";
     if (job.spec.kind === "profile") {
       result = ds.length > 0 ? `speed-${job.index}.md` : "";
+    } else if (job.spec.kind === "misses") {
+      const m = ds.map((c) => rowOf(missesRows, plan, dir, c)).find((r) => r !== undefined);
+      if (m) result = `正解率 ${pct(m.rate)} ± ${pts(m.se)}`;
     } else {
       const rs = ds.map((c) => rowOf(rows, plan, dir, c)).filter((r): r is RunRow => r !== undefined);
       if (rs.length > 0) {
@@ -775,7 +834,7 @@ export function statusText(dir: string): string {
       jobTitle(job),
       job.label,
       `${ds.length}/${cs.length}`,
-      `${games}/${2 * job.games}`,
+      job.spec.kind === "misses" ? `${games}/${job.games} 回` : `${games}/${2 * job.games}`,
       fmtDur(secs),
       result,
       f ? `失敗: ${f}` : "",
@@ -787,7 +846,7 @@ export function statusText(dir: string): string {
     `状態: ${state}`,
     `コミット ${plan.commit}（${plan.branch}）、${s ? `${s.machine}・${s.threads} スレッド、止める時刻 ${fmtClock(s.until, tz)}（${tz}）` : ""}`,
   ];
-  return `${head.join("\n")}\n\n${markdownTable(["#", "ジョブ", "台帳の名前", "区切り", "試合", "かかった時間", "A の勝率", "メモ"], tableRows)}`;
+  return `${head.join("\n")}\n\n${markdownTable(["#", "ジョブ", "台帳の名前", "区切り", "試合", "かかった時間", "A の勝率・正解率", "メモ"], tableRows)}`;
 }
 
 // ---------------------------------------------------------------- worker
@@ -871,7 +930,7 @@ export async function runWorker(dir: string, ctl: WorkerControl = { stopNow: fal
       const done = markers(dir);
       if (done.has(c.id)) continue;
       // 台帳に行があって印が無い（行を書いた直後に電源が切れた）なら、回さずに印を作る
-      const row = rowOf(chunkRows(dir), plan, dir, c);
+      const row = chunkRowOf(plan, dir, c);
       if (row) {
         writeMarker(dir, { id: c.id, seconds: row.seconds, at: new Date().toISOString(), threads: row.threads, recovered: true });
         log(dir, tz, `区切り ${c.id} は台帳に行があるので済んだものとした`);
@@ -894,9 +953,10 @@ export async function runWorker(dir: string, ctl: WorkerControl = { stopNow: fal
       if (r.code === 0) {
         fsyncFile(ledgerFile);
         writeMarker(dir, { id: c.id, seconds: r.seconds, at: new Date().toISOString(), threads: session.threads });
-        const got = job.spec.kind === "profile" ? undefined : rowOf(chunkRows(dir), plan, dir, c);
+        const got = chunkRowOf(plan, dir, c);
         if (job.spec.kind !== "profile" && got === undefined) log(dir, tz, `注意: 区切り ${c.id} の台帳の行が見つからない（chunks/${c.id}.log を見る）`);
-        log(dir, tz, `区切り ${c.id} 済み（${fmtDur(r.seconds)}、${(r.seconds / (2 * c.count)).toFixed(3)} 秒/試合${got ? `、A ${pct(got.rate)}` : ""}）`);
+        const what = got === undefined ? "" : got.kind === "misses" ? `、正解率 ${pct(got.rate)}` : `、A ${pct(got.rate)}`;
+        log(dir, tz, `区切り ${c.id} 済み（${fmtDur(r.seconds)}、${(r.seconds / unitsOf(job, c.count)).toFixed(3)} 秒/${job.spec.kind === "misses" ? "全問 1 回" : "試合"}${what}）`);
         continue;
       }
       if (ctl.stopNow) return end("stopped", `すぐ止めた（stop --now。区切り ${c.id} は回し直す）`);
@@ -962,9 +1022,9 @@ export function gitState(): { commit: string; branch: string; dirty: boolean } {
 
 const thisMachine = (): string => process.env.SVWB_MACHINE || hostname();
 
-function repoRuns(): RunRow[] {
+function repoLedger(): { runs: RunRow[]; misses: MissesRow[] } {
   const f = process.env.SVWB_LEDGER || DEFAULT_LEDGER;
-  return existsSync(f) ? parseLedger(readFileSync(f, "utf8")).runs : [];
+  return existsSync(f) ? parseLedger(readFileSync(f, "utf8")) : { runs: [], misses: [] };
 }
 
 function sessionOf(a: Args, machine: string): Session {
@@ -984,14 +1044,16 @@ function run(cmd: string, args: string[]): void {
   if (r.status !== 0) throw new Error(`${cmd} ${args.join(" ")} が失敗しました`);
 }
 
-/** 設定の書き間違いを、回す前に見つける（0 試合の compare は設定を読むだけ） */
+/** 設定の書き間違いを、回す前に見つける（0 試合の compare は設定を読むだけ。0 回の misses は設定と問題集を読むだけ） */
 function validate(bin: string, jobs: Job[]): void {
   for (const job of jobs) {
     const s = job.spec;
     const args =
       s.kind === "compare"
         ? ["compare", "0", s.a, s.b, "0", ...(s.vs === null ? [] : [s.vs]), ...(s.decks === null ? [] : ["--decks", s.decks]), "--no-ledger"]
-        : ["compare", "0", s.opts, "{}", "0", "--no-ledger"];
+        : s.kind === "misses"
+          ? ["misses", "run", "--opts", s.opts, "--trials", "0", "--no-ledger"]
+          : ["compare", "0", s.opts, "{}", "0", "--no-ledger"];
     const r = spawnSync(bin, args, { cwd: REPO, encoding: "utf8" });
     if (r.status !== 0) throw new Error(`ジョブ ${job.index} の設定が読めません: ${(r.stderr || r.stdout).trim()}`);
   }
@@ -1032,7 +1094,7 @@ export async function cmdStart(a: Args): Promise<number> {
   const chunkMin = Number(a.opts.get("--chunk-min") ?? "7.5");
   if (!(chunkMin > 0)) throw new Error("--chunk-min は正の数");
   const g = gitState();
-  const { estimates, chunks } = makePlanParts(jobs, repoRuns(), machine, session.threads, chunkMin);
+  const { estimates, chunks } = makePlanParts(jobs, repoLedger().runs, machine, session.threads, chunkMin, repoLedger().misses);
   const name = a.opts.get("--name") ?? `night-${stamp(session.started, session.tz)}`;
   if (!/^[A-Za-z0-9._-]+$/.test(name)) throw new Error(`--name は英数字と . _ - だけ: ${name}`);
   console.log(planText({ jobs, estimates, chunks }, { threads: session.threads, machine, startAt: session.started, until: session.until, tz: session.tz, title: `夜のキュー ${name}（${file}）` }));
@@ -1156,7 +1218,10 @@ function checkGitIdent(): void {
 
 /** この回の行のうち、作業ツリーの docs/ledger.jsonl にあって HEAD に無いものの数 */
 function uncommittedQueueRows(name: string): number {
-  const count = (text: string) => parseLedger(text).runs.filter((r) => (r as RunRow & { queue?: string }).queue === name).length;
+  const count = (text: string) => {
+    const l = parseLedger(text);
+    return [...l.runs, ...l.misses].filter((r) => (r as { queue?: string }).queue === name).length;
+  };
   const work = existsSync(DEFAULT_LEDGER) ? count(readFileSync(DEFAULT_LEDGER, "utf8")) : 0;
   const head = spawnSync("git", ["show", "HEAD:docs/ledger.jsonl"], { cwd: REPO, encoding: "utf8", maxBuffer: 1 << 30 });
   return work - (head.status === 0 ? count(head.stdout) : 0);
@@ -1180,12 +1245,26 @@ export function cmdFinish(a: Args): number {
     if (resolve(target) !== resolve(DEFAULT_LEDGER)) throw new Error("--commit はリポジトリの台帳（docs/ledger.jsonl）に足すときだけ");
     checkGitIdent();
   }
-  const existing = existsSync(target) ? parseLedger(readFileSync(target, "utf8")).runs : [];
+  const targetLedger = existsSync(target) ? parseLedger(readFileSync(target, "utf8")) : { runs: [], misses: [] };
+  const existing = targetLedger.runs;
   const key = (r: { label: string; g: [number, number]; commit: string; kind: string }) => `${r.kind}\u0001${r.label}\u0001${r.g[0]}\u0001${r.g[1]}\u0001${r.commit}`;
   const have = new Set(existing.filter((r) => (r as RunRow & { queue?: string }).queue === plan.name).map(key));
   const out: RunRow[] = [];
+  // 見落とし問題集は分けずに回すので、区切りの行に回の名前を足してそのまま写す
+  const outMisses: (MissesRow & { queue: string; chunks: number })[] = [];
+  const mrows = chunkMisses(dir);
+  const mkey = (r: MissesRow) => `${r.label}\u0001${r.commit}\u0001${r.seed}\u0001${r.trials}\u0001${r.set}`;
+  const haveMisses = new Set(targetLedger.misses.filter((r) => (r as MissesRow & { queue?: string }).queue === plan.name).map(mkey));
   for (const job of plan.jobs) {
     if (job.spec.kind === "profile") continue;
+    if (job.spec.kind === "misses") {
+      for (const c of plan.chunks.filter((c) => c.job === job.index && done.has(c.id) && !merged.has(c.id))) {
+        const r = rowOf(mrows, plan, dir, c);
+        if (r && !haveMisses.has(mkey(r))) outMisses.push({ ...r, queue: plan.name, chunks: 1 });
+        merged.add(c.id);
+      }
+      continue;
+    }
     const cs = plan.chunks.filter((c) => c.job === job.index && done.has(c.id) && !merged.has(c.id));
     const rs = cs.map((c) => rowOf(rows, plan, dir, c)).filter((r): r is RunRow => r !== undefined);
     for (const group of contiguous(rs)) {
@@ -1196,8 +1275,9 @@ export function cmdFinish(a: Args): number {
     }
     for (const c of cs) merged.add(c.id);
   }
-  const text = out.map((r) => `${JSON.stringify(r)}\n`).join("");
-  if (out.length > 0) {
+  const text = [...out, ...outMisses].map((r) => `${JSON.stringify(r)}\n`).join("");
+  const added = out.length + outMisses.length;
+  if (added > 0) {
     if (existsSync(target)) {
       const t = readFileSync(target, "utf8");
       if (t.length > 0 && !t.endsWith("\n")) appendFileSync(target, "\n");
@@ -1206,12 +1286,19 @@ export function cmdFinish(a: Args): number {
     appendFileSync(join(dir, "ledger-jobs.jsonl"), text);
   }
   writeAtomic(mergedFile, JSON.stringify([...merged]));
-  const summary = `${statusText(dir)}\n\n台帳（${target}）に足した行: ${out.length}\n${
+  const summary = `${statusText(dir)}\n\n台帳（${target}）に足した行: ${added}\n${
     out.length > 0
       ? markdownTable(
           ["名前", "試合", "A の勝率", "±", "区切り", "秒/試合"],
           out.map((r) => [r.label, `${r.n}（g${r.g[0]}〜${r.g[1]}）`, pct(r.rate), pts(r.se), String((r as RunRow & { chunks?: number }).chunks ?? 1), r.perGame?.toFixed(3) ?? "?"]),
         )
+      : ""
+  }${
+    outMisses.length > 0
+      ? `\n\n${markdownTable(
+          ["名前", "問", "回数", "正解率", "±", "秒"],
+          outMisses.map((r) => [r.label, `${r.problems}（${r.set}）`, String(r.trials), pct(r.rate), pts(r.se), r.seconds.toFixed(0)]),
+        )}`
       : ""
   }`;
   writeFileSync(join(dir, "summary.md"), `${summary}\n`);
@@ -1276,7 +1363,7 @@ export async function main(argv: string[]): Promise<number> {
         const machine = a.opts.get("--machine") ?? thisMachine();
         const session = sessionOf(a, machine);
         const chunkMin = Number(a.opts.get("--chunk-min") ?? "7.5");
-        const parts = makePlanParts(jobs, repoRuns(), machine, session.threads, chunkMin);
+        const parts = makePlanParts(jobs, repoLedger().runs, machine, session.threads, chunkMin, repoLedger().misses);
         console.log(planText({ jobs, ...parts }, { threads: session.threads, machine, startAt: session.started, until: session.until, tz: session.tz, title: `夜のキュー（${file}）` }));
         return 0;
       }

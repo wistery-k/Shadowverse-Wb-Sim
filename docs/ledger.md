@@ -50,6 +50,23 @@ AI の実験の結果を、1 行 1 件の JSON（JSON Lines）で残す台帳。
 | `cmd` | 回したコマンド（`svwb` の後ろ。シェルにそのまま貼れる形）。夜のキューのまとめた行は、1 回で回すときのコマンド |
 | `queue`・`chunks` | 夜のキューのまとめた行だけ: 回の名前と、まとめた区切りの数（`seconds` は区切りの和） |
 
+### 見落とし問題集の行（`misses`）: ランナーが自動で書く
+
+`npm run misses -- run`（[misses.md](misses.md)）も、回すたびに 1 行足す（`--label`・`--no-ledger`・`SVWB_LEDGER` は回の行と同じ。
+`--only` で問を絞った回は書かない）。試合ではなく問の合格を数えるので、回の行とは形が違い、`runs`・`sum` には出ない（`npm run ledger -- misses` で引く）。
+
+| 項目 | 中身 |
+| --- | --- |
+| `v`・`date`・`at`・`commit`・`branch`・`label`・`a`・`files` | 回の行と同じ（`a` は AI の設定） |
+| `kind` | `misses` |
+| `problems`・`set` | 問の数と問題集の指紋（問の名前と中身。問を足す・直すと変わる。指紋の違う回の正解率はそのまま比べない） |
+| `trials`・`seed` | 1 問を打つ回数と乱数の元 |
+| `n`・`passes` | 打った回数（問の数 × 回数）と合格した回数 |
+| `rate`・`se` | 正解率（問ごとの合格率の平均、0〜1）と標準誤差（問ごとの合格率のぶれから。問題集は決まったものとして） |
+| `perProblem` | 問ごとの [合格, 回数] |
+| `seconds`・`threads`・`machine`・`cmd` | 回の行と同じ |
+| `queue`・`chunks` | 夜のキューで回した行だけ: 回の名前と区切りの数（いつも 1） |
+
 ### 採否の行（`decision`）: `npm run ledger -- decide` で足す
 
 採否を決めたら 1 行足す。初めの 32 行は、2026-11-10 の既定に入っている項目を記録から写したもの（`"source":"notes"`）。
@@ -77,6 +94,7 @@ npm run ledger -- runs --label 幅 --since 2026-11-10 --kind compare --last 20
 npm run ledger -- runs --grep potentialNet       # 行の JSON のどこかに含む（大文字小文字を区別しない）
 npm run ledger -- sum --label 幅                  # 同じ比べ（種類・両方の設定・デッキ・鏡・相手・コミット）の回を足し合わせる
 npm run ledger -- sum --any-commit               # コミットが違っても足す（手が変わらない変更をまたぐとき）
+npm run ledger -- misses --label 定例             # 見落とし問題集の回（正解率と問ごとの合格）
 npm run ledger -- items --in-default             # 今の既定に入っている項目と、採ったときの数字
 npm run ledger -- items --grep drawSplit --all   # 項目の判定の移り変わり
 npm run ledger -- decide --item '自分のターンのビームを幅 256 に' --decision 採用 --from-label 幅256 \
