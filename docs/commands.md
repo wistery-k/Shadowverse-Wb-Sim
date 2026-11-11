@@ -260,11 +260,13 @@ npm run misses -- run [--opts '<設定>'] [--trials 24] [--seed 1] [--label 名�
 npm run misses -- add --id <問の名前> --pass '<合格の条件>' --title … --note … --source … [--agent search|rhino] [--no-run] [--force]
                       (--replay <記録> [--line N | --key …] | --seed S --decks A,B [--agents a,b] | --two-turn <局面> | --state <局面.json>) (--turn T | --step N)
 npm run misses -- list | show <問>… | check
+npm run misses -- cover [--opts '<設定>'] [--seeds 8] [--m 128] [--extra 4] [--wide 64] [--only 問,…] [--show]
 ```
 
 見落とし問題集（`misses/*.json`）。`run` は各問の局面から AI に手番の側のターンを `--trials` 回打たせ（AI の乱数だけを変える）、問ごとと全体の合格率（正解率）を出し、
 台帳に 1 行足す（`--only` の回と `--no-ledger` は書かない）。`--opts` は compare の設定と同じ形。`add` は記録した試合・今の AI で打ち直す試合・`two-turn` の局面・
 サンドボックスの書き出しから局面を取り出して問を書き、今の AI の合格を出す。`show` は問の中身、`check` は全部の問が読めて記録から打ち直せるか。
+`cover` は各問を候補の打ち比べ調査（下の `survey`）と同じ候補と打ち方にかけ、合格の並びが候補のどこにあるかと、AI の選んだ並びとの打ち比べの差を出す（台帳には書かない）。
 局面はシミュレータの中の試合からだけ取り、このコマンドだけで使う（公開サイトに出さない）。問の形・合格の条件の書き方・ミスを指摘されたときの手順は [misses.md](misses.md)。
 
 ## ledger

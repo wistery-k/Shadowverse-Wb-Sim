@@ -7,6 +7,7 @@
 //!   svwb misses list [--dir misses]
 //!   svwb misses show <問の名前>… [--dir misses]
 //!   svwb misses check [--dir misses]
+//!   svwb misses cover [--opts '<設定>'] [--seeds 8] [--m 128] [--extra 4] [--wide 64] [--only 名前,…] [--show] [--dir misses]
 //!
 //! - 1 問は 1 ファイル。局面そのもの（状態の JSON）・手番・合格の条件・出どころ・ひとことの説明を持つ。
 //!   局面を seed とターンで持たないのは、AI を変えると試合の流れが変わるため
@@ -15,6 +16,8 @@
 //!   局面の隠れた情報（相手の手札・山札、山札の順番、局面の乱数）は問のまま。AI は今までどおり自分から見た決定化で考えるので、見ない
 //! - `add` は記録した試合（`npm run game --json`・compare の `--replays`・人間の記録）・今の AI で打ち直す試合・手で作った局面（two-turn）・
 //!   サンドボックスの書き出しから局面を取り出し、問のファイルを書いて、今の AI の合格率を出す（`--no-run` で出さない）
+//! - `cover` は各問を候補の打ち比べ調査（docs/survey.md）と同じ作り方の候補にして、合格の並びが候補のどこにあるかを数え、
+//!   候補に入る問は AI の選んだ並びと最後まで打ち比べる（調査がその種類のミスを拾えるかの確かめ。台帳には書かない）
 //! - 局面はシミュレータの中の試合からだけ取り、このコマンドだけで使う（公開サイトには出さない。CLAUDE.md「ソフト打ち」）
 
 use super::deck_compare::read_deck;
@@ -1616,6 +1619,369 @@ fn show(argv: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+// ---------------------------------------------------------------- cover: 打ち比べ調査の候補に合格の並びがあるか
+
+/// cover の乱数の数の既定（候補を作る AI の乱数を変える回数）
+const COVER_SEEDS: u32 = 8;
+/// cover の打ち比べの回数の既定（0 なら打ち比べない）
+const COVER_M: u32 = 128;
+/// cover で「足しても入らない」を見るために足す候補の数の既定
+const COVER_WIDE: u32 = 64;
+
+/// 並び acts を root から打ったときの 1 ターン（play_turn と同じ形。打てない手があればそこまで）
+fn turn_of_plan(root: &GameState, p: PlayerIndex, acts: &[Action]) -> Turn {
+    let mut t = root.clone();
+    let mut steps = Vec::new();
+    let mut last: Option<String> = None;
+    for a in acts {
+        if t.phase == Phase::Ended || !is_legal(&t, a) {
+            break;
+        }
+        if acting_player(&t) == p {
+            let st = step_of(&t, a, p, &last);
+            if matches!(
+                a,
+                Action::Play(_)
+                    | Action::Act(_)
+                    | Action::Evolve(_)
+                    | Action::SuperEvolve(_)
+                    | Action::Fuse { .. }
+                    | Action::Attack { .. }
+            ) {
+                last = st.cards.first().cloned();
+            }
+            if !matches!(a, Action::EndTurn | Action::ExtraPp) {
+                steps.push(st);
+            }
+        }
+        t = apply_legal(&t, a);
+    }
+    if t.phase != Phase::Ended && acting_player(&t) == p && is_legal(&t, &Action::EndTurn) {
+        t = apply_legal(&t, &Action::EndTurn);
+    }
+    Turn {
+        steps,
+        won: t.phase == Phase::Ended && t.winner == Some(p),
+        hp: t.players[p].leader_hp,
+    }
+}
+
+/// 打ち比べ調査の候補 1 つ（調査と同じ並びの順。読み直す候補が先、足した候補が後）
+struct CoverPlan {
+    /// AI が読み直す候補か（false は足した候補）
+    top: bool,
+    /// 読み直しを始めたが、途中で打ち切られた候補か（rescoreRace。top も true）
+    cut: bool,
+    /// AI が選んだ並びか
+    chosen: bool,
+    /// 合格の条件を満たすか
+    pass: bool,
+    /// 打ち比べに渡す並び
+    steps: Vec<Action>,
+    /// 並びの文
+    text: String,
+    /// ターンの終わりの評価
+    turn_end: f64,
+    /// 探索の終点の中の順位
+    rank: usize,
+}
+
+/// 問 1 つを乱数 1 つで候補にしたもの
+struct CoverRow {
+    /// AI がリーサルを見つけた（調査はこの局面を取らない）
+    lethal: bool,
+    plans: Vec<CoverPlan>,
+    /// 探索の終点の数
+    terminals: usize,
+}
+
+/// 問 p を、乱数 k で打ち比べ調査と同じ作り方の候補にする（足す候補は extra 個まで。考える AI の設定は opts）
+fn cover_plans(
+    p: &Problem,
+    k: u32,
+    extra: usize,
+    opts: &SearchOptions,
+) -> Result<CoverRow, String> {
+    reset_lethal();
+    reset_exact_lethal_cache();
+    let start = state_from_json(&Json::parse(&p.state)?)?;
+    let x = mix(7, k);
+    let mut mr = MatchRng::with_shared(x, x);
+    let r = mr.next(&start, p.player, false);
+    let mut rng = crate::ai::Rng { state: r.state };
+    let legal = legal_actions(&start);
+    let agent = SearchAgent::new(opts.clone());
+    let none = |lethal| CoverRow {
+        lethal,
+        plans: Vec::new(),
+        terminals: 0,
+    };
+    match agent.survey_plans(&start, &legal, &mut rng, extra) {
+        None => Ok(none(false)),
+        Some(sv) if sv.lethal => Ok(none(true)),
+        Some(sv) => {
+            let root = sv.root.as_ref().unwrap_or(&start);
+            let plans = sv
+                .plans
+                .iter()
+                .map(|pl| {
+                    let t = turn_of_plan(root, p.player, &pl.full);
+                    let mut line: Vec<String> = t.steps.iter().map(|s| s.text.clone()).collect();
+                    if line.is_empty() {
+                        line.push("（何もしない）".into());
+                    }
+                    CoverPlan {
+                        top: pl.top,
+                        cut: pl.cut,
+                        chosen: pl.chosen,
+                        pass: passes(&p.pass, &t),
+                        steps: pl.steps.clone(),
+                        text: line.join(" → "),
+                        turn_end: pl.turn_end,
+                        rank: pl.rank,
+                    }
+                })
+                .collect();
+            Ok(CoverRow {
+                lethal: false,
+                plans,
+                terminals: sv.terminals,
+            })
+        }
+    }
+}
+
+/// 合格の並びが候補のどこにあるか
+#[derive(Default, PartialEq, Debug)]
+struct CoverWhere {
+    /// AI の選んだ並びが合格
+    chosen: bool,
+    /// 最後まで読んだ候補に合格の並びがある
+    read: bool,
+    /// 読み直す候補（途中で打ち切られたものも）に合格の並びがある
+    top: bool,
+    /// 読み直す候補と、足した extra 個までに合格の並びがある（調査の候補に入る）
+    within: bool,
+    /// 足した候補の全部までに合格の並びがある
+    any: bool,
+    /// 調査の候補に入る合格の並びの最初のもの（plans の番号）
+    first: Option<usize>,
+}
+
+fn cover_where(plans: &[CoverPlan], extra: usize) -> CoverWhere {
+    let mut w = CoverWhere::default();
+    let mut extras = 0;
+    for (x, pl) in plans.iter().enumerate() {
+        let within = pl.top || extras < extra;
+        if !pl.top {
+            extras += 1;
+        }
+        if !pl.pass {
+            continue;
+        }
+        w.any = true;
+        w.chosen |= pl.chosen;
+        w.read |= pl.top && !pl.cut;
+        w.top |= pl.top;
+        if within {
+            w.within = true;
+            w.first.get_or_insert(x);
+        }
+    }
+    w
+}
+
+/// 打ち比べる組（問の番号・AI の選んだ並び・合格の候補の並びと、それぞれの文）
+struct Duel {
+    problem: usize,
+    ai: Vec<Action>,
+    pass: Vec<Action>,
+    ai_text: String,
+    pass_text: String,
+}
+
+fn cover(argv: &[String]) -> Result<(), String> {
+    let mut argv = argv.to_vec();
+    let dir = take(&mut argv, "--dir")?.unwrap_or_else(|| MISSES_DIR.into());
+    let seeds = int_arg(take(&mut argv, "--seeds")?, "--seeds", COVER_SEEDS)?;
+    let m = int_arg(take(&mut argv, "--m")?, "--m", COVER_M)?;
+    let extra = int_arg(take(&mut argv, "--extra")?, "--extra", 4)? as usize;
+    let wide = int_arg(take(&mut argv, "--wide")?, "--wide", COVER_WIDE)? as usize;
+    let show = take_flag(&mut argv, "--show");
+    let only = take(&mut argv, "--only")?;
+    let opts_text = take(&mut argv, "--opts")?.unwrap_or_else(|| "{}".into());
+    no_rest(&argv)?;
+    let wide = wide.max(extra);
+    // 候補を作る AI の設定（打ち比べの続きは、調査と同じく今の既定の AI）
+    let opts = Agents::new(&opts_text)?.search;
+    if opts.plan_candidates > 1 {
+        // survey_plans は、読み直す候補の並びを最初の手から引く。同じ最初の手の 2 つ目の並びは取り違える
+        return Err("cover は planCandidates が 2 以上の設定を扱えません".into());
+    }
+    let mut ps = load(&dir)?;
+    if let Some(o) = &only {
+        let want: Vec<&str> = o.split(',').collect();
+        ps.retain(|p| want.contains(&p.id.as_str()));
+    }
+    if ps.is_empty() {
+        return Err("問がありません".into());
+    }
+    // 候補（問 × 乱数）
+    let tasks: Vec<(usize, u32)> = (0..ps.len())
+        .flat_map(|i| (0..seeds).map(move |k| (i, k)))
+        .collect();
+    let rows: Vec<Result<CoverRow, String>> = parallel_map(
+        &tasks,
+        |&(i, k), _| {
+            catch_unwind(AssertUnwindSafe(|| cover_plans(&ps[i], k, wide, &opts)))
+                .unwrap_or_else(|_| Err("途中で止まった".into()))
+        },
+        |_, _, _, _| {},
+    );
+    println!(
+        "打ち比べ調査の候補に合格の並びがあるか（{} 問、乱数 {seeds} 通り、設定 {opts_text}）",
+        ps.len()
+    );
+    println!();
+    println!("| 問 | AI の手が合格 | 最後まで読んだ候補に合格 | 読み直す候補に合格 | 足した {extra} つまでに合格 | 足した {wide} までに合格 | リーサル |");
+    println!("| --- | ---: | ---: | ---: | ---: | ---: | ---: |");
+    let mut duels: Vec<Duel> = Vec::new();
+    for (i, p) in ps.iter().enumerate() {
+        let (mut n, mut chosen, mut read, mut top, mut within, mut any, mut lethal) =
+            (0, 0, 0, 0, 0, 0, 0);
+        let mut duel_done = false;
+        for ((j, k), row) in tasks.iter().zip(&rows) {
+            if *j != i {
+                continue;
+            }
+            let row = match row {
+                Ok(x) => x,
+                Err(e) => {
+                    println!("（{} 乱数 {k}: 失敗 {e}）", p.id);
+                    continue;
+                }
+            };
+            n += 1;
+            if row.lethal {
+                lethal += 1;
+                continue;
+            }
+            let w = cover_where(&row.plans, extra);
+            chosen += w.chosen as u32;
+            read += w.read as u32;
+            top += w.top as u32;
+            within += w.within as u32;
+            any += w.any as u32;
+            if show && *k == 0 {
+                println!("  {}（乱数 0、探索の終点 {}）", p.id, row.terminals);
+                for pl in &row.plans {
+                    println!(
+                        "    {}{}{} 順位 {} 点 {:.1}: {}",
+                        match (pl.top, pl.cut) {
+                            (true, false) => "読",
+                            (true, true) => "切",
+                            _ => "足",
+                        },
+                        if pl.chosen { "*" } else { " " },
+                        if pl.pass { "○" } else { "×" },
+                        pl.rank,
+                        pl.turn_end,
+                        pl.text
+                    );
+                }
+            }
+            // 打ち比べる組は、AI の手が不合格で、合格の並びが調査の候補に入った最初の乱数から取る
+            if !duel_done && !w.chosen {
+                if let (Some(x), Some(ch)) = (w.first, row.plans.iter().position(|pl| pl.chosen)) {
+                    duels.push(Duel {
+                        problem: i,
+                        ai: row.plans[ch].steps.clone(),
+                        pass: row.plans[x].steps.clone(),
+                        ai_text: row.plans[ch].text.clone(),
+                        pass_text: row.plans[x].text.clone(),
+                    });
+                    duel_done = true;
+                }
+            }
+        }
+        println!(
+            "| {} | {chosen}/{n} | {read}/{n} | {top}/{n} | {within}/{n} | {any}/{n} | {lethal}/{n} |",
+            p.id
+        );
+    }
+    if m == 0 || duels.is_empty() {
+        return Ok(());
+    }
+    // 打ち比べ（調査と同じ打ち方。同じ回は 2 つの並びで同じ決定化と AI の乱数）。シードは問の名前から作る（問を足しても変わらない）
+    let dtasks: Vec<(usize, bool, u32)> = (0..duels.len())
+        .flat_map(|d| {
+            [false, true]
+                .into_iter()
+                .flat_map(move |w| (0..m).map(move |r| (d, w, r)))
+        })
+        .collect();
+    let res: Vec<char> = parallel_map(
+        &dtasks,
+        |&(d, pass, r), _| {
+            let duel = &duels[d];
+            let p = &ps[duel.problem];
+            let start = match Json::parse(&p.state).and_then(|j| state_from_json(&j)) {
+                Ok(s) => s,
+                Err(_) => return 'x',
+            };
+            let seed = mix(99, u32::from_str_radix(&fnv(&p.id), 16).unwrap_or(0));
+            let plan = if pass { &duel.pass } else { &duel.ai };
+            super::survey::playout(&start, p.player, plan, seed, r)
+        },
+        |_, _, _, _| {},
+    );
+    println!();
+    println!("| 問 | AI の並びの勝ち | 合格の候補の勝ち | 差（合格 − AI） |");
+    println!("| --- | ---: | ---: | ---: |");
+    for (d, duel) in duels.iter().enumerate() {
+        let get = |pass: bool| -> Vec<f64> {
+            dtasks
+                .iter()
+                .zip(&res)
+                .filter(|((dd, w, _), _)| *dd == d && *w == pass)
+                .map(|(_, c)| match c {
+                    '1' => 1.0,
+                    '0' => 0.0,
+                    'd' => 0.5,
+                    _ => f64::NAN,
+                })
+                .collect()
+        };
+        let (wa, wb) = (get(false), get(true));
+        // 同じ回どうしの差（どちらかが打てなかった回は外す）
+        let diffs: Vec<f64> = wa
+            .iter()
+            .zip(&wb)
+            .filter(|(x, y)| !x.is_nan() && !y.is_nan())
+            .map(|(x, y)| y - x)
+            .collect();
+        let nn = diffs.len() as f64;
+        let mean = diffs.iter().sum::<f64>() / nn.max(1.0);
+        let var = diffs.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>() / (nn - 1.0).max(1.0);
+        let se = (var / nn.max(1.0)).sqrt();
+        let sum = |v: &[f64]| v.iter().filter(|x| !x.is_nan()).sum::<f64>();
+        let count = |v: &[f64]| v.iter().filter(|x| !x.is_nan()).count();
+        println!(
+            "| {} | {}/{} | {}/{} | {:+.1} ± {:.1} |",
+            ps[duel.problem].id,
+            sum(&wa),
+            count(&wa),
+            sum(&wb),
+            count(&wb),
+            mean * 100.0,
+            se * 100.0
+        );
+        println!("  AI: {}", duel.ai_text);
+        println!("  合格: {}", duel.pass_text);
+    }
+    Ok(())
+}
+
 pub fn main(argv: &[String]) -> Result<(), String> {
     let rest = argv.get(1..).unwrap_or(&[]);
     match argv.first().map(|s| s.as_str()) {
@@ -1624,7 +1990,8 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         Some("list") => list(rest),
         Some("show") => show(rest),
         Some("check") => check(rest),
-        _ => Err("使い方: svwb misses run|add|list|show|check …（docs/misses.md）".into()),
+        Some("cover") => cover(rest),
+        _ => Err("使い方: svwb misses run|add|list|show|check|cover …（docs/misses.md）".into()),
     }
 }
 
@@ -1765,5 +2132,79 @@ mod tests {
                 assert_eq!(r, Ok(true), "{}: 記録から打ち直すと同じ局面", p.id);
             }
         }
+    }
+
+    fn cover_plan(kind: char, chosen: bool, pass: bool) -> CoverPlan {
+        CoverPlan {
+            top: kind != 'x',
+            cut: kind == 'c',
+            chosen,
+            pass,
+            steps: Vec::new(),
+            text: String::new(),
+            turn_end: 0.0,
+            rank: 0,
+        }
+    }
+
+    /// 合格の並びが、最後まで読んだ候補・途中で打ち切られた候補・足した extra 個まで・その先のどこにあるかを分ける
+    #[test]
+    fn cover_where_separates_the_layers() {
+        let flags = |w: &CoverWhere| (w.chosen, w.read, w.top, w.within, w.any, w.first);
+        // 最後まで読んだ候補 2 つ（AI の手は不合格）、足した候補 3 つ（3 つ目だけ合格）
+        let plans = vec![
+            cover_plan('r', true, false),
+            cover_plan('r', false, false),
+            cover_plan('x', false, false),
+            cover_plan('x', false, false),
+            cover_plan('x', false, true),
+        ];
+        assert_eq!(
+            flags(&cover_where(&plans, 2)),
+            (false, false, false, false, true, None)
+        );
+        assert_eq!(
+            flags(&cover_where(&plans, 3)),
+            (false, false, false, true, true, Some(4))
+        );
+        // 最後まで読んだ候補に合格があれば、足す数に関係なく候補に入る
+        let plans = vec![cover_plan('r', true, false), cover_plan('r', false, true)];
+        assert_eq!(
+            flags(&cover_where(&plans, 0)),
+            (false, true, true, true, true, Some(1))
+        );
+        // 途中で打ち切られた候補の合格は、読み直す候補には数えるが、最後まで読んだ候補には数えない
+        let plans = vec![cover_plan('r', true, false), cover_plan('c', false, true)];
+        assert_eq!(
+            flags(&cover_where(&plans, 0)),
+            (false, false, true, true, true, Some(1))
+        );
+        // AI の手が合格
+        let w = cover_where(&[cover_plan('r', true, true)], 0);
+        assert!(w.chosen && w.read && w.top && w.within && w.any);
+        assert_eq!(cover_where(&[], 4), CoverWhere::default());
+    }
+
+    /// 問を調査の候補にすると、AI の選んだ並びがちょうど 1 つあり、読み直す候補が先に並ぶ
+    #[test]
+    fn cover_plans_follow_the_survey_candidates() {
+        let ps = load(MISSES_DIR).expect("問題集が読めます");
+        let p = ps
+            .iter()
+            .find(|p| p.id == "witch-omega-heal")
+            .expect("問があります");
+        let row = cover_plans(p, 0, 4, &SearchOptions::default()).expect("候補が作れます");
+        assert!(!row.lethal);
+        assert_eq!(row.plans.iter().filter(|pl| pl.chosen).count(), 1);
+        assert!(row.plans.iter().all(|pl| !pl.chosen || (pl.top && !pl.cut)));
+        assert!(row.plans.iter().all(|pl| !pl.cut || pl.top));
+        assert!(row.plans.iter().filter(|pl| !pl.top).count() <= 4);
+        let first_extra = row
+            .plans
+            .iter()
+            .position(|pl| !pl.top)
+            .unwrap_or(row.plans.len());
+        assert!(row.plans[first_extra..].iter().all(|pl| !pl.top));
+        assert!(row.terminals >= row.plans.len());
     }
 }
