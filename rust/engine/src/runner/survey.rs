@@ -250,7 +250,7 @@ fn prepare(recs: &[GameRec], rec_i: usize, i: usize, p: PlayerIndex, cfg: &Cfg) 
                     chosen: pl.chosen,
                     steps: pl.steps.clone(),
                     value: json!({
-                        "top": pl.top, "chosen": pl.chosen, "rank": pl.rank,
+                        "top": pl.top, "cut": pl.cut, "chosen": pl.chosen, "rank": pl.rank,
                         "turnEnd": round2(pl.turn_end), "value": pl.value.map(round2),
                         "steps": actions_json(&pl.steps),
                         "text": texts(root, &pl.steps, p),
@@ -613,6 +613,8 @@ struct PosRow {
     skip: bool,
     ai: usize,
     top: Vec<bool>,
+    /// 読み直しを rescoreRace が打ち切った候補か（top も true）
+    cut: Vec<bool>,
     w: Vec<Vec<char>>,
     /// 二段目の差（ポイント）と標準誤差、候補
     confirm: Option<(usize, f64, f64)>,
@@ -625,6 +627,7 @@ fn chars(v: &Value) -> Vec<char> {
 fn pos_row(v: Value) -> PosRow {
     let plans = v["plans"].as_array().cloned().unwrap_or_default();
     let top = plans.iter().map(|x| x["top"] == json!(true)).collect();
+    let cut = plans.iter().map(|x| x["cut"] == json!(true)).collect();
     let w: Vec<Vec<char>> = v["w"]
         .as_array()
         .map(|a| a.iter().map(chars).collect())
@@ -642,6 +645,7 @@ fn pos_row(v: Value) -> PosRow {
         skip,
         ai,
         top,
+        cut,
         w,
         confirm,
     }
@@ -784,20 +788,17 @@ fn report(argv: &[String]) -> Result<(), String> {
     let (m8, se8) = mean_se(&g8);
     // 二段目で測る得（試しの後、本番の前に足した決まり。docs/survey.md）: 一段目の回の全部で選び（AI の選んだ候補との差が
     // 最も大きい候補の差が --flag 以上ならその候補、でなければ AI の選んだ候補）、選ぶのに使っていない二段目の回で測る。二段目に回らない局面は 0
-    let stage2 = |extra_only: bool| -> Vec<f64> {
+    let stage2 = |which: Option<&str>| -> Vec<f64> {
         rows.iter()
             .map(|r| match r.confirm {
-                Some((c, d, _))
-                    if d.is_finite() && (!extra_only || !r.top.get(c).copied().unwrap_or(true)) =>
-                {
-                    d
-                }
+                Some((c, d, _)) if d.is_finite() && which.is_none_or(|w| plan_kind(r, c) == w) => d,
                 _ => 0.0,
             })
             .collect()
     };
-    let (m2, se2) = mean_se(&stage2(false));
-    let (m2x, se2x) = mean_se(&stage2(true));
+    let (m2, se2) = mean_se(&stage2(None));
+    let (m2x, se2x) = mean_se(&stage2(Some(EXTRA)));
+    let (m2c, se2c) = mean_se(&stage2(Some(CUT)));
     let compared: Vec<&PosRow> = rows.iter().filter(|r| !r.skip).collect();
     let misses: Vec<&PosRow> = rows.iter().filter(|r| is_miss(r)).collect();
     let flagged = rows.iter().filter(|r| r.confirm.is_some()).count();
@@ -872,6 +873,19 @@ fn report(argv: &[String]) -> Result<(), String> {
         skips("one-plan"),
         skips("no-chosen"),
     ));
+    let per_kind = |k: &str| {
+        let n: usize = compared
+            .iter()
+            .map(|r| (0..r.w.len()).filter(|&c| plan_kind(r, c) == k).count())
+            .sum();
+        fixed(n as f64 / compared.len().max(1) as f64, 2)
+    };
+    line(format!(
+        "1 局面の候補の数: {READ} {}・{CUT} {}・{EXTRA} {}",
+        per_kind(READ),
+        per_kind(CUT),
+        per_kind(EXTRA)
+    ));
     line(String::new());
     line("## 打ち比べで選び直す得".into());
     line(String::new());
@@ -893,6 +907,11 @@ fn report(argv: &[String]) -> Result<(), String> {
         "| うち足した候補を選んだ局面の分 | {} | {} |",
         pm(m2x, se2x, 2),
         pm(m2x * per_seat, se2x * per_seat, 2)
+    ));
+    line(format!(
+        "| うち読み直しを打ち切った候補を選んだ局面の分 | {} | {} |",
+        pm(m2c, se2c, 2),
+        pm(m2c * per_seat, se2c * per_seat, 2)
     ));
     line(String::new());
     line(format!(
@@ -1045,11 +1064,7 @@ fn report(argv: &[String]) -> Result<(), String> {
             "### 試合 {g} の {i} 手目（{}、自分のターン {}、{}）: 差 {} ポイント\n\n",
             r.v["deck"].as_str().unwrap_or("?"),
             r.v["own"],
-            if alt["top"] == json!(true) {
-                "AI が読み直した候補"
-            } else {
-                "足した候補"
-            },
+            plan_kind(r, c),
             pm(d, se, 1)
         ));
         for l in strs(&r.v["view"]) {
@@ -1196,15 +1211,23 @@ fn best_kind(r: &PosRow) -> String {
     }
     let plans = r.v["plans"].as_array().cloned().unwrap_or_default();
     let kind = kind_of(&strs(&plans[r.ai]["used"]), &strs(&plans[best]["used"]));
-    format!(
-        "{}（{}）",
-        kind,
-        if r.top[best] {
-            "読み直した候補"
-        } else {
-            "足した候補"
-        }
-    )
+    format!("{}（{}）", kind, plan_kind(r, best))
+}
+
+/// 候補の出どころの名前
+const READ: &str = "読み直した候補";
+const CUT: &str = "読み直しを打ち切った候補";
+const EXTRA: &str = "足した候補";
+
+/// 局面 r の候補 c の出どころ
+fn plan_kind(r: &PosRow, c: usize) -> &'static str {
+    if r.cut.get(c).copied().unwrap_or(false) {
+        CUT
+    } else if r.top.get(c).copied().unwrap_or(true) {
+        READ
+    } else {
+        EXTRA
+    }
 }
 
 pub fn main(argv: &[String]) -> Result<(), String> {
@@ -1268,12 +1291,62 @@ mod tests {
             skip: false,
             ai: 0,
             top: vec![true, true],
+            cut: vec![false, false],
             w: Vec::new(),
             confirm: Some((1, d, se)),
         };
         assert!(is_miss(&row(16.0, 5.0)));
         assert!(!is_miss(&row(14.0, 3.0)));
         assert!(!is_miss(&row(16.0, 6.0)));
+    }
+
+    /// 読み直しを打ち切った候補も入れると、AI が読み直す候補（top）の最初の手は、打ち切りを切った（rescoreRace なし）ときと同じになる。
+    /// 打ち切った候補は、読み直した候補にも足した候補にも重ならない
+    #[test]
+    fn cut_candidates_cover_what_the_ai_started_to_read() {
+        let rec = play_game(3);
+        let mut cuts = 0;
+        for &(i, _) in rec.starts.iter().take(16) {
+            let (s, rng) = rebuild(&rec, i);
+            let legal = legal_actions(&s);
+            if legal.len() <= 1 {
+                continue;
+            }
+            let run = |opts: SearchOptions| {
+                reset_lethal();
+                reset_exact_lethal_cache();
+                let mut r = Rng { state: rng.state };
+                SearchAgent::new(opts)
+                    .survey_plans(&s, &legal, &mut r, 4)
+                    .filter(|sv| !sv.lethal)
+            };
+            let firsts = |sv: &crate::ai::search::Survey| {
+                let mut v: Vec<String> = sv
+                    .plans
+                    .iter()
+                    .filter(|x| x.top)
+                    .map(|x| format!("{:?}", x.steps[0]))
+                    .collect();
+                v.sort();
+                v
+            };
+            let (Some(on), Some(off)) = (
+                run(SearchOptions::default()),
+                run(SearchOptions {
+                    rescore_race: None,
+                    ..SearchOptions::default()
+                }),
+            ) else {
+                continue;
+            };
+            assert_eq!(firsts(&on), firsts(&off), "局面 {i}");
+            assert!(off.plans.iter().all(|x| !x.cut));
+            for x in on.plans.iter().filter(|x| x.cut) {
+                assert!(x.top && x.value.is_none() && !x.chosen);
+            }
+            cuts += on.plans.iter().filter(|x| x.cut).count();
+        }
+        assert!(cuts > 0, "打ち切った候補のある局面が無い");
     }
 
     /// 自己対戦の局面を作り直すと試合で打った手を選び、候補は AI の選ぶ手を 1 つだけ含み、打つ手がどれも違う。

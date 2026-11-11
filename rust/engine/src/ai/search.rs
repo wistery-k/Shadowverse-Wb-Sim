@@ -970,6 +970,38 @@ fn best_plan_last(
     best.and_then(|i| pl.steps_of(terminals[i].path).pop())
 }
 
+/// 相手のターンまで読み直す終局面（最初の手ごとの最善のうち、ターン末の点数の上位 rescore_top と、drawSplit が足す引く手）
+fn rescore_ranked(
+    root: &GameState,
+    p: PlayerIndex,
+    opts: &SearchOptions,
+    terminals: &[Node],
+    best_by_first: &[(Action, usize)],
+) -> Vec<usize> {
+    let mut ranked: Vec<usize> = best_by_first.iter().map(|(_, i)| *i).collect();
+    ranked.sort_by(|&x, &y| by_value_desc(terminals[x].value, terminals[y].value));
+    ranked.truncate(opts.rescore_top);
+    // drawSplit: 今打てる引く手（先に引く手）が上位に無ければ、ターン末の点数の高い順に足す
+    // （同じ局面をまとめると、先に引く並びの終局面が後で引く並びの側に数えられて、先に引く手の点数が下がるため）
+    if let Some(ds) = opts.draw_split {
+        let mut more: Vec<usize> = best_by_first
+            .iter()
+            .map(|(_, i)| *i)
+            .filter(|i| !ranked.contains(i))
+            .filter(|&i| {
+                let t = &terminals[i];
+                !matches!(t.first, Action::EndTurn)
+                    && try_apply_action(root, &t.first)
+                        .is_some_and(|after| is_chance_step(root, &after, p))
+            })
+            .collect();
+        more.sort_by(|&x, &y| by_value_desc(terminals[x].value, terminals[y].value));
+        more.truncate(ds.root_draws);
+        ranked.extend(more);
+    }
+    ranked
+}
+
 /// 1 つの局面で、最初の手ごとの評価値を求める（挿入順。TypeScript 版の Map と同じ順）。
 /// rescore が false なら相手のターンを読まず、最初の手ごとのターン末の最善の並びとその点数を返す
 pub fn plan_turn(
@@ -1029,27 +1061,7 @@ pub fn plan_turn_traced(
         return rekey_deferred(result, opts.defer_fuse, root);
     }
     let _p = prof::scope(Sec::Rescore);
-    let mut ranked: Vec<usize> = best_by_first.iter().map(|(_, i)| *i).collect();
-    ranked.sort_by(|&x, &y| by_value_desc(terminals[x].value, terminals[y].value));
-    ranked.truncate(opts.rescore_top);
-    // drawSplit: 今打てる引く手（先に引く手）が上位に無ければ、ターン末の点数の高い順に足す
-    // （同じ局面をまとめると、先に引く並びの終局面が後で引く並びの側に数えられて、先に引く手の点数が下がるため）
-    if let Some(ds) = draw_split {
-        let mut more: Vec<usize> = best_by_first
-            .iter()
-            .map(|(_, i)| *i)
-            .filter(|i| !ranked.contains(i))
-            .filter(|&i| {
-                let t = &terminals[i];
-                !matches!(t.first, Action::EndTurn)
-                    && try_apply_action(root, &t.first)
-                        .is_some_and(|after| is_chance_step(root, &after, p))
-            })
-            .collect();
-        more.sort_by(|&x, &y| by_value_desc(terminals[x].value, terminals[y].value));
-        more.truncate(ds.root_draws);
-        ranked.extend(more);
-    }
+    let ranked = rescore_ranked(root, p, opts, &terminals, &best_by_first);
 
     let candidates_of = |best: usize| -> Vec<usize> {
         if !opts.reuse_plan || opts.plan_candidates <= 1 {
@@ -2340,6 +2352,8 @@ impl SearchAgent {
 pub struct SurveyPlan {
     /// AI が読み直した候補（AI が選ぶ候補の中）か。false なら、ターン末の点数では下でも使うカードの組が違う並び
     pub top: bool,
+    /// AI が読み直しを始めたが、rescoreRace が打ち切った候補（top も true。value は None）
+    pub cut: bool,
     /// AI が選ぶ手か（choose_action と同じ）
     pub chosen: bool,
     /// AI がこの並びを選んだら打つ手（drawSplit なら最初の引く手・ランダムな手まで、deferFuse なら回せる融合を除いたもの。
@@ -2436,6 +2450,26 @@ impl SearchAgent {
                 .filter(|a| !matches!(a, Action::EndTurn))
                 .collect()
         };
+        // AI がこの終局面の並びを選んだときに打つ手（plan_turn_traced と同じ区切り方と、回せる融合の除き方）。打てなければ None
+        let ai_steps = |i: usize| -> Option<Vec<Action>> {
+            let t = &terminals[i];
+            let mut steps = pl.steps_of(t.path);
+            if opts.draw_split.is_some() {
+                if let Some(c) = first_chance_step(&root, &steps, p) {
+                    steps.truncate(c + 1);
+                }
+            }
+            if opts.defer_fuse {
+                steps = pl.defer_steps(t, steps);
+            }
+            let acts: Vec<Action> = steps.into_iter().map(|(a, _)| a).collect();
+            let first = acts.first().cloned()?;
+            if legal.contains(&first) {
+                return Some(acts);
+            }
+            // 回せる融合を除いた並びの最初の手が一覧に無い同じ融合なら、一覧の手に直してその手だけを打つ（rekey_deferred と同じ）
+            same_fusion_in(&root, legal, &first).map(|a| vec![a])
+        };
         let mut plans: Vec<SurveyPlan> = Vec::new();
         let mut keys: Vec<Vec<CardIdx>> = Vec::new();
         for c in thought
@@ -2459,12 +2493,42 @@ impl SearchAgent {
             keys.push(used_cards(&root, &full));
             plans.push(SurveyPlan {
                 top: true,
+                cut: false,
                 chosen: c.action == thought.chosen,
                 steps: c.steps.clone(),
                 full,
                 turn_end: c.turn_end.total,
                 rank: ti.map_or(usize::MAX, |i| rank[i]),
                 value: c.value,
+            });
+        }
+        // 読み直しを始めたが rescoreRace が打ち切った候補（読み直す終局面のうち、選ぶときの値が無いもの）
+        for i in rescore_ranked(&root, p, opts, &terminals, &bests) {
+            let t = &terminals[i];
+            let read = thought
+                .candidates
+                .iter()
+                .any(|c| c.action == t.first && c.value.is_some());
+            if read {
+                continue;
+            }
+            let Some(acts) = ai_steps(i) else {
+                continue;
+            };
+            if plans.iter().any(|x| x.steps == acts) {
+                continue;
+            }
+            let full = full_of(i);
+            keys.push(used_cards(&root, &full));
+            plans.push(SurveyPlan {
+                top: true,
+                cut: true,
+                chosen: false,
+                steps: acts,
+                full,
+                turn_end: t.value,
+                rank: rank[i],
+                value: None,
             });
         }
         let mut added = 0;
@@ -2478,33 +2542,16 @@ impl SearchAgent {
             if keys.contains(&key) {
                 continue;
             }
-            // AI がこの並びを選んだときに打つ手（plan_turn_traced と同じ区切り方と、回せる融合の除き方）
-            let mut steps = pl.steps_of(t.path);
-            if opts.draw_split.is_some() {
-                if let Some(c) = first_chance_step(&root, &steps, p) {
-                    steps.truncate(c + 1);
-                }
-            }
-            if opts.defer_fuse {
-                steps = pl.defer_steps(t, steps);
-            }
-            let mut acts: Vec<Action> = steps.into_iter().map(|(a, _)| a).collect();
-            let Some(first) = acts.first().cloned() else {
+            let Some(acts) = ai_steps(i) else {
                 continue;
             };
-            if !legal.contains(&first) {
-                // 回せる融合を除いた並びの最初の手が一覧に無い同じ融合なら、一覧の手に直してその手だけを打つ（rekey_deferred と同じ）
-                match same_fusion_in(&root, legal, &first) {
-                    Some(a) => acts = vec![a],
-                    None => continue,
-                }
-            }
             if plans.iter().any(|x| x.steps == acts) {
                 continue;
             }
             keys.push(key);
             plans.push(SurveyPlan {
                 top: false,
+                cut: false,
                 chosen: false,
                 steps: acts,
                 full,
