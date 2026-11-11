@@ -76,6 +76,7 @@ JSON で渡さない内部の項目（`next_lethal_search`・`pass_lethal_search
 | `beam_key.rs` の `BeamKey` | `beamKey`（項を出す `beam_features` は見込みと `beam-gap` が使うので残した） | `f19b416` |
 | `fusion.rs` の `fuse_root_chains` | `fuseRoot` | `f796ead` |
 | テスト `ai/tests/` の `tree.rs`・`attack_later.rs`・`per_plan.rs`・`fuse_root.rs`・`hand_read.rs`・`rescore_average.rs` と、ほかのファイルの中の消した設定のテスト | 上の設定の単体テスト | 上と同じ |
+| `svwb compare … --luck`（`runner/luck.rs`）と `SearchAgent::state_value`・`best_turn_end_value` | 引きの運を差し引いた勝率（2026-11-11、12「運の補正つきの compare」。鏡の compare では同じ確かさの手間が 0.90〜0.96 倍で、事前の線 2/3 に届かず不採用。入れたコミットだけで消した） | `56efb63` |
 
 ## 書き足し方
 

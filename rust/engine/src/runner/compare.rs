@@ -1,7 +1,7 @@
 //! 探索 AI の設定 A と B を対戦させる（TypeScript 版 scripts/compare-main.ts。npm run compare と同じ試合・同じ出力）。
 //!
 //!   svwb compare <試合数> '<Aの設定JSON>' '<Bの設定JSON>' [最初の試合番号] [Bのデッキ名] [--no-mirror] [--decks <7 つのデッキ>] [--replays <ファイル>]
-//!                [--label <名前>] [--no-ledger] [--luck]
+//!                [--label <名前>] [--no-ledger]
 //!
 //! 同じデッキの組で席とデッキを入れ替えて 2 試合ずつ行い、A の勝率とデッキごとの A の勝率を出す。
 //! 2 試合の組ごとの A の勝ち数（2・1・0）の数と、組のばらつきから求めた標準誤差も出す。
@@ -15,22 +15,17 @@
 //! `--replays` なら、試合ごとにデッキ・シード・行動の列を JSON Lines で書く（1 行の形は runner/mod.rs の ReplayRecord。
 //! npm run dev の「リプレイ検索」タブで読む）。打つ手は変わらない。
 //! 回すたびに、結果を実験の台帳 `docs/ledger.jsonl` に 1 行足す（runner/ledger.rs。`--label <名前>` で名前を付け、`--no-ledger` で書かない）。
-//! `--luck` なら、引きの運を差し引いた A の勝率と標準誤差も出す（runner/luck.rs。価値の出し方 2 通り。打つ手は変わらない）。
 //! 試合数 0 なら設定とデッキを読むだけで終わる。
 
 use super::deck_compare::read_deck;
 use super::ledger;
-use super::luck::{luck_stats, GameLuck, LuckJudge, METHODS};
 use super::options::compare_options;
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
 use crate::ai::search::{MulliganMode, SearchAgent, SearchOptions};
 use crate::ai::Agent;
 use crate::data::{data, Deck};
-use crate::game::apply_legal;
-use crate::json::Json;
 use crate::sim::play_match;
-use crate::state::{Action, Iid};
 use std::time::Instant;
 
 /// 試合番号 g（swap で席とデッキを入れ替えた方）の A と B のデッキ
@@ -85,40 +80,6 @@ pub fn play_compare_game_with(
     mirror: bool,
     labels: Option<[&str; 2]>,
 ) -> (String, bool, Option<String>) {
-    let r = play_compare_game_full(a, b, decks, g, swap, mirror, labels, false);
-    (r.deck, r.a_won, r.replay)
-}
-
-/// compare の 1 試合の結果
-pub struct CompareGame {
-    /// A のデッキ名と、A が勝ったか
-    pub deck: String,
-    pub a_won: bool,
-    /// リプレイ検索用の 1 行（labels のとき）
-    pub replay: Option<String>,
-    /// A の席
-    pub a_seat: usize,
-    /// 引きの運（--luck のとき。席 0 から見た値。runner/luck.rs）
-    pub luck: Option<GameLuck>,
-    /// 席ごとのマリガンで返したカード（--luck のとき。並べたもの）
-    pub mulligans: [Option<Vec<Iid>>; 2],
-    /// 試合に掛かった時間（秒。運の採点の分を除く）
-    pub seconds: f64,
-}
-
-/// play_compare_game_with と同じ試合。luck なら、引きの運（runner/luck.rs）とマリガンも記録する（打つ手は変わらない）
-#[allow(clippy::too_many_arguments)]
-pub fn play_compare_game_full(
-    a: &SearchOptions,
-    b: &SearchOptions,
-    decks: &[&'static Deck],
-    g: u32,
-    swap: bool,
-    mirror: bool,
-    labels: Option<[&str; 2]>,
-    luck: bool,
-) -> CompareGame {
-    let t0 = Instant::now();
     let (a_seat, seats, seed) = compare_setup(decks, g, swap, mirror);
     // デフォルトデッキと違うデッキ（--decks）では、デッキごとのモデルを使うマリガン（model・weights）の代わりに、
     // 返し方ごとに引き直しを試して選ぶ
@@ -137,30 +98,14 @@ pub fn play_compare_game_full(
         [&mut b, &mut a]
     };
     let mut log = Vec::new();
-    let judge = luck.then(LuckJudge::new);
-    let mut game_luck = GameLuck::default();
-    let mut mulligans: [Option<Vec<Iid>>; 2] = [None, None];
-    let mut step = 0u32;
     let end = play_match(
         &mut agents,
         [&seats[0].cards, &seats[1].cards],
         seed,
-        |s, a| {
+        |_, a| {
             if labels.is_some() {
                 log.push(a.clone());
             }
-            if let Some(judge) = &judge {
-                if let Action::Mulligan { player, swap } = a {
-                    let mut x = swap.clone();
-                    x.sort_unstable();
-                    mulligans[*player] = Some(x);
-                }
-                let t = Instant::now();
-                let after = apply_legal(s, a);
-                game_luck.alt_secs += t.elapsed().as_secs_f64();
-                judge.add_step(s, a, &after, seed, step, &mut game_luck);
-            }
-            step += 1;
         },
     );
     let winner = end
@@ -180,16 +125,7 @@ pub fn play_compare_game_full(
         }
         .line()
     });
-    let luck_secs = game_luck.alt_secs + game_luck.eval_secs.iter().sum::<f64>();
-    CompareGame {
-        deck: seats[a_seat].name.clone(),
-        a_won: winner == a_seat,
-        replay,
-        a_seat,
-        luck: judge.map(|_| game_luck),
-        mulligans,
-        seconds: seconds_since(t0) - luck_secs,
-    }
+    (seats[a_seat].name.clone(), winner == a_seat, replay)
 }
 
 fn number_arg(v: Option<&String>, def: f64) -> Result<u32, String> {
@@ -245,12 +181,6 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     // 実験の台帳（docs/ledger.jsonl。runner/ledger.rs）: --label で名前を付ける、--no-ledger で書かない
     let no_ledger = ledger::take_no_ledger(&mut argv);
     let label = ledger::take_value(&mut argv, "--label")?.unwrap_or_default();
-    // 引きの運を差し引いた勝率も出す（--luck。runner/luck.rs）
-    let luck = {
-        let before = argv.len();
-        argv.retain(|s| s != "--luck");
-        argv.len() != before
-    };
     // リプレイ検索用に、試合ごとのデッキ・シード・行動の列を書くファイル（--replays）
     let mut replays_path = None;
     if let Some(i) = argv.iter().position(|s| s == "--replays") {
@@ -313,9 +243,9 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let labels = replays.as_ref().map(|_| [la.as_str(), lb.as_str()]);
     let results = parallel_map(
         &tasks,
-        |&(g, swap), _| play_compare_game_full(&a, &b, &decks, g, swap, mirror, labels, luck),
+        |&(g, swap), _| play_compare_game_with(&a, &b, &decks, g, swap, mirror, labels),
         |_, _, r, _| {
-            if let (Some(f), Some(line)) = (replays.as_mut(), r.replay.as_ref()) {
+            if let (Some(f), Some(line)) = (replays.as_mut(), r.2.as_ref()) {
                 use std::io::Write;
                 writeln!(f, "{line}").unwrap_or_else(|e| {
                     panic!(
@@ -329,9 +259,9 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let n = results.len();
     let mut wins = 0;
     let mut per_deck = Tally::default();
-    for r in &results {
-        wins += r.a_won as u32;
-        per_deck.add(&r.deck, r.a_won);
+    for (deck, won, _) in &results {
+        wins += *won as u32;
+        per_deck.add(deck, *won);
     }
     println!(
         "A{a_text} vs B{b_text}: {wins}/{n} = {}%  {}s/試合",
@@ -339,7 +269,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         fixed(seconds_since(t0) / n as f64, 2)
     );
     println!("{}", per_deck.line());
-    let won: Vec<bool> = results.iter().map(|r| r.a_won).collect();
+    let won: Vec<bool> = results.iter().map(|r| r.1).collect();
     let ([c0, c1, c2], se) = pair_stats(&tasks, &won);
     if c0 + c1 + c2 >= 2 {
         println!(
@@ -352,11 +282,6 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             fixed(se * 100.0, 2)
         );
     }
-    let luck_json = if luck {
-        Some(print_luck(&tasks, &results))
-    } else {
-        None
-    };
     if !no_ledger && n > 0 {
         ledger::append(&ledger::Run {
             kind: "compare",
@@ -377,10 +302,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                         crate::json::Json::Str(p.clone())
                     }),
                 ),
-            ]
-            .into_iter()
-            .chain(luck_json.map(|j| ("luck".to_string(), j)))
-            .collect(),
+            ],
             decks: decks.iter().map(|d| d.name.clone()).collect(),
             mirror,
             first: start,
@@ -395,106 +317,6 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         });
     }
     Ok(())
-}
-
-/// --luck の集計を出し、台帳に書く項目を返す（runner/luck.rs）
-fn print_luck(tasks: &[(u32, bool)], results: &[CompareGame]) -> Json {
-    let n = results.len() as f64;
-    let lucks: Vec<&GameLuck> = results
-        .iter()
-        .map(|r| r.luck.as_ref().expect("--luck の試合"))
-        .collect();
-    let per_game = |f: &dyn Fn(&GameLuck) -> f64| lucks.iter().map(|l| f(l)).sum::<f64>() / n;
-    let game_secs = results.iter().map(|r| r.seconds).sum::<f64>() / n;
-    let alt_secs = per_game(&|l| l.alt_secs);
-    let draws = per_game(&|l| l.draws as f64);
-    let skipped = per_game(&|l| l.skipped as f64);
-    println!(
-        "運の補正: 1 試合あたり、補正した引き {}・補正しなかった山札の変化 {}。試合 {} 秒、引きうる局面を作る {} 秒（1 スレッドの時間）",
-        fixed(draws, 2),
-        fixed(skipped, 2),
-        fixed(game_secs, 3),
-        fixed(alt_secs, 4)
-    );
-    let won: Vec<bool> = results.iter().map(|r| r.a_won).collect();
-    // 台帳の数（有限でなければ null）
-    let num = |x: f64| {
-        if x.is_finite() {
-            Json::Num(crate::jsnum::round_precision(x, 6))
-        } else {
-            Json::Null
-        }
-    };
-    let mut methods = Vec::new();
-    for (m, name) in METHODS.iter().enumerate() {
-        let luck_a: Vec<f64> = results
-            .iter()
-            .zip(&lucks)
-            .map(|(r, l)| if r.a_seat == 0 { l.luck[m] } else { -l.luck[m] })
-            .collect();
-        let st = luck_stats(tasks, &won, &luck_a);
-        let eval_secs = per_game(&|l| l.eval_secs[m]);
-        let cost = alt_secs + eval_secs;
-        let var_ratio = (st.se / st.raw_se).powi(2);
-        let time_ratio = (game_secs + cost) / game_secs;
-        println!(
-            "  {name}: A の勝率 {}% ± {}（補正前 {}% ± {}）、分散の比 {}、運の平均 {} ± {} ポイント、傾き {}（その傾きなら ± {}）、\
-             採点 {} 秒/試合（試合の {} 倍）、同じ確かさの手間 {} 倍、補正後にちょうど 1 点の組 {}/{}",
-            fixed(st.rate * 100.0, 2),
-            fixed(st.se * 100.0, 2),
-            fixed(st.raw * 100.0, 2),
-            fixed(st.raw_se * 100.0, 2),
-            fixed(var_ratio, 3),
-            fixed(st.mean * 100.0, 2),
-            fixed(st.mean_se * 100.0, 2),
-            fixed(st.beta, 2),
-            fixed(st.beta_se * 100.0, 2),
-            fixed(cost, 4),
-            fixed(time_ratio, 3),
-            fixed(var_ratio * time_ratio, 3),
-            st.exact_half,
-            st.pairs
-        );
-        methods.push(Json::Obj(vec![
-            ("name".into(), Json::Str(["light", "heavy"][m].into())),
-            ("rate".into(), num(st.rate)),
-            ("se".into(), num(st.se)),
-            ("rawSe".into(), num(st.raw_se)),
-            ("varRatio".into(), num(var_ratio)),
-            ("mean".into(), num(st.mean)),
-            ("meanSe".into(), num(st.mean_se)),
-            ("beta".into(), num(st.beta)),
-            ("betaSe".into(), num(st.beta_se)),
-            ("secPerGame".into(), num(cost)),
-            ("timeRatio".into(), num(time_ratio)),
-            ("exactHalf".into(), Json::Num(st.exact_half as f64)),
-        ]));
-    }
-    // 組の 2 試合で、どちらかの席のマリガン（返したカード）が違った組。割れた組（A が 2 勝か 0 勝）のうちの数も
-    let mut by_game: std::collections::BTreeMap<u32, Vec<&CompareGame>> = Default::default();
-    for (&(g, _), r) in tasks.iter().zip(results) {
-        by_game.entry(g).or_default().push(r);
-    }
-    let (mut pairs, mut diff, mut split, mut split_diff) = (0, 0, 0, 0);
-    for rs in by_game.values().filter(|rs| rs.len() == 2) {
-        pairs += 1;
-        let d = rs[0].mulligans != rs[1].mulligans;
-        let s = rs[0].a_won == rs[1].a_won;
-        diff += d as u32;
-        split += s as u32;
-        split_diff += (d && s) as u32;
-    }
-    println!("  マリガンが違った組 {diff}/{pairs}、割れた組 {split} のうちマリガンが違った組 {split_diff}");
-    Json::Obj(vec![
-        ("draws".into(), num(draws)),
-        ("skipped".into(), num(skipped)),
-        ("gameSec".into(), num(game_secs)),
-        ("altSec".into(), num(alt_secs)),
-        ("methods".into(), Json::Arr(methods)),
-        ("mulliganDiff".into(), Json::Num(diff as f64)),
-        ("split".into(), Json::Num(split as f64)),
-        ("splitMulliganDiff".into(), Json::Num(split_diff as f64)),
-    ])
 }
 
 #[cfg(test)]
@@ -544,39 +366,6 @@ mod tests {
         let x = play_compare_game(&o, &o, &decks, 0, false, true);
         let y = play_compare_game(&o, &o, &decks, 0, true, true);
         assert_ne!(x.1, y.1);
-    }
-
-    /// --luck: 同じ AI どうしの鏡では、2 試合の局面が同じなので席 0 から見た運が同じになり、A から見ると打ち消し合って補正後もちょうど 1 勝 1 敗
-    #[test]
-    fn luck_cancels_in_a_mirror_of_the_same_ai() {
-        let decks = compare_decks();
-        let o = super::super::options::compare_options(r#"{"beamWidth":8}"#).unwrap();
-        let x = play_compare_game_full(&o, &o, &decks, 1, false, true, None, true);
-        let y = play_compare_game_full(&o, &o, &decks, 1, true, true, None, true);
-        let (lx, ly) = (x.luck.clone().unwrap(), y.luck.clone().unwrap());
-        assert!(lx.draws > 5, "補正した引き {}", lx.draws);
-        assert_eq!(lx.luck, ly.luck);
-        assert!(lx.luck.iter().all(|l| *l != 0.0));
-        assert_ne!(x.a_seat, y.a_seat);
-        assert_ne!(x.a_won, y.a_won);
-        assert_eq!(x.mulligans, y.mulligans);
-        let a_view = |r: &CompareGame, m: usize| {
-            let l = r.luck.as_ref().unwrap().luck[m];
-            if r.a_seat == 0 {
-                l
-            } else {
-                -l
-            }
-        };
-        for m in 0..2 {
-            let st = luck_stats(
-                &[(1, false), (1, true)],
-                &[x.a_won, y.a_won],
-                &[a_view(&x, m), a_view(&y, m)],
-            );
-            assert_eq!(st.exact_half, 1);
-            assert_eq!(st.rate, 0.5);
-        }
     }
 
     /// --replays の行（デッキ・シード・行動の列）から打ち直すと、同じ勝者になる
