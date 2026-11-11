@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseLedger, type MissesRow, type RunRow } from "../scripts/ledger-main";
+import { parseLedger, type MissesRow, type RunRow, type SurveyRow } from "../scripts/ledger-main";
 import {
   chunkJob,
   combineRows,
@@ -17,6 +17,7 @@ import {
   runWorker,
   shellLine,
   shellWords,
+  jobArgv,
   wallClock,
   type WorkerControl,
 } from "../scripts/night-main";
@@ -53,6 +54,17 @@ describe("ジョブの行", () => {
     expect(() => parseJob("compare 100 '{}' '{}' --label x --no-ledger", 1)).toThrow(/--no-ledger/);
     expect(() => parseJob("yardstick --label x --record", 1)).toThrow(/--record/);
     expect(() => parseJob("compare 100 '{beam}' '{}' --label x", 1)).toThrow(/JSON/);
+    const s = parseJob("svwb survey run --games 1000-1799 --label 調査 --confirm 64", 5);
+    expect(s).toMatchObject({ label: "調査", games: 800, start: 1000, spec: { kind: "survey", rate: 0.1, m: 32, extra: 4, confirm: 64, flag: 10, batch: 8 } });
+    expect(parseJob("survey --games 40 --start 7 --rate 0.2 --label x", 5)).toMatchObject({ games: 40, start: 7, spec: { rate: 0.2 } });
+    expect(jobArgv(s, 1200, 50, "/r")).toEqual(
+      ["survey", "run", "--out", "/r/survey-5.jsonl", "--games", "1200-1249", "--rate", "0.1", "--m", "32", "--extra", "4", "--confirm", "64", "--flag", "10", "--batch", "8"],
+    );
+    expect(() => parseJob("survey --games 0-9", 1)).toThrow(/--label/);
+    expect(() => parseJob("survey --label x", 1)).toThrow(/--games/);
+    expect(() => parseJob("survey --games 0-9 --label x --out a.jsonl", 1)).toThrow(/--out/);
+    expect(() => parseJob("survey --games 0-9 --label x --rate 2", 1)).toThrow(/--rate/);
+    expect(() => parseJob("survey --games 0-9 --start 3 --label x", 1)).toThrow(/--start/);
     expect(() => parseJob("td selfplay", 1)).toThrow(/compare・yardstick・profile/);
     expect(() => parseJobs("# だけ\n\n")).toThrow(/ジョブがありません/);
     expect(() => parseJobs("profile\nyardstick --ref weak --label x")).toThrow(/2 行目/);
@@ -72,6 +84,13 @@ describe("ジョブの行", () => {
     expect(odd.map((c) => c.count)).toEqual([2, 2, 2, 1]);
     expect(chunkJob(parseJob("profile --games 49", 3), 10, 1)).toHaveLength(1);
     expect(chunkJob(parseJob("misses --trials 48 --label x", 4), 10, 1).map((c) => [c.first, c.count])).toEqual([[0, 48]]);
+    // 打ち比べ調査は 1 つの番号で 1 試合。1 試合 20 秒・1 区切り 60 秒なら 3 試合ずつ
+    expect(chunkJob(parseJob("survey --games 100-109 --label x", 5), 20, 60).map((c) => [c.first, c.count])).toEqual([
+      [100, 3],
+      [103, 3],
+      [106, 3],
+      [109, 1],
+    ]);
   });
 
   it("見込みは --est、台帳の同じ比べ・同じマシンの回、決めておいた値の順に使う", () => {
@@ -92,6 +111,9 @@ describe("ジョブの行", () => {
     expect(estimate(mjob, [], "svwb-docker", 28, [mrow({})]).perGame).toBeCloseTo(1);
     expect(estimate(mjob, [], "svwb-docker", 28, [{ ...mrow({}), problems: 5 }, { ...mrow({}), problems: 10 }]).perGame).toBeCloseTo(1.5);
     expect(estimate(parseJob("yardstick --ref strong --label x --est 0.3", 1), [row({})], "svwb-docker", 28).perGame).toBe(0.3);
+    // 打ち比べ調査は、決めておいた値を局面の割合に比べて使う
+    const sv = estimate(parseJob("survey --games 0-9 --label x", 3), [], "svwb-docker", 28).perGame;
+    expect(estimate(parseJob("survey --games 0-9 --rate 0.05 --label x", 3), [], "svwb-docker", 28).perGame).toBeCloseTo(sv / 2);
   });
 
   it("--until は時刻帯の次のその時刻か、今からの長さ", () => {
@@ -171,6 +193,29 @@ let count, first, a, b;
 if (kind === "compare") { count = Number(argv[1]); a = JSON.parse(argv[2]); b = JSON.parse(argv[3]); first = Number(argv[4]); }
 else if (kind === "yardstick") { count = Number(flag("--games")); first = Number(flag("--start")); a = JSON.parse(flag("--opts")); b = flag("--ref"); }
 else if (kind === "profile") { fs.writeFileSync(flag("--json"), "{}"); fs.writeFileSync(flag("--report"), "# 速さ"); process.exit(0); }
+else if (kind === "survey" && argv[1] === "run") {
+  if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, shellLine(argv) + "\\n");
+  const out = flag("--out");
+  const [g0, g1] = flag("--games").split("-").map(Number);
+  const rows = fs.existsSync(out) ? fs.readFileSync(out, "utf8").split("\\n").filter((l) => l !== "").map((l) => JSON.parse(l)) : [];
+  const have = new Set(rows.filter((o) => o.game).map((o) => o.g));
+  let t = "";
+  for (let g = g0; g <= g1; g++) if (!have.has(g)) t += JSON.stringify({ g, i: 3, p: 0 }) + "\\n" + JSON.stringify({ game: true, g, turnStarts: [9, 9] }) + "\\n";
+  fs.appendFileSync(out, t);
+  process.exit(0);
+}
+else if (kind === "survey" && argv[1] === "report") {
+  const rows = fs.readFileSync(argv[2], "utf8").split("\\n").filter((l) => l !== "").map((l) => JSON.parse(l));
+  const games = rows.filter((o) => o.game).map((o) => o.g);
+  const n = rows.length - games.length;
+  const row = { v: 1, kind, date: "2026-11-11", at: "2026-11-11T00:00:00Z", commit: process.env.SVWB_COMMIT, branch: process.env.SVWB_BRANCH,
+    label: flag("--label"), a: {}, g: [Math.min(...games), Math.max(...games)], games: games.length, rate: 0.1, m: 32, extra: 4, confirm: 96, flag: 10,
+    turnStarts: 18 * games.length, positions: n, compared: n, gain4: [0.5, 0.25], gain8: [1, 0.5], gain2: [0.5, 0.25], gain2Extra: [0, 0], flagged: 0, misses: 0, missesPerGame: [0, 0],
+    splitAny: 0.5, splitPair: 0.25, pairSe: 0.1, perRollout: 1, seconds: n, machines: ["m"], commits: [process.env.SVWB_COMMIT], cmd: shellLine(argv) };
+  fs.appendFileSync(process.env.SVWB_LEDGER, JSON.stringify(row) + "\\n");
+  console.log("# 打ち比べ調査");
+  process.exit(0);
+}
 else if (kind === "misses") {
   const trials = Number(flag("--trials"));
   if (trials === 0) process.exit(0);
@@ -265,6 +310,34 @@ describe("区切って回す（偽物の svwb で）", () => {
     expect(await main(["finish", "n1", "--root", root, "--ledger", target])).toBe(0);
     expect(parseLedger(readFileSync(target, "utf8")).runs).toHaveLength(2);
     expect(parseLedger(readFileSync(target, "utf8")).misses).toHaveLength(1);
+  });
+
+  it("打ち比べ調査は区切りごとに同じ出力に足し、全部済んでから finish が survey report の 1 行を足す", async () => {
+    // 1 試合 20 秒・1 区切り 1 分 → 3 試合ずつ 4 区切り
+    writeFileSync(jobs, "survey run --games 0-9 --label 調査 --est 20\n");
+    expect(await start("--foreground")).toBe(0);
+    expect(done()).toEqual(["1-1", "1-2", "1-3", "1-4"]);
+    expect(calls().map((c) => c.split(" ").slice(4, 6).join(" "))).toEqual(["--games 0-2", "--games 3-5", "--games 6-8", "--games 9-9"]);
+    const out = join(dir(), "survey-1.jsonl");
+    expect(readFileSync(out, "utf8").trim().split("\n")).toHaveLength(20);
+    // 出力に試合が揃っていて印が無い区切りは回さない。最後の区切りを消すと、finish は待つ
+    unlinkSync(join(dir(), "done", "1-2.json"));
+    unlinkSync(join(dir(), "done", "1-4.json"));
+    writeFileSync(out, readFileSync(out, "utf8").split("\n").filter((l) => !l.includes('"g":9')).join("\n"));
+    const target = join(tmp, "ledger.jsonl");
+    writeFileSync(target, "");
+    expect(await main(["finish", "n1", "--root", root, "--ledger", target])).toBe(0);
+    expect(parseLedger(readFileSync(target, "utf8")).surveys).toHaveLength(0);
+    const before = calls().length;
+    expect(await resume()).toBe(0);
+    expect(calls().slice(before).map((c) => c.split(" ").slice(4, 6).join(" "))).toEqual(["--games 9-9"]);
+    expect(JSON.parse(readFileSync(join(dir(), "done", "1-2.json"), "utf8"))).toMatchObject({ recovered: true });
+    expect(await main(["finish", "n1", "--root", root, "--ledger", target])).toBe(0);
+    const rows = parseLedger(readFileSync(target, "utf8")).surveys as (SurveyRow & { queue: string; chunks: number })[];
+    expect(rows.map((r) => [r.label, r.g, r.games, r.positions, r.queue, r.chunks])).toEqual([["調査", [0, 9], 10, 10, "n1", 4]]);
+    expect(readFileSync(join(dir(), "survey-1.md"), "utf8")).toContain("打ち比べ調査");
+    expect(await main(["finish", "n1", "--root", root, "--ledger", target])).toBe(0);
+    expect(parseLedger(readFileSync(target, "utf8")).surveys).toHaveLength(1);
   });
 
   it("失敗した区切りの後はそのジョブを飛ばし、resume で続きから回す", async () => {
