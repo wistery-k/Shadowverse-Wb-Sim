@@ -142,9 +142,12 @@ export interface SurveyRow {
   turnStarts: number;
   positions: number;
   compared: number;
-  /** AI が読み直す候補だけで選び直す得と、足した候補を含めた得（ポイント） */
+  /** 半分の回で選ぶ得（回す前に決めた決まり）: AI が読み直す候補だけで選び直す得と、足した候補を含めた得（ポイント） */
   gain4: [number | null, number | null];
   gain8: [number | null, number | null];
+  /** 二段目で測る得（試しの後、本番の前に足した決まり）: 一段目で差が --flag 以上なら選び直し、二段目の回で測る。と、そのうち足した候補を選んだ局面の分 */
+  gain2: [number | null, number | null];
+  gain2Extra: [number | null, number | null];
   flagged: number;
   misses: number;
   missesPerGame: [number | null, number | null];
@@ -241,7 +244,7 @@ function checkSurvey(o: Obj): string[] {
   need(isNumArr(o.g, 2), "g");
   for (const k of ["games", "turnStarts", "positions", "compared", "flagged", "misses"]) need(isNum(o[k]), k);
   for (const k of ["rate", "m", "extra", "confirm", "flag", "splitAny", "splitPair", "pairSe", "perRollout", "seconds"]) need(numOrNull(o[k]), k);
-  for (const k of ["gain4", "gain8", "missesPerGame"]) need(Array.isArray(o[k]) && (o[k] as unknown[]).length === 2 && (o[k] as unknown[]).every(numOrNull), k);
+  for (const k of ["gain4", "gain8", "gain2", "gain2Extra", "missesPerGame"]) need(Array.isArray(o[k]) && (o[k] as unknown[]).length === 2 && (o[k] as unknown[]).every(numOrNull), k);
   for (const k of ["machines", "commits"]) need(Array.isArray(o[k]) && (o[k] as unknown[]).every(isStr), k);
   return bad;
 }
@@ -468,13 +471,15 @@ export function surveyTable(rows: SurveyRow[]): string {
   const pm = ([m, se]: [number | null, number | null], f: number) =>
     m === null ? "-" : se === null ? m.toFixed(f) : `${m.toFixed(f)} ± ${se.toFixed(f)}`;
   return markdownTable(
-    ["日付", "コミット", "名前", "試合", "局面（打ち比べた）", "得（読み直す候補だけ）", "得（足した候補も）", "見落とし", "見落とし（1 試合 1 席）", "続き 1 試合の秒", "マシン"],
+    ["日付", "コミット", "名前", "試合", "局面（打ち比べた）", "二段目で測る得", "うち足した候補", "半分で選ぶ得（読み直す候補だけ）", "（足した候補も）", "見落とし", "見落とし（1 試合 1 席）", "続き 1 試合の秒", "マシン"],
     rows.map((r) => [
       r.date,
       r.commits.join("・") || r.commit,
       r.label,
       `${r.games}（g${r.g[0]}〜${r.g[1]}）`,
       `${r.positions}（${r.compared}）`,
+      pm(r.gain2, 2),
+      pm(r.gain2Extra, 2),
       pm(r.gain4, 2),
       pm(r.gain8, 2),
       `${r.misses}（二段目 ${r.flagged}）`,

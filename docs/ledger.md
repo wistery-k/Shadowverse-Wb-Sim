@@ -67,6 +67,26 @@ AI の実験の結果を、1 行 1 件の JSON（JSON Lines）で残す台帳。
 | `seconds`・`threads`・`machine`・`cmd` | 回の行と同じ |
 | `queue`・`chunks` | 夜のキューで回した行だけ: 回の名前と区切りの数（いつも 1） |
 
+### 候補の打ち比べ調査の行（`survey`）: `svwb survey report` が書く
+
+`npm run svwb -- survey report`（[survey.md](survey.md)）が、まとめるたびに 1 行足す（`--label`・`--no-ledger`・`SVWB_LEDGER` は回の行と同じ）。
+`runs`・`sum` には出ない（`npm run ledger -- survey` で引く）。得と見落としは 1 試合 1 席あたりで、[値, 標準誤差]（ポイント・回）。
+
+| 項目 | 中身 |
+| --- | --- |
+| `v`・`date`・`at`・`commit`・`branch`・`label`・`a` | 回の行と同じ（`a` は AI の設定。今は今の既定 `{}` だけ）。`commit` はまとめたときのもの |
+| `kind` | `survey` |
+| `g`・`games` | 最初と最後の試合番号と、試合の数 |
+| `rate`・`m`・`extra`・`confirm`・`flag` | 局面の割合・一段目の回数・足す候補の数・二段目の回数・二段目に回す差（局面の行から。混ざっていれば最初の局面のもの） |
+| `turnStarts`・`positions`・`compared` | 自分のターンの最初の局面の数（両方の席）・取った局面・打ち比べた局面 |
+| `gain2`・`gain2Extra` | 二段目で測る得（一段目で 10 ポイント以上勝った候補に替え、二段目の回で測る。試しの後に足した決まり）と、そのうち足した候補に替えた局面の分 |
+| `gain4`・`gain8` | 半分の回で選ぶ得（回す前に決めた決まり。AI が読み直す候補だけ・足した候補を含む全部） |
+| `flagged`・`misses`・`missesPerGame` | 二段目に回した局面・はっきりした見落とし・その 1 試合 1 席あたり |
+| `splitAny`・`splitPair`・`pairSe` | 候補の勝ち負けが割れた回の割合（どれかの候補で・AI の選んだ候補と差の最も大きい候補で）・一段目の差の標準誤差の平均（ポイント） |
+| `perRollout`・`seconds` | 1 回最後まで打つスレッド秒・打ち比べのスレッド秒の和 |
+| `machines`・`commits`・`cmd` | 局面を打ったマシンとコミット・まとめたコマンド |
+| `queue`・`chunks` | 夜のキューでまとめた行だけ: 回の名前と区切りの数 |
+
 ### 採否の行（`decision`）: `npm run ledger -- decide` で足す
 
 採否を決めたら 1 行足す。初めの 32 行は、2026-11-10 の既定に入っている項目を記録から写したもの（`"source":"notes"`）。
@@ -95,6 +115,7 @@ npm run ledger -- runs --grep potentialNet       # 行の JSON のどこかに�
 npm run ledger -- sum --label 幅                  # 同じ比べ（種類・両方の設定・デッキ・鏡・相手・コミット）の回を足し合わせる
 npm run ledger -- sum --any-commit               # コミットが違っても足す（手が変わらない変更をまたぐとき）
 npm run ledger -- misses --label 定例             # 見落とし問題集の回（正解率と問ごとの合格）
+npm run ledger -- survey                         # 候補の打ち比べ調査の回（選び直す得・見落とし）
 npm run ledger -- items --in-default             # 今の既定に入っている項目と、採ったときの数字
 npm run ledger -- items --grep drawSplit --all   # 項目の判定の移り変わり
 npm run ledger -- decide --item '自分のターンのビームを幅 256 に' --decision 採用 --from-label 幅256 \

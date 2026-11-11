@@ -273,13 +273,14 @@ npm run misses -- list | show <問>… | check
 npm run ledger -- [runs] [--kind compare|yardstick] [--since 日付] [--until 日付] [--grep 文字列] [--label 文字列] [--last N]
 npm run ledger -- sum [runs と同じ絞り込み] [--any-commit]
 npm run ledger -- misses [--since 日付] [--until 日付] [--grep 文字列] [--label 文字列] [--last N]
+npm run ledger -- survey [--since 日付] [--until 日付] [--grep 文字列] [--label 文字列] [--last N]
 npm run ledger -- items [--all] [--grep 文字列] [--in-default]
 npm run ledger -- decide --item 名前 --decision 採用|不採用|保留|やめた [--in-default true|false] [--keys a,b]
                          [--from-label 回の名前] [--vs 比べた相手] [--ref 記録の節] [--note メモ] [--date 日付]
 npm run ledger -- check
 ```
 
-実験の台帳 `docs/ledger.jsonl`（1 行 1 件の JSON）を Markdown の表にする。`runs` は回の一覧、`sum` は同じ比べの回を足し合わせたもの、`misses` は見落とし問題集の回、
+実験の台帳 `docs/ledger.jsonl`（1 行 1 件の JSON）を Markdown の表にする。`runs` は回の一覧、`sum` は同じ比べの回を足し合わせたもの、`misses` は見落とし問題集の回、`survey` は候補の打ち比べ調査の回、
 `items` は採否の行（項目ごとの今の判定。`--all` で全部）。`decide` は採否の行を足す（`--from-label` でその名前の回を足し合わせた結果を入れる）。
 `check` は全部の行が形に合うかを確かめる。どれも `--file` で別の台帳を読む（既定は環境変数 `SVWB_LEDGER` か `docs/ledger.jsonl`）。
 行の形と使い方は [ledger.md](ledger.md)。
@@ -292,7 +293,7 @@ npm run night -- start <ジョブのファイル> --yes [--until 07:00] [--threa
 npm run night -- status | stop [--now] | resume --yes | finish --commit | list
 ```
 
-PC で対戦を回す夜のキュー。ジョブのファイルは 1 行 1 ジョブで、svwb の `compare`・`yardstick`・`profile`・`misses` と同じ形（`--label` が要る）。
+PC で対戦を回す夜のキュー。ジョブのファイルは 1 行 1 ジョブで、svwb の `compare`・`yardstick`・`profile`・`misses`・`survey` と同じ形（`--label` が要る）。
 5〜10 分の区切りごとに結果を回のフォルダ（`~/svwb-data/night/<名前>/`）に残し、電源が切れても続きから回る。朝の `finish` がジョブごとに 1 行にまとめて台帳に足す。
 物差し 2 つと速さと見落とし問題集の定例は `night/routine.txt`。流れ・引数・止まり方・台帳のコミットのしかたは [night.md](night.md)（`npm run night -- help` にも引数の一覧）。
 
@@ -339,6 +340,8 @@ npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 
 npm run svwb -- deep-gap play --out gap.jsonl [--games 100] [--start 0] [--deep '<設定の JSON>'] [--k 4] [--evalSeeds 48] [--turns 1-30]
 npm run svwb -- deep-gap rollout --in gap.jsonl[,…] --out roll.jsonl [--top 200] [--random 200] [--seed 1] [--m 48]
 npm run svwb -- deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 30] [--only <内訳の一部>] [--skipDecks <デッキ>,…] [--sort gap|rollout] [--listOnly 1]
+npm run svwb -- survey run --out 結果.jsonl --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8]
+npm run svwb -- survey report 結果.jsonl… [--label 名前] [--no-ledger] [--top 20] [--states <フォルダ>]
 npm run svwb -- two-turn show [--only <局面>,…] [--sandbox <フォルダ>]
 npm run svwb -- two-turn run --out tt.jsonl [--only <局面>,…] [--m 64] [--reads 4] [--twos 2] [--nextBeam 256] [--seed 1] [--opts '<設定の JSON>']
 npm run svwb -- two-turn report tt.jsonl… [--only <局面>,…]
@@ -378,6 +381,9 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
   `report` の局面の中身は、`--only`（内訳の名前の一部。例: `ビームが届かない`）・`--skipDecks`（手番の側のデッキ）で絞れる。`--listOnly 1` はまとめを出さず、
   デッキごとに 1 行 1 局面の表（両方のターンで使ったものの違いつき）と各局面の中身だけを出す（一覧の例: 共有フォルダの `notes/beam-miss/beam-miss.md`）
   クラウドで回すジョブは `cloud/jobs/deep-gap.sh`（docs/ai-notes.md「深い読みと食い違う局面を集める」）
+- `survey`: 候補の打ち比べ調査（[survey.md](survey.md)）。今の既定の AI どうしの自己対戦から自分のターンの最初の局面を無作為に取り、AI が読み直す候補（上位 4 つと引く手）と、
+  使うカードの組の違う並び（`--extra`）を、同じ乱数で `--m` 回ずつ最後まで打ち比べる（差の大きい局面は二段目で `--confirm` 回足す）。`report` は、半分の回で選び半分で測る
+  選び直しの得（1 試合あたり、上位 4 つだけと全部）・はっきりした見落とし・内訳・問題集に足す候補を出し、台帳に 1 行足す。夜のキューのジョブにできる（[night.md](night.md)）
 - `two-turn`: 2 ターン以上の計画が効きそうな、手で作った局面（`rust/engine/src/runner/two_turn.rs` の `SCENARIOS` に書いたものだけ。外から局面を入れる口はない）で、
   今の AI と計画の候補（最初の何手かを決める・カードを出さない 等を付けた AI）を打ち比べる。`show` は局面と候補、`run` は相手の手札・山札の決定化 `--m` 通りごとに全候補を打ち、
   AI の点数・読み直し・次の自分のターン末（幅 `--nextBeam`）・2 ターン読み・次のターンのリーサル・最後まで打った勝ち負けを 1 行ずつ追記する（済んだものは飛ばす）。

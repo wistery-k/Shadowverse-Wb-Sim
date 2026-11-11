@@ -573,14 +573,19 @@ fn run(argv: &[String]) -> Result<(), String> {
     let mut file = open_append(out)?;
     let t0 = Instant::now();
     let mut positions = 0;
-    for (n, chunk) in games.chunks(batch).enumerate() {
+    // まとめる試合の数をそろえる（17 試合を 8・8・1 でなく 6・6・5 に。端の小さなまとまりでスレッドが余らないように）
+    let size = games
+        .len()
+        .div_ceil(games.len().div_ceil(batch).max(1))
+        .max(1);
+    for (n, chunk) in games.chunks(size).enumerate() {
         let rows = run_batch(chunk, &cfg);
         positions += rows.iter().filter(|v| v["game"] != json!(true)).count();
         let text: String = rows.iter().map(|v| format!("{v}\n")).collect();
         file.write_all(text.as_bytes())
             .and_then(|_| file.flush())
             .map_err(|e| format!("{out} に書けません: {e}"))?;
-        let finished = ((n + 1) * batch).min(games.len());
+        let finished = ((n + 1) * size).min(games.len());
         let sec = t0.elapsed().as_secs_f64();
         eprintln!(
             "試合 {finished}/{}・局面 {positions}（{} 秒、残り約 {} 分）",
@@ -777,6 +782,22 @@ fn report(argv: &[String]) -> Result<(), String> {
     let g8 = gains(&all_set);
     let (m4, se4) = mean_se(&g4);
     let (m8, se8) = mean_se(&g8);
+    // 二段目で測る得（試しの後、本番の前に足した決まり。docs/survey.md）: 一段目の回の全部で選び（AI の選んだ候補との差が
+    // 最も大きい候補の差が --flag 以上ならその候補、でなければ AI の選んだ候補）、選ぶのに使っていない二段目の回で測る。二段目に回らない局面は 0
+    let stage2 = |extra_only: bool| -> Vec<f64> {
+        rows.iter()
+            .map(|r| match r.confirm {
+                Some((c, d, _))
+                    if d.is_finite() && (!extra_only || !r.top.get(c).copied().unwrap_or(true)) =>
+                {
+                    d
+                }
+                _ => 0.0,
+            })
+            .collect()
+    };
+    let (m2, se2) = mean_se(&stage2(false));
+    let (m2x, se2x) = mean_se(&stage2(true));
     let compared: Vec<&PosRow> = rows.iter().filter(|r| !r.skip).collect();
     let misses: Vec<&PosRow> = rows.iter().filter(|r| is_miss(r)).collect();
     let flagged = rows.iter().filter(|r| r.confirm.is_some()).count();
@@ -854,7 +875,30 @@ fn report(argv: &[String]) -> Result<(), String> {
     line(String::new());
     line("## 打ち比べで選び直す得".into());
     line(String::new());
-    line("半分の回で選び、残り半分で測った、AI の選んだ候補との勝率の差（ポイント）。打ち比べなかった局面は 0。1 試合あたりは、1 局面あたり × 1 試合 1 席の局面の数（片方の席が全部の自分のターンで選び直したときの見積もり。局面どうしの重なりは見ない）".into());
+    line("AI の選んだ候補との勝率の差（ポイント）。打ち比べなかった局面は 0。1 試合あたりは、1 局面あたり × 1 試合 1 席の局面の数（片方の席が全部の自分のターンで選び直したときの見積もり。局面どうしの重なりは見ない）".into());
+    line(String::new());
+    line(format!(
+        "二段目で測る得（試しの後に足した決まり）: 一段目の {} 回で、差の最も大きい候補の差が {} ポイント以上なら選び直し、二段目の {} 回で測る",
+        cfg0["m"], cfg0["flag"], cfg0["confirm"]
+    ));
+    line(String::new());
+    line("| 選び直し | 1 局面あたり | 1 試合あたり |".into());
+    line("| --- | ---: | ---: |".into());
+    line(format!(
+        "| 全部の候補から（二段目で測る） | {} | {} |",
+        pm(m2, se2, 2),
+        pm(m2 * per_seat, se2 * per_seat, 2)
+    ));
+    line(format!(
+        "| うち足した候補を選んだ局面の分 | {} | {} |",
+        pm(m2x, se2x, 2),
+        pm(m2x * per_seat, se2x * per_seat, 2)
+    ));
+    line(String::new());
+    line(format!(
+        "半分の回で選ぶ得（回す前に決めた決まり）: 一段目の {} 回を偶数回と奇数回に分け、片方で勝ちの最も多い候補を選び、もう片方で測る",
+        cfg0["m"]
+    ));
     line(String::new());
     line("| 候補 | 1 局面あたり | 1 試合あたり |".into());
     line("| --- | ---: | ---: |".into());
@@ -1085,6 +1129,8 @@ fn report(argv: &[String]) -> Result<(), String> {
                 ("compared".into(), num(compared.len() as f64)),
                 ("gain4".into(), pair(m4 * per_seat, se4 * per_seat)),
                 ("gain8".into(), pair(m8 * per_seat, se8 * per_seat)),
+                ("gain2".into(), pair(m2 * per_seat, se2 * per_seat)),
+                ("gain2Extra".into(), pair(m2x * per_seat, se2x * per_seat)),
                 ("flagged".into(), num(flagged as f64)),
                 ("misses".into(), num(misses.len() as f64)),
                 (

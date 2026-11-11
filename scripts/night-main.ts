@@ -35,7 +35,7 @@ import {
 import { availableParallelism, homedir, hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { DEFAULT_LEDGER, canonical, markdownTable, parseLedger, type MissesRow, type RunRow } from "./ledger-main.ts";
+import { DEFAULT_LEDGER, canonical, markdownTable, parseLedger, type MissesRow, type RunRow, type SurveyRow } from "./ledger-main.ts";
 
 /** リポジトリの根 */
 export const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -50,7 +50,9 @@ export type JobSpec =
   | { kind: "yardstick"; ref: "classic" | "strong"; opts: string }
   | { kind: "profile"; opts: string; rhino: boolean }
   /** 見落とし問題集（docs/misses.md）。games は 1 問を打つ回数（--trials） */
-  | { kind: "misses"; opts: string; seed: number };
+  | { kind: "misses"; opts: string; seed: number }
+  /** 候補の打ち比べ調査（docs/survey.md）。games は自己対戦の試合の数（1 つの番号で 1 試合） */
+  | { kind: "survey"; rate: number; m: number; extra: number; confirm: number; flag: number; batch: number };
 
 export interface Job {
   /** ファイルの中のジョブの番号（1 から） */
@@ -59,7 +61,7 @@ export interface Job {
   line: string;
   /** 台帳の名前（--label）。profile は空でもよい */
   label: string;
-  /** 試合番号の数（1 つの番号で席とデッキを入れ替えて 2 試合）と、最初の番号。misses は 1 問を打つ回数と 0 */
+  /** 試合番号の数（1 つの番号で席とデッキを入れ替えて 2 試合。survey は 1 試合）と、最初の番号。misses は 1 問を打つ回数と 0 */
   games: number;
   start: number;
   /** --est: 1 試合の見込みの秒（回すマシン・並列数で。キューだけが読む） */
@@ -237,8 +239,46 @@ export function parseJob(line: string, index: number): Job {
       if (rest.length > 0) throw new Error(`知らない引数: ${rest.join(" ")}`);
       return { index, line: text, label, games, start: 0, est, spec: { kind, opts, seed } };
     }
+    case "survey": {
+      // 行の頭の run は書いても書かなくてもよい。試合は --games a-b（svwb survey run と同じ）か --games N [--start S]
+      if (rest[0] === "run") rest.splice(0, 1);
+      refuse(["--out"], "キューが回のフォルダに書く");
+      const label = take("--label");
+      if (!label) throw new Error("--label で台帳の名前を付けます（朝の finish が survey report でこの名前の行を 1 つ足す）");
+      const gamesText = take("--games");
+      if (gamesText === null) throw new Error("survey は --games a-b で試合番号の範囲を渡します");
+      const startText = take("--start");
+      let games: number;
+      let start: number;
+      const range = /^(\d+)-(\d+)$/.exec(gamesText);
+      if (range) {
+        if (startText !== null) throw new Error("--games a-b と --start は一緒に使えません");
+        start = Number(range[1]);
+        games = Number(range[2]) - start + 1;
+        if (games < 1) throw new Error(`--games は a ≤ b: ${gamesText}`);
+      } else {
+        games = intOf(gamesText, "--games", 1);
+        start = intOf(startText ?? "0", "--start", 0);
+      }
+      const num = (name: string, def: number, ok: (x: number) => boolean, what: string): number => {
+        const t = take(name);
+        if (t === null) return def;
+        const x = Number(t);
+        if (t.trim() === "" || !Number.isFinite(x) || !ok(x)) throw new Error(`${name} は ${what}: ${t}`);
+        return x;
+      };
+      const rate = num("--rate", 0.1, (x) => x > 0 && x <= 1, "0 より大きく 1 以下");
+      const m = num("--m", 32, (x) => Number.isInteger(x) && x >= 2, "2 以上の整数");
+      const extra = num("--extra", 4, (x) => Number.isInteger(x) && x >= 0, "0 以上の整数");
+      const confirm = num("--confirm", 96, (x) => Number.isInteger(x) && x >= 0, "0 以上の整数");
+      const flagPts = num("--flag", 10, (x) => x >= 0, "0 以上の数");
+      const batch = num("--batch", 8, (x) => Number.isInteger(x) && x >= 1, "1 以上の整数");
+      noUnknown();
+      if (rest.length > 0) throw new Error(`知らない引数: ${rest.join(" ")}`);
+      return { index, line: text, label, games, start, est, spec: { kind, rate, m, extra, confirm, flag: flagPts, batch } };
+    }
     default:
-      throw new Error(`ジョブは compare・yardstick・profile・misses のどれか: ${kind ?? "（空）"}`);
+      throw new Error(`ジョブは compare・yardstick・profile・misses・survey のどれか: ${kind ?? "（空）"}`);
   }
 }
 
@@ -294,12 +334,49 @@ export function jobArgv(job: Job, first: number, count: number, dir: string): st
       ];
     case "misses":
       return ["misses", "run", "--opts", s.opts, "--trials", String(count), "--seed", String(s.seed), "--label", job.label];
+    case "survey":
+      // 出力はジョブで 1 つ（svwb survey run は出力に既にある試合を飛ばすので、止めた区切りは回し直せば続きから）
+      return [
+        "survey",
+        "run",
+        "--out",
+        surveyFile(dir, job),
+        "--games",
+        `${first}-${first + count - 1}`,
+        "--rate",
+        String(s.rate),
+        "--m",
+        String(s.m),
+        "--extra",
+        String(s.extra),
+        "--confirm",
+        String(s.confirm),
+        "--flag",
+        String(s.flag),
+        "--batch",
+        String(s.batch),
+      ];
   }
 }
 
-/** count（区切りの大きさ）が何試合か。misses は「全部の問を 1 回ずつ」を 1 と数える（見込みの 1 試合の秒も、その 1 回の秒） */
+/** survey のジョブの出力（回のフォルダの中） */
+export function surveyFile(dir: string, job: Job): string {
+  return join(dir, `survey-${job.index}.jsonl`);
+}
+
+/** count（区切りの大きさ）が何試合か。misses は「全部の問を 1 回ずつ」を 1 と数える（見込みの 1 試合の秒も、その 1 回の秒）。
+ * survey は 1 つの番号で 1 試合（見込みの 1 試合の秒は、その試合から取った局面の打ち比べを含む） */
 export function unitsOf(job: Job, count: number): number {
-  return job.spec.kind === "misses" ? count : 2 * count;
+  return job.spec.kind === "misses" || job.spec.kind === "survey" ? count : 2 * count;
+}
+
+/** survey の既定（docs/survey.md）と違う設定だけを並べる */
+function surveyOpts(s: Extract<JobSpec, { kind: "survey" }>): string {
+  const def = { rate: 0.1, m: 32, extra: 4, confirm: 96, flag: 10 };
+  return (Object.keys(def) as (keyof typeof def)[])
+    .filter((k) => s[k] !== def[k])
+    .map((k) => `--${k} ${s[k]}`)
+    .join(" ");
 }
 
 /** ジョブの短い名前（表に出す） */
@@ -308,22 +385,24 @@ export function jobTitle(job: Job): string {
   if (s.kind === "compare") return `compare A ${s.a} 対 B ${s.b}${s.vs ? `（B は ${s.vs}）` : ""}${s.noMirror ? "（鏡なし）" : ""}`;
   if (s.kind === "yardstick") return `yardstick ${s.ref}${s.opts === "{}" ? "" : ` ${s.opts}`}`;
   if (s.kind === "misses") return `misses（見落とし問題集）${s.opts === "{}" ? "" : ` ${s.opts}`}`;
+  if (s.kind === "survey") return `survey（候補の打ち比べ）${surveyOpts(s) === "" ? "" : ` ${surveyOpts(s)}`}`;
   return `profile（速さ）${s.opts === "{}" ? "" : ` ${s.opts}`}${s.rhino ? " --rhino" : ""}`;
 }
 
 // ---------------------------------------------------------------- 見積もりと区切り
 
-type SpeedKey = "compare" | "classic" | "strong" | "profile" | "misses";
+type SpeedKey = "compare" | "classic" | "strong" | "profile" | "misses" | "survey";
 
 /** 決めておいた速さ（1 試合あたりのスレッド秒 = 1 試合の秒 × 並列数。今の既定の探索 AI で）。台帳に同じ比べ・同じマシンの回が無いときに使う。
  * misses は全部の問を 1 回ずつ解く秒（10 問のとき。問が増えればその分かかる） */
 export const SPEEDS: Record<string, { threads: number; note: string; ts: Record<SpeedKey, number> }> = {
   // ユーザーの PC（Core i7-14700F、28 スレッド。Docker の svwb-docker）。compare は 3200 試合 5 分ほど、物差しは docs/yardstick.md の「（PC）」の行。
-  // misses は測っていないので、クラウド環境の値に compare の比（2.6 / 2.0）を掛けた
-  "svwb-docker": { threads: 28, note: "PC の決めておいた値", ts: { compare: 2.6, classic: 1.3, strong: 2.7, profile: 2.6, misses: 5.9 } },
+  // misses・survey は測っていないので、クラウド環境の値に compare の比（2.6 / 2.0）を掛けた
+  "svwb-docker": { threads: 28, note: "PC の決めておいた値", ts: { compare: 2.6, classic: 1.3, strong: 2.7, profile: 2.6, misses: 5.9, survey: 730 } },
   // Claude のクラウド環境（4 スレッド）で 2026-11-10 に測った値（compare 0.50・弱い相手 0.21・強い相手 0.44 秒/試合、各 56 試合。
-  // misses は 10 問 × 24 回が 27 秒）。ほかのマシンもこれで見積もる
-  default: { threads: 4, note: "クラウド環境の決めておいた値", ts: { compare: 2.0, classic: 0.85, strong: 1.8, profile: 2.0, misses: 4.5 } },
+  // misses は 10 問 × 24 回が 27 秒。survey は 2026-11-11 の試し（10 試合・15 局面）で 1 局面 277 秒、局面の割合 0.1 で 1 試合 2.0 局面として）。
+  // ほかのマシンもこれで見積もる
+  default: { threads: 4, note: "クラウド環境の決めておいた値", ts: { compare: 2.0, classic: 0.85, strong: 1.8, profile: 2.0, misses: 4.5, survey: 560 } },
 };
 
 export interface Estimate {
@@ -379,6 +458,11 @@ export function estimate(job: Job, runs: RunRow[], machine: string, threads: num
   if (!sp) throw new Error("決めておいた速さがありません");
   const s = job.spec;
   const key: SpeedKey = s.kind === "yardstick" ? s.ref : s.kind;
+  if (s.kind === "survey") {
+    // 決めておいた値は既定の設定（docs/survey.md）のもの。局面の割合には比べて、ほかの設定の違いは見ない
+    const other = surveyOpts({ ...s, rate: 0.1 }) !== "";
+    return { perGame: (sp.ts.survey * (s.rate / 0.1)) / threads, source: `${sp.note}${other ? "（局面の割合のほかの設定の違いは見ていない）" : ""}` };
+  }
   const plain = s.kind === "compare" ? s.a === "{}" && s.b === "{}" && s.decks === null : s.opts === "{}";
   if (s.kind === "misses") return { perGame: sp.ts.misses / threads, source: `${sp.note}（10 問のとき）` };
   return { perGame: sp.ts[key] / threads, source: `${sp.note}${plain ? "" : "（設定の違いは見ていない）"}` };
@@ -395,7 +479,7 @@ export interface Chunk {
 
 /** ジョブを、1 つが targetSec 秒ほどの区切りに分ける（大きさはそろえる。profile・misses は分けない） */
 export function chunkJob(job: Job, perGame: number, targetSec: number): Chunk[] {
-  const per = job.spec.kind === "profile" || job.spec.kind === "misses" ? job.games : Math.max(1, Math.floor(targetSec / (2 * perGame)));
+  const per = job.spec.kind === "profile" || job.spec.kind === "misses" ? job.games : Math.max(1, Math.floor(targetSec / (unitsOf(job, 1) * perGame)));
   const n = Math.ceil(job.games / per);
   const size = Math.ceil(job.games / n);
   const out: Chunk[] = [];
@@ -589,10 +673,38 @@ function rowOf<R extends { cmd: string }>(rows: R[], plan: Plan, dir: string, c:
   return rows.find((r) => r.cmd === cmd);
 }
 
-/** 区切りの台帳の行（ジョブの種類に合わせて読む。profile は行を書かない） */
+/** survey の出力にある試合と局面の数（試合の行のある試合だけ。途中で止めた試合の局面は数えない） */
+export function surveyProgress(file: string): { games: Set<number>; positions: number } {
+  const games = new Set<number>();
+  const pos: number[] = [];
+  if (!existsSync(file)) return { games, positions: 0 };
+  for (const line of readFileSync(file, "utf8").split("\n")) {
+    if (line.trim() === "") continue;
+    try {
+      const o = JSON.parse(line) as { game?: boolean; g?: number };
+      if (typeof o.g !== "number") continue;
+      if (o.game === true) games.add(o.g);
+      else pos.push(o.g);
+    } catch {
+      // 書きかけの行（止めた等）は数えない
+    }
+  }
+  return { games, positions: pos.filter((g) => games.has(g)).length };
+}
+
+/** survey の区切りの試合が、全部出力にあるか */
+function surveyChunkDone(plan: Plan, dir: string, c: Chunk): boolean {
+  const job = plan.jobs[c.job - 1];
+  if (!job) return false;
+  const { games } = surveyProgress(surveyFile(dir, job));
+  for (let g = c.first; g < c.first + c.count; g++) if (!games.has(g)) return false;
+  return true;
+}
+
+/** 区切りの台帳の行（ジョブの種類に合わせて読む。profile・survey は区切りごとの行を書かない） */
 function chunkRowOf(plan: Plan, dir: string, c: Chunk): RunRow | MissesRow | undefined {
   const kind = plan.jobs[c.job - 1]?.spec.kind;
-  if (kind === "profile") return undefined;
+  if (kind === "profile" || kind === "survey") return undefined;
   return kind === "misses" ? rowOf(chunkMisses(dir), plan, dir, c) : rowOf(chunkRows(dir), plan, dir, c);
 }
 
@@ -702,7 +814,7 @@ export function planText(
       String(job.index),
       jobTitle(job),
       job.label,
-      cs.length === 0 ? "済み" : job.spec.kind === "misses" ? `各問 ${games} 回` : `${games * 2}（g${first}〜${first + games - 1}）`,
+      cs.length === 0 ? "済み" : job.spec.kind === "misses" ? `各問 ${games} 回` : `${unitsOf(job, games)}（g${first}〜${first + games - 1}）`,
       String(cs.length),
       `${perGame.toFixed(3)} 秒${job.spec.kind === "misses" ? "（全問 1 回）" : ""}`,
       fmtDur(secs),
@@ -818,6 +930,9 @@ export function statusText(dir: string): string {
     let result = "";
     if (job.spec.kind === "profile") {
       result = ds.length > 0 ? `speed-${job.index}.md` : "";
+    } else if (job.spec.kind === "survey") {
+      const p = surveyProgress(surveyFile(dir, job));
+      if (p.games.size > 0) result = `試合 ${p.games.size}・局面 ${p.positions}（survey-${job.index}.jsonl）`;
     } else if (job.spec.kind === "misses") {
       const m = ds.map((c) => rowOf(missesRows, plan, dir, c)).find((r) => r !== undefined);
       if (m) result = `正解率 ${pct(m.rate)} ± ${pts(m.se)}`;
@@ -834,7 +949,7 @@ export function statusText(dir: string): string {
       jobTitle(job),
       job.label,
       `${ds.length}/${cs.length}`,
-      job.spec.kind === "misses" ? `${games}/${job.games} 回` : `${games}/${2 * job.games}`,
+      job.spec.kind === "misses" ? `${games}/${job.games} 回` : `${games}/${unitsOf(job, job.games)}`,
       fmtDur(secs),
       result,
       f ? `失敗: ${f}` : "",
@@ -846,7 +961,7 @@ export function statusText(dir: string): string {
     `状態: ${state}`,
     `コミット ${plan.commit}（${plan.branch}）、${s ? `${s.machine}・${s.threads} スレッド、止める時刻 ${fmtClock(s.until, tz)}（${tz}）` : ""}`,
   ];
-  return `${head.join("\n")}\n\n${markdownTable(["#", "ジョブ", "台帳の名前", "区切り", "試合", "かかった時間", "A の勝率・正解率", "メモ"], tableRows)}`;
+  return `${head.join("\n")}\n\n${markdownTable(["#", "ジョブ", "台帳の名前", "区切り", "試合", "かかった時間", "A の勝率・正解率・局面", "メモ"], tableRows)}`;
 }
 
 // ---------------------------------------------------------------- worker
@@ -936,6 +1051,11 @@ export async function runWorker(dir: string, ctl: WorkerControl = { stopNow: fal
         log(dir, tz, `区切り ${c.id} は台帳に行があるので済んだものとした`);
         continue;
       }
+      if (job.spec.kind === "survey" && surveyChunkDone(plan, dir, c)) {
+        writeMarker(dir, { id: c.id, seconds: 0, at: new Date().toISOString(), threads: session.threads, recovered: true });
+        log(dir, tz, `区切り ${c.id} は出力に全部の試合があるので済んだものとした`);
+        continue;
+      }
       if (existsSync(join(dir, "STOP"))) return end("stopped", "手で止めた（stop）");
       if (ctl.stopNow) return end("stopped", "すぐ止めた（stop --now）");
       const expected = chunkSeconds(c, plan, measuredSpeed(plan, done, session.threads));
@@ -954,7 +1074,8 @@ export async function runWorker(dir: string, ctl: WorkerControl = { stopNow: fal
         fsyncFile(ledgerFile);
         writeMarker(dir, { id: c.id, seconds: r.seconds, at: new Date().toISOString(), threads: session.threads });
         const got = chunkRowOf(plan, dir, c);
-        if (job.spec.kind !== "profile" && got === undefined) log(dir, tz, `注意: 区切り ${c.id} の台帳の行が見つからない（chunks/${c.id}.log を見る）`);
+        if (job.spec.kind !== "profile" && job.spec.kind !== "survey" && got === undefined) log(dir, tz, `注意: 区切り ${c.id} の台帳の行が見つからない（chunks/${c.id}.log を見る）`);
+        if (job.spec.kind === "survey" && !surveyChunkDone(plan, dir, c)) log(dir, tz, `注意: 区切り ${c.id} の試合が survey-${job.index}.jsonl に揃っていない（chunks/${c.id}.log を見る）`);
         const what = got === undefined ? "" : got.kind === "misses" ? `、正解率 ${pct(got.rate)}` : `、A ${pct(got.rate)}`;
         log(dir, tz, `区切り ${c.id} 済み（${fmtDur(r.seconds)}、${(r.seconds / unitsOf(job, c.count)).toFixed(3)} 秒/${job.spec.kind === "misses" ? "全問 1 回" : "試合"}${what}）`);
         continue;
@@ -1048,6 +1169,8 @@ function run(cmd: string, args: string[]): void {
 function validate(bin: string, jobs: Job[]): void {
   for (const job of jobs) {
     const s = job.spec;
+    // survey の設定は数だけで、ジョブの行を読むときに確かめた
+    if (s.kind === "survey") continue;
     const args =
       s.kind === "compare"
         ? ["compare", "0", s.a, s.b, "0", ...(s.vs === null ? [] : [s.vs]), ...(s.decks === null ? [] : ["--decks", s.decks]), "--no-ledger"]
@@ -1220,7 +1343,7 @@ function checkGitIdent(): void {
 function uncommittedQueueRows(name: string): number {
   const count = (text: string) => {
     const l = parseLedger(text);
-    return [...l.runs, ...l.misses].filter((r) => (r as { queue?: string }).queue === name).length;
+    return [...l.runs, ...l.misses, ...l.surveys].filter((r) => (r as { queue?: string }).queue === name).length;
   };
   const work = existsSync(DEFAULT_LEDGER) ? count(readFileSync(DEFAULT_LEDGER, "utf8")) : 0;
   const head = spawnSync("git", ["show", "HEAD:docs/ledger.jsonl"], { cwd: REPO, encoding: "utf8", maxBuffer: 1 << 30 });
@@ -1245,7 +1368,7 @@ export function cmdFinish(a: Args): number {
     if (resolve(target) !== resolve(DEFAULT_LEDGER)) throw new Error("--commit はリポジトリの台帳（docs/ledger.jsonl）に足すときだけ");
     checkGitIdent();
   }
-  const targetLedger = existsSync(target) ? parseLedger(readFileSync(target, "utf8")) : { runs: [], misses: [] };
+  const targetLedger = existsSync(target) ? parseLedger(readFileSync(target, "utf8")) : { runs: [], misses: [], surveys: [] };
   const existing = targetLedger.runs;
   const key = (r: { label: string; g: [number, number]; commit: string; kind: string }) => `${r.kind}\u0001${r.label}\u0001${r.g[0]}\u0001${r.g[1]}\u0001${r.commit}`;
   const have = new Set(existing.filter((r) => (r as RunRow & { queue?: string }).queue === plan.name).map(key));
@@ -1255,8 +1378,41 @@ export function cmdFinish(a: Args): number {
   const mrows = chunkMisses(dir);
   const mkey = (r: MissesRow) => `${r.label}\u0001${r.commit}\u0001${r.seed}\u0001${r.trials}\u0001${r.set}`;
   const haveMisses = new Set(targetLedger.misses.filter((r) => (r as MissesRow & { queue?: string }).queue === plan.name).map(mkey));
+  // 打ち比べ調査は、ジョブの区切りが全部済んでから svwb survey report で 1 行にまとめる（局面ごとの結果は回のフォルダの survey-<番号>.jsonl）
+  const outSurveys: (SurveyRow & { queue: string; chunks: number })[] = [];
+  const haveSurveys = new Set(targetLedger.surveys.filter((r) => (r as SurveyRow & { queue?: string }).queue === plan.name).map((r) => r.label));
+  const notes: string[] = [];
   for (const job of plan.jobs) {
     if (job.spec.kind === "profile") continue;
+    if (job.spec.kind === "survey") {
+      const cs = plan.chunks.filter((c) => c.job === job.index);
+      if (cs.every((c) => merged.has(c.id))) continue;
+      const nDone = cs.filter((c) => done.has(c.id)).length;
+      if (nDone < cs.length) {
+        notes.push(`ジョブ ${job.index}（${job.label}）はまだ途中（区切り ${nDone}/${cs.length}）。resume で続きを回してから finish で台帳に足す`);
+        continue;
+      }
+      if (!haveSurveys.has(job.label)) {
+        const one = join(dir, `survey-${job.index}-ledger.jsonl`);
+        rmSync(one, { force: true });
+        const states = join(dir, `survey-${job.index}-states`);
+        mkdirSync(states, { recursive: true });
+        const r = spawnSync(plan.bin, ["survey", "report", surveyFile(dir, job), "--label", job.label, "--states", states], {
+          cwd: plan.repo,
+          encoding: "utf8",
+          maxBuffer: 1 << 28,
+          env: { ...process.env, SVWB_LEDGER: one, SVWB_COMMIT: plan.commit, SVWB_BRANCH: plan.branch },
+        });
+        if (r.status !== 0) throw new Error(`ジョブ ${job.index} の survey report が失敗しました: ${(r.stderr || r.stdout).trim()}`);
+        writeFileSync(join(dir, `survey-${job.index}.md`), r.stdout);
+        const rows = existsSync(one) ? parseLedger(readFileSync(one, "utf8")).surveys : [];
+        const row = rows[rows.length - 1];
+        if (!row) throw new Error(`ジョブ ${job.index} の survey report が台帳の行を書きませんでした（${one}）`);
+        outSurveys.push({ ...row, queue: plan.name, chunks: cs.length });
+      }
+      for (const c of cs) merged.add(c.id);
+      continue;
+    }
     if (job.spec.kind === "misses") {
       for (const c of plan.chunks.filter((c) => c.job === job.index && done.has(c.id) && !merged.has(c.id))) {
         const r = rowOf(mrows, plan, dir, c);
@@ -1275,8 +1431,8 @@ export function cmdFinish(a: Args): number {
     }
     for (const c of cs) merged.add(c.id);
   }
-  const text = [...out, ...outMisses].map((r) => `${JSON.stringify(r)}\n`).join("");
-  const added = out.length + outMisses.length;
+  const text = [...out, ...outMisses, ...outSurveys].map((r) => `${JSON.stringify(r)}\n`).join("");
+  const added = out.length + outMisses.length + outSurveys.length;
   if (added > 0) {
     if (existsSync(target)) {
       const t = readFileSync(target, "utf8");
@@ -1300,7 +1456,18 @@ export function cmdFinish(a: Args): number {
           outMisses.map((r) => [r.label, `${r.problems}（${r.set}）`, String(r.trials), pct(r.rate), pts(r.se), r.seconds.toFixed(0)]),
         )}`
       : ""
-  }`;
+  }${
+    outSurveys.length > 0
+      ? `\n\n${markdownTable(
+          ["名前", "試合", "局面（打ち比べた）", "二段目で測る得", "半分で選ぶ得（8 つ）", "（上位 4 つ）", "はっきりした見落とし", "結果"],
+          outSurveys.map((r) => {
+            const f = (x: [number | null, number | null], k: number) => (x[0] === null ? "?" : `${x[0].toFixed(k)} ± ${(x[1] ?? 0).toFixed(k)}`);
+            const i = plan.jobs.find((j) => j.label === r.label && j.spec.kind === "survey")?.index ?? "?";
+            return [r.label, `${r.games}（g${r.g[0]}〜${r.g[1]}）`, `${r.positions}（${r.compared}）`, f(r.gain2, 2), f(r.gain8, 2), f(r.gain4, 2), `${r.misses}（1 試合 1 席 ${f(r.missesPerGame, 3)}）`, `survey-${i}.md`];
+          }),
+        )}`
+      : ""
+  }${notes.length > 0 ? `\n\n${notes.join("\n")}` : ""}`;
   writeFileSync(join(dir, "summary.md"), `${summary}\n`);
   console.log(summary);
   if (commit) {
