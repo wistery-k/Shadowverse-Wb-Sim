@@ -11,6 +11,7 @@ pub mod deep_gap;
 pub mod defer_playout;
 pub mod human_plan;
 pub mod ledger;
+pub mod luck;
 pub mod meta;
 pub mod misses;
 pub mod mulligan_compare;

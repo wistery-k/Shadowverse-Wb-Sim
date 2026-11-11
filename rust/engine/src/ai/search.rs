@@ -2320,6 +2320,24 @@ impl SearchAgent {
             .collect()
     }
 
+    /// 局面 s の p の点数（評価関数に、phase の評価に足す項を足したもの）。探索の外から局面を採点する用（runner/luck.rs の軽い採点）
+    pub fn state_value(&self, s: &GameState, p: PlayerIndex, phase: ValuePhase) -> f64 {
+        let v = evaluate_with(s, p, &self.w);
+        match &self.opts.extra_eval {
+            Some(f) => v + f(s, p, phase),
+            None => v,
+        }
+    }
+
+    /// 局面 root で p が打てる並びのターン末の点数の最大（ビームの終局面のうち最善。root を決定化せずに読む。
+    /// runner/luck.rs の重い採点）。終局面が無ければ None
+    pub fn best_turn_end_value(&self, root: &GameState, p: PlayerIndex) -> Option<f64> {
+        let env = self.env();
+        let root = Rc::new(root.clone());
+        let (_, terminals, _) = turn_end_bests(&root, p, &env);
+        terminals.iter().map(|t| t.value).reduce(f64::max)
+    }
+
     /// 局面 root で p が打てる並びの、最初の手ごとにターン末の点数が最も高い終局面とその点数（ビームの候補。root を決定化せずに読む）
     pub fn turn_end_candidates(
         &self,
