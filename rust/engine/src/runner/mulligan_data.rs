@@ -16,9 +16,10 @@ use super::seconds_since;
 use crate::ai::exact_lethal::reset_exact_lethal_cache;
 use crate::ai::lethal::reset_lethal;
 use crate::ai::search::{SearchAgent, SearchOptions};
-use crate::ai::{Agent, Rng};
+use crate::ai::Rng;
 use crate::data::data;
 use crate::game::{acting_player, apply_action, create_game, legal_actions};
+use crate::sim::MatchRng;
 use crate::state::*;
 use std::io::Write;
 use std::time::Instant;
@@ -44,7 +45,7 @@ fn play(i: usize, j: usize, seat: usize, seed: u32, flip: f64) -> String {
         SearchAgent::new(SearchOptions::default()),
     ];
     let mut s = create_game([&ds[0].cards, &ds[1].cards], seed);
-    let mut rng = Rng::new(seed ^ 0x9e3779b9);
+    let mut rng = MatchRng::new(seed);
     // 残す・返すのコイン（打つ手の乱数とは別）
     let mut coin = Rng::new(seed.wrapping_mul(2_654_435_761) ^ 0x6d75_6c6c);
     let mut hands: [Vec<String>; 2] = [Vec::new(), Vec::new()];
@@ -61,7 +62,7 @@ fn play(i: usize, j: usize, seat: usize, seed: u32, flip: f64) -> String {
         let a = if s.phase == Phase::Mulligan {
             // 基準の判断（flip 0.5 なら使わない）
             let base = if flip < 0.5 {
-                match agents[p].choose_action(&s, &legal, &mut Rng::new(rng.state)) {
+                match rng.choose(&mut agents[p], &s, &legal) {
                     Action::Mulligan { swap, .. } => swap,
                     _ => unreachable!(),
                 }
@@ -91,7 +92,7 @@ fn play(i: usize, j: usize, seat: usize, seed: u32, flip: f64) -> String {
                 .expect("マリガンの合法手")
                 .clone()
         } else {
-            agents[p].choose_action(&s, &legal, &mut rng)
+            rng.choose(&mut agents[p], &s, &legal)
         };
         s = apply_action(&s, &a);
     }

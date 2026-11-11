@@ -30,6 +30,7 @@ use crate::ai::{Agent, Rng};
 use crate::data::data;
 use crate::game::{acting_player, apply_legal, create_game, is_legal, legal_actions};
 use crate::json::Json;
+use crate::sim::MatchRng;
 use crate::state::{card, next_random, opponent, Action, GameState, Iid, Phase, PlayerIndex};
 use crate::state_json::action_from_json;
 use serde_json::{json, Value};
@@ -349,7 +350,7 @@ fn ai_turn(
     agents: &mut [Box<dyn Agent>; 2],
     seed: u32,
 ) -> Result<(GameState, Vec<String>), String> {
-    let mut rng = Rng::new(seed);
+    let mut rng = MatchRng::with_shared(seed, seed);
     let mut steps = Vec::new();
     let mut t = start.clone();
     for _ in 0..500 {
@@ -357,7 +358,7 @@ fn ai_turn(
             return Ok((t, steps));
         }
         let actor = acting_player(&t);
-        let a = agents[actor].choose_action(&t, &legal_actions(&t), &mut rng);
+        let a = rng.choose(agents[actor].as_mut(), &t, &legal_actions(&t));
         if actor == p && matches!(a, Action::EndTurn) {
             return Ok((t, steps));
         }
@@ -394,14 +395,15 @@ fn rollouts(
                     det = apply_legal(&det, a);
                 }
                 let mut agents = make_agents(subject, p);
-                let mut rng = Rng::new(mix(seed, 2000 + r));
+                let x = mix(seed, 2000 + r);
+                let mut rng = MatchRng::with_shared(x, x);
                 let mut s = det;
                 for _ in 0..10000 {
                     if s.phase == Phase::Ended {
                         return Some(s.winner == Some(p));
                     }
                     let actor = acting_player(&s);
-                    let a = agents[actor].choose_action(&s, &legal_actions(&s), &mut rng);
+                    let a = rng.choose(agents[actor].as_mut(), &s, &legal_actions(&s));
                     s = apply_legal(&s, &a);
                 }
                 None

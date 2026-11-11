@@ -82,10 +82,11 @@ use crate::ai::eval::{evaluate_with, EvalWeights};
 use crate::ai::mulligan::default_deck_name_of;
 use crate::ai::search::{MulliganMode, SearchAgent, SearchOptions};
 use crate::ai::valuenet::{ValueNet, ValuePhase};
-use crate::ai::{Agent, Rng};
+use crate::ai::Rng;
 use crate::data::{data, CardIdx, Deck};
 use crate::game::{acting_player, apply_action, create_game, legal_actions, resolve_turn_end};
 use crate::jsnum::{js_num, round_precision};
+use crate::sim::MatchRng;
 use crate::state::{
     next_random, opponent, Action, Evolve, GameState, Iid, OnBoard, Phase, PlayerIndex, EP, MAX_PP,
     SEP,
@@ -495,7 +496,7 @@ fn play_out(
     branch_at: Option<(PlayerIndex, i32)>,
     learner: Option<PlayerIndex>,
 ) -> Played {
-    let mut agent_rng = Rng::new(seed ^ 0x9e3779b9);
+    let mut agent_rng = MatchRng::new(seed);
     let mut img_rng = Rng::new(seed ^ 0x3c6ef372);
     let mut explore = seed ^ 0x2545f491;
     let mut next_float = || {
@@ -600,7 +601,7 @@ fn play_out(
         }
         let action = match action {
             Some(a) => a,
-            None => agents[actor].choose_action(&state, &legal, &mut agent_rng),
+            None => agent_rng.choose(&mut agents[actor], &state, &legal),
         };
         if matches!(action, Action::EndTurn)
             && state.phase == Phase::Main
@@ -692,14 +693,14 @@ fn rollout_wins(end: &GameState, p: PlayerIndex, roll: &Model, seed: u32) -> boo
         SearchAgent::new(roll.opts.clone()),
         SearchAgent::new(roll.opts.clone()),
     ];
-    let mut agent_rng = Rng::new(seed ^ 0x9e3779b9);
+    let mut agent_rng = MatchRng::new(seed);
     let mut n = 0;
     while state.phase != Phase::Ended {
         n += 1;
         assert!(n <= 10001, "打ち比べのアクション数が上限を超えました");
         let legal = legal_actions(&state);
         let actor = acting_player(&state);
-        let action = agents[actor].choose_action(&state, &legal, &mut agent_rng);
+        let action = agent_rng.choose(&mut agents[actor], &state, &legal);
         state = apply_action(&state, &action);
     }
     state.winner == Some(p)

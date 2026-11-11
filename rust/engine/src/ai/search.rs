@@ -27,7 +27,7 @@ use super::mulligan::{
 use super::potential::{default_potential_net, PotentialNet};
 use super::think::{Thought, ThoughtCandidate};
 use super::valuenet::{default_net_weights, value_net_eval, ValuePhase};
-use super::{Agent, Rng};
+use super::{purpose, purpose_rng, seed_of, with_purpose_rng, Agent, Rng};
 use crate::data::CardIdx;
 use crate::game::{
     acting_player, apply_legal, is_legal, legal_actions, resolve_turn_end, try_apply_action,
@@ -232,6 +232,10 @@ pub struct SearchOptions {
     pub draw_split: Option<DrawSplit>,
     /// 選んだ並びの、相手のターンを読んだ後の想像の局面を残す（SearchAgent::take_reads。TD 学習の自己対戦の --imagined 用。打つ手は変わらない）
     pub record_reads: bool,
+    /// AI の思考用の乱数を、渡された乱数から取った順番に使う（2026-11-10 より前の取り方。物差しの相手の手を変えないために残す）。
+    /// false（既定）なら、判断ごとに 1 つ取った種から、用途と何番目かで作る（相手の手札の引き直しの数を変えても、前からある引き直しは同じ）。
+    /// 試合の中では、true の AI だけが 1 試合に 1 本の乱数を順に使い、false の AI は判断ごとに作った乱数を使う（sim.rs の MatchRng）
+    pub sequential_rng: bool,
 }
 
 impl Default for SearchOptions {
@@ -310,6 +314,8 @@ impl Default for SearchOptions {
             rescore_race: Some(DEFAULT_RESCORE_RACE),
             draw_split: Some(DEFAULT_DRAW_SPLIT),
             record_reads: false,
+            // 2026-11-10 から、思考用の乱数を用途から作る（docs/ai-notes.md「AI の思考用の乱数を用途から作る」）
+            sequential_rng: false,
         }
     }
 }
@@ -1068,9 +1074,18 @@ pub fn plan_turn_traced(
         out
     };
 
+    // 読み直しの乱数の元（sequential_rng でなければ、ここで 1 つ取り、引き直しの種は用途と何番目かで作る。
+    // 引き直しの数を変えても、前からある引き直しは同じ）
+    let pbase: Option<u32> = (!opts.sequential_rng).then(|| rng.int(u32::MAX as usize) as u32);
+    let mut seed_at = |purpose: u32, i: usize| -> u32 {
+        match pbase {
+            Some(b) => seed_of(&[b, purpose, i as u32]),
+            None => rng.int(u32::MAX as usize) as u32,
+        }
+    };
     let common_seeds: Vec<u32> = if opts.opp_hand_common && opts.opp_hand_samples > 1 {
         (0..opts.opp_hand_samples)
-            .map(|_| rng.int(u32::MAX as usize) as u32)
+            .map(|i| seed_at(purpose::OPP_HAND, i))
             .collect()
     } else {
         Vec::new()
@@ -1078,14 +1093,18 @@ pub fn plan_turn_traced(
     // drawSplit: 引きを作り直す乱数（どの並びでも同じ）と、組み直すビームの設定
     let split_seeds: Vec<u32> = match draw_split {
         Some(ds) => (0..ds.samples.max(1))
-            .map(|_| rng.int(u32::MAX as usize) as u32)
+            .map(|i| seed_at(purpose::SPLIT, i))
             .collect(),
         None => Vec::new(),
     };
     // enumerate: 一番上のカードの種類ごとに山札の残りを並べ直す乱数の元（種類ごとに決まるので、どの並びでも同じ種類なら同じ並べ直し）
     let enum_seed: Option<u32> = match draw_split {
-        Some(ds) if ds.enumerate => Some(rng.int(u32::MAX as usize) as u32),
+        Some(ds) if ds.enumerate => Some(seed_at(purpose::SPLIT_ENUM, 0)),
         _ => None,
+    };
+    // 終局面 i の k 番目の引き直しの乱数（oppHandCommon でないとき・引き直し 1 回のとき。sequential_rng なら None で、rng を順に使う）
+    let read_rng = |i: usize, k: usize| -> Option<Rng> {
+        pbase.map(|b| Rng::new(seed_of(&[b, purpose::READ, i as u32, k as u32])))
     };
     let split_opts: Option<SearchOptions> = draw_split.map(|ds| SearchOptions {
         beam_width: ds.beam_width,
@@ -1240,7 +1259,11 @@ pub fn plan_turn_traced(
             (pl.eval_state(&node.state), 1)
         } else if opts.opp_hand_samples <= 1 {
             let settled = pl.settle(&node.state);
-            let (v, after) = read_once(&pl, settled.as_ref().unwrap_or(&node.state), rng);
+            let start = settled.as_ref().unwrap_or(&node.state);
+            let (v, after) = match read_rng(i, 0) {
+                Some(mut r) => read_once(&pl, start, &mut r),
+                None => read_once(&pl, start, rng),
+            };
             add(after);
             (v - pl.leftover(&node.state), 1)
         } else {
@@ -1270,9 +1293,17 @@ pub fn plan_turn_traced(
                     add(after);
                 }
             } else {
-                for _ in 0..opts.opp_hand_samples {
-                    let d = read_determinize(base, p, rng, opts);
-                    let (v, after) = read_once(&pl, &d, rng);
+                for k in 0..opts.opp_hand_samples {
+                    let (v, after) = match read_rng(i, k) {
+                        Some(mut r) => {
+                            let d = read_determinize(base, p, &mut r, opts);
+                            read_once(&pl, &d, &mut r)
+                        }
+                        None => {
+                            let d = read_determinize(base, p, rng, opts);
+                            read_once(&pl, &d, rng)
+                        }
+                    };
                     xs.push((1.0, v));
                     add(after);
                 }
@@ -1882,9 +1913,13 @@ impl SearchAgent {
         }
         let opts = &self.opts;
         let p = acting_player(real);
+        // 判断の乱数の元（choose_action と同じ）
+        let base = (!opts.sequential_rng).then(|| rng.int(u32::MAX as usize) as u32);
         let lethal = match lethal {
             Some(l) => l,
-            None => self.lethal_action(real, legal, p, rng),
+            None => with_purpose_rng(rng, base, purpose::LETHAL, 0, |r| {
+                self.lethal_action(real, legal, p, r)
+            }),
         };
         let env = Env {
             opts,
@@ -1908,9 +1943,17 @@ impl SearchAgent {
         // 読み直した手の、choose_action の totals と同じ順（決定化ごとに plan_turn が返した順で、初めて出たところ）
         let mut totals: Vec<usize> = Vec::new();
         for sample in 0..opts.samples {
-            let det = Rc::new(determinize(real, p, rng, opts.peek_opp_hand));
+            let det = Rc::new(with_purpose_rng(
+                rng,
+                base,
+                purpose::DETERMINIZE,
+                sample as u32,
+                |r| determinize(real, p, r, opts.peek_opp_hand),
+            ));
             let mut trace = PlanTrace::default();
-            let plans = plan_turn_traced(&det, p, &env, rng, true, Some(&mut trace));
+            let plans = with_purpose_rng(rng, base, purpose::PLAN, sample as u32, |r| {
+                plan_turn_traced(&det, p, &env, r, true, Some(&mut trace))
+            });
             roots.push((*det).clone());
             for (plan, turn_end) in &trace.turn_end {
                 if candidates.iter().any(|c| c.action == plan.action) {
@@ -2002,7 +2045,9 @@ impl SearchAgent {
                 } else {
                     &permitted
                 };
-                choose_greedy(real, choices, rng, false, &self.default_w)
+                with_purpose_rng(rng, base, purpose::GREEDY, 0, |r| {
+                    choose_greedy(real, choices, r, false, &self.default_w)
+                })
             }
         };
         candidates.sort_by(|x, y| match (x.value, y.value) {
@@ -2479,13 +2524,20 @@ impl Agent for SearchAgent {
             return first.clone();
         }
         let opts = &self.opts;
+        // 判断の乱数の元（sequential_rng でなければ 1 つ取り、ここから用途ごとの乱数を作る。think_with と同じ）
+        let base = (!opts.sequential_rng).then(|| rng.int(u32::MAX as usize) as u32);
         if matches!(first, Action::Mulligan { .. }) {
             let _p = prof::scope(Sec::Mulligan);
             let p0 = acting_player(real);
+            // マリガンは渡された乱数を進めず、その状態から作った乱数で引き直しを試す（mulligan.rs）
+            let mrng = match base {
+                Some(b) => purpose_rng(b, purpose::MULLIGAN, 0),
+                None => Rng::new(rng.state),
+            };
             if opts.mulligan == MulliganMode::Sample {
                 let extra = opts.extra_eval.clone().filter(|_| opts.mulligan_net);
                 let w = &self.w;
-                return sampled_mulligan(real, legal, p0, opts.mulligan_samples, rng, |s| {
+                return sampled_mulligan(real, legal, p0, opts.mulligan_samples, &mrng, |s| {
                     let v = if opts.mulligan_static {
                         evaluate_with(s, p0, w)
                     } else {
@@ -2530,6 +2582,7 @@ impl Agent for SearchAgent {
                     lethal: false,
                     mulligan: MulliganMode::Model,
                     draw_split: None,
+                    sequential_rng: opts.sequential_rng,
                     ..SearchOptions::default()
                 };
                 let new_policy = move || -> RolloutPolicy {
@@ -2550,7 +2603,7 @@ impl Agent for SearchAgent {
                         opts.mulligan_turns,
                         opts.mulligan_opp,
                     ),
-                    rng,
+                    &mrng,
                     &new_policy,
                     |s, phase| {
                         let v = if opts.mulligan_static {
@@ -2594,7 +2647,9 @@ impl Agent for SearchAgent {
                 return a.clone();
             }
             // 重みの無いデッキは貪欲法と同じ（コスト 4 以上を返す）
-            return choose_greedy(real, legal, rng, false, &self.default_w);
+            return with_purpose_rng(rng, base, purpose::GREEDY, 0, |r| {
+                choose_greedy(real, legal, r, false, &self.default_w)
+            });
         }
         let p = real
             .pending
@@ -2602,7 +2657,9 @@ impl Agent for SearchAgent {
             .map(|pd| pd.player())
             .unwrap_or(real.active);
 
-        if let Some(l) = self.lethal_action(real, legal, p, rng) {
+        if let Some(l) = with_purpose_rng(rng, base, purpose::LETHAL, 0, |r| {
+            self.lethal_action(real, legal, p, r)
+        }) {
             self.plans[p] = None;
             self.reads[p].clear();
             return l;
@@ -2627,9 +2684,18 @@ impl Agent for SearchAgent {
             policy_w: &self.policy_w,
         };
         let mut totals: Vec<Total> = Vec::new();
-        for _ in 0..opts.samples {
-            let det = Rc::new(determinize(real, p, rng, opts.peek_opp_hand));
-            for (k, sample) in plan_turn(&det, p, &env, rng, true) {
+        for i in 0..opts.samples {
+            let det = Rc::new(with_purpose_rng(
+                rng,
+                base,
+                purpose::DETERMINIZE,
+                i as u32,
+                |r| determinize(real, p, r, opts.peek_opp_hand),
+            ));
+            let plans = with_purpose_rng(rng, base, purpose::PLAN, i as u32, |r| {
+                plan_turn(&det, p, &env, r, true)
+            });
+            for (k, sample) in plans {
                 match totals.iter_mut().find(|t| t.action == k) {
                     Some(t) => {
                         t.sum += sample.value;
@@ -2686,6 +2752,12 @@ impl Agent for SearchAgent {
         } else {
             &permitted
         };
-        choose_greedy(real, choices, rng, false, &self.default_w)
+        with_purpose_rng(rng, base, purpose::GREEDY, 0, |r| {
+            choose_greedy(real, choices, r, false, &self.default_w)
+        })
+    }
+
+    fn sequential_rng(&self) -> bool {
+        self.opts.sequential_rng
     }
 }

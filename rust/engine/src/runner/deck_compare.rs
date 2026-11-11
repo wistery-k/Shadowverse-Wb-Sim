@@ -155,6 +155,10 @@ impl Agent for MulliganAs {
         }
         self.inner.choose_action(state, legal, rng)
     }
+
+    fn sequential_rng(&self) -> bool {
+        self.inner.sequential_rng()
+    }
 }
 
 /// カード名かカード ID からカードを引く（トークンは不可）

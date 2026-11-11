@@ -277,6 +277,16 @@ fn dispatch(req: &Json) -> R<Json> {
                 Json::Num((a.len() - 1) as f64)
             })
         }
+        "agentSequentialRng" => {
+            // 試合の中で思考用の乱数を古い取り方（1 試合に 1 本を順に）で使う AI か（src/sim/match.ts の playFrom）
+            let name = match field(req, "name")? {
+                Json::Str(n) => n.as_str(),
+                _ => return Err(Fail::Error("name は AI の名前".into())),
+            };
+            let agent =
+                create_agent(name).ok_or_else(|| Fail::Error(format!("未知の AI: {name}")))?;
+            Json::Bool(agent.sequential_rng())
+        }
         "agentFree" => {
             let h = uint(req, "handle")? as usize;
             AGENTS.with(|a| {

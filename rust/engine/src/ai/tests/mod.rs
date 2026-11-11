@@ -17,6 +17,7 @@ mod eval;
 mod fuse_minimal;
 mod keys;
 mod lethal;
+mod match_rng;
 mod mulligan;
 mod potential;
 mod rescore_race;

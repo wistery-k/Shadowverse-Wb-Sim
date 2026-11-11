@@ -28,11 +28,12 @@ use crate::ai::lethal::reset_lethal;
 use crate::ai::registry::create_agent;
 use crate::ai::rhino::RhinoAgent;
 use crate::ai::search::{SearchAgent, SearchOptions};
-use crate::ai::{Agent, Rng};
+use crate::ai::Agent;
 use crate::canonical::fnv;
 use crate::data::{data, CardIdx};
 use crate::game::{acting_player, apply_legal, create_game, is_legal, legal_actions};
 use crate::json::Json;
+use crate::sim::MatchRng;
 use crate::state::{card, Action, GameState, Phase, PlayerIndex};
 use crate::state_json::{action_from_json, action_to_json, state_from_json, state_to_json};
 use std::collections::BTreeMap;
@@ -388,7 +389,7 @@ fn play_turn(
     p: PlayerIndex,
     me: &mut dyn Agent,
     opp: &mut dyn Agent,
-    rng: &mut Rng,
+    rng: &mut MatchRng,
 ) -> Result<Turn, String> {
     let mut t = start.clone();
     let mut steps = Vec::new();
@@ -400,9 +401,9 @@ fn play_turn(
         let actor = acting_player(&t);
         let legal = legal_actions(&t);
         let a = if actor == p {
-            me.choose_action(&t, &legal, rng)
+            rng.choose(me, &t, &legal)
         } else {
-            opp.choose_action(&t, &legal, rng)
+            rng.choose(opp, &t, &legal)
         };
         if actor == p {
             let st = step_of(&t, &a, p, &last);
@@ -604,7 +605,8 @@ fn trial(p: &Problem, agents: &Agents, seed: u32, r: u32) -> (bool, String) {
         let start = state_from_json(&Json::parse(&p.state)?)?;
         let mut me = agents.create(p.agent);
         let mut opp = SearchAgent::new(SearchOptions::default());
-        let mut rng = Rng::new(mix(seed, r));
+        let x = mix(seed, r);
+        let mut rng = MatchRng::with_shared(x, x);
         let t = play_turn(&start, p.player, &mut *me, &mut opp, &mut rng)?;
         let mut line: Vec<String> = t.steps.iter().map(|s| s.text.clone()).collect();
         if t.won {
@@ -1005,7 +1007,7 @@ fn replay_to(
     let mut done: Vec<Action> = Vec::new();
     let mut agents: Option<[Box<dyn Agent>; 2]> = None;
     // AI の乱数は playMatch（npm run game）と同じくシードから作る
-    let mut rng = Rng::new(src.seed ^ 0x9e3779b9);
+    let mut rng = MatchRng::new(src.seed);
     if src.actions.is_empty() {
         let names = src.agents.as_ref().ok_or("打ち直す AI がありません")?;
         let a0 = create_agent(&names[0]).ok_or_else(|| format!("知らない AI: {}", names[0]))?;
@@ -1029,7 +1031,7 @@ fn replay_to(
             Some(ag) => {
                 let legal = legal_actions(&s);
                 let actor = acting_player(&s);
-                ag[actor].choose_action(&s, &legal, &mut rng)
+                rng.choose(ag[actor].as_mut(), &s, &legal)
             }
         };
         if !is_legal(&s, &a) {

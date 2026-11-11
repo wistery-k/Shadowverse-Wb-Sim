@@ -197,6 +197,16 @@ fn remulligan_opponent_redoes_the_first_players_mulligan() {
     assert_eq!(cards(&rf, of), cards(&df, of));
 }
 
+/// マリガンを選んだ後の乱数の状態の見込み。古い取り方（sequentialRng）は試合の乱数を進めない（判断が同じなら、その後の試合も同じ）。
+/// 用途から作る取り方（既定）は、ほかの判断と同じく元を 1 つ取り、そこからマリガンの乱数を作る（試合の中では判断ごとに別の乱数なので、進めても影響しない）
+fn rng_after_mulligan(start: u32, sequential: bool) -> u32 {
+    if sequential {
+        start
+    } else {
+        crate::state::next_random(start).1
+    }
+}
+
 #[test]
 fn turn1_mulligan_with_opponent_modes_is_legal_and_keeps_rng() {
     // 先へ進める中の相手のマリガンを変えても、先攻・後攻のどちらでも合法な手を選び、試合の乱数を進めない
@@ -214,15 +224,19 @@ fn turn1_mulligan_with_opponent_modes_is_legal_and_keeps_rng() {
             Some(OppMulligan::Cost),
             Some(OppMulligan::Keep),
         ] {
-            let mut agent = crate::ai::search::SearchAgent::new(crate::ai::search::SearchOptions {
-                mulligan_samples: 4,
-                mulligan_opp: m,
-                ..Default::default()
-            });
-            let mut rng = Rng::new(31);
-            let a = agent.choose_action(state, &legal, &mut rng);
-            assert_eq!(rng.state, 31);
-            assert!(legal.contains(&a));
+            for sequential in [false, true] {
+                let mut agent =
+                    crate::ai::search::SearchAgent::new(crate::ai::search::SearchOptions {
+                        mulligan_samples: 4,
+                        mulligan_opp: m,
+                        sequential_rng: sequential,
+                        ..Default::default()
+                    });
+                let mut rng = Rng::new(31);
+                let a = agent.choose_action(state, &legal, &mut rng);
+                assert_eq!(rng.state, rng_after_mulligan(31, sequential));
+                assert!(legal.contains(&a));
+            }
         }
     }
 }
@@ -276,23 +290,32 @@ fn turn1_mulligan_with_rollout_weights_is_legal_and_keeps_rng() {
             RolloutWeights::Ramp,
             RolloutWeights::Search,
         ] {
-            let mut agent = crate::ai::search::SearchAgent::new(crate::ai::search::SearchOptions {
-                mulligan_samples: 4,
-                mulligan_rollout_weights: w,
-                ..Default::default()
-            });
-            let mut rng = Rng::new(17);
-            let a = agent.choose_action(state, &legal, &mut rng);
-            assert_eq!(rng.state, 17);
-            assert!(legal.contains(&a));
+            for sequential in [false, true] {
+                let mut agent =
+                    crate::ai::search::SearchAgent::new(crate::ai::search::SearchOptions {
+                        mulligan_samples: 4,
+                        mulligan_rollout_weights: w,
+                        sequential_rng: sequential,
+                        ..Default::default()
+                    });
+                let mut rng = Rng::new(17);
+                let a = agent.choose_action(state, &legal, &mut rng);
+                assert_eq!(rng.state, rng_after_mulligan(17, sequential));
+                assert!(legal.contains(&a));
+            }
         }
     }
 }
 
 fn sample_agent(n: usize) -> crate::ai::search::SearchAgent {
+    sample_agent_with(n, false)
+}
+
+fn sample_agent_with(n: usize, sequential: bool) -> crate::ai::search::SearchAgent {
     crate::ai::search::SearchAgent::new(crate::ai::search::SearchOptions {
         mulligan: crate::ai::search::MulliganMode::Sample,
         mulligan_samples: n,
+        sequential_rng: sequential,
         ..Default::default()
     })
 }
@@ -303,12 +326,14 @@ fn sampled_mulligan_is_deterministic_and_keeps_rng() {
     let (s, _) = weights_state();
     let legal = legal_actions(&s);
     assert_eq!(legal.len(), 16);
-    let mut rng = Rng::new(777);
-    let a = sample_agent(20).choose_action(&s, &legal, &mut rng);
-    assert_eq!(rng.state, 777);
-    let b = sample_agent(20).choose_action(&s, &legal, &mut rng);
-    assert_eq!(a, b);
-    assert!(legal.contains(&a));
+    for sequential in [false, true] {
+        let mut rng = Rng::new(777);
+        let a = sample_agent_with(20, sequential).choose_action(&s, &legal, &mut rng);
+        assert_eq!(rng.state, rng_after_mulligan(777, sequential));
+        let b = sample_agent_with(20, sequential).choose_action(&s, &legal, &mut Rng::new(777));
+        assert_eq!(a, b);
+        assert!(legal.contains(&a));
+    }
 }
 
 /// 速さの確認（cargo test --release -- --ignored --nocapture sampled_mulligan_speed）

@@ -47,7 +47,7 @@ use crate::ai::{Agent, Rng};
 use crate::data::{data, Kw};
 use crate::game::{acting_player, apply_legal, create_game, is_legal, legal_actions};
 use crate::json::Json;
-use crate::sim::{ai_game_setup, play_match};
+use crate::sim::{ai_game_setup, play_match, MatchRng};
 use crate::state::{card, opponent, Action, Evolve, GameState, OnBoard, Phase, PlayerIndex};
 use crate::state_json::{action_from_json, action_to_json};
 use serde_json::{json, Value};
@@ -141,7 +141,7 @@ fn play_turn(
 ) -> Result<(Vec<Action>, GameState), String> {
     let mut mine = SearchAgent::new(me.clone());
     let mut other = SearchAgent::new(SearchOptions::default());
-    let mut rng = Rng::new(seed);
+    let mut rng = MatchRng::with_shared(seed, seed);
     let mut t = start.clone();
     let mut done = Vec::new();
     for _ in 0..500 {
@@ -151,9 +151,9 @@ fn play_turn(
         let actor = acting_player(&t);
         let legal = legal_actions(&t);
         let a = if actor == p {
-            mine.choose_action(&t, &legal, &mut rng)
+            rng.choose(&mut mine, &t, &legal)
         } else {
-            other.choose_action(&t, &legal, &mut rng)
+            rng.choose(&mut other, &t, &legal)
         };
         if actor == p && matches!(a, Action::EndTurn) {
             return Ok((done, t));
@@ -852,7 +852,7 @@ pub(crate) fn finish(end: &GameState, p: PlayerIndex, seed: u32) -> Option<bool>
     catch_unwind(AssertUnwindSafe(|| {
         let mut a0 = SearchAgent::new(SearchOptions::default());
         let mut a1 = SearchAgent::new(SearchOptions::default());
-        let mut rng = Rng::new(seed);
+        let mut rng = MatchRng::with_shared(seed, seed);
         let mut s = apply_legal(end, &Action::EndTurn);
         for _ in 0..10000 {
             if s.phase == Phase::Ended {
@@ -860,9 +860,9 @@ pub(crate) fn finish(end: &GameState, p: PlayerIndex, seed: u32) -> Option<bool>
             }
             let legal = legal_actions(&s);
             let a = if acting_player(&s) == 0 {
-                a0.choose_action(&s, &legal, &mut rng)
+                rng.choose(&mut a0, &s, &legal)
             } else {
-                a1.choose_action(&s, &legal, &mut rng)
+                rng.choose(&mut a1, &s, &legal)
             };
             s = apply_legal(&s, &a);
         }

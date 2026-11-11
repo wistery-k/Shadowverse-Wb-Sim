@@ -21,10 +21,11 @@ use super::yardstick::{command_line, commit_label_excluding, short_name};
 use super::{compare_decks, fixed};
 use crate::ai::rhino::RhinoAgent;
 use crate::ai::search::{SearchAgent, SearchOptions};
-use crate::ai::{Agent, Rng};
+use crate::ai::Agent;
 use crate::data::Deck;
 use crate::game::{acting_player, apply_action, create_game, legal_actions};
 use crate::prof::{self, Profile, Sec};
+use crate::sim::MatchRng;
 use crate::state::Phase;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -97,7 +98,7 @@ fn play_timed(
     let _ = prof::take();
     let t0 = Instant::now();
     let mut s = create_game([&seats[0].cards, &seats[1].cards], seed);
-    let mut rng = Rng::new(seed ^ 0x9e3779b9);
+    let mut rng = MatchRng::new(seed);
     let mut think = [0.0; 2];
     let mut decisions = [0u32; 2];
     let mut profs: [Profile; 2] = Default::default();
@@ -113,7 +114,7 @@ fn play_timed(
         let t = Instant::now();
         let a = {
             let _p = prof::scope(Sec::Think);
-            agents[actor].choose_action(&s, &legal, &mut rng)
+            rng.choose(&mut *agents[actor], &s, &legal)
         };
         think[actor] += t.elapsed().as_secs_f64();
         decisions[actor] += 1;

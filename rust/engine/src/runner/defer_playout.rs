@@ -20,6 +20,7 @@ use crate::ai::{Agent, Rng};
 use crate::data::{data, CardIdx};
 use crate::game::{acting_player, apply_action, apply_legal, create_game, is_legal, legal_actions};
 use crate::json::Json;
+use crate::sim::MatchRng;
 use crate::state::{card, Action, GameState, Phase, PlayerIndex};
 use crate::state_json::action_from_json;
 use std::collections::BTreeMap;
@@ -83,15 +84,15 @@ fn playout(
     }
     let mut mine = SearchAgent::new(me.clone());
     let mut theirs = SearchAgent::new(SearchOptions::default());
-    let mut rng = Rng::new(seed ^ 0x9e3779b9);
+    let mut rng = MatchRng::new(seed);
     let mut n = 0;
     while s.phase != Phase::Ended && n < 10000 {
         n += 1;
         let legal = legal_actions(&s);
         let a = if acting_player(&s) == p {
-            mine.choose_action(&s, &legal, &mut rng)
+            rng.choose(&mut mine, &s, &legal)
         } else {
-            theirs.choose_action(&s, &legal, &mut rng)
+            rng.choose(&mut theirs, &s, &legal)
         };
         s = apply_action(&s, &a);
     }
