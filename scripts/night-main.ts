@@ -398,11 +398,11 @@ type SpeedKey = "compare" | "classic" | "strong" | "profile" | "misses" | "surve
 export const SPEEDS: Record<string, { threads: number; note: string; ts: Record<SpeedKey, number> }> = {
   // ユーザーの PC（Core i7-14700F、28 スレッド。Docker の svwb-docker）。compare は 3200 試合 5 分ほど、物差しは docs/yardstick.md の「（PC）」の行。
   // misses・survey は測っていないので、クラウド環境の値に compare の比（2.6 / 2.0）を掛けた
-  "svwb-docker": { threads: 28, note: "PC の決めておいた値", ts: { compare: 2.6, classic: 1.3, strong: 2.7, profile: 2.6, misses: 5.9, survey: 730 } },
+  "svwb-docker": { threads: 28, note: "PC の決めておいた値", ts: { compare: 2.6, classic: 1.3, strong: 2.7, profile: 2.6, misses: 5.9, survey: 860 } },
   // Claude のクラウド環境（4 スレッド）で 2026-11-10 に測った値（compare 0.50・弱い相手 0.21・強い相手 0.44 秒/試合、各 56 試合。
-  // misses は 10 問 × 24 回が 27 秒。survey は 2026-11-11 の試し（10 試合・15 局面）で 1 局面 277 秒、局面の割合 0.1 で 1 試合 2.0 局面として）。
+  // misses は 10 問 × 24 回が 27 秒。survey は 2026-11-11 の試し 2（10 試合・15 局面、読み直しを打ち切った候補を入れた後）で 1 局面 328 秒、局面の割合 0.1 で 1 試合 2.0 局面として）。
   // ほかのマシンもこれで見積もる
-  default: { threads: 4, note: "クラウド環境の決めておいた値", ts: { compare: 2.0, classic: 0.85, strong: 1.8, profile: 2.0, misses: 4.5, survey: 560 } },
+  default: { threads: 4, note: "クラウド環境の決めておいた値", ts: { compare: 2.0, classic: 0.85, strong: 1.8, profile: 2.0, misses: 4.5, survey: 660 } },
 };
 
 export interface Estimate {
