@@ -2336,6 +2336,200 @@ impl SearchAgent {
     }
 }
 
+/// 候補の打ち比べ調査（runner/survey.rs）の候補 1 つ
+pub struct SurveyPlan {
+    /// AI が読み直した候補（AI が選ぶ候補の中）か。false なら、ターン末の点数では下でも使うカードの組が違う並び
+    pub top: bool,
+    /// AI が選ぶ手か（choose_action と同じ）
+    pub chosen: bool,
+    /// AI がこの並びを選んだら打つ手（drawSplit なら最初の引く手・ランダムな手まで、deferFuse なら回せる融合を除いたもの。
+    /// その先は AI が考え直す）
+    pub steps: Vec<Action>,
+    /// ビームの終局面までの並び（使うカードの組と手の種類を見る用。ターン終了は含まない）
+    pub full: Vec<Action>,
+    /// ターン末の点数
+    pub turn_end: f64,
+    /// ターン末の点数の、ビームの全部の終局面の中での順位（0 が最も高い）
+    pub rank: usize,
+    /// 手を選ぶときの値（読み直した候補だけ）
+    pub value: Option<f64>,
+}
+
+/// 候補の打ち比べ調査の、1 つの局面の候補
+pub struct Survey {
+    /// リーサルを見つけた（候補を比べずにそれを打つ。plans は空）
+    pub lethal: bool,
+    /// 読み直した候補（選ぶときの値の高い順）、続いて足した候補（ターン末の点数の高い順）
+    pub plans: Vec<SurveyPlan>,
+    /// ビームの終局面の数
+    pub terminals: usize,
+    /// 考えた決定化の局面（候補の並びはこの局面からのもの。リーサルなら None）
+    pub root: Option<GameState>,
+}
+
+/// root から p が手の列 acts を打つときに使うカード（手札から出したカードと融合の素材）の種類の組（並べたもの）。打てない手があればそこまで
+pub fn used_cards(root: &GameState, acts: &[Action]) -> Vec<CardIdx> {
+    let mut s = root.clone();
+    let mut out = Vec::new();
+    let card_in_hand = |s: &GameState, iid: Iid| {
+        s.players
+            .iter()
+            .flat_map(|pl| pl.hand.iter())
+            .find(|h| h.iid == iid)
+            .map(|h| h.card)
+    };
+    for a in acts {
+        match a {
+            Action::Play(i) => out.extend(card_in_hand(&s, *i)),
+            Action::Fuse { materials, .. } => {
+                out.extend(materials.iter().filter_map(|m| card_in_hand(&s, *m)))
+            }
+            _ => {}
+        }
+        if matches!(a, Action::EndTurn) {
+            break;
+        }
+        match try_apply_action(&s, a) {
+            Some(next) => s = next,
+            None => break,
+        }
+    }
+    out.sort_unstable();
+    out
+}
+
+impl SearchAgent {
+    /// 候補の打ち比べ調査（runner/survey.rs）: 実際の局面 real で、choose_action と同じ乱数の使い方で考え（think_with）、
+    /// 読み直した候補（AI が選ぶ候補）と、同じ決定化のビームの終局面からターン末の点数の高い順に、使うカードの組が
+    /// それまでの候補のどれとも違い、打つ手も違う並びを extra 個まで足して返す。手を 1 つしか打てない局面は None
+    pub fn survey_plans(
+        &self,
+        real: &GameState,
+        legal: &[Action],
+        rng: &mut Rng,
+        extra: usize,
+    ) -> Option<Survey> {
+        let thought = self.think_with(real, legal, rng, None)?;
+        if thought.lethal.is_some() {
+            return Some(Survey {
+                lethal: true,
+                plans: Vec::new(),
+                terminals: 0,
+                root: None,
+            });
+        }
+        let p = thought.player;
+        let opts = &self.opts;
+        let env = self.env();
+        let root = Rc::new(thought.roots[0].clone());
+        // think_with と同じ決定化・同じ設定のビーム（乱数を使わないので、考えたときと同じ終局面）
+        let (pl, terminals, bests) = turn_end_bests(&root, p, &env);
+        let mut order: Vec<usize> = (0..terminals.len()).collect();
+        order.sort_by(|&x, &y| by_value_desc(terminals[x].value, terminals[y].value));
+        let mut rank = vec![0usize; terminals.len()];
+        for (r, &i) in order.iter().enumerate() {
+            rank[i] = r;
+        }
+        let full_of = |i: usize| -> Vec<Action> {
+            pl.steps_actions(terminals[i].path)
+                .into_iter()
+                .filter(|a| !matches!(a, Action::EndTurn))
+                .collect()
+        };
+        let mut plans: Vec<SurveyPlan> = Vec::new();
+        let mut keys: Vec<Vec<CardIdx>> = Vec::new();
+        for c in thought
+            .candidates
+            .iter()
+            .filter(|c| c.value.is_some() && c.legal)
+        {
+            // ビームの終局面は、最初の手ごとの最善（決定化 1 回のとき。無ければ打つ手を終局面までの並びとみなす）
+            let ti = (c.sample == 0)
+                .then(|| bests.iter().find(|(a, _)| *a == c.action).map(|x| x.1))
+                .flatten();
+            let full = match ti {
+                Some(i) => full_of(i),
+                None => c
+                    .steps
+                    .iter()
+                    .filter(|a| !matches!(a, Action::EndTurn))
+                    .cloned()
+                    .collect(),
+            };
+            keys.push(used_cards(&root, &full));
+            plans.push(SurveyPlan {
+                top: true,
+                chosen: c.action == thought.chosen,
+                steps: c.steps.clone(),
+                full,
+                turn_end: c.turn_end.total,
+                rank: ti.map_or(usize::MAX, |i| rank[i]),
+                value: c.value,
+            });
+        }
+        let mut added = 0;
+        for &i in &order {
+            if added >= extra {
+                break;
+            }
+            let t = &terminals[i];
+            let full = full_of(i);
+            let key = used_cards(&root, &full);
+            if keys.contains(&key) {
+                continue;
+            }
+            // AI がこの並びを選んだときに打つ手（plan_turn_traced と同じ区切り方と、回せる融合の除き方）
+            let mut steps = pl.steps_of(t.path);
+            if opts.draw_split.is_some() {
+                if let Some(c) = first_chance_step(&root, &steps, p) {
+                    steps.truncate(c + 1);
+                }
+            }
+            if opts.defer_fuse {
+                steps = pl.defer_steps(t, steps);
+            }
+            let mut acts: Vec<Action> = steps.into_iter().map(|(a, _)| a).collect();
+            let Some(first) = acts.first().cloned() else {
+                continue;
+            };
+            if !legal.contains(&first) {
+                // 回せる融合を除いた並びの最初の手が一覧に無い同じ融合なら、一覧の手に直してその手だけを打つ（rekey_deferred と同じ）
+                match same_fusion_in(&root, legal, &first) {
+                    Some(a) => acts = vec![a],
+                    None => continue,
+                }
+            }
+            if plans.iter().any(|x| x.steps == acts) {
+                continue;
+            }
+            keys.push(key);
+            plans.push(SurveyPlan {
+                top: false,
+                chosen: false,
+                steps: acts,
+                full,
+                turn_end: t.value,
+                rank: rank[i],
+                value: None,
+            });
+            added += 1;
+        }
+        Some(Survey {
+            lethal: false,
+            plans,
+            terminals: terminals.len(),
+            root: Some((*root).clone()),
+        })
+    }
+
+    /// 候補の打ち比べ調査: p がこのターンに並び steps（各手を打った後の予想の局面つき）を選び、最初の手を打ったものとする。
+    /// 次の判断から、choose_action が選んだ並びと同じく、局面が予想どおりなら続きを打つ
+    pub fn follow_plan(&mut self, p: PlayerIndex, steps: Vec<(Action, Rc<GameState>)>) {
+        self.plans[p] =
+            (self.opts.reuse_plan && steps.len() > 1).then_some(PlanState { steps, index: 1 });
+    }
+}
+
 /// 調べもの用（svwb beam-gap）: 自分のターンのビームを 1 回打った結果
 pub struct BeamProbe {
     /// ターン末の点数の最大と、その並び

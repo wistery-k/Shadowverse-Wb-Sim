@@ -3,12 +3,13 @@
 //   npm run ledger -- [runs] [--kind compare|yardstick] [--since 日付] [--until 日付] [--grep 文字列] [--label 文字列] [--last N]
 //   npm run ledger -- sum [runs と同じ絞り込み] [--any-commit]
 //   npm run ledger -- misses [--since 日付] [--until 日付] [--grep 文字列] [--label 文字列] [--last N]
+//   npm run ledger -- survey [--since 日付] [--until 日付] [--grep 文字列] [--label 文字列] [--last N]
 //   npm run ledger -- items [--all] [--grep 文字列] [--in-default]
 //   npm run ledger -- decide --item 名前 --decision 採用|不採用|保留|やめた [--in-default true|false] [--keys a,b]
 //                            [--from-label 回の名前] [--vs 比べた相手] [--ref 記録の節] [--note メモ] [--date 日付]
 //   npm run ledger -- check
 //
-// 回の行（compare・yardstick・misses）は Rust のランナーが回すたびに書く（rust/engine/src/runner/ledger.rs）。
+// 回の行（compare・yardstick・misses・survey）は Rust のランナーが回すたびに書く（rust/engine/src/runner/ledger.rs。survey は report のとき）。
 // 採否の行（decision）はこのスクリプトの decide で足す。どれも足すだけで、前の行は書き換えない。
 // 台帳のファイルは環境変数 SVWB_LEDGER か --file で替えられる。外部のコマンドは使わない。
 
@@ -119,12 +120,52 @@ export interface MissesRow {
   cmd: string;
 }
 
-export type Row = RunRow | DecisionRow | MissesRow;
+/** 候補の打ち比べ調査（npm run svwb -- survey report。docs/survey.md）の 1 回。得・見落としは 1 試合 1 席あたり [値, 標準誤差] */
+export interface SurveyRow {
+  v: number;
+  kind: "survey";
+  date: string;
+  at: string;
+  commit: string;
+  branch: string;
+  label: string;
+  /** AI の設定（今は今の既定 {} だけ） */
+  a: unknown;
+  /** 最初と最後の試合番号 */
+  g: [number, number];
+  games: number;
+  rate: number | null;
+  m: number | null;
+  extra: number | null;
+  confirm: number | null;
+  flag: number | null;
+  turnStarts: number;
+  positions: number;
+  compared: number;
+  /** AI が読み直す候補だけで選び直す得と、足した候補を含めた得（ポイント） */
+  gain4: [number | null, number | null];
+  gain8: [number | null, number | null];
+  flagged: number;
+  misses: number;
+  missesPerGame: [number | null, number | null];
+  splitAny: number | null;
+  splitPair: number | null;
+  pairSe: number | null;
+  perRollout: number | null;
+  seconds: number | null;
+  /** 局面を打ったマシンとコミット */
+  machines: string[];
+  commits: string[];
+  cmd: string;
+}
+
+export type Row = RunRow | DecisionRow | MissesRow | SurveyRow;
 
 export interface Parsed {
   runs: RunRow[];
   decisions: DecisionRow[];
   misses: MissesRow[];
+  surveys: SurveyRow[];
   errors: string[];
 }
 
@@ -188,9 +229,26 @@ function checkMisses(o: Obj): string[] {
   return bad;
 }
 
+function checkSurvey(o: Obj): string[] {
+  const bad: string[] = [];
+  const need = (ok: boolean, key: string) => {
+    if (!ok) bad.push(key);
+  };
+  const numOrNull = (x: unknown) => x === null || isNum(x);
+  need(isDate(o.date), "date");
+  for (const k of ["at", "commit", "branch", "label", "cmd"]) need(isStr(o[k]), k);
+  need("a" in o, "a");
+  need(isNumArr(o.g, 2), "g");
+  for (const k of ["games", "turnStarts", "positions", "compared", "flagged", "misses"]) need(isNum(o[k]), k);
+  for (const k of ["rate", "m", "extra", "confirm", "flag", "splitAny", "splitPair", "pairSe", "perRollout", "seconds"]) need(numOrNull(o[k]), k);
+  for (const k of ["gain4", "gain8", "missesPerGame"]) need(Array.isArray(o[k]) && (o[k] as unknown[]).length === 2 && (o[k] as unknown[]).every(numOrNull), k);
+  for (const k of ["machines", "commits"]) need(Array.isArray(o[k]) && (o[k] as unknown[]).every(isStr), k);
+  return bad;
+}
+
 /** 台帳の中身を読む。形の合わない行は errors に（行番号つきで）入れて飛ばす */
 export function parseLedger(text: string): Parsed {
-  const out: Parsed = { runs: [], decisions: [], misses: [], errors: [] };
+  const out: Parsed = { runs: [], decisions: [], misses: [], surveys: [], errors: [] };
   text.split("\n").forEach((line, i) => {
     if (line.trim() === "") return;
     const at = `${i + 1} 行目`;
@@ -217,6 +275,10 @@ export function parseLedger(text: string): Parsed {
       const bad = checkMisses(o);
       if (bad.length > 0) out.errors.push(`${at}: ${bad.join("・")} が合いません`);
       else out.misses.push(o as unknown as MissesRow);
+    } else if (o.kind === "survey") {
+      const bad = checkSurvey(o);
+      if (bad.length > 0) out.errors.push(`${at}: ${bad.join("・")} が合いません`);
+      else out.surveys.push(o as unknown as SurveyRow);
     } else {
       out.errors.push(`${at}: 知らない kind: ${String(o.kind)}`);
     }
@@ -236,7 +298,7 @@ export interface RunFilter {
   last?: number;
 }
 
-export function filterRuns<R extends RunRow | MissesRow>(runs: R[], f: RunFilter): R[] {
+export function filterRuns<R extends RunRow | MissesRow | SurveyRow>(runs: R[], f: RunFilter): R[] {
   const g = f.grep?.toLowerCase();
   let out = runs.filter(
     (r) =>
@@ -401,6 +463,28 @@ export function missesTable(rows: MissesRow[]): string {
   );
 }
 
+/** 候補の打ち比べ調査の回の表（得・見落としは 1 試合 1 席あたり） */
+export function surveyTable(rows: SurveyRow[]): string {
+  const pm = ([m, se]: [number | null, number | null], f: number) =>
+    m === null ? "-" : se === null ? m.toFixed(f) : `${m.toFixed(f)} ± ${se.toFixed(f)}`;
+  return markdownTable(
+    ["日付", "コミット", "名前", "試合", "局面（打ち比べた）", "得（読み直す候補だけ）", "得（足した候補も）", "見落とし", "見落とし（1 試合 1 席）", "続き 1 試合の秒", "マシン"],
+    rows.map((r) => [
+      r.date,
+      r.commits.join("・") || r.commit,
+      r.label,
+      `${r.games}（g${r.g[0]}〜${r.g[1]}）`,
+      `${r.positions}（${r.compared}）`,
+      pm(r.gain4, 2),
+      pm(r.gain8, 2),
+      `${r.misses}（二段目 ${r.flagged}）`,
+      pm(r.missesPerGame, 3),
+      r.perRollout === null ? "-" : r.perRollout.toFixed(2),
+      r.machines.join("・"),
+    ]),
+  );
+}
+
 /** 項目ごとの最後の行（今の判定）。all なら全部 */
 export function latestDecisions(rows: DecisionRow[], all: boolean): DecisionRow[] {
   if (all) return rows;
@@ -496,6 +580,7 @@ const USAGE = `使い方（docs/ledger.md）:
   npm run ledger -- [runs] [--kind compare|yardstick] [--since 日付] [--until 日付] [--grep 文字列] [--label 文字列] [--last N]
   npm run ledger -- sum [runs と同じ絞り込み] [--any-commit]
   npm run ledger -- misses [--since 日付] [--until 日付] [--grep 文字列] [--label 文字列] [--last N]
+  npm run ledger -- survey [--since 日付] [--until 日付] [--grep 文字列] [--label 文字列] [--last N]
   npm run ledger -- items [--all] [--grep 文字列] [--in-default]
   npm run ledger -- decide --item 名前 --decision 採用|不採用|保留|やめた [--in-default true|false] [--keys a,b]
                            [--from-label 回の名前] [--vs 比べた相手] [--ref 記録の節] [--note メモ] [--date 日付]
@@ -580,6 +665,10 @@ export async function main(argv: string[]): Promise<number> {
         known(runFlags.filter((k) => k !== "--kind"));
         console.log(missesTable(filterRuns(ledger.misses, filter())));
         return 0;
+      case "survey":
+        known(runFlags.filter((k) => k !== "--kind"));
+        console.log(surveyTable(filterRuns(ledger.surveys, filter())));
+        return 0;
       case "items": {
         known(["--all", "--grep", "--in-default"]);
         const g = opts.get("--grep")?.toLowerCase();
@@ -620,7 +709,7 @@ export async function main(argv: string[]): Promise<number> {
       case "check":
         known([]);
         console.log(
-          `${file}: 回 ${ledger.runs.length} 行・見落とし問題集 ${ledger.misses.length} 行・採否 ${ledger.decisions.length} 行・合わない行 ${ledger.errors.length}`,
+          `${file}: 回 ${ledger.runs.length} 行・見落とし問題集 ${ledger.misses.length} 行・打ち比べ調査 ${ledger.surveys.length} 行・採否 ${ledger.decisions.length} 行・合わない行 ${ledger.errors.length}`,
         );
         return ledger.errors.length > 0 ? 1 : 0;
       default:

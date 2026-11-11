@@ -20,6 +20,7 @@
 //!   svwb yardstick [--opts …] [--games 1000] [--label …] [--record]  固定した相手との勝率（強さの物差し。docs/yardstick.md）
 //!   svwb profile [--games 49] [--opts …] [--json …] [--baseline …] [--report …]  デッキごとの 1 試合の時間と処理ごとの内訳（docs/profile.md。内訳は --features profile のビルドだけ）
 //!   svwb misses run|add|list|check …  見落とし問題集（misses/ の局面を何度も解かせて正解率を出す。docs/misses.md）
+//!   svwb survey run|report …  候補の打ち比べ調査（自己対戦の局面で、AI の候補を同じ乱数で最後まで打ち比べる。docs/survey.md）
 
 use std::time::Instant;
 use svwb_engine::golden::{ai_game, step_canon, SETS};
@@ -165,7 +166,8 @@ fn main() {
         Some(
             cmd @ ("compare" | "rhino-compare" | "deck-compare" | "mulligan-compare"
             | "mulligan-data" | "td" | "yardstick" | "human-plan-value" | "meta"
-            | "deep-gap" | "profile" | "two-turn" | "defer-playout" | "beam-gap" | "misses"),
+            | "deep-gap" | "profile" | "two-turn" | "defer-playout" | "beam-gap" | "misses"
+            | "survey"),
         ) => {
             let rest = &args[1..];
             let r = match cmd {
@@ -183,6 +185,7 @@ fn main() {
                 "meta" => runner::meta::main(rest),
                 "profile" => runner::profile::main(rest),
                 "misses" => runner::misses::main(rest),
+                "survey" => runner::survey::main(rest),
                 _ => runner::td::main(rest),
             };
             if let Err(e) = r {
@@ -191,7 +194,7 @@ fn main() {
             }
         }
         _ => {
-            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | mulligan-data … | td selfplay … | yardstick … | human-plan-value … | deep-gap … | two-turn … | defer-playout … | beam-gap … | profile … | misses …（rust/README.md）");
+            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | mulligan-data … | td selfplay … | yardstick … | human-plan-value … | deep-gap … | two-turn … | defer-playout … | beam-gap … | profile … | misses … | survey …（rust/README.md）");
             std::process::exit(2);
         }
     }

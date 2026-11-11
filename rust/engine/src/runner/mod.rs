@@ -19,6 +19,7 @@ pub mod options;
 pub mod parallel;
 pub mod profile;
 pub mod rhino_compare;
+pub mod survey;
 pub mod td;
 pub mod two_turn;
 pub mod yardstick;

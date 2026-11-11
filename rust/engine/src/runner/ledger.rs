@@ -152,7 +152,7 @@ pub fn utc_iso(secs: u64) -> String {
 }
 
 /// 回したマシン（環境変数 `SVWB_MACHINE`、無ければホスト名）
-fn machine() -> String {
+pub fn machine() -> String {
     if let Ok(m) = std::env::var("SVWB_MACHINE") {
         if !m.is_empty() {
             return m;
@@ -267,6 +267,10 @@ fn env_or(name: &str, f: impl FnOnce() -> String) -> String {
 }
 
 /// 回した日付・時刻・コミット・ブランチ（今のもの。夜のキューは環境変数で渡す）
+pub fn context() -> (String, String, String, String) {
+    now_context()
+}
+
 fn now_context() -> (String, String, String, String) {
     use super::yardstick::{command_line, commit_label_excluding};
     let date = command_line("date", &["+%Y-%m-%d"]).unwrap_or("?".into());
@@ -395,6 +399,23 @@ pub fn append_misses(run: &MissesRun) {
         &machine(),
         thread_count(),
     ));
+}
+
+/// 候補の打ち比べ調査（`svwb survey report`。runner/survey.rs）の 1 行を台帳に足す。fields は `label` の後に並べる項目
+pub fn append_survey(label: &str, fields: Vec<(String, Json)>) {
+    let (date, at, commit, branch) = now_context();
+    let s = |x: &str| Json::Str(x.to_string());
+    let mut items: Vec<(String, Json)> = vec![
+        ("v".into(), Json::Num(LEDGER_VERSION as f64)),
+        ("kind".into(), s("survey")),
+        ("date".into(), s(&date)),
+        ("at".into(), s(&at)),
+        ("commit".into(), s(&commit)),
+        ("branch".into(), s(&branch)),
+        ("label".into(), s(label)),
+    ];
+    items.extend(fields);
+    append_line(&Json::Obj(items));
 }
 
 /// 台帳に 1 行足す（書けなければ注意を出すだけ）
