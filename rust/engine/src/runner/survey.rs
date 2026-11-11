@@ -280,7 +280,13 @@ fn prepare(recs: &[GameRec], rec_i: usize, i: usize, p: PlayerIndex, cfg: &Cfg) 
 }
 
 /// 局面 start（p の自分のターンの最初）から、p が並び plan を選んだとして r 回目の乱数で最後まで打った結果の 1 文字
-fn playout(start: &GameState, p: PlayerIndex, plan: &[Action], seed: u32, r: u32) -> char {
+pub(crate) fn playout(
+    start: &GameState,
+    p: PlayerIndex,
+    plan: &[Action],
+    seed: u32,
+    r: u32,
+) -> char {
     catch_unwind(AssertUnwindSafe(|| {
         reset_lethal();
         reset_exact_lethal_cache();
