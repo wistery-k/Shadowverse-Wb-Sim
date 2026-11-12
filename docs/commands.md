@@ -262,12 +262,15 @@ npm run misses -- add --id <問の名前> --pass '<合格の条件>' --title …
                       (--replay <記録> [--line N | --key …] | --seed S --decks A,B [--agents a,b] | --two-turn <局面> | --state <局面.json>) (--turn T | --step N)
 npm run misses -- list | show <問>… | check
 npm run misses -- cover [--opts '<設定>'] [--seeds 8] [--m 128] [--extra 4] [--wide 64] [--only 問,…] [--show]
+npm run misses -- duel <問> [--line '<名前>=<手の JSON の配列>']… [--m 512] [--base 1] [--no-stored] [--peek] [--show N [--dump <フォルダ>]]
 ```
 
 見落とし問題集（`misses/*.json`）。`run` は各問の局面から AI に手番の側のターンを `--trials` 回打たせ（AI の乱数だけを変える）、問ごとと全体の合格率（正解率）を出し、
 台帳に 1 行足す（`--only` の回と `--no-ledger` は書かない）。`--opts` は compare の設定と同じ形。`add` は記録した試合・今の AI で打ち直す試合・`two-turn` の局面・
 サンドボックスの書き出しから局面を取り出して問を書き、今の AI の合格を出す。`show` は問の中身、`check` は全部の問が読めて記録から打ち直せるか。
 `cover` は各問を候補の打ち比べ調査（下の `survey`）と同じ候補と打ち方にかけ、合格の並びが候補のどこにあるかと、AI の選んだ並びとの打ち比べの差を出す（台帳には書かない）。
+`duel` は問 1 つの局面で、書き添えた調査の並びと `--line` で名指しした並びを同じ決定化で打ち比べる（`endTurn` で終わる並びは、並びのとおりに打ってターンを終える。
+勝率のほかに、回がいつ終わったか（相手の次のターンに負け・自分の次のターンに勝ち等）を出し、`--show N` で最初の N 回の手を出す。台帳には書かない）。
 局面はシミュレータの中の試合からだけ取る。問はブラウザの「問題集」タブでも見られる（公開サイトにも出す。見られるのはリポジトリの問だけ）。問の形・合格の条件の書き方・ミスを指摘されたときの手順・問題集のページは [misses.md](misses.md)。
 
 ```sh

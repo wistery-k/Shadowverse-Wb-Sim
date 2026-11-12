@@ -46,7 +46,7 @@ use crate::game::{
 };
 use crate::json::Json;
 use crate::sim::{ai_game_setup, play_match, MatchRng};
-use crate::state::{Action, GameState, Phase, PlayerIndex};
+use crate::state::{card, Action, GameState, Phase, PlayerIndex};
 use crate::state_json::{action_from_json, action_to_json, state_from_json, state_to_json};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashSet};
@@ -299,7 +299,77 @@ fn playout_with(
     r: u32,
     peek_opp_hand: bool,
 ) -> char {
-    catch_unwind(AssertUnwindSafe(|| {
+    playout_ends(start, p, plan, seed, r, peek_opp_hand, false, None).result
+}
+
+/// 打ち進めた 1 回の結果と、いつ終わったか
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PlayoutEnd {
+    /// p から見た勝ち負け（'1' 勝ち・'0' 負け・'d' 引き分け・'x' 打てなかった）
+    pub result: char,
+    /// 始めの局面から何ターン後に終わったか（0 はこのターン、1 は相手の次のターン、2 は自分の次のターン。打てなかった回は 0）
+    pub turns: i32,
+    /// 自分の次のターンの最初の [自分の体力, 相手の体力, 自分の場のフォロワーの数, 相手の場のフォロワーの数]（そこまで続かなかった回は None）
+    pub next: Option<[i32; 4]>,
+}
+
+/// 打ち進めた 1 回の記録（`misses duel --show`）
+#[derive(Default)]
+pub(crate) struct PlayoutLog {
+    /// 自分の次のターンの終わりまでの手と、ターンの変わり目の局面の説明
+    pub lines: Vec<String>,
+    /// ターンの変わり目の局面（始めの局面から何ターン後か, 局面の JSON）。相手の次のターンの最初と、自分の次のターンの最初。
+    /// この回の決定化の局面なので、相手の手札と山札は引き直したもの
+    pub states: Vec<(i32, String)>,
+}
+
+/// 記録に足す局面の説明（p から見たもの。sampled なら、この回の決定化で相手に配った手札も書く）
+fn log_view(
+    log: &mut PlayoutLog,
+    ahead: i32,
+    title: &str,
+    s: &GameState,
+    p: PlayerIndex,
+    sampled: bool,
+) {
+    log.states.push((ahead, state_to_json(s).stringify()));
+    let log = &mut log.lines;
+    log.push(format!("  [{title}]"));
+    let names = ["-".to_string(), "-".to_string()];
+    for l in describe(s, p, &names) {
+        log.push(format!("    {l}"));
+    }
+    if sampled {
+        let hand: Vec<String> = s.players[1 - p]
+            .hand
+            .iter()
+            .map(|h| card(h.card).name.clone())
+            .collect();
+        log.push(format!(
+            "    相手の手札（この回の引き直し）: {}",
+            hand.join("、")
+        ));
+    }
+}
+
+/// playout の結果と、いつ終わったか・自分の次のターンの最初の様子。
+/// fixed なら、並び plan を全部そのまま打ってから（ターンを終える手まで並びに入れる）、両方の席を今の既定の AI で最後まで打つ
+/// （`misses duel` の、ターンを終える手で終わる並び）。playout と違い、並びの後に AI が同じターンの続きを打たないので、「何もせずに残す」並びを測れる。
+/// 決定化と AI の乱数の取り方は playout と同じ（同じ seed と r なら同じ決定化）。決定化した局面で並びのどれかが打てなければ 'x'。
+/// log を渡すと、自分の次のターンの終わりまでの手と、ターンの変わり目の局面を書き足す
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn playout_ends(
+    start: &GameState,
+    p: PlayerIndex,
+    plan: &[Action],
+    seed: u32,
+    r: u32,
+    peek_opp_hand: bool,
+    fixed: bool,
+    mut log: Option<&mut PlayoutLog>,
+) -> PlayoutEnd {
+    let mut next: Option<[i32; 4]> = None;
+    let res = catch_unwind(AssertUnwindSafe(|| {
         reset_lethal();
         reset_exact_lethal_cache();
         let det = determinize(
@@ -308,35 +378,80 @@ fn playout_with(
             &mut Rng::new(mix(seed, 1_000_000 + r)),
             peek_opp_hand,
         );
-        let first = plan.first()?;
-        if !is_legal(&det, first) {
-            return None;
-        }
-        // 並びの各手の後の予想の局面（AI が並びを選んだときと同じく、局面が予想どおりなら続きを打つため）
-        let mut steps: Vec<(Action, Rc<GameState>)> = Vec::new();
-        let mut t = det.clone();
-        for a in plan {
-            if matches!(a, Action::EndTurn) || !is_legal(&t, a) {
-                break;
-            }
-            t = apply_legal(&t, a);
-            steps.push((a.clone(), Rc::new(t.clone())));
-        }
         let x = mix(seed, 2_000_000 + r);
         let mut rng = MatchRng::with_shared(x, x);
-        // 最初の判断（候補を選んだ判断）の分を使っておく（後の判断の乱数を、試合で AI が選んだときと同じ並びにする）
-        rng.next(&det, p, false);
         let mut me = SearchAgent::new(SearchOptions::default());
+        let s = if fixed {
+            let mut t = det.clone();
+            for a in plan {
+                if t.phase == Phase::Ended {
+                    break;
+                }
+                if !is_legal(&t, a) {
+                    return None;
+                }
+                if let Some(l) = log.as_deref_mut() {
+                    l.lines.push(format!("  {}", step_text(&t, a, p)));
+                }
+                t = apply_legal(&t, a);
+            }
+            t
+        } else {
+            let first = plan.first()?;
+            if !is_legal(&det, first) {
+                return None;
+            }
+            // 並びの各手の後の予想の局面（AI が並びを選んだときと同じく、局面が予想どおりなら続きを打つため）
+            let mut steps: Vec<(Action, Rc<GameState>)> = Vec::new();
+            let mut t = det.clone();
+            for a in plan {
+                if matches!(a, Action::EndTurn) || !is_legal(&t, a) {
+                    break;
+                }
+                t = apply_legal(&t, a);
+                steps.push((a.clone(), Rc::new(t.clone())));
+            }
+            // 最初の判断（候補を選んだ判断）の分を使っておく（後の判断の乱数を、試合で AI が選んだときと同じ並びにする）
+            rng.next(&det, p, false);
+            me.follow_plan(p, steps);
+            if let Some(l) = log.as_deref_mut() {
+                l.lines.push(format!("  {}", step_text(&det, first, p)));
+            }
+            apply_legal(&det, first)
+        };
+        let mut s = s;
         let mut other = SearchAgent::new(SearchOptions::default());
-        let mut s = apply_legal(&det, first);
-        me.follow_plan(p, steps);
+        let mut seen = start.turn;
         for _ in 0..10000 {
             if s.phase == Phase::Ended {
-                return Some(match s.winner {
+                let c = match s.winner {
                     Some(w) if w == p => '1',
                     Some(_) => '0',
                     None => 'd',
-                });
+                };
+                return Some((c, s.turn - start.turn));
+            }
+            let ahead = s.turn - start.turn;
+            if s.turn != seen {
+                seen = s.turn;
+                if ahead == 2 && acting_player(&s) == p {
+                    let followers = |q: PlayerIndex| {
+                        s.players[q].board.iter().filter(|b| b.is_follower).count() as i32
+                    };
+                    next = Some([
+                        s.players[p].leader_hp,
+                        s.players[1 - p].leader_hp,
+                        followers(p),
+                        followers(1 - p),
+                    ]);
+                }
+                if let Some(l) = log.as_deref_mut() {
+                    match ahead {
+                        1 => log_view(l, 1, "相手の次のターンの最初", &s, p, true),
+                        2 => log_view(l, 2, "自分の次のターンの最初", &s, p, false),
+                        _ => {}
+                    }
+                }
             }
             let legal = legal_actions(&s);
             let a = if acting_player(&s) == p {
@@ -344,13 +459,29 @@ fn playout_with(
             } else {
                 rng.choose(&mut other, &s, &legal)
             };
+            if ahead <= 2 {
+                if let Some(l) = log.as_deref_mut() {
+                    l.lines.push(format!("  {}", step_text(&s, &a, p)));
+                }
+            }
             s = apply_legal(&s, &a);
         }
         None
     }))
     .ok()
-    .flatten()
-    .unwrap_or('x')
+    .flatten();
+    match res {
+        Some((result, turns)) => PlayoutEnd {
+            result,
+            turns,
+            next,
+        },
+        None => PlayoutEnd {
+            result: 'x',
+            turns: 0,
+            next: None,
+        },
+    }
 }
 
 /// 勝ち負けの 1 文字を勝ちの数に（打てなかったものは None）
