@@ -4,10 +4,10 @@
 // ブラウザ（画面・Worker）では、使う前に initEngine() を待つ（WASM の読み込みは非同期にしかできない）。
 // Chrome は画面（メインスレッド）では 8MB を超える WASM の同期のインスタンス化（new WebAssembly.Instance）も許さないので、
 // ブラウザではインスタンスも WebAssembly.instantiate で作る。WASM が止まったときに読み込み直す分は、画面では先に作っておく。
-// ブラウザが読み込むのは gzip で縮めた svwb.wasm.gz で、DecompressionStream で戻す。WASM は 10MB ほどあり（大半は埋め込んだ AI の学習データ）、
-// 配信（GitHub Pages）が WASM を縮めて送るとは限らないため。縮めると 3.5MB ほどになる。
+// WASM は 10MB ほどある（大半は埋め込んだ AI の学習データ。GitHub Pages は gzip で縮めて送るので転送は 3.6MB ほど）。
+// ブラウザでは受け取りながらコンパイルし（WebAssembly.compileStreaming）、画面には読み込みの進み具合を出す（src/main.tsx）。
 // Node（テスト・スクリプト）では、最初の呼び出しで src/engine/svwb.wasm を読み込む。
-// svwb.wasm・svwb.wasm.gz は npm run wasm（scripts/build-wasm.mjs）で作る（ビルドの生成物なのでコミットしない）。
+// svwb.wasm は npm run wasm（scripts/build-wasm.mjs）で作る（ビルドの生成物なのでコミットしない）。
 
 /** WASM が書き出す関数（rust/wasm/src/lib.rs） */
 interface Exports {
@@ -83,15 +83,12 @@ function loadSync(): void {
   use(new WebAssembly.Instance(compiled, {}));
 }
 
-/** fetch で受け取るバイト列 */
-type Bytes = Uint8Array<ArrayBuffer>;
-
-/** 読み込みの進み具合（受け取ったバイト数と、分かれば全体のバイト数。分からなければ 0） */
-export type LoadProgress = (loaded: number, total: number) => void;
+/** 読み込みの進み具合（受け取った WASM のバイト数（配信が縮めていても戻した後の数）と、受け取り終えたか） */
+export type LoadProgress = (loaded: number, done: boolean) => void;
 
 /**
  * エンジンを使えるようにする（ブラウザでは最初に待つ。Node では待たなくてもよい）。
- * onProgress は WASM を受け取るたびに呼ぶ（画面で読み込み中の表示を出すため。2 回目からの呼び出しでは使わない）
+ * onProgress は WASM を受け取るたびと受け取り終えたときに呼ぶ（画面で読み込み中の表示を出すため。2 回目からの呼び出しでは使わない）
  */
 export function initEngine(onProgress?: LoadProgress): Promise<void> {
   if (wasm) return Promise.resolve();
@@ -99,64 +96,38 @@ export function initEngine(onProgress?: LoadProgress): Promise<void> {
     loadSync();
     return Promise.resolve();
   }
-  loading ??= loadFrom(new URL("./svwb.wasm.gz", import.meta.url), onProgress);
+  loading ??= loadFrom(new URL("./svwb.wasm", import.meta.url), onProgress);
   return loading;
 }
 
 /**
- * URL の gzip で縮めた WASM を非同期で読み込む。受け取りながら戻してコンパイルする（WebAssembly.compileStreaming）。
- * 配信が Content-Encoding: gzip を付けてブラウザが先に戻した場合も読めるよう、先頭の印（gzip は 1f 8b）を見て戻すかを決める
+ * URL の WASM を非同期で読み込む。受け取りながらコンパイルする（WebAssembly.compileStreaming）。
+ * compileStreaming は Content-Type が application/wasm の Response が要るので、配信の Content-Type によらず読めるよう、受け取った中身で Response を作り直す
  */
 async function loadFrom(url: URL, onProgress?: LoadProgress): Promise<void> {
   const res = await fetch(url);
   if (!res.ok || !res.body) throw new Error(`${url.pathname} を読み込めません（${res.status}）`);
-  let body: ReadableStream<Bytes> = res.body;
+  let body: ReadableStream<Uint8Array<ArrayBuffer>> = res.body;
   if (onProgress) {
-    const total = Number(res.headers.get("Content-Length")) || 0;
     let loaded = 0;
     body = body.pipeThrough(
-      new TransformStream<Bytes, Bytes>({
+      new TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>({
         transform(chunk, out) {
           loaded += chunk.byteLength;
-          onProgress(loaded, total);
+          onProgress(loaded, false);
           out.enqueue(chunk);
+        },
+        flush() {
+          onProgress(loaded, true);
         },
       }),
     );
   }
-  const [stream, gzipped] = await sniffGzip(body);
-  const bytes = gzipped ? stream.pipeThrough(new DecompressionStream("gzip")) : stream;
-  // 自分で作った Response なので Content-Type は application/wasm にできる（compileStreaming はこれが要る）
-  const module = await WebAssembly.compileStreaming(new Response(bytes, { headers: { "Content-Type": "application/wasm" } }));
+  const module = await WebAssembly.compileStreaming(new Response(body, { headers: { "Content-Type": "application/wasm" } }));
   const instance = await WebAssembly.instantiate(module, {});
   compiled = module;
   use(instance);
   prepareSpare();
-}
-
-/** 先頭の 2 バイトが gzip の印（1f 8b）か。読んだ分も含めて同じ中身を流すストリームと一緒に返す */
-async function sniffGzip(body: ReadableStream<Bytes>): Promise<[ReadableStream<Bytes>, boolean]> {
-  const reader = body.getReader();
-  const head: Bytes[] = [];
-  const first: number[] = [];
-  while (first.length < 2) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    head.push(value);
-    for (const b of value.subarray(0, 2 - first.length)) first.push(b);
-  }
-  const stream = new ReadableStream<Bytes>({
-    start(out) {
-      for (const chunk of head) out.enqueue(chunk);
-    },
-    async pull(out) {
-      const { done, value } = await reader.read();
-      if (done) out.close();
-      else out.enqueue(value);
-    },
-    cancel: (reason) => reader.cancel(reason),
-  });
-  return [stream, first[0] === 0x1f && first[1] === 0x8b];
 }
 
 function exports(): Exports {
