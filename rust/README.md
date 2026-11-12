@@ -25,8 +25,10 @@ rustup target add wasm32-unknown-unknown
 
 ## WASM（ブラウザ・Node）
 
-`npm run wasm`（`scripts/build-wasm.mjs`）が `rust/wasm` を `wasm32-unknown-unknown` 向けにビルドし、`src/engine/svwb.wasm` に置く
-（コミットしない。`npm test`・`npm run dev`・`npm run build` の前に自動で行う）。
+`npm run wasm`（`scripts/build-wasm.mjs`）が `rust/wasm` を `wasm32-unknown-unknown` 向けにビルドし、`src/engine/svwb.wasm` と、
+それを gzip で縮めた `src/engine/svwb.wasm.gz` に置く（コミットしない。`npm test`・`npm run dev`・`npm run build` の前に自動で行う）。
+Node は `svwb.wasm` を、ブラウザは `svwb.wasm.gz` を読み込む（ブラウザの `DecompressionStream` で戻す）。
+WASM は埋め込んだ AI の学習データで 10MB ほどあり、配信（GitHub Pages）が縮めて送るとは限らないため、縮めたもの（3.5MB ほど）を配る。
 `src/engine/wasm.ts` が読み込み、`src/engine/game.ts`（エンジン）・`src/ai/registry.ts`（AI）の関数として呼ぶ。
 wasm-bindgen は使わず、要求と結果を JSON の文字列で受け渡す（局面・行動の形は `src/engine/types.ts`、変換は `engine/src/state_json.rs`）。
 
