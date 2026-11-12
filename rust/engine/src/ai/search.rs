@@ -146,6 +146,28 @@ thread_local! {
     static SCORED: Cell<u64> = const { Cell::new(0) };
 }
 
+/// 自分のターンの最初に、候補の打ち比べ調査と同じ候補を最後まで打ち比べて選び直す（2026-11-12。打ち比べ調査の得を対戦で確かめる。
+/// docs/survey.md「対戦で確かめる」）。打つのは手番の側から見た決定化（相手の手札は引き直す）で、続きは両方の席とも今の既定の AI
+#[derive(Clone, Debug, PartialEq)]
+pub struct PickByPlayout {
+    /// 候補ごとに最後まで打つ回数（一段目）
+    pub m: u32,
+    /// 足す候補の数（調査の --extra）
+    pub extra: usize,
+    /// AI の選んだ候補との勝率の差（ポイント）がこれ以上の候補があれば、差の最も大きい候補に替える
+    pub threshold: f64,
+    /// 前半の回で AI の選んだ候補に勝っていない候補は、後半を打たない（調査の行から、得の下限 6.9・打つ回数 65% と見積もった）
+    pub prune: bool,
+}
+
+/// pick の既定（調査の行から決めた線。docs/survey.md「対戦で確かめる」）
+pub const DEFAULT_PICK: PickByPlayout = PickByPlayout {
+    m: 32,
+    extra: 4,
+    threshold: 15.0,
+    prune: true,
+};
+
 /// 探索 AI の設定（search.ts の SearchOptions。exhaustive 等の実験用の項目のうち既定で使わないものは省く）
 #[derive(Clone)]
 pub struct SearchOptions {
@@ -236,6 +258,8 @@ pub struct SearchOptions {
     /// false（既定）なら、判断ごとに 1 つ取った種から、用途と何番目かで作る（相手の手札の引き直しの数を変えても、前からある引き直しは同じ）。
     /// 試合の中では、true の AI だけが 1 試合に 1 本の乱数を順に使い、false の AI は判断ごとに作った乱数を使う（sim.rs の MatchRng）
     pub sequential_rng: bool,
+    /// 自分のターンの最初に、候補を最後まで打ち比べて選び直す（PickByPlayout。None なら使わない。既定 None）
+    pub pick: Option<PickByPlayout>,
 }
 
 impl Default for SearchOptions {
@@ -316,6 +340,7 @@ impl Default for SearchOptions {
             record_reads: false,
             // 2026-11-10 から、思考用の乱数を用途から作る（docs/ai-notes.md「AI の思考用の乱数を用途から作る」）
             sequential_rng: false,
+            pick: None,
         }
     }
 }
@@ -1826,6 +1851,8 @@ pub struct SearchAgent {
     plans: [Option<PlanState>; 2],
     /// 最後に選んだ並びの想像の局面（record_reads のとき）
     reads: [Vec<Rc<GameState>>; 2],
+    /// pick で最後に打ち比べた自分のターン（席ごとの turn_count）
+    pick_turn: [i32; 2],
 }
 
 impl SearchAgent {
@@ -1851,6 +1878,7 @@ impl SearchAgent {
             default_w: EvalWeights::new(ad.default_weights.clone()),
             plans: [None, None],
             reads: [Vec::new(), Vec::new()],
+            pick_turn: [i32::MIN; 2],
         }
     }
 
@@ -2575,6 +2603,102 @@ impl SearchAgent {
         self.plans[p] =
             (self.opts.reuse_plan && steps.len() > 1).then_some(PlanState { steps, index: 1 });
     }
+
+    /// pick: 自分のターンの最初の判断なら、候補を最後まで打ち比べ、替える候補があればその最初の手（続きは並びを打つ）。
+    /// 替えないとき・ターンの最初でないときは None（渡された乱数を進めないので、続く choose_action は pick なしと同じ手を選ぶ）
+    fn pick_by_playout(
+        &mut self,
+        real: &GameState,
+        legal: &[Action],
+        rng: &mut Rng,
+    ) -> Option<Action> {
+        let pk = self.opts.pick.clone()?;
+        let p = acting_player(real);
+        let start = real.phase == Phase::Main
+            && real.active == p
+            && real.pending.is_none()
+            && real.stack.is_empty()
+            && real.queue.is_empty();
+        if !start || real.players[p].turn_count == self.pick_turn[p] {
+            return None;
+        }
+        self.pick_turn[p] = real.players[p].turn_count;
+        let mut r2 = Rng::new(rng.state);
+        let sv = self.survey_plans(real, legal, &mut r2, pk.extra)?;
+        if sv.lethal || sv.plans.len() < 2 {
+            return None;
+        }
+        let ai = sv.plans.iter().position(|x| x.chosen)?;
+        let seed = r2.int(u32::MAX as usize) as u32;
+        let n = sv.plans.len();
+        let play =
+            |c: usize, r: u32| crate::runner::survey::playout(real, p, &sv.plans[c].steps, seed, r);
+        let win = |c: char| match c {
+            '1' => Some(1.0),
+            '0' => Some(0.0),
+            'd' => Some(0.5),
+            _ => None,
+        };
+        // 同じ回どうしの差（a − b）の平均。打てなかった回は除く
+        let diff = |a: &[char], b: &[char]| -> f64 {
+            let xs: Vec<f64> = a
+                .iter()
+                .zip(b)
+                .filter_map(|(x, y)| Some(win(*x)? - win(*y)?))
+                .collect();
+            if xs.is_empty() {
+                f64::NAN
+            } else {
+                xs.iter().sum::<f64>() / xs.len() as f64
+            }
+        };
+        let half = if pk.prune { (pk.m / 2).max(1) } else { pk.m };
+        let mut w: Vec<Vec<char>> = vec![Vec::new(); n];
+        for r in 0..half {
+            for (c, wc) in w.iter_mut().enumerate() {
+                wc.push(play(c, r));
+            }
+        }
+        let alive: Vec<bool> = (0..n)
+            .map(|c| c == ai || !pk.prune || diff(&w[c], &w[ai]) > 1e-12)
+            .collect();
+        for r in half..pk.m {
+            for (c, wc) in w.iter_mut().enumerate() {
+                if alive[c] {
+                    wc.push(play(c, r));
+                }
+            }
+        }
+        let mut best: Option<(usize, f64)> = None;
+        for c in (0..n).filter(|&c| c != ai && alive[c]) {
+            let d = diff(&w[c], &w[ai]) * 100.0;
+            if d.is_finite() && best.is_none_or(|(_, b)| d > b) {
+                best = Some((c, d));
+            }
+        }
+        let (c, d) = best?;
+        if d < pk.threshold {
+            return None;
+        }
+        // 替える。並びの各手の後の予想の局面を作り、局面が予想どおりなら続きを打つ（AI が並びを選んだときと同じ）
+        let steps = &sv.plans[c].steps;
+        let first = steps.first()?.clone();
+        if !legal.contains(&first) {
+            return None;
+        }
+        let mut t = real.clone();
+        let mut follow = Vec::new();
+        for a in steps {
+            if matches!(a, Action::EndTurn) || !is_legal(&t, a) {
+                break;
+            }
+            t = apply_legal(&t, a);
+            follow.push((a.clone(), Rc::new(t.clone())));
+        }
+        self.reads[p].clear();
+        self.follow_plan(p, follow);
+        Some(first)
+    }
 }
 
 /// 調べもの用（svwb beam-gap）: 自分のターンのビームを 1 回打った結果
@@ -2763,6 +2887,11 @@ impl Agent for SearchAgent {
         let first = &legal[0];
         if legal.len() == 1 {
             return first.clone();
+        }
+        if self.opts.pick.is_some() {
+            if let Some(a) = self.pick_by_playout(real, legal, rng) {
+                return a;
+            }
         }
         let opts = &self.opts;
         // 判断の乱数の元（sequential_rng でなければ 1 つ取り、ここから用途ごとの乱数を作る。think_with と同じ）

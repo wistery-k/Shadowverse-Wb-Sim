@@ -14,14 +14,14 @@
 //!    候補は、AI がその並びを選んだものとして打つ: 最初の手を打ち、次の判断からは局面が予想どおりなら並びの続きを打つ
 //!    （並びは最初の引く手・ランダムな手まで。その先と、並びを打ち終えた後は AI が考え直す）。続きは両方の席とも今の既定の AI
 //! 3. 二段目（確かめ）: 一段目で、AI の選んだ候補との勝率の差が最も大きい候補の差が `--flag` ポイント以上なら、
-//!    その候補と AI の選んだ候補だけを、一段目と重ならない乱数でさらに `--confirm` 回打つ。見落としの判定は二段目の回だけで行う
+//!    その候補と AI の選んだ候補だけを、一段目と重ならない乱数でさらに `--confirm` 回打つ。大きなミスの判定は二段目の回だけで行う
 //!    （一段目で差の大きいものを選んだ偏りが入らない）
 //!
 //! 出力は JSON Lines。局面の行（局面の状態の JSON・候補・勝ち負け）と、試合の行（`"game": true`。自分のターンの最初の局面の数）。
 //! `--batch` 試合ごとにまとめて書き、出力に既にある試合は飛ばす（同じ引数で再開できる。試合の行の無い局面の行は、再開のときに消す）。
 //! 勝ち負けは 1 文字ずつ（`1` 勝ち・`0` 負け・`d` 引き分け・`x` 打てなかった・途中で止まった）。
 //!
-//! **report**: 決まり（docs/survey.md「決まり」。回す前に決めたもの）で、打ち比べで選び直す得（1 試合あたり）、はっきりした見落としの回数、
+//! **report**: 決まり（docs/survey.md「決まり」。回す前に決めたもの）で、打ち比べで選び直す得（1 試合あたり）、大きなミスの回数、
 //! デッキ・ターン・手の種類ごとの内訳、問題集に足す局面の候補を Markdown で出し、台帳に 1 行足す（`kind` は `survey`。`--no-ledger` で書かない）。
 //! `--states` を渡すと、問題集に足す候補の局面を 1 つずつ状態の JSON で書く（`npm run misses -- add --state` に渡せる）。
 //!
@@ -47,7 +47,7 @@ use crate::game::{
 use crate::json::Json;
 use crate::sim::{ai_game_setup, play_match, MatchRng};
 use crate::state::{Action, GameState, Phase, PlayerIndex};
-use crate::state_json::{action_to_json, state_to_json};
+use crate::state_json::{action_from_json, action_to_json, state_from_json, state_to_json};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashSet};
 use std::io::Write;
@@ -57,7 +57,7 @@ use std::time::Instant;
 
 /// 局面を選ぶ乱数・局面ごとの乱数に混ぜる印（"SURV"）
 const TAG: u32 = 0x5355_5256;
-/// はっきりした見落とし（と問題集に足す候補）の線: 二段目の差がこのポイント以上で、標準誤差の MISS_Z 倍以上
+/// 大きなミス（と問題集に足す候補）の線: 二段目の差がこのポイント以上で、標準誤差の MISS_Z 倍以上
 pub const MISS_POINTS: f64 = 15.0;
 pub const MISS_Z: f64 = 3.0;
 
@@ -287,10 +287,27 @@ pub(crate) fn playout(
     seed: u32,
     r: u32,
 ) -> char {
+    playout_with(start, p, plan, seed, r, false)
+}
+
+/// playout の、相手の手札を実際のまま（山札の中身と順番、乱数の状態は作り直す）にもできる形（`survey recheck`）
+fn playout_with(
+    start: &GameState,
+    p: PlayerIndex,
+    plan: &[Action],
+    seed: u32,
+    r: u32,
+    peek_opp_hand: bool,
+) -> char {
     catch_unwind(AssertUnwindSafe(|| {
         reset_lethal();
         reset_exact_lethal_cache();
-        let det = determinize(start, p, &mut Rng::new(mix(seed, 1_000_000 + r)), false);
+        let det = determinize(
+            start,
+            p,
+            &mut Rng::new(mix(seed, 1_000_000 + r)),
+            peek_opp_hand,
+        );
         let first = plan.first()?;
         if !is_legal(&det, first) {
             return None;
@@ -731,7 +748,7 @@ fn pm(m: f64, se: f64, f: usize) -> String {
     }
 }
 
-/// 局面の行 r が、はっきりした見落とし（二段目の差が MISS_POINTS 以上で、標準誤差の MISS_Z 倍以上）か
+/// 局面の行 r が、大きなミス（二段目の差が MISS_POINTS 以上で、標準誤差の MISS_Z 倍以上）か
 fn is_miss(r: &PosRow) -> bool {
     matches!(r.confirm, Some((_, d, se)) if d >= MISS_POINTS && (se.is_nan() || d >= MISS_Z * se))
 }
@@ -802,7 +819,8 @@ fn report(argv: &[String]) -> Result<(), String> {
             })
             .collect()
     };
-    let (m2, se2) = mean_se(&stage2(None));
+    let g2 = stage2(None);
+    let (m2, se2) = mean_se(&g2);
     let (m2x, se2x) = mean_se(&stage2(Some(EXTRA)));
     let (m2c, se2c) = mean_se(&stage2(Some(CUT)));
     let compared: Vec<&PosRow> = rows.iter().filter(|r| !r.skip).collect();
@@ -945,7 +963,7 @@ fn report(argv: &[String]) -> Result<(), String> {
         pm(md * per_seat, sed * per_seat, 2)
     ));
     line(String::new());
-    line("## はっきりした見落とし".into());
+    line("## 大きなミス".into());
     line(String::new());
     line(format!(
         "二段目の差が {MISS_POINTS} ポイント以上で、標準誤差の {MISS_Z} 倍以上の局面: {}（選んだ局面の {}、1 試合 1 席あたり {}）。一段目で二段目に回した局面 {flagged}",
@@ -969,6 +987,7 @@ fn report(argv: &[String]) -> Result<(), String> {
         )
     ));
     line(String::new());
+    switch_tables(&rows, per_seat, &mut line);
     line("## ぶれと時間".into());
     line(String::new());
     line(format!(
@@ -996,17 +1015,18 @@ fn report(argv: &[String]) -> Result<(), String> {
         }
         line(format!("### {title}"));
         line(String::new());
-        line("| | 局面 | 打ち比べた | 得（全部の候補、1 局面） | AI が読み直す候補だけ | はっきりした見落とし |".into());
-        line("| --- | ---: | ---: | ---: | ---: | ---: |".into());
+        line("| | 局面 | 打ち比べた | 二段目で測る得（1 局面） | 二段目に回した | 半分の回で選ぶ得（全部の候補） | （読み直す候補だけ） | 大きなミス |".into());
+        line("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |".into());
         for (name, ks) in groups {
-            let a: Vec<f64> = ks.iter().map(|&k| g8[k]).collect();
-            let b: Vec<f64> = ks.iter().map(|&k| g4[k]).collect();
-            let (ma, sa) = mean_se(&a);
-            let (mb, sb) = mean_se(&b);
+            let (m, s) = mean_se(&ks.iter().map(|&k| g2[k]).collect::<Vec<_>>());
+            let (ma, sa) = mean_se(&ks.iter().map(|&k| g8[k]).collect::<Vec<_>>());
+            let (mb, sb) = mean_se(&ks.iter().map(|&k| g4[k]).collect::<Vec<_>>());
             line(format!(
-                "| {name} | {} | {} | {} | {} | {} |",
+                "| {name} | {} | {} | {} | {} | {} | {} | {} |",
                 ks.len(),
                 ks.iter().filter(|&&k| !rows[k].skip).count(),
+                pm(m, s, 2),
+                ks.iter().filter(|&&k| rows[k].confirm.is_some()).count(),
                 pm(ma, sa, 2),
                 pm(mb, sb, 2),
                 ks.iter().filter(|&&k| is_miss(&rows[k])).count()
@@ -1021,6 +1041,8 @@ fn report(argv: &[String]) -> Result<(), String> {
             body.push('\n');
         };
         l("## 内訳".into());
+        l(String::new());
+        l("1 局面あたりのポイント。二段目で測る得はどの内訳でも偏りがない（分け方は一段目の回だけで決まり、測るのは二段目の回）。半分の回で選ぶ得は前の決まり".into());
         l(String::new());
         breakdown(
             "デッキ（手番の側）",
@@ -1041,7 +1063,7 @@ fn report(argv: &[String]) -> Result<(), String> {
             &mut l,
         );
         breakdown(
-            "手の種類（全部の回で勝ちが最も多い候補と AI の選んだ候補の違い）",
+            "手の種類（一段目の全部の回で勝ちが最も多い候補と AI の選んだ候補の違い）",
             &|r| best_kind(r),
             &mut l,
         );
@@ -1054,7 +1076,7 @@ fn report(argv: &[String]) -> Result<(), String> {
         d(b).partial_cmp(&d(a)).unwrap_or(std::cmp::Ordering::Equal)
     });
     out.push_str(&format!(
-        "## 問題集に足す局面の候補（はっきりした見落とし、差の大きい順に {} まで）\n\n",
+        "## 問題集に足す局面の候補（大きなミス、差の大きい順に {} まで）\n\n",
         top_n
     ));
     if let Some(dir) = flag(&flags, "states") {
@@ -1200,7 +1222,162 @@ fn join_or(v: &[String]) -> String {
     }
 }
 
-/// 全部の回で勝ちが最も多い候補（同じなら AI の選んだ候補）と、AI の選んだ候補の違いの種類
+/// 局面 r の候補 c の AI 自身の点（読み直した値があればそれ、無ければターン末の点）と、どちらを使ったか
+fn ai_score(r: &PosRow, c: usize) -> (Option<f64>, bool) {
+    let pl = &r.v["plans"][c];
+    match pl["value"].as_f64() {
+        Some(v) => (Some(v), true),
+        None => (pl["turnEnd"].as_f64(), false),
+    }
+}
+
+/// 二段目に回した局面の、替える決まりを決めるための表（2026-11-12、本番の後に足した出し方。docs/survey.md）。
+/// 分け方は一段目の回と AI の点だけで決まるので、どの行の二段目の差にも偏りはない
+fn switch_tables(rows: &[PosRow], per_seat: f64, line: &mut dyn FnMut(String)) {
+    let flagged: Vec<&PosRow> = rows.iter().filter(|r| r.confirm.is_some()).collect();
+    if flagged.is_empty() {
+        return;
+    }
+    let d1 = |r: &PosRow| r.v["confirm"]["d1"].as_f64().unwrap_or(f64::NAN);
+    let d2 = |r: &PosRow| r.confirm.map_or(0.0, |x| x.1);
+    // 全部の局面に対する寄与（替えない局面は 0）の平均と標準誤差
+    let contrib = |keep: &dyn Fn(&PosRow) -> bool| -> (f64, f64) {
+        let xs: Vec<f64> = rows
+            .iter()
+            .map(|r| {
+                if r.confirm.is_some() && keep(r) {
+                    d2(r)
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        mean_se(&xs)
+    };
+    line("## 替える決まり（二段目に回した局面）".into());
+    line(String::new());
+    line("どれも二段目の 96 回で測った差（ポイント）。寄与は、選んだ局面の全部に対する 1 局面あたり（替えない局面は 0）".into());
+    line(String::new());
+    line("### 一段目の差の幅".into());
+    line(String::new());
+    line("| 一段目の差 | 局面 | 一段目の差の平均 | 二段目の差の平均 | 寄与（1 局面） | この幅から上だけ替える得（1 局面） | （1 試合） |".into());
+    line("| --- | ---: | ---: | ---: | ---: | ---: | ---: |".into());
+    let edges = [10.0, 15.0, 20.0, 30.0, f64::INFINITY];
+    for k in 0..edges.len() - 1 {
+        let (lo, hi) = (edges[k], edges[k + 1]);
+        let ks: Vec<&&PosRow> = flagged
+            .iter()
+            .filter(|r| d1(r) >= lo && d1(r) < hi)
+            .collect();
+        let name = if hi.is_finite() {
+            format!("{lo}〜{hi}")
+        } else {
+            format!("{lo} 以上")
+        };
+        let (m2, s2) = mean_se(&ks.iter().map(|r| d2(r)).collect::<Vec<_>>());
+        let (c, cs) = contrib(&|r| d1(r) >= lo && d1(r) < hi);
+        let (a, as_) = contrib(&|r| d1(r) >= lo);
+        line(format!(
+            "| {name} | {} | {} | {} | {} | {} | {} |",
+            ks.len(),
+            pm(
+                mean(&ks.iter().map(|r| d1(r)).collect::<Vec<_>>()),
+                f64::NAN,
+                1
+            ),
+            pm(m2, s2, 1),
+            pm(c, cs, 2),
+            pm(a, as_, 2),
+            pm(a * per_seat, as_ * per_seat, 2)
+        ));
+    }
+    line(String::new());
+    line("### AI 自身の点の差（AI の選んだ候補 − 替える候補）".into());
+    line(String::new());
+    line("点は、両方に読み直した値があればその値、無ければターン末の点（盤面の評価の点。勝率ではない）".into());
+    line(String::new());
+    line("| 点の差 | 局面 | うち読み直した値どうし | 二段目の差の平均 | 寄与（1 局面） |".into());
+    line("| --- | ---: | ---: | ---: | ---: |".into());
+    let gap = |r: &PosRow| -> (f64, bool) {
+        let c = r.confirm.map_or(0, |x| x.0);
+        let (a, av) = ai_score(r, r.ai);
+        let (b, bv) = ai_score(r, c);
+        if av && bv {
+            (a.unwrap_or(f64::NAN) - b.unwrap_or(f64::NAN), true)
+        } else {
+            let t = |k: usize| r.v["plans"][k]["turnEnd"].as_f64().unwrap_or(f64::NAN);
+            (t(r.ai) - t(c), false)
+        }
+    };
+    let gaps = [f64::NEG_INFINITY, 0.0, 5.0, 20.0, 60.0, f64::INFINITY];
+    for k in 0..gaps.len() - 1 {
+        let (lo, hi) = (gaps[k], gaps[k + 1]);
+        let inb = |r: &PosRow| {
+            let g = gap(r).0;
+            g >= lo && g < hi
+        };
+        let ks: Vec<&&PosRow> = flagged.iter().filter(|r| inb(r)).collect();
+        let name = match (lo.is_finite(), hi.is_finite()) {
+            (false, _) => "0 未満（替える候補のほうが高い）".to_string(),
+            (_, false) => format!("{lo} 以上"),
+            _ => format!("{lo}〜{hi}"),
+        };
+        let (m2, s2) = mean_se(&ks.iter().map(|r| d2(r)).collect::<Vec<_>>());
+        let (c, cs) = contrib(&|r| inb(r));
+        line(format!(
+            "| {name} | {} | {} | {} | {} |",
+            ks.len(),
+            ks.iter().filter(|r| gap(r).1).count(),
+            pm(m2, s2, 1),
+            pm(c, cs, 2)
+        ));
+    }
+    line(String::new());
+    // 安くする決まり: 一段目の前半で AI の選んだ候補に勝っていない候補を、後半は打たない
+    line("### 一段目の前半で負けている候補を捨てる".into());
+    line(String::new());
+    line("一段目の前半（初めの半分の回）で、AI の選んだ候補との差が 0 以下の候補を後半は打たないとしたとき。得は、替える候補が捨てられた局面を 0 とした下限（ほかの候補に替わる分は数えない）".into());
+    line(String::new());
+    let mut kept_runs = 0usize;
+    let mut all_runs = 0usize;
+    for r in rows.iter().filter(|r| !r.skip) {
+        let m = r.w[r.ai].len();
+        let h = m / 2;
+        for (c, wc) in r.w.iter().enumerate() {
+            all_runs += m;
+            let first = mean(&paired(wc, &r.w[r.ai], |t| t < h));
+            kept_runs += if c == r.ai || first > 1e-12 { m } else { h };
+        }
+    }
+    let survives = |r: &PosRow| {
+        let c = r.confirm.map_or(0, |x| x.0);
+        let h = r.w[r.ai].len() / 2;
+        mean(&paired(&r.w[c], &r.w[r.ai], |t| t < h)) > 1e-12
+    };
+    let (a, as_) = contrib(&|r| survives(r));
+    let (b, bs) = contrib(&|_| true);
+    line("| | 得（1 局面） | （1 試合） | 一段目の打つ回数 |".into());
+    line("| --- | ---: | ---: | ---: |".into());
+    line(format!(
+        "| 今の決まり | {} | {} | 100% |",
+        pm(b, bs, 2),
+        pm(b * per_seat, bs * per_seat, 2)
+    ));
+    line(format!(
+        "| 前半で負けている候補を捨てる | {} | {} | {} |",
+        pm(a, as_, 2),
+        pm(a * per_seat, as_ * per_seat, 2),
+        fixed(100.0 * kept_runs as f64 / all_runs.max(1) as f64, 0) + "%"
+    ));
+    line(format!(
+        "\n二段目に回した {} 局面のうち、替える候補が前半で負けていて捨てられるのは {}",
+        flagged.len(),
+        flagged.iter().filter(|r| !survives(r)).count()
+    ));
+    line(String::new());
+}
+
+/// 一段目の全部の回で勝ちが最も多い候補（同じなら AI の選んだ候補）と、AI の選んだ候補の違いの種類
 fn best_kind(r: &PosRow) -> String {
     if r.skip {
         return "z: 打ち比べていない".into();
@@ -1236,11 +1413,254 @@ fn plan_kind(r: &PosRow, c: usize) -> &'static str {
     }
 }
 
+const RECHECK_TAG: u32 = 0x5245_4348;
+
+/// svwb survey recheck: 二段目に回した局面を、相手の手札を実際のまま（`--peek 0` なら今までどおり引き直す）で、
+/// AI の選んだ候補と替える候補を `--m` 回ずつ打ち直す（2026-11-12、本番の後に足した確かめ。docs/survey.md）。
+/// 打ち比べは相手の手札を引き直した世界で測るので、実際の手札でも差が残るかを見る
+fn recheck(argv: &[String]) -> Result<(), String> {
+    let (flags, files) = parse_flags(argv)?;
+    check_flags(&flags, &["out", "m", "peek", "batch"])?;
+    let out = flag(&flags, "out")
+        .ok_or("--out を渡してください")?
+        .to_string();
+    let m = num_flag(&flags, "m", 32)?.max(2);
+    let peek = num_flag(&flags, "peek", 1)? != 0;
+    let batch = num_flag(&flags, "batch", 16)?.max(1) as usize;
+    if files.is_empty() {
+        return Err("調査の結果（jsonl）を 1 つ以上渡してください".into());
+    }
+    let mut games: BTreeMap<u64, Value> = BTreeMap::new();
+    let mut pos: BTreeMap<(u64, u64), Value> = BTreeMap::new();
+    for f in &files {
+        for v in read_rows(f)? {
+            let g = v["g"].as_u64().unwrap_or(u64::MAX);
+            if v["game"] == json!(true) {
+                games.insert(g, v);
+            } else {
+                pos.insert((g, v["i"].as_u64().unwrap_or(u64::MAX)), v);
+            }
+        }
+    }
+    let rows: Vec<PosRow> = pos
+        .into_iter()
+        .filter(|((g, _), _)| games.contains_key(g))
+        .map(|(_, v)| pos_row(v))
+        .collect();
+    let turn_starts: u64 = games
+        .values()
+        .map(|g| strs_u(&g["turnStarts"]).iter().sum::<u64>())
+        .sum();
+    let per_seat = turn_starts as f64 / (2.0 * games.len().max(1) as f64);
+    let done: HashSet<(u64, u64)> = if std::path::Path::new(&out).exists() {
+        read_rows(&out)?
+            .iter()
+            .map(|v| (v["g"].as_u64().unwrap_or(0), v["i"].as_u64().unwrap_or(0)))
+            .collect()
+    } else {
+        HashSet::new()
+    };
+    let key = |r: &PosRow| {
+        (
+            r.v["g"].as_u64().unwrap_or(0),
+            r.v["i"].as_u64().unwrap_or(0),
+        )
+    };
+    let todo: Vec<&PosRow> = rows
+        .iter()
+        .filter(|r| r.confirm.is_some() && !done.contains(&key(r)))
+        .collect();
+    eprintln!(
+        "二段目に回した局面のうち残り {}（済み {}）、{m} 回ずつ、相手の手札は{}、{} スレッド",
+        todo.len(),
+        done.len(),
+        if peek {
+            "実際のまま"
+        } else {
+            "引き直す"
+        },
+        thread_count()
+    );
+    for chunk in todo.chunks(batch) {
+        // 局面と 2 つの並び（AI の選んだ候補・替える候補）
+        // 局面は JSON の文字列で持ち、回ごとに作る（GameState はスレッドをまたいで共有できない）
+        let mut items: Vec<(String, PlayerIndex, [Vec<Action>; 2], u32)> = Vec::new();
+        for r in chunk {
+            let s = r.v["state"].to_string();
+            state_from_json(&Json::parse(&s)?)?;
+            let p = r.v["p"].as_u64().unwrap_or(0) as PlayerIndex;
+            let c = r.confirm.map_or(0, |x| x.0);
+            let steps = |k: usize| -> Result<Vec<Action>, String> {
+                r.v["plans"][k]["steps"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|a| action_from_json(&Json::parse(&a.to_string())?))
+                    .collect()
+            };
+            let (g, i) = key(r);
+            let seed = seed_of(&[RECHECK_TAG, g as u32, i as u32]);
+            items.push((s, p, [steps(r.ai)?, steps(c)?], seed));
+        }
+        let tasks: Vec<(usize, usize, u32)> = (0..items.len())
+            .flat_map(|k| (0..2).flat_map(move |w| (0..m).map(move |t| (k, w, t))))
+            .collect();
+        let res: Vec<char> = parallel_map(
+            &tasks,
+            |&(k, w, t), _| {
+                let (s, p, plans, seed) = &items[k];
+                match Json::parse(s).and_then(|j| state_from_json(&j)) {
+                    Ok(start) => playout_with(&start, *p, &plans[w], *seed, t, peek),
+                    Err(_) => 'x',
+                }
+            },
+            |_, _, _, _| {},
+        );
+        let mut f = open_append(&out)?;
+        for (k, r) in chunk.iter().enumerate() {
+            let get = |w: usize| -> String {
+                tasks
+                    .iter()
+                    .zip(&res)
+                    .filter(|((kk, ww, _), _)| *kk == k && *ww == w)
+                    .map(|(_, c)| *c)
+                    .collect()
+            };
+            let (a, b) = (get(0), get(1));
+            let (g, i) = key(r);
+            let (c, d2, _) = r.confirm.unwrap_or((0, f64::NAN, f64::NAN));
+            let row = json!({
+                "g": g, "i": i, "p": r.v["p"], "deck": r.v["deck"], "own": r.v["own"],
+                "c": c, "kind": plan_kind(r, c), "d1": r.v["confirm"]["d1"], "d2": round2(d2),
+                "peek": peek, "m": m, "ai": a, "alt": b,
+            });
+            writeln!(f, "{row}").map_err(|e| format!("{out} に書けません: {e}"))?;
+        }
+        f.sync_all().ok();
+    }
+    // まとめ
+    let back = read_rows(&out)?;
+    let n_all = rows.len().max(1) as f64;
+    let by: BTreeMap<(u64, u64), &Value> = back
+        .iter()
+        .map(|v| {
+            (
+                (v["g"].as_u64().unwrap_or(0), v["i"].as_u64().unwrap_or(0)),
+                v,
+            )
+        })
+        .collect();
+    let flagged: Vec<&PosRow> = rows.iter().filter(|r| r.confirm.is_some()).collect();
+    let pairs: Vec<(&PosRow, f64)> = flagged
+        .iter()
+        .filter_map(|r| {
+            let v = by.get(&key(r))?;
+            let d = mean(&paired(&chars(&v["alt"]), &chars(&v["ai"]), |_| true)) * 100.0;
+            Some((*r, d))
+        })
+        .collect();
+    println!(
+        "# 打ち比べ調査の打ち直し（{}）",
+        if peek {
+            "相手の手札を実際のまま"
+        } else {
+            "相手の手札を引き直す"
+        }
+    );
+    println!();
+    println!(
+        "二段目に回した {} 局面のうち {}。AI の選んだ候補と替える候補を {m} 回ずつ（同じ回は同じ乱数）。山札の中身と順番、乱数の状態は回ごとに作り直す",
+        flagged.len(),
+        pairs.len()
+    );
+    println!();
+    println!("| | 局面 | 二段目の差（96 回、引き直した世界） | 打ち直した差 | 打ち直した差 − 二段目の差 |");
+    println!("| --- | ---: | ---: | ---: | ---: |");
+    let d1 = |r: &PosRow| r.v["confirm"]["d1"].as_f64().unwrap_or(f64::NAN);
+    type Keep = Box<dyn Fn(&PosRow) -> bool>;
+    let groups: Vec<(String, Keep)> = vec![
+        ("全部".into(), Box::new(|_| true)),
+        ("一段目の差 10〜15".into(), Box::new(move |r| d1(r) < 15.0)),
+        (
+            "一段目の差 15〜20".into(),
+            Box::new(move |r| (15.0..20.0).contains(&d1(r))),
+        ),
+        (
+            "一段目の差 20〜30".into(),
+            Box::new(move |r| (20.0..30.0).contains(&d1(r))),
+        ),
+        (
+            "一段目の差 30 以上".into(),
+            Box::new(move |r| d1(r) >= 30.0),
+        ),
+        ("大きなミス".into(), Box::new(is_miss)),
+        (
+            format!("替える候補が{READ}"),
+            Box::new(|r| plan_kind(r, r.confirm.map_or(0, |x| x.0)) == READ),
+        ),
+        (
+            format!("替える候補が{CUT}"),
+            Box::new(|r| plan_kind(r, r.confirm.map_or(0, |x| x.0)) == CUT),
+        ),
+        (
+            format!("替える候補が{EXTRA}"),
+            Box::new(|r| plan_kind(r, r.confirm.map_or(0, |x| x.0)) == EXTRA),
+        ),
+    ];
+    for (name, keep) in &groups {
+        let sel: Vec<&(&PosRow, f64)> = pairs.iter().filter(|(r, _)| keep(r)).collect();
+        let a: Vec<f64> = sel
+            .iter()
+            .map(|(r, _)| r.confirm.map_or(0.0, |x| x.1))
+            .collect();
+        let b: Vec<f64> = sel.iter().map(|(_, d)| *d).collect();
+        let ab: Vec<f64> = b.iter().zip(&a).map(|(x, y)| x - y).collect();
+        let (ma, sa) = mean_se(&a);
+        let (mb, sb) = mean_se(&b);
+        let (md, sd) = mean_se(&ab);
+        println!(
+            "| {name} | {} | {} | {} | {} |",
+            sel.len(),
+            pm(ma, sa, 1),
+            pm(mb, sb, 1),
+            pm(md, sd, 1)
+        );
+    }
+    let contrib = |use_recheck: bool| -> (f64, f64) {
+        let mut xs: Vec<f64> = pairs
+            .iter()
+            .map(|(r, d)| {
+                if use_recheck {
+                    *d
+                } else {
+                    r.confirm.map_or(0.0, |x| x.1)
+                }
+            })
+            .collect();
+        xs.resize(rows.len(), 0.0);
+        mean_se(&xs)
+    };
+    let (g2, s2) = contrib(false);
+    let (gr, sr) = contrib(true);
+    println!();
+    println!(
+        "替える決まり（一段目 10 ポイント以上で替える）の得を打ち直した差で測ると、1 局面 {}・1 試合 {}（二段目で測ると 1 局面 {}・1 試合 {}。選んだ局面 {}）",
+        pm(gr, sr, 2),
+        pm(gr * per_seat, sr * per_seat, 2),
+        pm(g2, s2, 2),
+        pm(g2 * per_seat, s2 * per_seat, 2),
+        n_all
+    );
+    Ok(())
+}
+
 pub fn main(argv: &[String]) -> Result<(), String> {
     match argv.first().map(|s| s.as_str()) {
         Some("run") => run(&argv[1..]),
         Some("report") => report(&argv[1..]),
-        _ => Err("使い方: svwb survey run --out <結果.jsonl> --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8] | survey report <結果.jsonl>… [--label 名前] [--no-ledger] [--top 20] [--states <フォルダ>]".into()),
+        Some("recheck") => recheck(&argv[1..]),
+        _ => Err("使い方: svwb survey run --out <結果.jsonl> --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8] | survey report <結果.jsonl>… [--label 名前] [--no-ledger] [--top 20] [--states <フォルダ>] | survey recheck <結果.jsonl>… --out <打ち直し.jsonl> [--m 32] [--peek 1] [--batch 16]".into()),
     }
 }
 
@@ -1304,6 +1724,103 @@ mod tests {
         assert!(is_miss(&row(16.0, 5.0)));
         assert!(!is_miss(&row(14.0, 3.0)));
         assert!(!is_miss(&row(16.0, 6.0)));
+    }
+
+    /// 探索 AI の pick（自分のターンの最初に候補を打ち比べて選び直す）: 替える線に届かなければ pick なしと同じ手を選び、
+    /// 線を −∞ にすれば候補のどれかの最初の手を選ぶ。ターンの途中の判断では打ち比べない
+    #[test]
+    fn pick_keeps_the_ai_move_unless_a_candidate_clears_the_line() {
+        use crate::ai::search::PickByPlayout;
+        use crate::ai::Agent;
+        let rec = play_game(3);
+        let with = |threshold: f64| SearchOptions {
+            pick: Some(PickByPlayout {
+                m: 2,
+                extra: 2,
+                threshold,
+                prune: false,
+            }),
+            ..SearchOptions::default()
+        };
+        // 最後のほうの局面（続きが短い）を 1 つ
+        let mut tried = 0;
+        for &(i, p) in rec.starts.iter().rev() {
+            let (s, rng) = rebuild(&rec, i);
+            let legal = legal_actions(&s);
+            if legal.len() <= 1 {
+                continue;
+            }
+            let base = SearchAgent::new(SearchOptions::default()).choose_action(
+                &s,
+                &legal,
+                &mut Rng::new(rng.state),
+            );
+            let never =
+                SearchAgent::new(with(1000.0)).choose_action(&s, &legal, &mut Rng::new(rng.state));
+            assert_eq!(never, base, "g3 i{i}");
+            let mut always = SearchAgent::new(with(-1000.0));
+            let a = always.choose_action(&s, &legal, &mut Rng::new(rng.state));
+            let sv = SearchAgent::new(SearchOptions::default())
+                .survey_plans(&s, &legal, &mut Rng::new(rng.state), 2)
+                .expect("候補");
+            if !sv.lethal && sv.plans.len() >= 2 {
+                assert!(
+                    sv.plans.iter().any(|pl| pl.steps.first() == Some(&a)),
+                    "g3 i{i}: {a:?}"
+                );
+            }
+            // 同じターンの 2 回目の判断では打ち比べない（pick なしと同じ）
+            assert_eq!(
+                always.choose_action(&s, &legal, &mut Rng::new(rng.state)),
+                base,
+                "g3 i{i} p{p}"
+            );
+            tried += 1;
+            break;
+        }
+        assert_eq!(tried, 1);
+    }
+
+    /// 替える決まりの表: 一段目の差の幅ごとの寄与を足すと全部の得になり、「この幅から上だけ替える」は上の幅の寄与の和。
+    /// 前半で負けている候補を捨てると、その局面の寄与が 0 になる
+    #[test]
+    fn switch_tables_split_the_stage_two_gain() {
+        let row = |d1: f64, d2: f64, w1: &str| PosRow {
+            v: json!({"confirm": {"d1": d1}, "plans": [{"value": 10.0}, {"value": 4.0}]}),
+            skip: false,
+            ai: 0,
+            top: vec![true, true],
+            cut: vec![false, false],
+            w: w(&["00000000", w1]),
+            confirm: (d1 >= 10.0).then_some((1, d2, 1.0)),
+        };
+        // 4 局面: 一段目 12（二段目 −8、前半で負け）・25（二段目 20）・40（二段目 30）・5（回さない）
+        let rows = vec![
+            row(12.0, -8.0, "00001111"),
+            row(25.0, 20.0, "11000000"),
+            row(40.0, 30.0, "11110000"),
+            row(5.0, 0.0, "00000000"),
+        ];
+        let mut out = String::new();
+        switch_tables(&rows, 10.0, &mut |s: String| {
+            out.push_str(&s);
+            out.push('\n');
+        });
+        let cell = |prefix: &str, col: usize| -> String {
+            let l = out.lines().find(|l| l.starts_with(prefix)).unwrap_or("");
+            l.split('|').nth(col).unwrap_or("").trim().to_string()
+        };
+        // 全部の得 (−8 + 20 + 30) / 4 = 10.5。15 から上だけ替えると (20 + 30) / 4 = 12.5
+        assert!(cell("| 10〜15 ", 6).starts_with("10.50"), "{out}");
+        assert!(cell("| 15〜20 ", 6).starts_with("12.50"), "{out}");
+        assert!(cell("| 30 以上 ", 6).starts_with("7.50"), "{out}");
+        // AI 自身の点の差は 10 − 4 = 6（5〜20 の幅に 3 局面）
+        assert_eq!(cell("| 5〜20 ", 2), "3");
+        // 前半で負けている候補（1 局面目）を捨てると (20 + 30) / 4 = 12.5
+        assert!(
+            cell("| 前半で負けている候補を捨てる ", 2).starts_with("12.50"),
+            "{out}"
+        );
     }
 
     /// 読み直しを打ち切った候補も入れると、AI が読み直す候補（top）の最初の手は、打ち切りを切った（rescoreRace なし）ときと同じになる。

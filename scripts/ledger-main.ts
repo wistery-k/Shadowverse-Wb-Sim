@@ -120,7 +120,7 @@ export interface MissesRow {
   cmd: string;
 }
 
-/** 候補の打ち比べ調査（npm run svwb -- survey report。docs/survey.md）の 1 回。得・見落としは 1 試合 1 席あたり [値, 標準誤差] */
+/** 候補の打ち比べ調査（npm run svwb -- survey report。docs/survey.md）の 1 回。得・大きなミスは 1 試合 1 席あたり [値, 標準誤差] */
 export interface SurveyRow {
   v: number;
   kind: "survey";
@@ -466,12 +466,12 @@ export function missesTable(rows: MissesRow[]): string {
   );
 }
 
-/** 候補の打ち比べ調査の回の表（得・見落としは 1 試合 1 席あたり） */
+/** 候補の打ち比べ調査の回の表（得・大きなミスは 1 試合 1 席あたり） */
 export function surveyTable(rows: SurveyRow[]): string {
   const pm = ([m, se]: [number | null, number | null], f: number) =>
     m === null ? "-" : se === null ? m.toFixed(f) : `${m.toFixed(f)} ± ${se.toFixed(f)}`;
   return markdownTable(
-    ["日付", "コミット", "名前", "試合", "局面（打ち比べた）", "二段目で測る得", "うち足した候補", "半分で選ぶ得（読み直す候補だけ）", "（足した候補も）", "見落とし", "見落とし（1 試合 1 席）", "続き 1 試合の秒", "マシン"],
+    ["日付", "コミット", "名前", "試合", "局面（打ち比べた）", "二段目で測る得", "うち足した候補", "半分で選ぶ得（読み直す候補だけ）", "（足した候補も）", "大きなミス", "大きなミス（1 試合 1 席）", "続き 1 試合の秒", "マシン"],
     rows.map((r) => [
       r.date,
       r.commits.join("・") || r.commit,

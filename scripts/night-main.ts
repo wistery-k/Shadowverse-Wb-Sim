@@ -1459,7 +1459,7 @@ export function cmdFinish(a: Args): number {
   }${
     outSurveys.length > 0
       ? `\n\n${markdownTable(
-          ["名前", "試合", "局面（打ち比べた）", "二段目で測る得", "半分で選ぶ得（8 つ）", "（上位 4 つ）", "はっきりした見落とし", "結果"],
+          ["名前", "試合", "局面（打ち比べた）", "二段目で測る得", "半分で選ぶ得（8 つ）", "（上位 4 つ）", "大きなミス", "結果"],
           outSurveys.map((r) => {
             const f = (x: [number | null, number | null], k: number) => (x[0] === null ? "?" : `${x[0].toFixed(k)} ± ${(x[1] ?? 0).toFixed(k)}`);
             const i = plan.jobs.find((j) => j.label === r.label && j.spec.kind === "survey")?.index ?? "?";
