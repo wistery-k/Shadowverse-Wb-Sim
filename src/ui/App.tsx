@@ -6,6 +6,7 @@ import { DeckSelect, resolveDeck, type DeckChoice } from "./DeckSelect";
 import { Decks } from "./Decks";
 import { Game } from "./Game";
 import { HumanCompare, loadHumanRecords, saveHumanRecords, type HumanMatchChoice } from "./HumanCompare";
+import { isMissesHash, Misses } from "./Misses";
 import { ReplaySearch } from "./ReplaySearch";
 import { Sandbox, type SandboxIncoming } from "./Sandbox";
 import { Simulate } from "./Simulate";
@@ -42,7 +43,7 @@ function saveSetup(setup: Setup): void {
   }
 }
 
-type Tab = "play" | "decks" | "sim" | "compare" | "sandbox" | "replays";
+type Tab = "play" | "decks" | "sim" | "compare" | "misses" | "sandbox" | "replays";
 
 /**
  * サンドボックス（好きな局面を作って AI に考えさせる）は、ゲームの実際の対戦の局面を入れて手を聞く
@@ -53,22 +54,38 @@ const SANDBOX = import.meta.env.DEV;
 /** リプレイ検索（手元の自己対戦の記録から条件に合うターンを探す）は、手元のファイルを読むので開発サーバーだけで出す */
 const REPLAY_SEARCH = import.meta.env.DEV;
 
+// 問題集（見落とし問題集の局面を見る）は公開サイトにも出す。見られるのはリポジトリにある決まった局面だけで、
+// 局面の編集・貼り付け・読み込みは付けない（サンドボックスと違い、実際の対戦の局面を入れて手を聞くことはできない。CLAUDE.md「ソフト打ち」）
+
 const TABS: readonly [Tab, string][] = [
   ["play", "対戦"],
   ["decks", "デッキ"],
   ["sim", "AI対戦"],
   ["compare", "人間との比較"],
+  ["misses", "問題集"],
   ...(SANDBOX ? [["sandbox", "サンドボックス"] as [Tab, string]] : []),
   ...(REPLAY_SEARCH ? [["replays", "リプレイ検索"] as [Tab, string]] : []),
 ];
 
 export function App() {
-  const [tab, setTabState] = useState<Tab>("play");
+  // URL が #misses（問題集の問）なら問題集を開く
+  const [tab, setTabState] = useState<Tab>(() => (isMissesHash() ? "misses" : "play"));
   // リプレイ検索は、最初に開くまで作らない（開くと手元のファイルの一覧を取りに行く）
   const [replaysOpened, setReplaysOpened] = useState(false);
+  // 問題集も、最初に開くまで作らない（開くと問のデータを読み込む）
+  const [missesOpened, setMissesOpened] = useState(() => isMissesHash());
   const setTab = (t: Tab) => {
     setTabState(t);
     if (t === "replays") setReplaysOpened(true);
+    if (t === "misses") setMissesOpened(true);
+    // 問題集を離れたら URL の #misses を消す（読み込み直したときに問題集が開かないように）
+    else if (isMissesHash()) {
+      try {
+        history.replaceState(null, "", location.pathname + location.search);
+      } catch {
+        // 書き換えられなくても画面は動く
+      }
+    }
   };
   // サンドボックスに開く局面（リプレイの「サンドボックスで開く」）
   const [sandboxIncoming, setSandboxIncoming] = useState<SandboxIncoming | null>(null);
@@ -152,6 +169,12 @@ export function App() {
             <ReplaySearch {...(SANDBOX ? { onSandbox: openSandbox } : {})} />
           </div>
         )}
+        {/* 問題集も、開いた問と打たせた並びを残すため隠すだけにする */}
+        {missesOpened && (
+          <div hidden={!!game || tab !== "misses"}>
+            <Misses active={!game && tab === "misses"} {...(SANDBOX ? { onSandbox: openSandbox } : {})} />
+          </div>
+        )}
         {game ? (
           <Game
             initial={game.state}
@@ -164,7 +187,7 @@ export function App() {
           />
         ) : tab === "decks" ? (
           <Decks decks={saved} onChange={updateDecks} />
-        ) : tab === "sim" || tab === "sandbox" || tab === "replays" ? null : tab === "compare" ? (
+        ) : tab === "sim" || tab === "sandbox" || tab === "replays" || tab === "misses" ? null : tab === "compare" ? (
           <HumanCompare onStart={startCompare} saveError={compareError} />
         ) : (
           <div class="setup panel">

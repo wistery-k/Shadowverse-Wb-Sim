@@ -1,0 +1,31 @@
+{
+  "v": 1,
+  "id": "witch-cauldron-g1508",
+  "source": "logs/night-20261111-2230/survey-1.jsonl.gz の試合 1508 の 5 手目",
+  "lines": [
+    {
+      "kind": "ai",
+      "label": "調査の AI の手",
+      "steps": [
+        {"type":"endTurn"}
+      ],
+      "text": [
+        "ターン終了"
+      ],
+      "full": []
+    },
+    {
+      "kind": "good",
+      "label": "打ち比べで良い手",
+      "steps": [
+        {"iid":3,"type":"act"}
+      ],
+      "text": [
+        "魔女の錬金釜の能力を使う"
+      ],
+      "full": [
+        "魔女の錬金釜の能力を使う"
+      ]
+    }
+  ]
+}
