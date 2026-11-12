@@ -26,6 +26,7 @@ use super::human_plan::{is_start_of_turn, mix, name_of, parse_record, step_text}
 use super::ledger;
 use super::options::{rhino_compare_options, rhino_options, search_options};
 use super::parallel::parallel_map;
+use super::survey::{PlayoutEnd, PlayoutLog};
 use crate::ai::exact_lethal::reset_exact_lethal_cache;
 use crate::ai::lethal::reset_lethal;
 use crate::ai::registry::create_agent;
@@ -1982,6 +1983,348 @@ fn cover(argv: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+// ---------------------------------------------------------------- duel: 並びを指定して打ち比べる
+
+/// duel の打ち比べの回数の既定
+const DUEL_M: u32 = 512;
+
+/// duel で比べる並び 1 つ
+struct DuelLine {
+    name: String,
+    steps: Vec<Action>,
+    /// ターンを終える手で終わる並びか（並びのとおりに打ってターンを終える。false は調査と同じく、並びの後の同じターンの続きを AI が打つ）
+    fixed: bool,
+    /// 並びの文
+    text: String,
+    /// 問の合格の条件を満たすか（並びの分だけで見る。AI が続きを打つ並びは、続きの手で変わりうる）
+    pass: bool,
+}
+
+/// 手の JSON の配列を、問 p の局面 start から打てる並びにする（打てない手があれば断る）
+fn duel_line(start: &GameState, p: &Problem, name: &str, steps: &Json) -> Result<DuelLine, String> {
+    let Json::Arr(arr) = steps else {
+        return Err(format!("{name}: 並びは手の JSON の配列で渡します"));
+    };
+    let mut acts: Vec<Action> = arr
+        .iter()
+        .map(action_from_json)
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("{name}: {e}"))?;
+    if acts.is_empty() {
+        return Err(format!("{name}: 並びが空です"));
+    }
+    let fixed = matches!(acts.last(), Some(Action::EndTurn));
+    // 問の局面で、並びの手が順に打てるか（決定化した局面でも同じ手が打てるとは限らないが、まず書き間違いを断る）
+    let mut t = start.clone();
+    for (i, a) in acts.iter().enumerate() {
+        if t.phase == Phase::Ended {
+            acts.truncate(i);
+            break;
+        }
+        if !is_legal(&t, a) {
+            return Err(format!(
+                "{name}: {} 手目が打てません: {}",
+                i + 1,
+                action_to_json(a).stringify()
+            ));
+        }
+        t = apply_legal(&t, a);
+    }
+    let turn = turn_of_plan(start, p.player, &acts);
+    let mut line: Vec<String> = turn.steps.iter().map(|s| s.text.clone()).collect();
+    if line.is_empty() {
+        line.push("（何もしない）".into());
+    }
+    Ok(DuelLine {
+        name: name.to_string(),
+        steps: acts,
+        fixed,
+        text: line.join(" → "),
+        pass: passes(&p.pass, &turn),
+    })
+}
+
+/// 勝ち負けの 1 文字を勝ちの数に（打てなかった回は NaN）
+fn duel_win(c: char) -> f64 {
+    match c {
+        '1' => 1.0,
+        '0' => 0.0,
+        'd' => 0.5,
+        _ => f64::NAN,
+    }
+}
+
+/// 同じ回どうしの差 b − a の平均と標準誤差（どちらかが打てなかった回は外す）と、数えた回の数
+fn paired(a: &[f64], b: &[f64]) -> (f64, f64, usize) {
+    let diffs: Vec<f64> = a
+        .iter()
+        .zip(b)
+        .filter(|(x, y)| !x.is_nan() && !y.is_nan())
+        .map(|(x, y)| y - x)
+        .collect();
+    let n = diffs.len() as f64;
+    let mean = diffs.iter().sum::<f64>() / n.max(1.0);
+    let var = diffs.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>() / (n - 1.0).max(1.0);
+    (mean, (var / n.max(1.0)).sqrt(), diffs.len())
+}
+
+/// 問 1 つの局面で、指定した並びどうしを打ち比べる
+fn duel(argv: &[String]) -> Result<(), String> {
+    let mut argv = argv.to_vec();
+    let dir = take(&mut argv, "--dir")?.unwrap_or_else(|| MISSES_DIR.into());
+    let m = int_arg(take(&mut argv, "--m")?, "--m", DUEL_M)?;
+    let base = int_arg(take(&mut argv, "--base")?, "--base", 1)? as usize;
+    let no_stored = take_flag(&mut argv, "--no-stored");
+    let show = int_arg(take(&mut argv, "--show")?, "--show", 0)?;
+    let peek = take_flag(&mut argv, "--peek");
+    let dump = take(&mut argv, "--dump")?;
+    if let Some(d) = &dump {
+        if show == 0 {
+            return Err("--dump は --show N と一緒に使います".into());
+        }
+        std::fs::create_dir_all(d).map_err(|e| format!("{d}: {e}"))?;
+    }
+    let mut added: Vec<String> = Vec::new();
+    while let Some(l) = take(&mut argv, "--line")? {
+        added.push(l);
+    }
+    let usage = "svwb misses duel <問の名前> [--line '<名前>=<手の JSON の配列>']… [--m 512] [--base 1] [--no-stored] [--peek] [--show N [--dump <フォルダ>]]";
+    if argv.len() != 1 {
+        return Err(usage.into());
+    }
+    if m == 0 {
+        return Err("--m は 1 以上".into());
+    }
+    let id = argv[0].clone();
+    let ps = load(&dir)?;
+    let p = ps
+        .iter()
+        .find(|p| p.id == id)
+        .ok_or_else(|| format!("問がありません: {id}"))?;
+    let start = state_from_json(&Json::parse(&p.state)?)?;
+    let mut lines: Vec<DuelLine> = Vec::new();
+    // 書き添えてある調査の並び（misses/lines/<問>.json。無ければ --line だけ）
+    let stored = repo_path(&format!("{dir}/lines/{id}.json"));
+    if !no_stored {
+        if let Ok(text) = std::fs::read_to_string(&stored) {
+            let v = Json::parse(&text).map_err(|e| format!("{stored}: {e}"))?;
+            if let Some(Json::Arr(ls)) = v.get("lines") {
+                for l in ls {
+                    let name = match l.get("label") {
+                        Some(Json::Str(x)) => x.clone(),
+                        _ => "書き添えた並び".into(),
+                    };
+                    let steps = l
+                        .get("steps")
+                        .ok_or_else(|| format!("{stored}: \"steps\" がありません"))?;
+                    lines.push(duel_line(&start, p, &name, steps)?);
+                }
+            }
+        }
+    }
+    for a in &added {
+        let (name, json) = a
+            .split_once('=')
+            .ok_or("--line は '<名前>=<手の JSON の配列>'")?;
+        let steps = Json::parse(json).map_err(|e| format!("{name}: {e}"))?;
+        lines.push(duel_line(&start, p, name, &steps)?);
+    }
+    if lines.len() < 2 {
+        return Err(format!("比べる並びが 2 つ要ります（{usage}）"));
+    }
+    if base == 0 || base > lines.len() {
+        return Err(format!("--base は 1〜{}", lines.len()));
+    }
+    // 打ち比べ（同じ回は全部の並びで同じ決定化と AI の乱数。シードは cover と同じく問の名前から作る）
+    let seed = mix(99, u32::from_str_radix(&fnv(&p.id), 16).unwrap_or(0));
+    let tasks: Vec<(usize, u32)> = (0..lines.len())
+        .flat_map(|l| (0..m).map(move |r| (l, r)))
+        .collect();
+    let res: Vec<(PlayoutEnd, PlayoutLog)> = parallel_map(
+        &tasks,
+        |&(l, r), _| {
+            let line = &lines[l];
+            // 局面は回ごとに読み直す（GameState はスレッドをまたげない）
+            let start = match Json::parse(&p.state).and_then(|j| state_from_json(&j)) {
+                Ok(s) => s,
+                Err(_) => {
+                    let none = PlayoutEnd {
+                        result: 'x',
+                        turns: 0,
+                        next: None,
+                    };
+                    return (none, PlayoutLog::default());
+                }
+            };
+            let mut log = PlayoutLog::default();
+            let end = super::survey::playout_ends(
+                &start,
+                p.player,
+                &line.steps,
+                seed,
+                r,
+                peek,
+                line.fixed,
+                if r < show { Some(&mut log) } else { None },
+            );
+            (end, log)
+        },
+        |_, _, _, _| {},
+    );
+    let of_line = |l: usize| -> Vec<PlayoutEnd> {
+        tasks
+            .iter()
+            .zip(&res)
+            .filter(|((ll, _), _)| *ll == l)
+            .map(|(_, x)| x.0)
+            .collect()
+    };
+    let wins: Vec<Vec<f64>> = (0..lines.len())
+        .map(|l| of_line(l).iter().map(|e| duel_win(e.result)).collect())
+        .collect();
+    println!(
+        "{id}: 並びの打ち比べ（{m} 回ずつ。同じ回は同じ決定化と AI の乱数。差は {base} 番との、同じ回どうしの差{}）",
+        if peek {
+            "。相手の手札は実際のまま（--peek）"
+        } else {
+            ""
+        }
+    );
+    println!();
+    println!("| 番 | 並び | 並びの後 | 合格 | 勝ち | 勝率 | 差（− {base} 番） |");
+    println!("| ---: | --- | --- | --- | ---: | ---: | ---: |");
+    for (l, line) in lines.iter().enumerate() {
+        let w = &wins[l];
+        let n = w.iter().filter(|x| !x.is_nan()).count();
+        let sum: f64 = w.iter().filter(|x| !x.is_nan()).sum();
+        let diff = if l + 1 == base {
+            "基準".to_string()
+        } else {
+            let (mean, se, _) = paired(&wins[base - 1], w);
+            format!("{:+.1} ± {:.1}", mean * 100.0, se * 100.0)
+        };
+        println!(
+            "| {} | {} | {} | {} | {}/{} | {} | {} |",
+            l + 1,
+            line.name,
+            if line.fixed {
+                "ターンを終える"
+            } else {
+                "AI が続ける"
+            },
+            if line.pass { "○" } else { "×" },
+            sum,
+            n,
+            if n > 0 {
+                pct(sum / n as f64)
+            } else {
+                "-".into()
+            },
+            diff
+        );
+    }
+    // いつ終わったか（「次のターンに勝つ」「次の相手のターンを耐える」という狙いが、打ち継ぎで実際にそうなったかを見る）
+    println!();
+    println!("| 番 | このターンに勝ち | 相手の次のターンに負け | 自分の次のターンに勝ち | その後に勝ち | その後に負け | 引き分け・打てない |");
+    println!("| ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+    for l in 0..lines.len() {
+        let e = duel_ends(&of_line(l));
+        println!(
+            "| {} | {} | {} | {} | {} | {} | {} |",
+            l + 1,
+            e[0],
+            e[1],
+            e[2],
+            e[3],
+            e[4],
+            e[5]
+        );
+    }
+    // 自分の次のターンの最初の様子（そこまで続いた回の平均）
+    println!();
+    println!("| 番 | 自分の次のターンまで続いた回 | 自分の体力 | 相手の体力 | 自分の場のフォロワー | 相手の場のフォロワー |");
+    println!("| ---: | ---: | ---: | ---: | ---: | ---: |");
+    for l in 0..lines.len() {
+        let v: Vec<[i32; 4]> = of_line(l).iter().filter_map(|e| e.next).collect();
+        let mean = |k: usize| -> String {
+            if v.is_empty() {
+                "-".into()
+            } else {
+                fixed(
+                    v.iter().map(|x| x[k] as f64).sum::<f64>() / v.len() as f64,
+                    1,
+                )
+            }
+        };
+        println!(
+            "| {} | {} | {} | {} | {} | {} |",
+            l + 1,
+            v.len(),
+            mean(0),
+            mean(1),
+            mean(2),
+            mean(3)
+        );
+    }
+    println!();
+    for (l, line) in lines.iter().enumerate() {
+        println!("{}. {}: {}", l + 1, line.name, line.text);
+    }
+    // 最初の --show 回の手（自分の次のターンの終わりまで）
+    if show > 0 {
+        for (l, line) in lines.iter().enumerate() {
+            for ((ll, r), (end, log)) in tasks.iter().zip(&res) {
+                if *ll != l || *r >= show {
+                    continue;
+                }
+                println!();
+                println!(
+                    "### {} 番（{}）の回 {r}: {}（{} ターン後に終わる）",
+                    l + 1,
+                    line.name,
+                    match end.result {
+                        '1' => "勝ち",
+                        '0' => "負け",
+                        'd' => "引き分け",
+                        _ => "打てない",
+                    },
+                    end.turns
+                );
+                for t in &log.lines {
+                    println!("{t}");
+                }
+                // --dump: ターンの変わり目の局面を書き出す（その回の決定化の局面。`--dir` の問や `misses add --state` に使える）
+                if let Some(d) = &dump {
+                    for (ahead, state) in &log.states {
+                        let f = format!("{d}/{id}-L{}-r{r}-t{ahead}.json", l + 1);
+                        std::fs::write(&f, format!("{state}\n"))
+                            .map_err(|e| format!("{f}: {e}"))?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 回の結果（勝ち負けと、始めの局面から何ターン後に終わったか）を、いつ終わったかで数える。
+/// [このターンに勝ち, 相手の次のターンに負け, 自分の次のターンに勝ち, その後に勝ち, その後に負け, 引き分け・打てない]
+fn duel_ends(res: &[PlayoutEnd]) -> [u32; 6] {
+    let mut e = [0u32; 6];
+    for end in res {
+        let k = match (end.result, end.turns) {
+            ('1', 0) => 0,
+            ('0', 1) => 1,
+            ('1', 2) => 2,
+            ('1', _) => 3,
+            ('0', _) => 4,
+            _ => 5,
+        };
+        e[k] += 1;
+    }
+    e
+}
+
 pub fn main(argv: &[String]) -> Result<(), String> {
     let rest = argv.get(1..).unwrap_or(&[]);
     match argv.first().map(|s| s.as_str()) {
@@ -1991,7 +2334,10 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         Some("show") => show(rest),
         Some("check") => check(rest),
         Some("cover") => cover(rest),
-        _ => Err("使い方: svwb misses run|add|list|show|check|cover …（docs/misses.md）".into()),
+        Some("duel") => duel(rest),
+        _ => {
+            Err("使い方: svwb misses run|add|list|show|check|cover|duel …（docs/misses.md）".into())
+        }
     }
 }
 
@@ -2206,5 +2552,98 @@ mod tests {
             .unwrap_or(row.plans.len());
         assert!(row.plans[first_extra..].iter().all(|pl| !pl.top));
         assert!(row.terminals >= row.plans.len());
+    }
+
+    #[test]
+    fn paired_difference_skips_missing_trials() {
+        let a = [1.0, 0.0, f64::NAN, 0.0];
+        let b = [1.0, 1.0, 1.0, f64::NAN];
+        let (mean, se, n) = paired(&a, &b);
+        assert_eq!(n, 2);
+        assert!((mean - 0.5).abs() < 1e-12);
+        assert!((se - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn duel_lines_are_checked_and_a_fixed_line_ends_the_turn() {
+        let ps = load(MISSES_DIR).expect("問題集が読めます");
+        let p = ps
+            .iter()
+            .find(|p| p.id == "witch-storm-g1689")
+            .expect("問があります");
+        let start = state_from_json(&Json::parse(&p.state).unwrap()).unwrap();
+        let line = |text: &str| duel_line(&start, p, "並び", &Json::parse(text).unwrap());
+        // ターンを終える手で終わる並びは、並びのとおりに打って終える
+        let fixed =
+            line(r#"[{"iid":47,"type":"play"},{"iid":76,"type":"play"},{"type":"endTurn"}]"#)
+                .expect("打てる並び");
+        assert!(fixed.fixed);
+        assert!(fixed.pass);
+        assert_eq!(
+            fixed.text,
+            "ストームブラストをプレイ → 五行の果て・クオンをプレイ"
+        );
+        // 終える手が無い並びは、調査と同じく続きを AI が打つ
+        let open = line(r#"[{"iid":76,"type":"play"},{"iid":76,"type":"superEvolve"}]"#)
+            .expect("打てる並び");
+        assert!(!open.fixed);
+        assert!(!open.pass);
+        // 打てない手・空の並び・配列でないものは断る
+        assert!(line(r#"[{"iid":76,"type":"superEvolve"}]"#).is_err());
+        assert!(line("[]").is_err());
+        assert!(line(r#"{"type":"endTurn"}"#).is_err());
+        // 並びのとおりに打って最後まで打てる
+        let mut log = PlayoutLog::default();
+        let end = super::super::survey::playout_ends(
+            &start,
+            p.player,
+            &fixed.steps,
+            1,
+            0,
+            false,
+            true,
+            Some(&mut log),
+        );
+        assert!("10d".contains(end.result), "勝ち負けが出る: {end:?}");
+        assert!(
+            end.turns >= 1,
+            "並びでは終わらないので、相手のターンより後に終わる: {end:?}"
+        );
+        // 記録は並びの手から始まり、相手のターンの最初の局面が入る
+        assert_eq!(log.lines[0], "  ストームブラストをプレイ");
+        assert!(log
+            .lines
+            .iter()
+            .any(|l| l.contains("相手の次のターンの最初")));
+        // ターンの変わり目の局面は読み戻せる（相手の次のターンの最初は、相手の手番）
+        let (ahead, text) = &log.states[0];
+        assert_eq!(*ahead, 1);
+        let s1 = state_from_json(&Json::parse(text).unwrap()).unwrap();
+        assert_eq!(acting_player(&s1), 1 - p.player);
+        // 自分の次のターンまで続いた回だけ、その最初の様子がある
+        assert_eq!(end.next.is_some(), end.turns >= 2);
+    }
+
+    #[test]
+    fn duel_ends_count_when_the_game_ended() {
+        let res: Vec<PlayoutEnd> = [
+            ('1', 0),
+            ('0', 1),
+            ('0', 1),
+            ('1', 2),
+            ('1', 4),
+            ('0', 3),
+            ('0', 5),
+            ('d', 9),
+            ('x', 0),
+        ]
+        .iter()
+        .map(|&(result, turns)| PlayoutEnd {
+            result,
+            turns,
+            next: None,
+        })
+        .collect();
+        assert_eq!(duel_ends(&res), [1, 2, 1, 1, 2, 2]);
     }
 }
