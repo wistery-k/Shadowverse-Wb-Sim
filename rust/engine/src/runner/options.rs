@@ -9,8 +9,8 @@ use crate::ai::mulligan::OppMulligan;
 use crate::ai::potential::PotentialNet;
 use crate::ai::rhino::{rhino_search_options, RHINO_POTENTIAL};
 use crate::ai::search::{
-    DrawSplit, ExtraEval, MulliganMode, OpponentSearch, RescoreRace, RolloutWeights, SearchOptions,
-    DEFAULT_RESCORE_RACE,
+    DrawSplit, ExtraEval, MulliganMode, OpponentSearch, PickByPlayout, RescoreRace, RolloutWeights,
+    SearchOptions, DEFAULT_PICK, DEFAULT_RESCORE_RACE,
 };
 use crate::ai::valuenet::ValueNet;
 use crate::json::Json;
@@ -417,6 +417,44 @@ pub fn search_options(
                     _ => {
                         return Err(format!(
                             "\"drawSplit\" は null かオブジェクト: {}",
+                            v.stringify()
+                        ))
+                    }
+                }
+            }
+            "pick" => {
+                o.pick = match v {
+                    Json::Null => None,
+                    Json::Obj(fields) => {
+                        const KEYS: [&str; 4] = ["m", "extra", "threshold", "prune"];
+                        if let Some((k, _)) =
+                            fields.iter().find(|(k, _)| !KEYS.contains(&k.as_str()))
+                        {
+                            return Err(format!("pick の知らない項目: {k}"));
+                        }
+                        let d = DEFAULT_PICK;
+                        Some(PickByPlayout {
+                            m: match v.get("m") {
+                                None => d.m,
+                                Some(x) => count("pick.m", x)?.max(2) as u32,
+                            },
+                            extra: match v.get("extra") {
+                                None => d.extra,
+                                Some(x) => count("pick.extra", x)?,
+                            },
+                            threshold: match v.get("threshold") {
+                                None => d.threshold,
+                                Some(x) => number("pick.threshold", x)?,
+                            },
+                            prune: match v.get("prune") {
+                                None => d.prune,
+                                Some(x) => flag("pick.prune", x)?,
+                            },
+                        })
+                    }
+                    _ => {
+                        return Err(format!(
+                            "\"pick\" は null かオブジェクト: {}",
                             v.stringify()
                         ))
                     }

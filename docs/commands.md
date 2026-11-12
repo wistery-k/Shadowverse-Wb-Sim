@@ -344,6 +344,7 @@ npm run svwb -- deep-gap rollout --in gap.jsonl[,…] --out roll.jsonl [--top 20
 npm run svwb -- deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 30] [--only <内訳の一部>] [--skipDecks <デッキ>,…] [--sort gap|rollout] [--listOnly 1]
 npm run svwb -- survey run --out 結果.jsonl --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8]
 npm run svwb -- survey report 結果.jsonl… [--label 名前] [--no-ledger] [--top 20] [--states <フォルダ>]
+npm run svwb -- survey recheck 結果.jsonl… --out 打ち直し.jsonl [--m 32] [--peek 1] [--batch 16]
 npm run svwb -- two-turn show [--only <局面>,…] [--sandbox <フォルダ>]
 npm run svwb -- two-turn run --out tt.jsonl [--only <局面>,…] [--m 64] [--reads 4] [--twos 2] [--nextBeam 256] [--seed 1] [--opts '<設定の JSON>']
 npm run svwb -- two-turn report tt.jsonl… [--only <局面>,…]
@@ -385,7 +386,8 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
   クラウドで回すジョブは `cloud/jobs/deep-gap.sh`（docs/ai-notes.md「深い読みと食い違う局面を集める」）
 - `survey`: 候補の打ち比べ調査（[survey.md](survey.md)）。今の既定の AI どうしの自己対戦から自分のターンの最初の局面を無作為に取り、AI が読み直す候補（上位 4 つと引く手）と、
   使うカードの組の違う並び（`--extra`）を、同じ乱数で `--m` 回ずつ最後まで打ち比べる（差の大きい局面は二段目で `--confirm` 回足す）。`report` は、半分の回で選び半分で測る
-  選び直しの得（1 試合あたり、上位 4 つだけと全部）・はっきりした見落とし・内訳・問題集に足す候補を出し、台帳に 1 行足す。夜のキューのジョブにできる（[night.md](night.md)）
+  選び直しの得（1 試合あたり、上位 4 つだけと全部）・二段目で測る得・替える決まりの表（一段目の差の幅・AI 自身の点の差・安くする決まり）・大きなミス・内訳・
+  問題集に足す候補を出し、台帳に 1 行足す。夜のキューのジョブにできる（[night.md](night.md)）。`recheck` は、二段目に回した局面を相手の手札を実際のままで打ち直す（台帳には書かない）
 - `two-turn`: 2 ターン以上の計画が効きそうな、手で作った局面（`rust/engine/src/runner/two_turn.rs` の `SCENARIOS` に書いたものだけ。外から局面を入れる口はない）で、
   今の AI と計画の候補（最初の何手かを決める・カードを出さない 等を付けた AI）を打ち比べる。`show` は局面と候補、`run` は相手の手札・山札の決定化 `--m` 通りごとに全候補を打ち、
   AI の点数・読み直し・次の自分のターン末（幅 `--nextBeam`）・2 ターン読み・次のターンのリーサル・最後まで打った勝ち負けを 1 行ずつ追記する（済んだものは飛ばす）。
@@ -574,6 +576,9 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
   false なら、判断ごとの乱数を試合のシード・席・ターン・そのターンでその席が何回目の判断かから作り、判断の中の種は 1 つ取った元から用途と何番目かで作る
   （片方の席の設定を変えても相手の席の乱数は変わらず、`oppHandSamples` を増やしても前からある引き直しは同じ）。物差しの相手 2 つが true を使う（指紋を変えないため。docs/yardstick.md）。
   docs/ai-notes.md「AI の思考用の乱数を用途から作る」
+- `pick`: null かオブジェクト（既定 null。2026-11-12、打ち比べ調査の得を対戦で確かめる用）。`{"m":32,"extra":4,"threshold":15,"prune":true}`（省いた項目はこの値）。
+  自分のターンの最初の判断で、候補の打ち比べ調査と同じ候補を同じ打ち方で `m` 回ずつ最後まで打ち、AI の選んだ候補との差が最も大きい候補の差が `threshold` ポイント以上ならその候補に替える。
+  `prune` なら前半の回で AI の選んだ候補に勝っていない候補は後半を打たない。1 スレッドで 1 ターン 4 分ほどかかる（docs/survey.md「対戦で確かめる」）
 - `deferFuse`: 真偽（既定 true。2026-10-29 に今の形で既定に）。次のターン以降に回せる融合（作ったカードがターン末まで手札に残り、その融合を除いて打ち直しても手札のほかが同じになるもの。
   融合しないと手札が上限（9 枚）になるもの、ターン終了時の処理が変わるもの（手札の枚数で引くかどうかが決まるエースのクレスト等）は除く）を打たない。並びの選び方と点数は変えず（融合した終局面の点数のまま）、選んだ並びから回せる融合を除いて打つ。除いて何も残らなければ、ターン末の点数に入れている合流する相打ちを打つ（docs/ai-notes.md「使わない融合を次のターン以降に回す」）
 - `deferFuseHand`: 数（既定 8。2026-10-29）。`deferFuse` で回したあとのターン末の手札の枚数の上限。回すと手札がこれより多くなる融合は回さない

@@ -75,7 +75,7 @@ npm run meta -- round --state 環境.json --report 記録.md  # 環境（デッ�
 npm run svwb -- mulligan-compare --games 50 --a '{"mulligan":"sample"}'  # マリガンの設定どうしを同じシードの試合で打ち比べる（相手は今の探索 AI）
 npm run svwb -- human-plan-value --out d.jsonl --m 32 <人間の記録.jsonl>...  # 人間の手順と AI の手順を同じ局面から打ち比べる（集計は human-plan-value report d.jsonl）
 npm run svwb -- deep-gap play --out gap.jsonl --games 100  # 自己対戦の局面で今の AI の手と深い読みの手を比べる（rollout で最後まで打って確かめ、report でまとめる）
-npm run svwb -- survey run --out s.jsonl --games 0-99       # 自己対戦の局面で AI の候補を同じ乱数で最後まで打ち比べる（report でまとめて台帳に足す。docs/survey.md）
+npm run svwb -- survey run --out s.jsonl --games 0-99       # 自己対戦の局面で AI の候補を同じ乱数で最後まで打ち比べる（report でまとめて台帳に足す。recheck で相手の手札を実際のままで打ち直す。docs/survey.md）
 npm run svwb -- td selfplay --model m0.json --games 2000 --out d0.jsonl  # TD 学習の自己対戦（試合が終わった順に書く。--opp beam・--iv k・--sampling default は td.rs の先頭の説明）
 npm run svwb -- td selfplay --model l0.json --frozen '{}' --games 2000 --out x0.jsonl  # 片方の席を今の既定の AI に固定した自己対戦（狙い撃ちの相手を学ばせる。学習は td train --seat learner）
 npm run yardstick -- --opts '{}' --games 1000 --label 名前 --record    # 固定した相手との勝率を docs/yardstick.md の表に足す（強さの物差し。--ref strong で強い相手）
