@@ -4,6 +4,8 @@
 // ブラウザ（画面・Worker）では、使う前に initEngine() を待つ（WASM の読み込みは非同期にしかできない）。
 // Chrome は画面（メインスレッド）では 8MB を超える WASM の同期のインスタンス化（new WebAssembly.Instance）も許さないので、
 // ブラウザではインスタンスも WebAssembly.instantiate で作る。WASM が止まったときに読み込み直す分は、画面では先に作っておく。
+// WASM は 10MB ほどある（大半は埋め込んだ AI の学習データ。GitHub Pages は gzip で縮めて送るので転送は 3.6MB ほど）。
+// ブラウザでは受け取りながらコンパイルし（WebAssembly.compileStreaming）、画面には読み込みの進み具合を出す（src/main.tsx）。
 // Node（テスト・スクリプト）では、最初の呼び出しで src/engine/svwb.wasm を読み込む。
 // svwb.wasm は npm run wasm（scripts/build-wasm.mjs）で作る（ビルドの生成物なのでコミットしない）。
 
@@ -81,22 +83,47 @@ function loadSync(): void {
   use(new WebAssembly.Instance(compiled, {}));
 }
 
-/** エンジンを使えるようにする（ブラウザでは最初に待つ。Node では待たなくてもよい） */
-export function initEngine(): Promise<void> {
+/** 読み込みの進み具合（受け取った WASM のバイト数（配信が縮めていても戻した後の数）と、受け取り終えたか） */
+export type LoadProgress = (loaded: number, done: boolean) => void;
+
+/**
+ * エンジンを使えるようにする（ブラウザでは最初に待つ。Node では待たなくてもよい）。
+ * onProgress は WASM を受け取るたびと受け取り終えたときに呼ぶ（画面で読み込み中の表示を出すため。2 回目からの呼び出しでは使わない）
+ */
+export function initEngine(onProgress?: LoadProgress): Promise<void> {
   if (wasm) return Promise.resolve();
   if (isNode) {
     loadSync();
     return Promise.resolve();
   }
-  loading ??= loadFrom(new URL("./svwb.wasm", import.meta.url));
+  loading ??= loadFrom(new URL("./svwb.wasm", import.meta.url), onProgress);
   return loading;
 }
 
-/** URL の WASM を非同期で読み込む（配信の Content-Type が application/wasm でなくても読めるよう、ストリーミングにはしない） */
-async function loadFrom(url: URL): Promise<void> {
+/**
+ * URL の WASM を非同期で読み込む。受け取りながらコンパイルする（WebAssembly.compileStreaming）。
+ * compileStreaming は Content-Type が application/wasm の Response が要るので、配信の Content-Type によらず読めるよう、受け取った中身で Response を作り直す
+ */
+async function loadFrom(url: URL, onProgress?: LoadProgress): Promise<void> {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`${url.pathname} を読み込めません（${res.status}）`);
-  const module = await WebAssembly.compile(await res.arrayBuffer());
+  if (!res.ok || !res.body) throw new Error(`${url.pathname} を読み込めません（${res.status}）`);
+  let body: ReadableStream<Uint8Array<ArrayBuffer>> = res.body;
+  if (onProgress) {
+    let loaded = 0;
+    body = body.pipeThrough(
+      new TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>({
+        transform(chunk, out) {
+          loaded += chunk.byteLength;
+          onProgress(loaded, false);
+          out.enqueue(chunk);
+        },
+        flush() {
+          onProgress(loaded, true);
+        },
+      }),
+    );
+  }
+  const module = await WebAssembly.compileStreaming(new Response(body, { headers: { "Content-Type": "application/wasm" } }));
   const instance = await WebAssembly.instantiate(module, {});
   compiled = module;
   use(instance);

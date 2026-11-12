@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import preact from "@preact/preset-vite";
@@ -18,6 +19,15 @@ function gitInfo(): { commit: string; date: string; dirty: boolean } {
 
 const git = gitInfo();
 
+/** エンジンの WASM の大きさ（読み込み中の表示で、受け取った割合を出す）。npm run wasm で作った後に読む（無ければ 0） */
+function wasmSize(): number {
+  try {
+    return statSync(fileURLToPath(new URL("./src/engine/svwb.wasm", import.meta.url))).size;
+  } catch {
+    return 0;
+  }
+}
+
 export default defineConfig(({ command, isSsrBuild }) => ({
   // GitHub Pages はリポジトリ名のサブパスで配信される
   base: "/Shadowverse-Wb-Sim/",
@@ -28,6 +38,7 @@ export default defineConfig(({ command, isSsrBuild }) => ({
     __BUILD_COMMIT__: JSON.stringify(git.commit),
     __BUILD_DATE__: JSON.stringify(git.date),
     __BUILD_DIRTY__: JSON.stringify(git.dirty),
+    __SVWB_WASM_SIZE__: JSON.stringify(wasmSize()),
     // Node（テスト・スクリプト）で読み込むエンジンの WASM（src/engine/wasm.ts）。ブラウザ向けのビルドでは使わない（このマシンのパスを埋め込まない）
     __SVWB_WASM_PATH__: JSON.stringify(command === "build" && !isSsrBuild ? "" : fileURLToPath(new URL("./src/engine/svwb.wasm", import.meta.url))),
   },

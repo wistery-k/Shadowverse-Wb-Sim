@@ -8,3 +8,5 @@ declare const __BUILD_DATE__: string;
 declare const __BUILD_DIRTY__: boolean;
 /** Node で読み込むエンジンの WASM の場所（src/engine/svwb.wasm の絶対パス） */
 declare const __SVWB_WASM_PATH__: string;
+/** エンジンの WASM（src/engine/svwb.wasm）のバイト数（ビルドの時点。分からなければ 0） */
+declare const __SVWB_WASM_SIZE__: number;
