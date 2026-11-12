@@ -1,0 +1,72 @@
+{
+  "v": 1,
+  "id": "royal-albert-g1163",
+  "source": "logs/night-20261111-2230/survey-1.jsonl.gz の試合 1163 の 60 手目",
+  "lines": [
+    {
+      "kind": "ai",
+      "label": "調査の AI の手",
+      "steps": [
+        {"iid":37,"type":"play"},
+        {"attacker":37,"target":"leader","type":"attack"},
+        {"attacker":90,"target":"leader","type":"attack"},
+        {"attacker":91,"target":"leader","type":"attack"},
+        {"attacker":9,"target":"leader","type":"attack"},
+        {"attacker":24,"target":"leader","type":"attack"}
+      ],
+      "text": [
+        "ケンタウロスの騎士をプレイ",
+        "ケンタウロスの騎士でリーダーを攻撃",
+        "スティールナイトでリーダーを攻撃",
+        "スティールナイトでリーダーを攻撃",
+        "勇猛のルミナスランサーでリーダーを攻撃",
+        "卓越のルミナスメイジでリーダーを攻撃"
+      ],
+      "full": [
+        "ケンタウロスの騎士をプレイ",
+        "ケンタウロスの騎士でリーダーを攻撃",
+        "スティールナイトでリーダーを攻撃",
+        "スティールナイトでリーダーを攻撃",
+        "勇猛のルミナスランサーでリーダーを攻撃",
+        "卓越のルミナスメイジでリーダーを攻撃"
+      ]
+    },
+    {
+      "kind": "good",
+      "label": "打ち比べで良い手",
+      "steps": [
+        {"type":"extraPp"},
+        {"iid":25,"type":"play"},
+        {"iid":25,"type":"superEvolve"},
+        {"attacker":25,"target":"leader","type":"attack"},
+        {"attacker":25,"target":"leader","type":"attack"},
+        {"attacker":90,"target":"leader","type":"attack"},
+        {"attacker":91,"target":"leader","type":"attack"},
+        {"attacker":9,"target":"leader","type":"attack"},
+        {"attacker":24,"target":"leader","type":"attack"}
+      ],
+      "text": [
+        "エクストラPP",
+        "レヴィオンの迅雷・アルベールをプレイ",
+        "レヴィオンの迅雷・アルベールを超進化",
+        "レヴィオンの迅雷・アルベールでリーダーを攻撃",
+        "レヴィオンの迅雷・アルベールでリーダーを攻撃",
+        "スティールナイトでリーダーを攻撃",
+        "スティールナイトでリーダーを攻撃",
+        "勇猛のルミナスランサーでリーダーを攻撃",
+        "卓越のルミナスメイジでリーダーを攻撃"
+      ],
+      "full": [
+        "エクストラPP",
+        "レヴィオンの迅雷・アルベールをプレイ",
+        "レヴィオンの迅雷・アルベールを超進化",
+        "レヴィオンの迅雷・アルベールでリーダーを攻撃",
+        "レヴィオンの迅雷・アルベールでリーダーを攻撃",
+        "スティールナイトでリーダーを攻撃",
+        "スティールナイトでリーダーを攻撃",
+        "勇猛のルミナスランサーでリーダーを攻撃",
+        "卓越のルミナスメイジでリーダーを攻撃"
+      ]
+    }
+  ]
+}
