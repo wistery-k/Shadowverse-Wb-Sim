@@ -72,6 +72,19 @@ describe("結晶", () => {
     expect(hp(t, me)).toBe(12);
   });
 
+  it("破壊された『結晶：崇奉の怯者』はカンディマの「破壊されたアミュレット」に数え、出るのは『結晶：崇奉の怯者』（質問 33）", () => {
+    const { s, me } = setup();
+    s.players[me].pp = 4;
+    let t = passTurns(play(s, toHand(s, me, "崇奉の怯者")), 3);
+    // ラストワードで出た崇奉の怯者（フォロワー）は関係ない
+    expect(names(t, me)).toEqual(["崇奉の怯者"]);
+    expect(t.players[me].destroyedAmulets).toEqual([specialId("崇奉の怯者", "crystallize")]);
+    t.players[t.active].pp = t.players[t.active].maxPp = 10;
+    expect(t.active).toBe(me);
+    t = play(t, toHand(t, me, "崇高の憎悪・カンディマ"));
+    expect(names(t, me).sort()).toEqual(["崇奉の怯者", "崇高の憎悪・カンディマ", "結晶：崇奉の怯者"].sort());
+  });
+
   it("PP が足りれば崇奉の怯者（フォロワー）をプレイする", () => {
     const { s, me } = setup();
     s.players[me].pp = 5;
