@@ -131,6 +131,8 @@ pub struct HandCard {
     pub fused_this_turn: bool,
     pub revealed: bool,
     pub drawn_by: Option<DrawHint>,
+    /// 奥義ゲージのうち、手札にある間に自分のフォロワーが進化した回数（【奥義】を持つカードだけ数える。docs/rules.md 12章）
+    pub ougi: i32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -196,6 +198,8 @@ pub struct CrestInstance {
     pub used_once: Vec<(u8, i32)>,
     /// 信仰なら信仰値（クレストは None）
     pub faith: Option<i32>,
+    /// 信仰に「自分の信仰は「…」を持つ」で付いた能力の数
+    pub stacks: i32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -389,6 +393,8 @@ pub struct PlayerState {
     pub mulligan_done: bool,
     /// このターン番号の終わりまで、リーダーは「受ける1以上のダメージを0にする。」を持つ（世界の味方・ゾーイ）
     pub leader_damage_zero_until: Option<i32>,
+    /// このバトル中に場に出た自分のフォロワーの枚数（【連携】）。デッキに【連携】のカードがあるときだけ数える（ほかは None）
+    pub followers_entered: Option<i32>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -664,6 +670,7 @@ pub fn hand_state_changed(h: &HandCard) -> bool {
         || h.keywords != Kw::EMPTY
         || !h.fused_kinds.is_empty()
         || h.fused_this_turn
+        || h.ougi != 0
 }
 
 /// 条件付きのドローの条件 hint に、カード c が合うか（コストは元のコストで見る）
@@ -836,6 +843,7 @@ impl GameState {
             fused_this_turn: false,
             revealed: false,
             drawn_by: None,
+            ougi: 0,
         }
     }
 

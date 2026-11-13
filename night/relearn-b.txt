@@ -3,6 +3,7 @@
 # 公式Q&A に合わせたルールの直し（#241、同じクレストの 2 つ目は持たない等）の後の main で回す。直しの後に小さいキュー（relearn-b-small.txt）を通し直した。
 # PC（svwb-docker、28 スレッド）で 2 晩ほど。止まっても resume で続きから（作ったファイルのあるジョブは飛ばす）。
 # --est は PC の見込み（relearn9 の時間と、2026-11-13 にクラウド環境で小さく通した night/relearn-b-small.txt の比から。docs/ai-notes/13-2026-11-13.md「学び直しの流れを夜のキュー 1 本にする」）。
+# 対戦のジョブ（自己対戦・beam-gap・compare）の --est は、プールを広げる仕事（#240〜#242）でエンジンが 4〜5% 遅くなったぶん（審査が 2026-11-13 に測った）を足した。
 # 入力ありの学習はメモリのピークが 12〜13GB ほど（入力なしは relearn9 で 7.8GB）。回す前に PC のコンテナで 16GB ほど使えるか確かめる。
 # 確かめ方: コンテナで free -g（compose.yaml はメモリの上限を付けていないので、使えるのは WSL2 の VM と同じ。PC は 32GB で、WSL2 の既定はその半分の 16GB ほど。15GB を切っていたら Windows の .wslconfig で増やす）。
 # 足りずに落ちても、それを読まないジョブ（問い 3）は回る
@@ -12,45 +13,45 @@
 td extend --model data/value-net.json --out @/net0.json --est 10
 
 # 1. 自己対戦 6 万試合（g6300000〜6359999。前の学び直しの g6000000〜6259999 と重ならない）。3000 試合ずつ s-1〜s-20。relearn9 と同じ打ち方
-td selfplay --model @/net0.json --games 60000 --start 6300000 --chunk 3000 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --out @/s-{k}.jsonl.gz --est 0.38
+td selfplay --model @/net0.json --games 60000 --start 6300000 --chunk 3000 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --out @/s-{k}.jsonl.gz --est 0.40
 
 # 2. 入力なし: 今の既定から、足した入力を読まずに学ぶ（relearn9 と同じ学び方）→ 間引き → 属性で埋める
 td train --model data/value-net.json --data @/s-{1..20}.jsonl.gz --out @/n.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 1800
 td prune --model @/n.json --data @/s-{1..20}.jsonl.gz --out @/np.json --est 600
 td attr --model @/np.json --out @/npa.json --keepA 0 --est 60
 
-# 3. 入力あり: net0（足した入力の行は 0 から）を同じ学び方で
-td train --model @/net0.json --data @/s-{1..20}.jsonl.gz --out @/i.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 2500
-td prune --model @/i.json --data @/s-{1..20}.jsonl.gz --out @/ip.json --est 600
-td attr --model @/ip.json --out @/ipa.json --keepA 0 --est 60
-
 # 物差しの測り直し（ルールの直し PR #241 で物差し 5・強い相手の物差し 4 に上がった。案 B のファイルを読まないので、ここで落ちても止まっても B とは別）。
 # 定例（night/routine.txt）の物差し 2 つと速さ、物差しと同じ設定の確かめの行。見落とし問題集は #241 のスレッドがクラウド環境で測り済み（台帳の名前 ルールの直し-公式QA）なので省く。
-# 入力ありの学習の後に置いたのは、23:00 に始めた夜の 1 晩目を学習で使い切り、2 晩目の頭に回すため（早く始めた夜は 1 晩目の終わりに回る）
+# 入力なしの学習の後に置いたのは、23:00 に始めた夜の 1 晩目の残り（入力ありの学習 42 分には足りない分）で回すため
 yardstick --ref classic --opts '{}' --games 4000 --start 0 --label 定例-弱い相手
 yardstick --ref strong --opts '{}' --games 4000 --start 0 --label 定例-強い相手
 profile --games 49
 yardstick --ref classic --opts '{"valueNet":false,"opponentSearch":null,"samples":3,"planCandidates":3,"oppHandSamples":1,"oppHandCommon":false}' --games 1000 --start 0 --label 物差しと同じ設定（確かめ）
 
+# 3. 入力あり: net0（足した入力の行は 0 から）を同じ学び方で
+td train --model @/net0.json --data @/s-{1..20}.jsonl.gz --out @/i.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 2500
+td prune --model @/i.json --data @/s-{1..20}.jsonl.gz --out @/ip.json --est 600
+td attr --model @/ip.json --out @/ipa.json --keepA 0 --est 60
+
 # 問い 1: 足した入力は効くか（入力あり 対 入力なし、鏡の compare 4 万試合。見込み 0〜+1。A の勝率 − 50% − 2 SE > 0 なら「効く」）
-compare 20000 '{"valueNet":"@/ipa.json"}' '{"valueNet":"@/npa.json"}' 0 --label B-入力 --est 0.115
+compare 20000 '{"valueNet":"@/ipa.json"}' '{"valueNet":"@/npa.json"}' 0 --label B-入力 --est 0.12
 # 線を越えたら入力あり、越えなければ入力なしを、問い 2 の補正にする
 pick --compare B-入力 --pass @/ipa.json --fail @/npa.json --out @/q2.json
 
 # 見込み（potentialNet）を、選んだ補正の点数で学び直す（relearn.sh と同じ: g1000〜2999 で見込みなしの幅 4096 のビームが残した局面を 100 個ずつ。最後の 200 試合は確かめ）
-beam-gap --games 2000 --from 1000 --chunk 500 --ref '{"beamWidth":4096,"potentialNet":null,"valueNet":"@/q2.json"}' --variants '{"w32":{"beamWidth":32,"potentialNet":null,"valueNet":"@/q2.json"}}' --sample 100 --inputs @/pot-{k}.jsonl --out @/pot-{k}-rows.jsonl --est 0.33
+beam-gap --games 2000 --from 1000 --chunk 500 --ref '{"beamWidth":4096,"potentialNet":null,"valueNet":"@/q2.json"}' --variants '{"w32":{"beamWidth":32,"potentialNet":null,"valueNet":"@/q2.json"}}' --sample 100 --inputs @/pot-{k}.jsonl --out @/pot-{k}-rows.jsonl --est 0.345
 potential train --data @/pot-{1..4}.jsonl --valid 2800-2999 --out @/q2pot.json --est 300
 
 # 問い 2: 学び直すと伸びるか（選んだ補正 ＋ 学び直した見込み 対 今の既定、鏡の compare 1.2 万試合。見込み +0.5〜+1.5。線は問い 1 と同じで、越えたら既定に採用）
 # 注意: 今の既定は直す前のルールで学んだものなので、新しいほうにわずかに有利（線は変えず、結果に書く。STATE.md の B）
-compare 6000 '{"valueNet":"@/q2.json","potentialNet":"@/q2pot.json"}' '{}' 0 --label B-学び直し --est 0.115
+compare 6000 '{"valueNet":"@/q2.json","potentialNet":"@/q2pot.json"}' '{}' 0 --label B-学び直し --est 0.12
 
 # 問い 3（案 E。採否でなく測定）: 1 デッキ（ミッドレンジナイトメア）を外して学んだ入力なしの補正と、入力なしを、外したデッキの絡む組だけで比べる（2 万試合）。
 # 外したデッキのカードの行は、外したデータでの間引きで 0 になり、属性の分で埋まる（新しいカードと同じ扱い）
 td train --model data/value-net.json --data @/s-{1..20}.jsonl.gz --excludeDecks ミッドレンジナイトメア --out @/x.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 1400
 td prune --model @/x.json --data @/s-{1..20}.jsonl.gz --excludeDecks ミッドレンジナイトメア --out @/xp.json --est 600
 td attr --model @/xp.json --out @/xpa.json --keepA 0 --est 60
-compare 10000 '{"valueNet":"@/xpa.json"}' '{"valueNet":"@/npa.json"}' 0 --with ミッドレンジナイトメア --label B-外す --est 0.1
+compare 10000 '{"valueNet":"@/xpa.json"}' '{"valueNet":"@/npa.json"}' 0 --with ミッドレンジナイトメア --label B-外す --est 0.105
 
 # 学び足し: 外した補正から、s-1〜s-5（1.5 万試合）のうち外したデッキの絡む試合（約 4000 試合）だけを同じ学び方で学ぶ。間引きは全部の自己対戦で
 # 入力なしとの差（A の勝率 − 50%）を、外したデッキの絡む組 2 万試合と絡まない組 2 万試合に分けて測る（2026-11-13 の審査で分けた。合わせて 4 万試合のまま）。
@@ -58,5 +59,5 @@ compare 10000 '{"valueNet":"@/xpa.json"}' '{"valueNet":"@/npa.json"}' 0 --with �
 td train --model @/xpa.json --data @/s-{1..5}.jsonl.gz --onlyDecks ミッドレンジナイトメア --out @/y.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 300
 td prune --model @/y.json --data @/s-{1..20}.jsonl.gz --out @/yp.json --est 600
 td attr --model @/yp.json --out @/ypa.json --keepA 0 --est 60
-compare 10000 '{"valueNet":"@/ypa.json"}' '{"valueNet":"@/npa.json"}' 0 --with ミッドレンジナイトメア --label B-学び足し --est 0.1
-compare 10000 '{"valueNet":"@/ypa.json"}' '{"valueNet":"@/npa.json"}' 0 --without ミッドレンジナイトメア --label B-学び足し-ほか --est 0.12
+compare 10000 '{"valueNet":"@/ypa.json"}' '{"valueNet":"@/npa.json"}' 0 --with ミッドレンジナイトメア --label B-学び足し --est 0.105
+compare 10000 '{"valueNet":"@/ypa.json"}' '{"valueNet":"@/npa.json"}' 0 --without ミッドレンジナイトメア --label B-学び足し-ほか --est 0.125

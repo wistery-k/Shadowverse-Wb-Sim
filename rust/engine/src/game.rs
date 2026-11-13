@@ -33,6 +33,7 @@ fn new_player(deck: Vec<CardRef>) -> PlayerState {
         sep_evolved_this_turn: None,
         mulligan_done: false,
         leader_damage_zero_until: None,
+        followers_entered: None,
     }
 }
 
@@ -50,8 +51,14 @@ pub fn create_game(decks: [&[CardIdx]; 2], seed: u32) -> GameState {
             })
             .collect()
     };
-    let p0 = new_player(refs(decks[0]));
-    let p1 = new_player(refs(decks[1]));
+    let mut p0 = new_player(refs(decks[0]));
+    let mut p1 = new_player(refs(decks[1]));
+    // 【連携】のカードをデッキに入れたプレイヤーだけ、場に出た自分のフォロワーの枚数を数える（ほかの試合の局面は変えない）
+    for (pl, deck) in [(&mut p0, decks[0]), (&mut p1, decks[1])] {
+        if deck.iter().any(|&c| card(c).link) {
+            pl.followers_entered = Some(0);
+        }
+    }
     let mut s = GameState {
         phase: Phase::Mulligan,
         players: [p0, p1],
@@ -952,6 +959,14 @@ fn apply_play(s: &mut GameState, iid: Iid) {
     } else {
         0
     };
+    // 【奥義】の奥義ゲージ（今のターン数＋手札にある間に自分のフォロワーが進化した回数）と、「これのコストがNなら」の払ったコストは、
+    // それを見るカードだけ文脈の変数に入れる（docs/rules.md 12章）
+    if cd.ougi {
+        ctx.set_var(data().var_ougi, s.players[p].turn_count + h.ougi);
+    }
+    if cd.paid_cost {
+        ctx.set_var(data().var_paid_cost, cost);
+    }
 
     if cd.ctype == CardType::Spell {
         s.players[p].graveyard += 1;
@@ -966,14 +981,14 @@ fn apply_play(s: &mut GameState, iid: Iid) {
             fire_spellboost(s, p, o, 1);
         }
         // 【自分がカードをプレイしたとき】は誘発待ちに入り、スペルの効果の後に解決する（docs/rules.md 12章 質問 30）
-        fire_ally_play(s, p, iid, as_card);
+        fire_ally_play(s, p, iid, as_card, enhanced);
         push_own_abilities(s, as_card, On::Spell, &ctx);
         return;
     }
     let b = s.new_board_card(as_card, Some(&h));
     let fanfare = board_abilities_on(&b, On::Fanfare);
     // 【自分がカードをプレイしたとき】は場に出たときより先に誘発待ちに入り、【ファンファーレ】の後に働く（docs/rules.md 12章の 30）
-    fire_ally_play(s, p, iid, as_card);
+    fire_ally_play(s, p, iid, as_card, enhanced);
     enter_board(s, p, b);
     push_abilities(s, &fanfare, &ctx);
 }

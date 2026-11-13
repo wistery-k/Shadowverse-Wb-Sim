@@ -375,7 +375,7 @@ const deckFiles = import.meta.glob<string>("../data/pools/azvaldt/decks/*/*.txt"
   import: "default",
   eager: true,
 });
-const DONE_ARCHETYPES = /^名前: (スペルW|アグロNi|ランプD|アミュレットB)（/m;
+const DONE_ARCHETYPES = /^名前: (スペルW|アグロNi|ランプD|アミュレットB|コンボE|海賊R)（/m;
 /** 能力定義が不要な行（tests/abilities-coverage.test.ts と同じ） */
 const STATIC_LINE = /^(【(守護|疾走|突進|必殺|ドレイン|潜伏|威圧|バリア|オーラ|土の印|カウントダウン_\d+)】|1ターンに\d回攻撃できる。)$/;
 
@@ -392,6 +392,8 @@ describe("前期のローテーション: 能力の定義", () => {
     expect(names.size).toBeGreaterThan(25);
     const tokens = ["マナリアの魔弾", "ソニック・フォー", "大いなる回帰", "ガーディアンゴーレム", "壮麗なる隼", "バット", "ゴースト"];
     tokens.push("天刀の深淵", "赤色流し", "大海のオルカ", "天書の深淵", "ホーリーファルコン");
+    tokens.push("天槍の深淵", "フェアリー", "森の神秘", "天剣の深淵", "戦慄の海賊旗", "黄金の靴", "黄金の杯", "輝く金貨");
+    tokens.push("黄金の小剣", "黄金の首飾り", "スティールナイト", "ナイト", "決意の輝竜・アーサー");
     const deckCards = [...names].map((n) => byName.get(n)!);
     const alts = deckCards.flatMap((c) => (c.specials ?? []).map((sp) => CARD.get(sp)).filter((c2) => c2 !== undefined));
     expect(alts.map((c) => c.name)).toEqual(

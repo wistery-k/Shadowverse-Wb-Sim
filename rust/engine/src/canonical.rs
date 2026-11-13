@@ -60,7 +60,7 @@ fn hand_canon(h: &HandCard) -> String {
             )
         }
     };
-    [
+    let s = [
         h.iid.to_string(),
         cid(h.card).into(),
         h.cost_mod.to_string(),
@@ -74,7 +74,13 @@ fn hand_canon(h: &HandCard) -> String {
         b(h.revealed).into(),
         drawn,
     ]
-    .join(":")
+    .join(":");
+    // 奥義ゲージのうち手札で数えた分（あるカードだけ足す）
+    if h.ougi != 0 {
+        format!("{s}:ougi{}", h.ougi)
+    } else {
+        s
+    }
 }
 
 fn board_canon(c: &OnBoard) -> String {
@@ -139,6 +145,11 @@ fn player_canon(p: &PlayerState) -> String {
         Some(t) => format!("{head},zero{t}"),
         None => head,
     };
+    // 【連携】で数える、場に出た自分のフォロワーの枚数（数えるときだけ足す）
+    let head = match p.followers_entered {
+        Some(n) => format!("{head},link{n}"),
+        None => head,
+    };
     let mut out = [
         head,
         format!(
@@ -159,14 +170,20 @@ fn player_canon(p: &PlayerState) -> String {
             join(
                 &p.crests,
                 |c| format!(
-                    "{}:{}:{}:{}:{}{}",
+                    "{}:{}:{}:{}:{}{}{}",
                     c.iid,
                     data().crests[c.crest as usize].id,
                     opt(c.countdown),
                     c.order,
                     once(&c.used_once),
                     // 信仰の信仰値（クレストには付けない）
-                    c.faith.map(|f| format!(":faith{f}")).unwrap_or_default()
+                    c.faith.map(|f| format!(":faith{f}")).unwrap_or_default(),
+                    // 信仰に付いた能力の数（あるときだけ）
+                    if c.stacks != 0 {
+                        format!(":stacks{}", c.stacks)
+                    } else {
+                        String::new()
+                    }
                 ),
                 ","
             )

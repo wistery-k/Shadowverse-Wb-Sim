@@ -435,6 +435,14 @@ pub enum ValueObj {
     },
     /// 【自分がカードをプレイしたとき】で、プレイしたカードの元のコスト
     PlayedCost,
+    /// -of
+    Neg {
+        of: Box<Value>,
+    },
+    /// この信仰に「自分の信仰は「…」を持つ」で付いた能力の数
+    FaithStacks,
+    /// これをプレイしたときに払ったコスト（Card::paid_cost のカードだけ）
+    PaidCost,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -483,6 +491,19 @@ pub enum Condition {
     CountAtLeast {
         of: Target,
         value: i32,
+    },
+    /// 【奥義】（10）・【解放奥義】（15）: これをプレイしたときの奥義ゲージが level 以上
+    Ougi {
+        level: i32,
+    },
+    /// 【連携_N】: このバトル中に場に出た自分のフォロワーの枚数が at_least 以上
+    Link {
+        at_least: i32,
+    },
+    /// value が eq と等しい
+    ValueEq {
+        value: Value,
+        eq: i32,
     },
     Not {
         cond: Box<Condition>,
@@ -587,6 +608,8 @@ pub enum Effect {
         #[serde(deserialize_with = "de_card")]
         card_id: CardIdx,
         count: Value,
+        #[serde(default, deserialize_with = "de_opt_slot")]
+        slot: Option<SlotId>,
     },
     Summon {
         #[serde(deserialize_with = "de_card")]
@@ -667,6 +690,11 @@ pub enum Effect {
         target: Target,
         amount: i32,
     },
+    /// 手札のカードのコストを cost にする
+    SetCost {
+        target: Target,
+        cost: i32,
+    },
     AddX {
         target: Target,
         amount: i32,
@@ -679,6 +707,10 @@ pub enum Effect {
         amount: PpAmount,
     },
     AddMaxPp {
+        amount: i32,
+    },
+    /// 自分のEPを amount 回復（上限は試合の始めの EP）
+    GainEp {
         amount: i32,
     },
     AddCombo {
@@ -720,6 +752,17 @@ pub enum Effect {
         crest_id: CrestIdx,
         amount: i32,
         then: Vec<Effect>,
+    },
+    /// 自分の信仰 crest_id は「…」を持つ（付いた回数を数える）
+    GrantFaith {
+        #[serde(deserialize_with = "de_crest")]
+        crest_id: CrestIdx,
+    },
+    /// 自分のデッキの filter に合うカードすべては +attack/+defense する
+    BuffDeck {
+        filter: CardFilter,
+        attack: i32,
+        defense: i32,
     },
     /// 相手のターン終了まで、自分のリーダーは「受ける1以上のダメージを0にする。」を持つ
     LeaderDamageZero {
@@ -787,10 +830,12 @@ impl Effect {
             Effect::Evolve { .. } => "Evolve",
             Effect::Spellboost { .. } => "Spellboost",
             Effect::CostChange { .. } => "CostChange",
+            Effect::SetCost { .. } => "SetCost",
             Effect::AddX { .. } => "AddX",
             Effect::Countdown { .. } => "Countdown",
             Effect::GainPp { .. } => "GainPp",
             Effect::AddMaxPp { .. } => "AddMaxPp",
+            Effect::GainEp { .. } => "GainEp",
             Effect::AddCombo { .. } => "AddCombo",
             Effect::AddGraveyard { .. } => "AddGraveyard",
             Effect::AddSigils { .. } => "AddSigils",
@@ -801,6 +846,8 @@ impl Effect {
             Effect::BanishCrests { .. } => "BanishCrests",
             Effect::AddFaith { .. } => "AddFaith",
             Effect::SpendFaith { .. } => "SpendFaith",
+            Effect::GrantFaith { .. } => "GrantFaith",
+            Effect::BuffDeck { .. } => "BuffDeck",
             Effect::LeaderDamageZero { .. } => "LeaderDamageZero",
             Effect::SetLeaderMaxHp { .. } => "SetLeaderMaxHp",
             Effect::AddLeaderMaxHp { .. } => "AddLeaderMaxHp",
@@ -819,8 +866,9 @@ pub enum Whose {
     Opponent,
 }
 
-/// 誘発。AllyPlay は自分が他のカードをプレイしたとき（filter はプレイしたカードの条件。コストは元のコスト）、
-/// TurnEndInHand は手札にある間の自分のターン終了時
+/// 誘発。AllyPlay は自分が他のカードをプレイしたとき（filter はプレイしたカードの条件。コストは元のコスト。
+/// enhanced なら【エンハンス】でプレイしたときだけ）、TurnEndInHand は手札にある間の自分のターン終了時、
+/// AllyEvolved は自分のフォロワーが進化したとき（超進化・効果による進化を含む）
 #[derive(Deserialize, Clone, Debug, PartialEq)]
 #[serde(
     tag = "on",
@@ -838,21 +886,34 @@ pub enum Trigger {
     Attack,
     Clash,
     TurnStart,
-    TurnEnd { whose: Whose },
-    AllyEnter { filter: Option<CardFilter> },
+    TurnEnd {
+        whose: Whose,
+    },
+    AllyEnter {
+        filter: Option<CardFilter>,
+    },
     Enter,
-    Act { cost: i32 },
+    Act {
+        cost: i32,
+    },
     AllyAct,
     Fused,
     AllyFuse,
     Spellboost,
     AllyLeaveInHand,
     Discarded,
-    AllyDestroyed { filter: Option<CardFilter> },
+    AllyDestroyed {
+        filter: Option<CardFilter>,
+    },
     LeaderHealed,
-    AllyPlay { filter: Option<CardFilter> },
+    AllyPlay {
+        filter: Option<CardFilter>,
+        #[serde(default)]
+        enhanced: bool,
+    },
     TurnEndInHand,
     AllyAmuletDestroyed,
+    AllyEvolved,
 }
 
 /// 誘発の種類（Trigger の on だけ）
@@ -882,6 +943,7 @@ pub enum On {
     AllyPlay,
     TurnEndInHand,
     AllyAmuletDestroyed,
+    AllyEvolved,
 }
 
 impl Trigger {
@@ -911,6 +973,7 @@ impl Trigger {
             Trigger::AllyPlay { .. } => On::AllyPlay,
             Trigger::TurnEndInHand => On::TurnEndInHand,
             Trigger::AllyAmuletDestroyed => On::AllyAmuletDestroyed,
+            Trigger::AllyEvolved => On::AllyEvolved,
         }
     }
 }
@@ -983,6 +1046,15 @@ pub struct Card {
     pub alt_play: Option<CardIdx>,
     /// デッキに入れると置かれる信仰（クレストの表の番号）
     pub faith: Option<CrestIdx>,
+    /// 能力に【奥義】【解放奥義】を持つ（手札で奥義ゲージを数える）
+    #[serde(default)]
+    pub ougi: bool,
+    /// 能力に【連携】を持つ（デッキに入れると、場に出た自分のフォロワーの枚数を数える）
+    #[serde(default)]
+    pub link: bool,
+    /// 能力が「これのコストがNなら」を見る（プレイしたときに払ったコストを覚える）
+    #[serde(default)]
+    pub paid_cost: bool,
 }
 
 impl Card {
@@ -1024,6 +1096,10 @@ pub struct Data {
     pub var_fused_kinds: VarId,
     /// 【自分がカードをプレイしたとき】の、プレイしたカードの元のコスト
     pub var_played_cost: VarId,
+    /// これをプレイしたときに払ったコスト（Card::paid_cost のカードだけ）
+    pub var_paid_cost: VarId,
+    /// これをプレイしたときの奥義ゲージ（Card::ougi のカードだけ）
+    pub var_ougi: VarId,
 }
 
 impl Data {
@@ -1122,6 +1198,8 @@ pub fn load(json: &str) -> Data {
     }
     // スターターの能力の後に名前を付ける（スターターの変数の番号を変えないため）
     let var_played_cost = var_id_now("playedCost");
+    let var_paid_cost = var_id_now("paidCost");
+    let var_ougi = var_id_now("ougi");
     let apocalypse_deck = raw
         .apocalypse_deck
         .iter()
@@ -1156,6 +1234,8 @@ pub fn load(json: &str) -> Data {
         var_fused_cost,
         var_fused_kinds,
         var_played_cost,
+        var_paid_cost,
+        var_ougi,
     }
 }
 

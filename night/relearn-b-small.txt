@@ -9,14 +9,14 @@ td train --model data/value-net.json --data @/s-{1..2}.jsonl.gz --out @/n.json -
 td prune --model @/n.json --data @/s-{1..2}.jsonl.gz --out @/np.json --est 20
 td attr --model @/np.json --out @/npa.json --keepA 0 --est 20
 
-td train --model @/net0.json --data @/s-{1..2}.jsonl.gz --out @/i.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 60
-td prune --model @/i.json --data @/s-{1..2}.jsonl.gz --out @/ip.json --est 20
-td attr --model @/ip.json --out @/ipa.json --keepA 0 --est 20
-
 yardstick --ref classic --opts '{}' --games 25 --start 0 --label B小-弱い相手
 yardstick --ref strong --opts '{}' --games 25 --start 0 --label B小-強い相手
 profile --games 5
 yardstick --ref classic --opts '{"valueNet":false,"opponentSearch":null,"samples":3,"planCandidates":3,"oppHandSamples":1,"oppHandCommon":false}' --games 25 --start 0 --label B小-確かめ
+
+td train --model @/net0.json --data @/s-{1..2}.jsonl.gz --out @/i.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 60
+td prune --model @/i.json --data @/s-{1..2}.jsonl.gz --out @/ip.json --est 20
+td attr --model @/ip.json --out @/ipa.json --keepA 0 --est 20
 
 compare 100 '{"valueNet":"@/ipa.json"}' '{"valueNet":"@/npa.json"}' 0 --label B小-入力 --est 0.6
 pick --compare B小-入力 --pass @/ipa.json --fail @/npa.json --out @/q2.json
