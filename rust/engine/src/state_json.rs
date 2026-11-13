@@ -89,17 +89,22 @@ fn dsl_index() -> &'static DslIndex {
             effect_by_key: HashMap::new(),
             ability_by_key: HashMap::new(),
         };
-        if let Some(Json::Obj(items)) = raw.get("cardAbilities") {
-            for (id, v) in items {
-                let c = d.card_idx(id) as usize;
-                walk_abilities(&d.abilities[c].abilities, v.get("abilities"), &mut ix);
+        // 前期のローテーションの能力（pool*）はスターターの後に見る（同じ形の効果はスターターのものを先に覚える）
+        for key in ["cardAbilities", "poolCardAbilities"] {
+            if let Some(Json::Obj(items)) = raw.get(key) {
+                for (id, v) in items {
+                    let c = d.card_idx(id) as usize;
+                    walk_abilities(&d.abilities[c].abilities, v.get("abilities"), &mut ix);
+                }
             }
         }
-        if let Some(Json::Obj(items)) = raw.get("crestAbilities") {
-            for (id, v) in items {
-                let n = d.crests.iter().position(|c| &c.id == id).expect("クレスト");
-                if let Some(ca) = &d.crest_abilities[n] {
-                    walk_abilities(&ca.abilities, v.get("abilities"), &mut ix);
+        for key in ["crestAbilities", "poolCrestAbilities"] {
+            if let Some(Json::Obj(items)) = raw.get(key) {
+                for (id, v) in items {
+                    let n = d.crests.iter().position(|c| &c.id == id).expect("クレスト");
+                    if let Some(ca) = &d.crest_abilities[n] {
+                        walk_abilities(&ca.abilities, v.get("abilities"), &mut ix);
+                    }
                 }
             }
         }

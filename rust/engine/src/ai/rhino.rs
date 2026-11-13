@@ -555,7 +555,7 @@ fn effects_may_hit_own_leader(effs: &[crate::data::Effect], depth: u32) -> bool 
                 .is_none_or(|e| hits(e.1, slots)),
             Target::Union { of } => of.iter().any(|x| hits(x, slots)),
             Target::MaxAttack { of } => hits(of, slots),
-            Target::Event => true,
+            Target::Event | Target::LowestHpLeaders => true,
         }
     }
     fn card_risky(c: crate::data::CardIdx, depth: u32) -> bool {
