@@ -3,6 +3,7 @@
 # PC（svwb-docker、28 スレッド）で 2 晩ほど。止まっても resume で続きから（作ったファイルのあるジョブは飛ばす）。
 # --est は PC の見込み（relearn9 の時間と、2026-11-13 にクラウド環境で小さく通した night/relearn-b-small.txt の比から。docs/ai-notes/13-2026-11-13.md「学び直しの流れを夜のキュー 1 本にする」）。
 # 入力ありの学習はメモリのピークが 12〜13GB ほど（入力なしは relearn9 で 7.8GB）。回す前に PC のコンテナで 16GB ほど使えるか確かめる。
+# 確かめ方: コンテナで free -g（compose.yaml はメモリの上限を付けていないので、使えるのは WSL2 の VM と同じ。PC は 32GB で、WSL2 の既定はその半分の 16GB ほど。15GB を切っていたら Windows の .wslconfig で増やす）。
 # 足りずに落ちても、それを読まないジョブ（問い 3）は回る
 # 朝: finish --commit で compare の行を台帳に足す。モデル（@/ の *.json）は pack-run で共有フォルダの data/models/relearn-b/ へ
 
