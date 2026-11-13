@@ -1,7 +1,7 @@
 //! 探索 AI の設定 A と B を対戦させる（TypeScript 版 scripts/compare-main.ts。npm run compare と同じ試合・同じ出力）。
 //!
 //!   svwb compare <試合数> '<Aの設定JSON>' '<Bの設定JSON>' [最初の試合番号] [Bのデッキ名] [--no-mirror] [--decks <7 つのデッキ>] [--replays <ファイル>]
-//!                [--label <名前>] [--no-ledger]
+//!                [--with <デッキ名>] [--label <名前>] [--no-ledger]
 //!
 //! 同じデッキの組で席とデッキを入れ替えて 2 試合ずつ行い、A の勝率とデッキごとの A の勝率を出す。
 //! 2 試合の組ごとの A の勝ち数（2・1・0）の数と、組のばらつきから求めた標準誤差も出す。
@@ -16,6 +16,9 @@
 //! npm run dev の「リプレイ検索」タブで読む）。打つ手は変わらない。
 //! 回すたびに、結果を実験の台帳 `docs/ledger.jsonl` に 1 行足す（runner/ledger.rs。`--label <名前>` で名前を付け、`--no-ledger` で書かない）。
 //! 試合数 0 なら設定とデッキを読むだけで終わる。
+//! `--with <デッキ名>` なら、そのデッキの絡む組（A か B のどちらかがそのデッキ。49 組のうち 13 組）だけを打つ。試合番号 k は
+//! 「そのデッキの絡む k 番目の試合番号」（with_game）で、組の 2 試合（鏡）はそのまま。見ていないデッキを渡したときの落ち方を、
+//! そのデッキの絡む試合だけで測る用（docs/STATE.md の案 E）。
 
 use super::deck_compare::read_deck;
 use super::ledger;
@@ -37,6 +40,19 @@ pub fn compare_pair(decks: &[&'static Deck], g: u32, swap: bool) -> (&'static De
     } else {
         (decks[i], decks[j])
     }
+}
+
+/// --with: デッキ with の絡む（A か B のどちらかがそのデッキの）k 番目の試合番号。compare_pair は試合番号 49 ごとに同じ組を繰り返す
+pub fn with_game(decks: &[&'static Deck], with: &str, k: u32) -> u32 {
+    let table: Vec<u32> = (0..49)
+        .filter(|&g| {
+            let (a, b) = compare_pair(decks, g, false);
+            a.name == with || b.name == with
+        })
+        .collect();
+    assert!(!table.is_empty(), "{with} の絡む組がありません");
+    let n = table.len() as u32;
+    49 * (k / n) + table[(k % n) as usize]
 }
 
 /// 試合番号 g のシード。mirror なら組の 2 試合で同じ
@@ -191,6 +207,8 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         );
         argv.drain(i..i + 2);
     }
+    // --with: そのデッキの絡む組だけを打つ
+    let with = ledger::take_value(&mut argv, "--with")?;
     let mut deck_list = None;
     if let Some(i) = argv.iter().position(|s| s == "--decks") {
         deck_list = Some(
@@ -225,10 +243,30 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             return Err(format!("不明なデッキ: {v}"));
         }
     }
+    if let Some(w) = &with {
+        if !decks.iter().any(|d| &d.name == w) {
+            return Err(format!("--with: 不明なデッキ: {w}"));
+        }
+        if vs.is_some() {
+            return Err("--with と B のデッキは一緒に使えません".into());
+        }
+    }
+    let game_of = |k: u32| match &with {
+        Some(w) => with_game(&decks, w, k),
+        None => k,
+    };
     let tasks: Vec<(u32, bool)> = (0..games)
-        .flat_map(|k| [(start + k, false), (start + k, true)])
+        .flat_map(|k| [(game_of(start + k), false), (game_of(start + k), true)])
         .filter(|&(g, swap)| vs.is_none_or(|v| &compare_pair(&decks, g, swap).1.name == v))
         .collect();
+    if let (Some(w), Some(first), Some(last)) = (&with, tasks.first(), tasks.last()) {
+        println!(
+            "{w} の絡む組だけ（{} 組、試合番号 {}〜{}）",
+            tasks.len() / 2,
+            first.0,
+            last.0
+        );
+    }
     // 0 試合なら設定とデッキを読むだけ（夜のキュー npm run night が、回す前に書き間違いを見つけるのに使う）
     if tasks.is_empty() {
         println!("試合がありません（設定とデッキは読めました）");
@@ -297,6 +335,12 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                     }),
                 ),
                 (
+                    "with".into(),
+                    with.as_ref().map_or(crate::json::Json::Null, |w| {
+                        crate::json::Json::Str(w.clone())
+                    }),
+                ),
+                (
                     "replays".into(),
                     replays_path.as_ref().map_or(crate::json::Json::Null, |p| {
                         crate::json::Json::Str(p.clone())
@@ -357,6 +401,28 @@ mod tests {
             assert_eq!(seed2, g * 7 + 1);
             assert_eq!(compare_setup(&decks, g, false, false).2, g * 7 + 2);
         }
+    }
+
+    #[test]
+    fn with_game_lists_pairs_with_the_deck() {
+        // --with: 49 組のうち、そのデッキの絡む 13 組を順に回す（同じ番号が 2 回出ない）
+        let decks = compare_decks();
+        let name = &decks[5].name;
+        let gs: Vec<u32> = (0..39).map(|k| with_game(&decks, name, k)).collect();
+        assert!(gs.windows(2).all(|w| w[0] < w[1]));
+        for &g in &gs {
+            let (a, b) = compare_pair(&decks, g, false);
+            assert!(&a.name == name || &b.name == name);
+        }
+        assert_eq!(gs[13], gs[0] + 49);
+        let all: Vec<u32> = (0..49)
+            .filter(|&g| {
+                let (a, b) = compare_pair(&decks, g, false);
+                &a.name == name || &b.name == name
+            })
+            .collect();
+        assert_eq!(all.len(), 13);
+        assert_eq!(&gs[..13], &all[..]);
     }
 
     #[test]

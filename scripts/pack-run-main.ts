@@ -105,7 +105,8 @@ export function skipReason(file: string): string | null {
 export function classify(file: string, head: string): Kind {
   const base = file.endsWith(".gz") ? file.slice(0, -3) : file;
   const firstLine = head.split("\n", 1)[0] ?? "";
-  if (base.endsWith(".jsonl") && /"samples"\s*:/.test(firstLine)) return "selfplay";
+  // svwb td selfplay は先頭の行に入力の並び（{"tdLayout": …}）を書く（2026-11-13 から）
+  if (base.endsWith(".jsonl") && (/"samples"\s*:/.test(firstLine) || /^\s*\{\s*"tdLayout"\s*:/.test(firstLine))) return "selfplay";
   if (base.endsWith(".json") && /^\s*\{\s*"kind"\s*:\s*"(td-value-net|potential-net)"/.test(head)) return "models";
   return "logs";
 }

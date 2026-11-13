@@ -308,6 +308,7 @@ npm run night -- status | stop [--now] | resume --yes | finish --commit | list
 
 PC で対戦を回す夜のキュー。ジョブのファイルは 1 行 1 ジョブで、svwb の `compare`・`yardstick`・`profile`・`misses`・`survey` と同じ形（`--label` が要る）。
 5〜10 分の区切りごとに結果を回のフォルダ（`~/svwb-data/night/<名前>/`）に残し、電源が切れても続きから回る。朝の `finish` がジョブごとに 1 行にまとめて台帳に足す。
+自己対戦から学習・判定までの学び直しの流れ（`td selfplay`・`beam-gap`・`td`・`potential`・`pick` のジョブ）も並べられる（`night/relearn-b.txt`）。
 物差し 2 つと速さと見落とし問題集の定例は `night/routine.txt`。流れ・引数・止まり方・台帳のコミットのしかたは [night.md](night.md)（`npm run night -- help` にも引数の一覧）。
 
 ## profile

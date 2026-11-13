@@ -1,0 +1,31 @@
+# 案 B の流れを小さく試す（night/relearn-b.txt と同じ並びで、試合数だけ小さくしたもの。Claude のクラウド環境の 4 スレッドで 30 分ほど）。
+# 流し方: npm run night -- start night/relearn-b-small.txt --yes --name relearn-b-small --foreground --until +2h
+# 見込みの --est はクラウド環境（4 スレッド）のもの。結果の数字（勝率）は試合が少ないので見ない（流れが通るか・時間・ファイルの大きさを見る）
+
+td extend --model data/value-net.json --out @/net0.json --est 5
+td selfplay --model @/net0.json --games 200 --start 6390000 --chunk 100 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --out @/s-{k}.jsonl.gz --est 1.5
+
+td train --model data/value-net.json --data @/s-{1..2}.jsonl.gz --out @/n.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 60
+td prune --model @/n.json --data @/s-{1..2}.jsonl.gz --out @/np.json --est 20
+td attr --model @/np.json --out @/npa.json --keepA 0 --est 20
+
+td train --model @/net0.json --data @/s-{1..2}.jsonl.gz --out @/i.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 60
+td prune --model @/i.json --data @/s-{1..2}.jsonl.gz --out @/ip.json --est 20
+td attr --model @/ip.json --out @/ipa.json --keepA 0 --est 20
+
+compare 100 '{"valueNet":"@/ipa.json"}' '{"valueNet":"@/npa.json"}' 0 --label B小-入力 --est 0.6
+pick --compare B小-入力 --pass @/ipa.json --fail @/npa.json --out @/q2.json
+
+beam-gap --games 40 --from 1000 --chunk 20 --ref '{"beamWidth":4096,"potentialNet":null,"valueNet":"@/q2.json"}' --variants '{"w32":{"beamWidth":32,"potentialNet":null,"valueNet":"@/q2.json"}}' --sample 100 --inputs @/pot-{k}.jsonl --out @/pot-{k}-rows.jsonl --est 2
+potential train --data @/pot-{1..2}.jsonl --valid 1036-1039 --out @/q2pot.json --est 30
+compare 100 '{"valueNet":"@/q2.json","potentialNet":"@/q2pot.json"}' '{}' 0 --label B小-学び直し --est 0.6
+
+td train --model data/value-net.json --data @/s-{1..2}.jsonl.gz --excludeDecks ミッドレンジナイトメア --out @/x.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 60
+td prune --model @/x.json --data @/s-{1..2}.jsonl.gz --excludeDecks ミッドレンジナイトメア --out @/xp.json --est 20
+td attr --model @/xp.json --out @/xpa.json --keepA 0 --est 20
+compare 50 '{"valueNet":"@/xpa.json"}' '{"valueNet":"@/npa.json"}' 0 --with ミッドレンジナイトメア --label B小-外す --est 0.6
+
+td train --model @/xpa.json --data @/s-1.jsonl.gz --onlyDecks ミッドレンジナイトメア --out @/y.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 30
+td prune --model @/y.json --data @/s-{1..2}.jsonl.gz --out @/yp.json --est 20
+td attr --model @/yp.json --out @/ypa.json --keepA 0 --est 20
+compare 50 '{"valueNet":"@/ypa.json"}' '{"valueNet":"@/npa.json"}' 0 --with ミッドレンジナイトメア --label B小-学び足し --est 0.6

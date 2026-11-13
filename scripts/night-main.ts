@@ -8,7 +8,10 @@
 //   npm run night -- finish [名前] [--commit] [--pack] [--ledger 台帳]
 //   npm run night -- list
 //
-// - ジョブのファイルは 1 行 1 ジョブで、svwb のコマンドと同じ形（compare・yardstick・profile・misses）。# から行の終わりまでは書き添え
+// - ジョブのファイルは 1 行 1 ジョブで、svwb のコマンドと同じ形（compare・yardstick・profile・misses・survey）。# から行の終わりまでは書き添え
+// - 学び直しの流れ（docs/night.md「学び直しの流れ」）: td selfplay・beam-gap（--chunk 試合ずつ {k} を入れたファイルに書く）、
+//   td・potential（TypeScript の学習。--out のファイルを 1 つ作る）、pick（前の compare の結果で、決めておいた線を越えたかでファイルを選ぶ）。
+//   @/ は回のフォルダ、{1..20} は 1,2,…,20 に開く。作ったファイルがあれば済んだものとし、前のジョブの作るファイルが無ければ失敗にする
 // - 回は ~/svwb-data/night/<名前>/ に置く（環境変数 SVWB_NIGHT_DIR か --root で替えられる）。区切りが済むたびに印を書き、
 //   やり直したときは済んだ区切りを飛ばす。電源が切れても、失うのは回していた区切りだけ
 // - start・resume は、組み立てた svwb を回のフォルダに写し、セッションから切り離した worker を立てて、すぐに戻る。
@@ -22,9 +25,13 @@ import {
   chmodSync,
   closeSync,
   copyFileSync,
+  cpSync,
+  createReadStream,
+  createWriteStream,
   existsSync,
   fsyncSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readFileSync,
   readdirSync,
@@ -32,9 +39,11 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { availableParallelism, homedir, hostname } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { availableParallelism, homedir, hostname, tmpdir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createGzip } from "node:zlib";
 import { DEFAULT_LEDGER, canonical, markdownTable, parseLedger, type MissesRow, type RunRow, type SurveyRow } from "./ledger-main.ts";
 
 /** リポジトリの根 */
@@ -46,13 +55,20 @@ const HARD_GRACE = 15 * 60;
 // ---------------------------------------------------------------- ジョブのファイル
 
 export type JobSpec =
-  | { kind: "compare"; a: string; b: string; vs: string | null; noMirror: boolean; decks: string | null }
+  | { kind: "compare"; a: string; b: string; vs: string | null; noMirror: boolean; decks: string | null; with: string | null }
   | { kind: "yardstick"; ref: "classic" | "strong"; opts: string }
   | { kind: "profile"; opts: string; rhino: boolean }
   /** 見落とし問題集（docs/misses.md）。games は 1 問を打つ回数（--trials） */
   | { kind: "misses"; opts: string; seed: number }
   /** 候補の打ち比べ調査（docs/survey.md）。games は自己対戦の試合の数（1 つの番号で 1 試合） */
-  | { kind: "survey"; rate: number; m: number; extra: number; confirm: number; flag: number; batch: number };
+  | { kind: "survey"; rate: number; m: number; extra: number; confirm: number; flag: number; batch: number }
+  /** データを作る svwb（td selfplay・beam-gap）。chunk 試合ずつ、out（{k} に区切りの番号を入れる）に書く。out が .gz なら書いた後に gzip する。
+   * args はそのほかの引数（そのまま渡す。{k} は区切りの番号にする） */
+  | { kind: "data"; cmd: string[]; startFlag: "--start" | "--from"; outFlag: "--out" | "--inputs"; out: string; chunk: number; args: string[] }
+  /** TypeScript の学習（npm run td・npm run potential）。out を 1 つ作る。args は --out も含めた全部 */
+  | { kind: "node"; tool: "td" | "potential"; args: string[]; out: string }
+  /** 前の compare（台帳の名前 from）の A の勝率 − 50% が 2 SE を越えたら pass、越えなければ fail のファイルを out に写す */
+  | { kind: "pick"; from: string; pass: string; fail: string; out: string };
 
 export interface Job {
   /** ファイルの中のジョブの番号（1 から） */
@@ -64,7 +80,7 @@ export interface Job {
   /** 試合番号の数（1 つの番号で席とデッキを入れ替えて 2 試合。survey は 1 試合）と、最初の番号。misses は 1 問を打つ回数と 0 */
   games: number;
   start: number;
-  /** --est: 1 試合の見込みの秒（回すマシン・並列数で。キューだけが読む） */
+  /** --est: 1 試合の見込みの秒（回すマシン・並列数で。キューだけが読む）。td・potential は全体の秒 */
   est: number | null;
   spec: JobSpec;
 }
@@ -170,7 +186,7 @@ export function parseJob(line: string, index: number): Job {
   };
   const estText = take("--est");
   const est = estText === null ? null : Number(estText);
-  if (est !== null && !(est > 0)) throw new Error(`--est は 1 試合の秒（正の数）: ${estText}`);
+  if (est !== null && !(est > 0)) throw new Error(`--est は見込みの秒（正の数）: ${estText}`);
   const noUnknown = () => {
     const bad = rest.filter((x) => x.startsWith("--"));
     if (bad.length > 0) throw new Error(`知らない引数: ${bad.join(" ")}`);
@@ -184,6 +200,7 @@ export function parseJob(line: string, index: number): Job {
       if (!label) throw new Error("--label で台帳の名前を付けます（区切りの結果を後で足し合わせるため）");
       const noMirror = flag("--no-mirror");
       const decks = take("--decks");
+      const withDeck = take("--with");
       noUnknown();
       const [g, a = "{}", b = "{}", s = "0", vs, ...extra] = rest;
       if (g === undefined) throw new Error("compare の試合数（1 つ目の引数）がありません");
@@ -195,7 +212,7 @@ export function parseJob(line: string, index: number): Job {
         games: intOf(g, "試合数", 1),
         start: intOf(s, "最初の試合番号", 0),
         est,
-        spec: { kind, a: jsonObject(a, "A の設定"), b: jsonObject(b, "B の設定"), vs: vs === undefined || vs === "" ? null : vs, noMirror, decks },
+        spec: { kind, a: jsonObject(a, "A の設定"), b: jsonObject(b, "B の設定"), vs: vs === undefined || vs === "" ? null : vs, noMirror, decks, with: withDeck },
       };
     }
     case "yardstick": {
@@ -277,10 +294,110 @@ export function parseJob(line: string, index: number): Job {
       if (rest.length > 0) throw new Error(`知らない引数: ${rest.join(" ")}`);
       return { index, line: text, label, games, start, est, spec: { kind, rate, m, extra, confirm, flag: flagPts, batch } };
     }
+    case "beam-gap":
+    case "td":
+    case "potential": {
+      for (let i = 0; i < rest.length; i++) rest[i] = expandBraces(rest[i] ?? "");
+      if (kind === "beam-gap" || rest[0] === "selfplay") {
+        // データを作る svwb。区切りの大きさは --chunk で決める（後のジョブがファイルの名前で読むので、時間では決めない）
+        const selfplay = kind === "td";
+        if (selfplay) rest.splice(0, 1);
+        const startFlag = selfplay ? "--start" : "--from";
+        const outFlag = selfplay ? "--out" : "--inputs";
+        refuse(["--positions", "--refFrom"], "キューではデータを作るときだけ");
+        const label = take("--label") ?? "";
+        const gamesText = take("--games");
+        if (gamesText === null) throw new Error("--games で試合数を書きます");
+        const games = intOf(gamesText, "--games", 1);
+        const start = intOf(take(startFlag) ?? "0", startFlag, 0);
+        const chunkText = take("--chunk");
+        if (chunkText === null) throw new Error("--chunk で 1 つのファイルの試合数を書きます");
+        const chunk = intOf(chunkText, "--chunk", 1);
+        const out = take(outFlag);
+        if (out === null || !out.includes("{k}")) throw new Error(`${outFlag} は {k}（区切りの番号）を入れたファイル（例: @/s-{k}.jsonl.gz）`);
+        if (est === null) throw new Error("--est で 1 試合の見込みの秒（回すマシン・並列数で）を書きます");
+        const cmd = selfplay ? ["td", "selfplay"] : ["beam-gap"];
+        return { index, line: text, label, games, start, est, spec: { kind: "data", cmd, startFlag, outFlag, out, chunk, args: [...rest] } };
+      }
+      const tool = kind === "potential" ? "potential" : "td";
+      const label = take("--label") ?? "";
+      const sub = rest[0];
+      if (sub === undefined || sub.startsWith("--")) throw new Error(`${tool} のコマンド（train 等）がありません`);
+      const i = rest.indexOf("--out");
+      const out = i < 0 ? undefined : rest[i + 1];
+      if (out === undefined) throw new Error("--out で作るファイルを書きます（そのファイルがあれば済んだものとする）");
+      if (rest.indexOf("--out", i + 1) >= 0) throw new Error("--out が 2 回あります");
+      if (est === null) throw new Error("--est で全体の見込みの秒（回すマシンで）を書きます");
+      return { index, line: text, label, games: 1, start: 0, est, spec: { kind: "node", tool, args: [...rest], out } };
+    }
+    case "pick": {
+      const label = take("--label") ?? "";
+      const from = take("--compare");
+      const pass = take("--pass");
+      const fail = take("--fail");
+      const out = take("--out");
+      if (from === null || pass === null || fail === null || out === null) {
+        throw new Error("pick は --compare <前の compare の台帳の名前> --pass <越えたときのファイル> --fail <越えないときのファイル> --out <写す先>");
+      }
+      noUnknown();
+      if (rest.length > 0) throw new Error(`知らない引数: ${rest.join(" ")}`);
+      return { index, line: text, label, games: 1, start: 0, est: est ?? 1, spec: { kind: "pick", from, pass, fail, out } };
+    }
     default:
-      throw new Error(`ジョブは compare・yardstick・profile・misses・survey のどれか: ${kind ?? "（空）"}`);
+      throw new Error(`ジョブは compare・yardstick・profile・misses・survey・td・beam-gap・potential・pick のどれか: ${kind ?? "（空）"}`);
   }
 }
+
+/** 語の中の {a..b} を a,a+1,…,b のカンマ区切りに開く（--data に並べる用。カンマで区切った 1 つに 1 つまで） */
+export function expandBraces(word: string): string {
+  return word
+    .split(",")
+    .map((part) => {
+      const m = /^(.*)\{(\d+)\.\.(\d+)\}(.*)$/.exec(part);
+      if (!m) return part;
+      const lo = Number(m[2]);
+      const hi = Number(m[3]);
+      if (hi < lo) throw new Error(`{a..b} は a ≤ b: ${part}`);
+      return Array.from({ length: hi - lo + 1 }, (_, i) => `${m[1]}${lo + i}${m[4]}`).join(",");
+    })
+    .join(",");
+}
+
+/** データを作るジョブの区切りの大きさ（chunkJob と同じく、大きさをそろえる） */
+function dataChunkSize(job: Job, chunk: number): number {
+  return Math.ceil(job.games / Math.ceil(job.games / chunk));
+}
+
+/** ジョブが作る回のフォルダのファイル（@/ の形。データを作るジョブは区切りの番号の順） */
+export function jobProducts(job: Job): string[] {
+  const s = job.spec;
+  if (s.kind === "data") {
+    const n = Math.ceil(job.games / dataChunkSize(job, s.chunk));
+    return Array.from({ length: n }, (_, i) => s.out.split("{k}").join(String(i + 1)));
+  }
+  return s.kind === "node" || s.kind === "pick" ? [s.out] : [];
+}
+
+/** ジョブが読む回のフォルダのファイル（@/ の形。設定の JSON の中も見る） */
+export function jobInputs(job: Job): string[] {
+  const s = job.spec;
+  const words =
+    s.kind === "compare"
+      ? [s.a, s.b]
+      : s.kind === "yardstick" || s.kind === "profile" || s.kind === "misses"
+        ? [s.opts]
+        : s.kind === "data"
+          ? s.args.filter((a) => !a.includes("{k}"))
+          : s.kind === "node"
+            ? s.args.filter((_, i) => s.args[i - 1] !== "--out")
+            : s.kind === "pick"
+              ? [s.pass, s.fail]
+              : [];
+  return [...new Set(words.flatMap((w) => w.match(/@\/[^\s",]+/g) ?? []))];
+}
+
+/** @/ を回のフォルダにする */
+export const atDir = (word: string, dir: string): string => word.split("@/").join(`${dir}/`);
 
 /** ジョブのファイルを読む（空の行と # で始まる行は飛ばす） */
 export function parseJobs(text: string): Job[] {
@@ -295,13 +412,47 @@ export function parseJobs(text: string): Job[] {
     }
   });
   if (jobs.length === 0) throw new Error("ジョブがありません");
+  // 回のフォルダのファイル（@/）は、前のジョブが作るものだけを読む（書き間違いを回す前に見つける）
+  const made = new Set<string>();
+  for (const job of jobs) {
+    for (const f of jobInputs(job)) if (!made.has(f)) throw new Error(`ジョブ ${job.index}（${job.line.slice(0, 40)}…）: ${f} を作るジョブが前にありません`);
+    const s = job.spec;
+    if (s.kind === "pick" && jobs.filter((j) => j.index < job.index && j.spec.kind === "compare" && j.label === s.from).length !== 1) {
+      throw new Error(`ジョブ ${job.index}: 前に台帳の名前 ${s.from} の compare が 1 つだけあるようにします`);
+    }
+    for (const f of jobProducts(job)) {
+      if (made.has(f)) throw new Error(`ジョブ ${job.index}: ${f} を作るジョブが 2 つあります`);
+      made.add(f);
+    }
+  }
   return jobs;
 }
 
-/** 試合番号 first から count 個を回す svwb の引数（dir は profile の結果を書く回のフォルダ） */
+/** データを作るジョブの、試合番号 first からの区切りが書くファイル（回のフォルダの道）と、svwb が書く途中のファイル */
+export function dataProduct(job: Job, first: number, dir: string): { file: string; tmp: string; k: number } {
+  const s = job.spec;
+  if (s.kind !== "data") throw new Error("データを作るジョブではありません");
+  const k = Math.floor((first - job.start) / dataChunkSize(job, s.chunk)) + 1;
+  const file = atDir(s.out.split("{k}").join(String(k)), dir);
+  return { file, tmp: file.endsWith(".gz") ? `${file.slice(0, -3)}.tmp` : `${file}.tmp`, k };
+}
+
+/** 試合番号 first から count 個を回す svwb の引数（dir は回のフォルダ。@/ をここにする）。td・potential は npm run td 等の引数 */
 export function jobArgv(job: Job, first: number, count: number, dir: string): string[] {
+  return jobArgvRaw(job, first, count, dir).map((a) => atDir(a, dir));
+}
+
+function jobArgvRaw(job: Job, first: number, count: number, dir: string): string[] {
   const s = job.spec;
   switch (s.kind) {
+    case "data": {
+      const { tmp, k } = dataProduct(job, first, dir);
+      return [...s.cmd, "--games", String(count), s.startFlag, String(first), ...s.args.map((a) => a.split("{k}").join(String(k))), s.outFlag, tmp];
+    }
+    case "node":
+      return [s.tool, ...s.args.map((a, i) => (s.args[i - 1] === "--out" ? `${a}.tmp` : a))];
+    case "pick":
+      return ["pick", "--compare", s.from, "--pass", s.pass, "--fail", s.fail, "--out", s.out];
     case "compare":
       return [
         "compare",
@@ -312,6 +463,7 @@ export function jobArgv(job: Job, first: number, count: number, dir: string): st
         ...(s.vs === null ? [] : [s.vs]),
         ...(s.noMirror ? ["--no-mirror"] : []),
         ...(s.decks === null ? [] : ["--decks", s.decks]),
+        ...(s.with === null ? [] : ["--with", s.with]),
         "--label",
         job.label,
       ];
@@ -367,8 +519,11 @@ export function surveyFile(dir: string, job: Job): string {
 /** count（区切りの大きさ）が何試合か。misses は「全部の問を 1 回ずつ」を 1 と数える（見込みの 1 試合の秒も、その 1 回の秒）。
  * survey は 1 つの番号で 1 試合（見込みの 1 試合の秒は、その試合から取った局面の打ち比べを含む） */
 export function unitsOf(job: Job, count: number): number {
-  return job.spec.kind === "misses" || job.spec.kind === "survey" ? count : 2 * count;
+  return job.spec.kind === "compare" || job.spec.kind === "yardstick" || job.spec.kind === "profile" ? 2 * count : count;
 }
+
+/** 試合を打たないジョブ（td・potential・pick。区切りは 1 つで、見込みは全体の秒） */
+const isStep = (job: Job): boolean => job.spec.kind === "node" || job.spec.kind === "pick";
 
 /** survey の既定（docs/survey.md）と違う設定だけを並べる */
 function surveyOpts(s: Extract<JobSpec, { kind: "survey" }>): string {
@@ -382,10 +537,13 @@ function surveyOpts(s: Extract<JobSpec, { kind: "survey" }>): string {
 /** ジョブの短い名前（表に出す） */
 export function jobTitle(job: Job): string {
   const s = job.spec;
-  if (s.kind === "compare") return `compare A ${s.a} 対 B ${s.b}${s.vs ? `（B は ${s.vs}）` : ""}${s.noMirror ? "（鏡なし）" : ""}`;
+  if (s.kind === "compare") return `compare A ${s.a} 対 B ${s.b}${s.vs ? `（B は ${s.vs}）` : ""}${s.noMirror ? "（鏡なし）" : ""}${s.with ? `（${s.with} の絡む組だけ）` : ""}`;
   if (s.kind === "yardstick") return `yardstick ${s.ref}${s.opts === "{}" ? "" : ` ${s.opts}`}`;
   if (s.kind === "misses") return `misses（見落とし問題集）${s.opts === "{}" ? "" : ` ${s.opts}`}`;
   if (s.kind === "survey") return `survey（候補の打ち比べ）${surveyOpts(s) === "" ? "" : ` ${surveyOpts(s)}`}`;
+  if (s.kind === "data") return `${s.cmd.join(" ")} → ${s.out}`;
+  if (s.kind === "node") return `${s.tool} ${s.args[0] ?? ""} → ${s.out}`;
+  if (s.kind === "pick") return `pick（${s.from} が線を越えたら ${s.pass}、越えなければ ${s.fail}）→ ${s.out}`;
   return `profile（速さ）${s.opts === "{}" ? "" : ` ${s.opts}`}${s.rhino ? " --rhino" : ""}`;
 }
 
@@ -422,6 +580,7 @@ function sameComparison(job: Job, r: RunRow): boolean {
       canonical(r.b) === canonical(JSON.parse(s.b)) &&
       (r.vs ?? null) === s.vs &&
       r.mirror === !s.noMirror &&
+      (r.with ?? null) === s.with &&
       (s.decks === null) === (r.decks.length === 7 && !r.cmd.includes("--decks"))
     );
   }
@@ -457,6 +616,8 @@ export function estimate(job: Job, runs: RunRow[], machine: string, threads: num
   const sp = SPEEDS[machine] ?? SPEEDS.default;
   if (!sp) throw new Error("決めておいた速さがありません");
   const s = job.spec;
+  // データを作るジョブ・td・potential は --est が要る（ジョブの行を読むときに確かめた）。pick はすぐ済む
+  if (s.kind === "data" || s.kind === "node" || s.kind === "pick") return { perGame: 1, source: "決めた値" };
   const key: SpeedKey = s.kind === "yardstick" ? s.ref : s.kind;
   if (s.kind === "survey") {
     // 決めておいた値は既定の設定（docs/survey.md）のもの。局面の割合には比べて、ほかの設定の違いは見ない
@@ -479,7 +640,13 @@ export interface Chunk {
 
 /** ジョブを、1 つが targetSec 秒ほどの区切りに分ける（大きさはそろえる。profile・misses は分けない） */
 export function chunkJob(job: Job, perGame: number, targetSec: number): Chunk[] {
-  const per = job.spec.kind === "profile" || job.spec.kind === "misses" ? job.games : Math.max(1, Math.floor(targetSec / (unitsOf(job, 1) * perGame)));
+  const s = job.spec;
+  const per =
+    s.kind === "data"
+      ? s.chunk
+      : s.kind === "profile" || s.kind === "misses" || isStep(job)
+        ? job.games
+        : Math.max(1, Math.floor(targetSec / (unitsOf(job, 1) * perGame)));
   const n = Math.ceil(job.games / per);
   const size = Math.ceil(job.games / n);
   const out: Chunk[] = [];
@@ -814,9 +981,9 @@ export function planText(
       String(job.index),
       jobTitle(job),
       job.label,
-      cs.length === 0 ? "済み" : job.spec.kind === "misses" ? `各問 ${games} 回` : `${unitsOf(job, games)}（g${first}〜${first + games - 1}）`,
+      cs.length === 0 ? "済み" : job.spec.kind === "misses" ? `各問 ${games} 回` : isStep(job) ? "―" : `${unitsOf(job, games)}（g${first}〜${first + games - 1}）`,
       String(cs.length),
-      `${perGame.toFixed(3)} 秒${job.spec.kind === "misses" ? "（全問 1 回）" : ""}`,
+      isStep(job) ? `${fmtDur(perGame)}（全体）` : `${perGame.toFixed(3)} 秒${job.spec.kind === "misses" ? "（全問 1 回）" : ""}`,
       fmtDur(secs),
       cs.length === 0 ? "" : fmtClock(t, o.tz),
       measured.has(job.index) ? "この回で測った速さ" : (plan.estimates[i]?.source ?? ""),
@@ -928,8 +1095,16 @@ export function statusText(dir: string): string {
     const secs = ds.reduce((s, c) => s + (done.get(c.id)?.seconds ?? 0), 0);
     const games = ds.reduce((s, c) => s + unitsOf(job, c.count), 0);
     let result = "";
-    if (job.spec.kind === "profile") {
+    const sp = job.spec;
+    if (sp.kind === "profile") {
       result = ds.length > 0 ? `speed-${job.index}.md` : "";
+    } else if (sp.kind === "data") {
+      result = ds.length > 0 ? `ファイル ${ds.length}/${cs.length}` : "";
+    } else if (sp.kind === "node") {
+      result = ds.length > 0 ? `${sp.out} を作った` : "";
+    } else if (sp.kind === "pick") {
+      const f = join(dir, `pick-${job.index}.json`);
+      if (existsSync(f)) result = pickText(readJson<PickResult>(f));
     } else if (job.spec.kind === "survey") {
       const p = surveyProgress(surveyFile(dir, job));
       if (p.games.size > 0) result = `試合 ${p.games.size}・局面 ${p.positions}（survey-${job.index}.jsonl）`;
@@ -949,7 +1124,7 @@ export function statusText(dir: string): string {
       jobTitle(job),
       job.label,
       `${ds.length}/${cs.length}`,
-      job.spec.kind === "misses" ? `${games}/${job.games} 回` : `${games}/${unitsOf(job, job.games)}`,
+      job.spec.kind === "misses" ? `${games}/${job.games} 回` : isStep(job) ? "―" : `${games}/${unitsOf(job, job.games)}`,
       fmtDur(secs),
       result,
       f ? `失敗: ${f}` : "",
@@ -961,7 +1136,48 @@ export function statusText(dir: string): string {
     `状態: ${state}`,
     `コミット ${plan.commit}（${plan.branch}）、${s ? `${s.machine}・${s.threads} スレッド、止める時刻 ${fmtClock(s.until, tz)}（${tz}）` : ""}`,
   ];
-  return `${head.join("\n")}\n\n${markdownTable(["#", "ジョブ", "台帳の名前", "区切り", "試合", "かかった時間", "A の勝率・正解率・局面", "メモ"], tableRows)}`;
+  return `${head.join("\n")}\n\n${markdownTable(["#", "ジョブ", "台帳の名前", "区切り", "試合", "かかった時間", "結果（A の勝率・正解率・局面・ファイル）", "メモ"], tableRows)}`;
+}
+
+/** pick の結果（回のフォルダの pick-<番号>.json） */
+export interface PickResult {
+  compare: string;
+  n: number;
+  rate: number | null;
+  se: number | null;
+  /** A の勝率 − 50% − 2 SE */
+  lower: number | null;
+  pass: boolean;
+  chosen: string;
+  out: string;
+}
+
+const pickText = (p: PickResult): string =>
+  `${p.compare}: ${pct(p.rate)} ± ${pts(p.se)}（${p.n} 試合、差 − 2 SE ${p.lower === null ? "?" : (p.lower * 100).toFixed(2)}）→ ${p.pass ? "越えた" : "越えない"}。${p.out} は ${p.chosen}`;
+
+/** pick を回す: 前の compare の区切りの行をまとめ、A の勝率 − 50% − 2 SE > 0 なら pass、そうでなければ fail のファイルを out に写す */
+export function runPick(plan: Plan, dir: string, job: Job): PickResult {
+  const s = job.spec;
+  if (s.kind !== "pick") throw new Error("pick ではありません");
+  const cj = plan.jobs.find((j) => j.spec.kind === "compare" && j.label === s.from);
+  if (!cj) throw new Error(`台帳の名前 ${s.from} の compare がありません`);
+  const done = markers(dir);
+  const cs = plan.chunks.filter((c) => c.job === cj.index);
+  const left = cs.filter((c) => !done.has(c.id));
+  if (left.length > 0) throw new Error(`compare ${s.from}（ジョブ ${cj.index}）が済んでいない（区切り ${cs.length - left.length}/${cs.length}）`);
+  const all = chunkRows(dir);
+  const rows = cs.map((c) => rowOf(all, plan, dir, c));
+  if (rows.some((r) => r === undefined)) throw new Error(`compare ${s.from} の台帳の行が揃っていない`);
+  const r = combineRows(rows as RunRow[], "", plan.name);
+  const lower = r.rate === null || r.se === null ? null : r.rate - 0.5 - 2 * r.se;
+  const pass = lower !== null && lower > 0;
+  const chosen = pass ? s.pass : s.fail;
+  const out = atDir(s.out, dir);
+  copyFileSync(atDir(chosen, dir), `${out}.tmp`);
+  const res: PickResult = { compare: s.from, n: r.n, rate: r.rate, se: r.se, lower, pass, chosen, out: s.out };
+  writeAtomic(join(dir, `pick-${job.index}.json`), JSON.stringify(res));
+  renameSync(`${out}.tmp`, out);
+  return res;
 }
 
 // ---------------------------------------------------------------- worker
@@ -972,6 +1188,38 @@ export interface WorkerControl {
   kill?: (() => void) | undefined;
 }
 
+/** 区切りが作るファイル（回のフォルダの道。データを作るジョブ・td・potential・pick だけ） */
+export function chunkProducts(plan: Pick<Plan, "jobs">, dir: string, c: Chunk): string[] {
+  const job = plan.jobs[c.job - 1];
+  if (!job) return [];
+  const s = job.spec;
+  if (s.kind === "data") return [dataProduct(job, c.first, dir).file];
+  return s.kind === "node" || s.kind === "pick" ? [atDir(s.out, dir)] : [];
+}
+
+/** 済んだ区切りの途中のファイルを、できたファイルにする（データは .gz なら gzip する） */
+async function finishProducts(job: Job, c: Chunk, dir: string): Promise<void> {
+  const s = job.spec;
+  if (s.kind === "data") {
+    const { file, tmp } = dataProduct(job, c.first, dir);
+    if (!existsSync(tmp)) throw new Error(`書いたはずのファイルがありません: ${tmp}`);
+    if (file.endsWith(".gz")) {
+      await pipeline(createReadStream(tmp), createGzip(), createWriteStream(`${file}.tmp`));
+      fsyncFile(`${file}.tmp`);
+      renameSync(`${file}.tmp`, file);
+      rmSync(tmp, { force: true });
+    } else {
+      fsyncFile(tmp);
+      renameSync(tmp, file);
+    }
+  } else if (s.kind === "node") {
+    const out = atDir(s.out, dir);
+    if (!existsSync(`${out}.tmp`)) throw new Error(`書いたはずのファイルがありません: ${out}.tmp`);
+    fsyncFile(`${out}.tmp`);
+    renameSync(`${out}.tmp`, out);
+  }
+}
+
 /** 区切りを 1 つ回す。終わりの状態（0 なら済んだ）と秒 */
 function runChunk(plan: Plan, session: Session, dir: string, c: Chunk, ctl: WorkerControl): Promise<{ code: number | null; seconds: number; why: string }> {
   const job = plan.jobs[c.job - 1];
@@ -979,10 +1227,24 @@ function runChunk(plan: Plan, session: Session, dir: string, c: Chunk, ctl: Work
   const argv = jobArgv(job, c.first, c.count, dir);
   mkdirSync(join(dir, "chunks"), { recursive: true });
   const logFile = join(dir, "chunks", `${c.id}.log`);
-  const out = openSync(`${logFile}.tmp`, "w");
   const t0 = Date.now();
+  const s = job.spec;
+  if (s.kind === "pick") {
+    try {
+      const r = runPick(plan, dir, job);
+      writeFileSync(logFile, `${pickText(r)}\n`);
+      return Promise.resolve({ code: 0, seconds: (Date.now() - t0) / 1000, why: "" });
+    } catch (e) {
+      writeFileSync(`${logFile}.tmp`, `${(e as Error).message}\n`);
+      return Promise.resolve({ code: null, seconds: (Date.now() - t0) / 1000, why: (e as Error).message });
+    }
+  }
+  // td・potential は、回のフォルダに写したビルド結果を回す（start が作る）
+  const [cmd, args] =
+    s.kind === "node" ? [process.execPath, [join(dir, "bin", "run-bundle.mjs"), join(dir, "bin", s.tool, `${s.tool}-main.mjs`), ...argv.slice(1)]] : [plan.bin, argv];
+  const out = openSync(`${logFile}.tmp`, "w");
   return new Promise((done) => {
-    const child = spawn(plan.bin, argv, {
+    const child = spawn(cmd, args, {
       cwd: plan.repo,
       stdio: ["ignore", out, out],
       env: {
@@ -1007,18 +1269,26 @@ function runChunk(plan: Plan, session: Session, dir: string, c: Chunk, ctl: Work
       },
       Math.max(0, session.until + HARD_GRACE * 1000 - Date.now()),
     );
-    const finish = (code: number | null) => {
+    const finish = async (code: number | null) => {
       clearTimeout(hard);
       ctl.kill = undefined;
       closeSync(out);
+      if (code === 0) {
+        try {
+          await finishProducts(job, c, dir);
+        } catch (e) {
+          why = (e as Error).message;
+          code = null;
+        }
+      }
       if (code === 0) renameSync(`${logFile}.tmp`, logFile);
       done({ code, seconds: (Date.now() - t0) / 1000, why });
     };
     child.on("error", (e) => {
       why = e.message;
-      finish(null);
+      void finish(null);
     });
-    child.on("exit", (code) => finish(code));
+    child.on("exit", (code) => void finish(code));
   });
 }
 
@@ -1056,6 +1326,23 @@ export async function runWorker(dir: string, ctl: WorkerControl = { stopNow: fal
         log(dir, tz, `区切り ${c.id} は出力に全部の試合があるので済んだものとした`);
         continue;
       }
+      // 作るファイルがあれば（できた直後に電源が切れた・手で置いた）、回さずに印を作る
+      const products = chunkProducts(plan, dir, c);
+      if (products.length > 0 && products.every((f) => existsSync(f))) {
+        writeMarker(dir, { id: c.id, seconds: 0, at: new Date().toISOString(), threads: session.threads, recovered: true });
+        log(dir, tz, `区切り ${c.id} は ${products.map((f) => basename(f)).join("・")} があるので済んだものとした`);
+        continue;
+      }
+      // 前のジョブが作るファイルが無ければ（失敗した・まだ済んでいない）、このジョブは回さない
+      const missing = jobInputs(job)
+        .map((f) => atDir(f, dir))
+        .filter((f) => !existsSync(f));
+      if (missing.length > 0) {
+        failed[String(job.index)] = `入力がありません: ${missing.map((f) => basename(f)).join("・")}（前のジョブが失敗したか、済んでいない）`;
+        log(dir, tz, `ジョブ ${job.index} の入力がない（${missing.map((f) => basename(f)).join("・")}）ので飛ばす`);
+        writeAtomic(failedFile, JSON.stringify(failed));
+        break;
+      }
       if (existsSync(join(dir, "STOP"))) return end("stopped", "手で止めた（stop）");
       if (ctl.stopNow) return end("stopped", "すぐ止めた（stop --now）");
       const expected = chunkSeconds(c, plan, measuredSpeed(plan, done, session.threads));
@@ -1068,21 +1355,26 @@ export async function runWorker(dir: string, ctl: WorkerControl = { stopNow: fal
         if (text.length > 0 && !text.endsWith("\n")) appendFileSync(ledgerFile, "\n");
       }
       writeStatus(dir, { state: "running", reason: "", current: { id: c.id, since: Date.now() } });
-      log(dir, tz, `区切り ${c.id}（${job.label || jobTitle(job)}、g${c.first}〜${c.first + c.count - 1}、見込み ${fmtDur(expected)}）を始める`);
+      log(dir, tz, `区切り ${c.id}（${job.label || jobTitle(job)}${isStep(job) ? "" : `、g${c.first}〜${c.first + c.count - 1}`}、見込み ${fmtDur(expected)}）を始める`);
       const r = await runChunk(plan, session, dir, c, ctl);
       if (r.code === 0) {
         fsyncFile(ledgerFile);
         writeMarker(dir, { id: c.id, seconds: r.seconds, at: new Date().toISOString(), threads: session.threads });
         const got = chunkRowOf(plan, dir, c);
-        if (job.spec.kind !== "profile" && job.spec.kind !== "survey" && got === undefined) log(dir, tz, `注意: 区切り ${c.id} の台帳の行が見つからない（chunks/${c.id}.log を見る）`);
+        const k = job.spec.kind;
+        if ((k === "compare" || k === "yardstick" || k === "misses") && got === undefined) log(dir, tz, `注意: 区切り ${c.id} の台帳の行が見つからない（chunks/${c.id}.log を見る）`);
         if (job.spec.kind === "survey" && !surveyChunkDone(plan, dir, c)) log(dir, tz, `注意: 区切り ${c.id} の試合が survey-${job.index}.jsonl に揃っていない（chunks/${c.id}.log を見る）`);
         const what = got === undefined ? "" : got.kind === "misses" ? `、正解率 ${pct(got.rate)}` : `、A ${pct(got.rate)}`;
-        log(dir, tz, `区切り ${c.id} 済み（${fmtDur(r.seconds)}、${(r.seconds / unitsOf(job, c.count)).toFixed(3)} 秒/${job.spec.kind === "misses" ? "全問 1 回" : "試合"}${what}）`);
+        const pace = isStep(job) ? "" : `、${(r.seconds / unitsOf(job, c.count)).toFixed(3)} 秒/${job.spec.kind === "misses" ? "全問 1 回" : "試合"}`;
+        const made = chunkProducts(plan, dir, c).map((f) => basename(f));
+        log(dir, tz, `区切り ${c.id} 済み（${fmtDur(r.seconds)}${pace}${what}${made.length > 0 ? `、${made.join("・")}` : ""}）`);
         continue;
       }
       if (ctl.stopNow) return end("stopped", `すぐ止めた（stop --now。区切り ${c.id} は回し直す）`);
       if (r.why.startsWith("止める時刻")) return end("stopped", `${r.why}ので区切り ${c.id} を止めた（回し直す）`);
       failed[String(job.index)] = `区切り ${c.id}（終わりの状態 ${r.code ?? "?"}${r.why ? `、${r.why}` : ""}。chunks/${c.id}.log.tmp）`;
+      for (const f of chunkProducts(plan, dir, c)) rmSync(`${f}.tmp`, { force: true });
+      if (job.spec.kind === "data") rmSync(dataProduct(job, c.first, dir).tmp, { force: true });
       log(dir, tz, `区切り ${c.id} が失敗した（終わりの状態 ${r.code ?? "?"}）。ジョブ ${job.index} の残りを飛ばす`);
       writeAtomic(failedFile, JSON.stringify(failed));
       break;
@@ -1165,20 +1457,85 @@ function run(cmd: string, args: string[]): void {
   if (r.status !== 0) throw new Error(`${cmd} ${args.join(" ")} が失敗しました`);
 }
 
-/** 設定の書き間違いを、回す前に見つける（0 試合の compare は設定を読むだけ。0 回の misses は設定と問題集を読むだけ） */
+/** 確かめるときの、回のフォルダのモデルの代わり（設定の JSON の鍵ごと） */
+const STAND_INS: Record<string, string> = { valueNet: "data/value-net.json", potentialNet: "data/potential-net.json" };
+
+/** 設定の JSON の中の @/（前のジョブが作るモデル）を、確かめる間だけ今の既定のモデルにする */
+export function standIn(text: string): string {
+  if (!text.includes("@/")) return text;
+  const walk = (v: unknown, key: string): unknown => {
+    if (typeof v === "string" && v.includes("@/")) {
+      const s = STAND_INS[key];
+      if (s === undefined) throw new Error(`回のフォルダのファイル（@/）は ${Object.keys(STAND_INS).join("・")} にだけ書けます: ${key}`);
+      return s;
+    }
+    if (typeof v === "object" && v !== null && !Array.isArray(v)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x, k)]));
+    return v;
+  };
+  return JSON.stringify(walk(JSON.parse(text), ""));
+}
+
+/** 設定の書き間違いを、回す前に見つける（0 試合の compare は設定を読むだけ。0 回の misses は設定と問題集を読むだけ。
+ * データを作るジョブは 0 試合で回す。td・potential・pick は確かめない） */
 function validate(bin: string, jobs: Job[]): void {
-  for (const job of jobs) {
-    const s = job.spec;
-    // survey の設定は数だけで、ジョブの行を読むときに確かめた
-    if (s.kind === "survey") continue;
-    const args =
-      s.kind === "compare"
-        ? ["compare", "0", s.a, s.b, "0", ...(s.vs === null ? [] : [s.vs]), ...(s.decks === null ? [] : ["--decks", s.decks]), "--no-ledger"]
-        : s.kind === "misses"
-          ? ["misses", "run", "--opts", s.opts, "--trials", "0", "--no-ledger"]
-          : ["compare", "0", s.opts, "{}", "0", "--no-ledger"];
-    const r = spawnSync(bin, args, { cwd: REPO, encoding: "utf8" });
-    if (r.status !== 0) throw new Error(`ジョブ ${job.index} の設定が読めません: ${(r.stderr || r.stdout).trim()}`);
+  const tmp = mkdtempSync(join(tmpdir(), "night-check-"));
+  try {
+    for (const job of jobs) {
+      const s = job.spec;
+      // survey の設定は数だけで、ジョブの行を読むときに確かめた
+      if (s.kind === "survey" || s.kind === "node" || s.kind === "pick") continue;
+      let args: string[];
+      if (s.kind === "data") {
+        const sub = (a: string, prev: string | undefined): string =>
+          a.startsWith("{") ? standIn(a) : a.includes("@/") ? (prev === "--model" ? STAND_INS.valueNet! : join(tmp, basename(a.split("{k}").join("0")))) : a;
+        const rest = s.args.map((a, i) => sub(a, s.args[i - 1]));
+        args = [...s.cmd, "--games", "0", s.startFlag, String(job.start), ...rest, s.outFlag, join(tmp, `check-${job.index}.tmp`)];
+      } else if (s.kind === "compare") {
+        args = [
+          "compare",
+          "0",
+          standIn(s.a),
+          standIn(s.b),
+          "0",
+          ...(s.vs === null ? [] : [s.vs]),
+          ...(s.decks === null ? [] : ["--decks", s.decks]),
+          ...(s.with === null ? [] : ["--with", s.with]),
+          "--no-ledger",
+        ];
+      } else if (s.kind === "misses") {
+        args = ["misses", "run", "--opts", standIn(s.opts), "--trials", "0", "--no-ledger"];
+      } else {
+        args = ["compare", "0", standIn(s.opts), "{}", "0", "--no-ledger"];
+      }
+      const r = spawnSync(bin, args, { cwd: REPO, encoding: "utf8" });
+      if (r.status !== 0) throw new Error(`ジョブ ${job.index} の設定が読めません: ${(r.stderr || r.stdout).trim()}`);
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+/** td・potential のジョブがあれば、そのスクリプトをビルドして回のフォルダに置く（夜の間にチェックアウトが替わっても、start のときのコードで回す）。
+ * nodeBin（試す用）があれば、ビルドせずにそこの <td|potential>/<td|potential>-main.mjs を写す */
+function prepareNodeTools(jobs: Job[], dir: string, nodeBin: string | undefined): void {
+  const tools = [...new Set(jobs.flatMap((j) => (j.spec.kind === "node" ? [j.spec.tool] : [])))];
+  if (tools.length === 0) return;
+  const bin = join(dir, "bin");
+  mkdirSync(bin, { recursive: true });
+  for (const f of ["run-bundle.mjs", "vite-run.mjs"]) copyFileSync(join(REPO, "scripts", f), join(bin, f));
+  for (const tool of tools) {
+    const to = join(bin, tool);
+    if (nodeBin !== undefined) {
+      cpSync(join(nodeBin, tool), to, { recursive: true });
+      continue;
+    }
+    console.log(`npm run ${tool} をビルドする…`);
+    const r = spawnSync(process.execPath, [join(REPO, "scripts/vite-run.mjs"), `scripts/${tool}-main.ts`], {
+      cwd: REPO,
+      stdio: ["ignore", "inherit", "inherit"],
+      env: { ...process.env, VITE_RUN_OUT_DIR: to },
+    });
+    if (r.status !== 0 || !existsSync(join(to, `${tool}-main.mjs`))) throw new Error(`${tool} のビルドが失敗しました`);
   }
 }
 
@@ -1205,8 +1562,9 @@ function afterStart(dir: string, session: Session): string {
 }
 
 export async function cmdStart(a: Args): Promise<number> {
-  // --bin（組み立てずにこの svwb を使う）・--foreground（切り離さずに回す）・--prepare-only（回のフォルダを作るだけ）は試す用
-  known(a, ["--yes", "--name", "--until", "--tz", "--threads", "--chunk-min", "--allow-dirty", "--bin", "--foreground", "--prepare-only"], 1);
+  // --bin（組み立てずにこの svwb を使う）・--node-bin（td・potential をビルドせずにここのものを使う）・--foreground（切り離さずに回す）・
+  // --prepare-only（回のフォルダを作るだけ）は試す用
+  known(a, ["--yes", "--name", "--until", "--tz", "--threads", "--chunk-min", "--allow-dirty", "--bin", "--node-bin", "--foreground", "--prepare-only"], 1);
   const file = a.pos[0];
   if (file === undefined) throw new Error("ジョブのファイルを渡します");
   const jobsText = readFileSync(file, "utf8");
@@ -1243,6 +1601,8 @@ export async function cmdStart(a: Args): Promise<number> {
   const copied = join(dir, "bin", "svwb");
   copyFileSync(resolve(bin), copied);
   chmodSync(copied, 0o755);
+  const nodeBin = a.opts.get("--node-bin");
+  prepareNodeTools(jobs, dir, nodeBin === undefined ? undefined : resolve(nodeBin));
   const plan: Plan = {
     v: 1,
     name,
@@ -1383,7 +1743,12 @@ export function cmdFinish(a: Args): number {
   const haveSurveys = new Set(targetLedger.surveys.filter((r) => (r as SurveyRow & { queue?: string }).queue === plan.name).map((r) => r.label));
   const notes: string[] = [];
   for (const job of plan.jobs) {
-    if (job.spec.kind === "profile") continue;
+    if (job.spec.kind === "profile" || job.spec.kind === "data" || job.spec.kind === "node") continue;
+    if (job.spec.kind === "pick") {
+      const f = join(dir, `pick-${job.index}.json`);
+      notes.push(`ジョブ ${job.index}（pick）: ${existsSync(f) ? pickText(readJson<PickResult>(f)) : "まだ"}`);
+      continue;
+    }
     if (job.spec.kind === "survey") {
       const cs = plan.chunks.filter((c) => c.job === job.index);
       if (cs.every((c) => merged.has(c.id))) continue;

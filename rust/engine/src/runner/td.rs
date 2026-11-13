@@ -1117,7 +1117,7 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
         Some(Compare {
             k: cmp_k as usize,
             rollouts: rollouts as usize,
-            roll: model_options(net, false, false)?,
+            roll: model_options(net.clone(), false, false)?,
         })
     } else {
         None
@@ -1160,6 +1160,10 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
         println!("相手は {}（挑戦する側 {} 個）", v.name, decks.len());
     }
     let mut file = std::fs::File::create(out).map_err(|e| format!("{out} に書けません: {e}"))?;
+    // 先頭の行に入力の並び（"x" の添字の意味）を書く。学習側（npm run td）は、これを見てモデルの並びに読み替えるので、
+    // 入力を足したモデルで作った自己対戦から、足す前の並びのモデルも学べる（docs/value-net.md「自己対戦のデータ」）
+    writeln!(file, "{{\"tdLayout\":{}}}", net.layout_json())
+        .map_err(|e| format!("{out} に書けません: {e}"))?;
     // リプレイ検索用の行動の列（--replays）
     let replays_path = arg(args, "replays");
     let mut replays_file = replays_path

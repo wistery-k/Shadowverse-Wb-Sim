@@ -558,3 +558,151 @@ fn search_weights_follow_net_base_weights() {
     assert_eq!(own.weights.expect("重み").my_hp, 0.0);
     assert!(own.policy_weights.is_none());
 }
+
+/// 全部の入力（ZONES・SCALARS）を持ち、重みが 0 でないモデル
+fn full_model(hidden: usize) -> ValueNet {
+    use crate::ai::valuenet::{SCALARS, ZONES};
+    let base = model(hidden, |_| 0.0, 0.7);
+    let n = ZONES.len() * base.vocab.len() + SCALARS.len();
+    ValueNet::new(RawValueNet {
+        zones: ZONES.iter().map(|s| s.to_string()).collect(),
+        scalars: SCALARS.iter().map(|s| s.to_string()).collect(),
+        w1: (0..n * hidden)
+            .map(|i| ((i * 7919) % 23) as f64 / 40.0 - 0.27)
+            .collect(),
+        ..base
+    })
+    .expect("モデル")
+}
+
+/// 貪欲法で打った試合の途中の局面（デッキの組と種ごとに、いくつかの手数の後）
+fn played_states() -> Vec<GameState> {
+    let mut out = Vec::new();
+    let n = data().decks.len();
+    for (k, seed) in [11u32, 23, 37, 41, 59, 73].into_iter().enumerate() {
+        let mut s = new_game(deck_at(k % n), deck_at((k * 3 + 1) % n), seed);
+        let mut agent = greedy_base();
+        let mut rng = Rng::new(seed);
+        for step in 0..400 {
+            if s.phase == Phase::Ended {
+                break;
+            }
+            if step % 9 == 4 {
+                out.push(s.clone());
+            }
+            let a = agent.choose_action(&s, &legal_actions(&s), &mut rng);
+            s = apply(&s, &a);
+        }
+    }
+    out
+}
+
+#[test]
+fn deck_inputs_do_not_change_with_determinize() {
+    // 山札の中身の入力（自分の山札に残っているカード・相手のまだ見えていないカード）は、決定化で並べ直しても同じ。
+    // 入力の並びも同じなので、補正の値もビットまで同じ（docs/value-net.md「入力」）
+    use crate::ai::determinize::{determinize, determinize_apart, determinize_with};
+    use crate::ai::valuenet::ZONES;
+    let net = full_model(6);
+    let v = net.layout_json().matches("\"crest:").count() + data().cards.len();
+    let zone = |name: &str| ZONES.iter().position(|z| *z == name).unwrap() * v;
+    let (my_deck, opp_unseen) = (zone("myDeckCards"), zone("oppUnseen"));
+    let sum_in = |x: &[(usize, f64)], from: usize| -> f64 {
+        x.iter()
+            .filter(|(i, _)| (from..from + v).contains(i))
+            .map(|(_, x)| x)
+            .sum()
+    };
+    let states = played_states();
+    assert!(states.len() > 30, "局面 {}", states.len());
+    let mut rng = Rng::new(3);
+    let mut with_hidden_hand = 0;
+    for s in &states {
+        for p in 0..2 {
+            let x = net.encode(s, p, ValuePhase::End);
+            let me = &s.players[p];
+            let opp = &s.players[opponent(p)];
+            assert_eq!(sum_in(&x, my_deck), me.deck.len() as f64);
+            let hidden = opp.hand.iter().filter(|h| !h.revealed).count();
+            with_hidden_hand += usize::from(hidden > 0);
+            assert_eq!(
+                sum_in(&x, opp_unseen),
+                (hidden + opp.deck.len() + opp.hidden_discards.len()) as f64
+            );
+            let z = net.eval(s, p, ValuePhase::End);
+            for t in [
+                determinize(s, p, &mut rng, false),
+                determinize_apart(s, p, &mut rng, false),
+            ] {
+                assert_eq!(net.encode(&t, p, ValuePhase::End), x);
+                assert_eq!(net.eval(&t, p, ValuePhase::End).to_bits(), z.to_bits());
+            }
+            // 伏せた手札のスペルブーストを見込む決定化（oppHandBoosts。既定では切る）は、かけ直したスペルブーストで変身したカードの分だけ
+            // 相手のまだ見えていないカードが変わることがある。自分の山札の入力は同じ
+            let t = determinize_with(s, p, &mut rng, false, true);
+            let mine = |x: &[(usize, f64)]| -> Vec<(usize, f64)> {
+                x.iter()
+                    .copied()
+                    .filter(|(i, _)| (my_deck..my_deck + v).contains(i))
+                    .collect()
+            };
+            assert_eq!(mine(&net.encode(&t, p, ValuePhase::End)), mine(&x));
+        }
+    }
+    assert!(with_hidden_hand > 20);
+    // 自分の山札を入れ替えると変わる（山札の中身を見ている）
+    let s = &states[states.len() / 2];
+    let p = s.active;
+    let mut t = s.clone();
+    let deck = t.players[p].deck.make_mut();
+    let other = deck
+        .iter()
+        .position(|r| r.card != deck[0].card)
+        .expect("違うカード");
+    deck[0].card = deck[other].card;
+    assert_ne!(
+        net.encode(&t, p, ValuePhase::End),
+        net.encode(s, p, ValuePhase::End)
+    );
+}
+
+#[test]
+fn extended_model_keeps_values_and_layout() {
+    // 山札の中身の入力を重み 0 で足したモデル（npm run td -- extend）は、足す前のモデルと同じ値を出す。入力の並びは先頭の行に書く形で出す
+    use crate::ai::valuenet::ZONES;
+    let base = model(4, |i| ((i * 31) % 17) as f64 / 30.0 - 0.25, 0.6);
+    let v = base.vocab.len();
+    let h = base.hidden;
+    let n_old = base.zones.len() * v;
+    let mut zones = base.zones.clone();
+    zones.extend(["myDeckCards".to_string(), "oppUnseen".to_string()]);
+    assert!(zones.iter().all(|z| ZONES.contains(&z.as_str())));
+    let mut w1 = base.w1[..n_old * h].to_vec();
+    w1.extend(std::iter::repeat_n(0.0, 2 * v * h));
+    w1.extend_from_slice(&base.w1[n_old * h..]);
+    let wide = ValueNet::new(RawValueNet {
+        zones,
+        w1,
+        ..base.clone()
+    })
+    .expect("モデル");
+    let old = ValueNet::new(base).expect("モデル");
+    assert!(wide.has_zone("myDeckCards") && !old.has_zone("myDeckCards"));
+    for s in played_states().iter().step_by(5) {
+        for p in 0..2 {
+            for phase in [ValuePhase::End, ValuePhase::After] {
+                assert_eq!(
+                    wide.eval(s, p, phase).to_bits(),
+                    old.eval(s, p, phase).to_bits()
+                );
+            }
+            assert!(
+                wide.encode(s, p, ValuePhase::End).len() > old.encode(s, p, ValuePhase::End).len()
+            );
+        }
+    }
+    let layout: serde_json::Value = serde_json::from_str(&wide.layout_json()).expect("JSON");
+    assert_eq!(layout["vocab"].as_array().map(|a| a.len()), Some(v));
+    assert_eq!(layout["zones"][14], "myDeckCards");
+    assert_eq!(layout["scalars"][0], "myHp");
+}
