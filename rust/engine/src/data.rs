@@ -999,6 +999,14 @@ pub enum On {
     AllyAttack,
 }
 
+impl On {
+    /// CardAbilities::on_mask の中のビット
+    #[inline]
+    pub fn bit(self) -> u64 {
+        1 << (self as u32)
+    }
+}
+
 impl Trigger {
     pub fn on(&self) -> On {
         match self {
@@ -1061,6 +1069,25 @@ pub struct CardAbilities {
     pub ignore_ward: bool,
     #[allow(dead_code)]
     pub unimplemented: Option<String>,
+    /// 能力の誘発の種類の集まり（On の番号のビット。読み込んだ後に set_on_mask で作る）。
+    /// 手札・場のカードを回るとき、その誘発の能力が無いカードを能力の列を見ずに飛ばすため
+    #[serde(skip)]
+    pub on_mask: u64,
+}
+
+impl CardAbilities {
+    /// on の誘発の能力を持つか
+    #[inline]
+    pub fn has_on(&self, on: On) -> bool {
+        self.on_mask & on.bit() != 0
+    }
+
+    fn set_on_mask(&mut self) {
+        self.on_mask = self
+            .abilities
+            .iter()
+            .fold(0, |m, a| m | a.trigger.on().bit());
+    }
 }
 
 // ---- カード ----
@@ -1258,6 +1285,12 @@ pub fn load(json: &str) -> Data {
             "クレストの能力の定義が 2 つあります: {id}"
         );
         crest_abilities[n] = Some(a);
+    }
+    for a in abilities
+        .iter_mut()
+        .chain(crest_abilities.iter_mut().flatten())
+    {
+        a.set_on_mask();
     }
     // スターターの能力の後に名前を付ける（スターターの変数の番号を変えないため）
     let var_played_cost = var_id_now("playedCost");

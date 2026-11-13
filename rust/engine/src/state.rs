@@ -143,7 +143,7 @@ pub enum Evolve {
 }
 
 /// 場のカード（フォロワーとアミュレットを 1 つの形で持つ。使わない項目は既定値）
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct OnBoard {
     pub iid: Iid,
     pub card: CardIdx,
@@ -180,6 +180,19 @@ pub const BOARD_UNDEAD: u8 = 2;
 /// OnBoard::flags: 手札でこれに【融合】していた（Card::this_fused のカードだけ）
 pub const BOARD_FUSED: u8 = 4;
 
+/// 探索で場を写すたびに呼ぶので、derive の代わりに書いて呼び出し元に展開させる
+/// （項目を足したときに derive の clone が展開されなくなり、局面の写しが遅くなったため）
+impl Clone for OnBoard {
+    #[inline(always)]
+    fn clone(&self) -> Self {
+        OnBoard {
+            granted: self.granted.clone(),
+            used_once: self.used_once.clone(),
+            ..*self
+        }
+    }
+}
+
 impl OnBoard {
     #[inline]
     pub fn has_keyword(&self, k: Kw) -> bool {
@@ -192,6 +205,13 @@ impl OnBoard {
     #[inline]
     pub fn has_flag(&self, f: u8) -> bool {
         self.flags & f != 0
+    }
+    /// on の誘発の能力を持ちうるか（カード固有の能力か付与された能力に、その誘発のものがある）。
+    /// 誘発を探すときに、能力の列を見ずに飛ばすため
+    #[inline]
+    pub fn may_have_on(&self, on: On) -> bool {
+        data().abilities[self.card as usize].has_on(on)
+            || self.granted.iter().any(|a| a.trigger.on() == on)
     }
     /// カード固有の能力＋付与された能力（【ラストワード】を失ったら、カード固有の【ラストワード】を除く）
     pub fn abilities(&self) -> impl Iterator<Item = &'static Ability> + '_ {
@@ -669,6 +689,13 @@ pub fn card(idx: CardIdx) -> &'static Card {
 #[inline]
 pub fn abilities_of(idx: CardIdx) -> &'static CardAbilities {
     &data().abilities[idx as usize]
+}
+/// クレストが on の誘発の能力を持つか
+#[inline]
+pub fn crest_has_on(idx: CrestIdx, on: On) -> bool {
+    data().crest_abilities[idx as usize]
+        .as_ref()
+        .is_some_and(|a| a.has_on(on))
 }
 pub fn crest_abilities_of(idx: CrestIdx) -> &'static [Ability] {
     data().crest_abilities[idx as usize]

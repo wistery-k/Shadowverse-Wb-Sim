@@ -505,8 +505,19 @@ type Matched = Option<Option<Iid>>;
 fn fire_side(
     s: &mut GameState,
     p: PlayerIndex,
+    on: On,
     mut matcher: impl FnMut(&GameState, &Trigger, Iid) -> Matched,
 ) {
+    // on の誘発の能力を持つクレスト・カードが無ければ何もしない（matcher は on の誘発にしか合わない）。
+    // 攻撃・ドローなどのたびに呼ぶので、能力の列を見る前に飛ばす
+    {
+        let pl = &s.players[p];
+        if !pl.crests.iter().any(|c| crest_has_on(c.crest, on))
+            && !pl.board.iter().any(|c| c.may_have_on(on))
+        {
+            return;
+        }
+    }
     let turn_id = s.players[p].turn_count;
     // 誘発の判定は状態を変えないので、クレストと場をそれぞれ並べ替えた順に見ていく
     let crest_perm = order_perm(s.players[p].crests.iter().map(|c| c.order));
@@ -517,6 +528,9 @@ fn fire_side(
             let c = &s.players[p].crests[ci];
             (c.iid, c.crest)
         };
+        if !crest_has_on(crest_idx, on) {
+            continue;
+        }
         for (i, ability) in crest_abilities_of(crest_idx).iter().enumerate() {
             let Some(event) = matcher(s, &ability.trigger, iid) else {
                 continue;
@@ -540,6 +554,9 @@ fn fire_side(
     for k in 0..n_board {
         let bi = board_perm.as_ref().map(|v| v[k]).unwrap_or(k);
         let c = &s.players[p].board[bi];
+        if !c.may_have_on(on) {
+            continue;
+        }
         let (iid, cid, is_follower) = (c.iid, c.card, c.is_follower);
         let own = &abilities_of(cid).abilities;
         let n_granted = c.granted.len();
@@ -575,7 +592,15 @@ fn fire_side(
 }
 
 /// 手札のカードの能力を誘発させる
+/// その誘発の能力が無いカードは、呼び出しも能力の列を見ることもせずに飛ばす（ターン終了・場を離れるたびに手札の全部を回るので）
+#[inline]
 fn fire_hand(s: &mut GameState, p: PlayerIndex, hi: usize, on: On) {
+    if abilities_of(s.players[p].hand[hi].card).has_on(on) {
+        fire_hand_abilities(s, p, hi, on);
+    }
+}
+
+fn fire_hand_abilities(s: &mut GameState, p: PlayerIndex, hi: usize, on: On) {
     let h = &s.players[p].hand[hi];
     let (iid, cid, x) = (h.iid, h.card, h.x);
     for ability in &abilities_of(cid).abilities {
@@ -589,8 +614,11 @@ fn fire_hand(s: &mut GameState, p: PlayerIndex, hi: usize, on: On) {
 
 /// カード自身の能力のうち、指定の誘発のもの
 pub fn own_abilities(cid: CardIdx, on: On) -> Vec<&'static Ability> {
-    abilities_of(cid)
-        .abilities
+    let ab = abilities_of(cid);
+    if !ab.has_on(on) {
+        return Vec::new();
+    }
+    ab.abilities
         .iter()
         .filter(|a| a.trigger.on() == on)
         .collect()
@@ -639,7 +667,7 @@ pub fn enter_board(s: &mut GameState, p: PlayerIndex, mut c: OnBoard) -> bool {
     for a in enter {
         queue(s, a, Ctx::new(p, iid));
     }
-    fire_side(s, p, |s, t, src| match t {
+    fire_side(s, p, On::AllyEnter, |s, t, src| match t {
         Trigger::AllyEnter { filter }
             if src != iid && card_matches(s, &Ctx::new(p, src), iid, filter.as_ref()) =>
         {
@@ -677,7 +705,7 @@ pub fn leave_board(s: &mut GameState, iid: Iid, mut reason: LeaveReason) {
     let is_follower = s.board_card(iid).unwrap().is_follower;
     // 破壊されたときの誘発は、離れる前の状態で条件を判定する
     if reason == LeaveReason::Destroy && is_follower {
-        fire_side(s, p, |s, t, src| match t {
+        fire_side(s, p, On::AllyDestroyed, |s, t, src| match t {
             Trigger::AllyDestroyed { filter }
                 if src != iid && card_matches(s, &Ctx::new(p, src), iid, filter.as_ref()) =>
             {
@@ -687,7 +715,7 @@ pub fn leave_board(s: &mut GameState, iid: Iid, mut reason: LeaveReason) {
         });
     }
     if reason == LeaveReason::Destroy && !is_follower {
-        fire_side(s, p, |_, t, src| match t {
+        fire_side(s, p, On::AllyAmuletDestroyed, |_, t, src| match t {
             Trigger::AllyAmuletDestroyed if src != iid => Some(Some(iid)),
             _ => None,
         });
@@ -831,7 +859,7 @@ pub fn heal_leader(s: &mut GameState, p: PlayerIndex, amount: i32) {
     let pl = &mut s.players[p];
     let healed = pl.leader_max_hp.min(pl.leader_hp + amount) - pl.leader_hp;
     pl.leader_hp += healed.max(0);
-    fire_side(s, p, |_, t, _| {
+    fire_side(s, p, On::LeaderHealed, |_, t, _| {
         if matches!(t, Trigger::LeaderHealed) {
             Some(None)
         } else {
@@ -876,7 +904,7 @@ pub fn evolve_follower(s: &mut GameState, p: PlayerIndex, iid: Iid, kind: Evolve
         }
     }
     // 自分のフォロワーが進化したとき
-    fire_side(s, p, |_, t, _| {
+    fire_side(s, p, On::AllyEvolved, |_, t, _| {
         if matches!(t, Trigger::AllyEvolved) {
             Some(Some(iid))
         } else {
@@ -889,7 +917,7 @@ pub fn evolve_follower(s: &mut GameState, p: PlayerIndex, iid: Iid, kind: Evolve
 
 pub fn fire_turn_start(s: &mut GameState) {
     let p = s.active;
-    fire_side(s, p, |_, t, _| {
+    fire_side(s, p, On::TurnStart, |_, t, _| {
         if matches!(t, Trigger::TurnStart) {
             Some(None)
         } else {
@@ -900,7 +928,7 @@ pub fn fire_turn_start(s: &mut GameState) {
 
 pub fn fire_turn_end(s: &mut GameState) {
     let [me, opp] = s.turn_order();
-    fire_side(s, me, |_, t, _| {
+    fire_side(s, me, On::TurnEnd, |_, t, _| {
         if matches!(t, Trigger::TurnEnd { whose: Whose::Me }) {
             Some(None)
         } else {
@@ -911,7 +939,7 @@ pub fn fire_turn_end(s: &mut GameState) {
     for hi in 0..s.players[me].hand.len() {
         fire_hand(s, me, hi, On::TurnEndInHand);
     }
-    fire_side(s, opp, |_, t, _| {
+    fire_side(s, opp, On::TurnEnd, |_, t, _| {
         if matches!(
             t,
             Trigger::TurnEnd {
@@ -952,7 +980,7 @@ fn played_card_matches(
 /// 文脈の event はプレイしたカード、変数 playedCost はその元のコスト
 pub fn fire_ally_play(s: &mut GameState, p: PlayerIndex, iid: Iid, cid: CardIdx, enhanced: bool) {
     let before = s.queue.len();
-    fire_side(s, p, |s, t, src| match t {
+    fire_side(s, p, On::AllyPlay, |s, t, src| match t {
         Trigger::AllyPlay {
             filter,
             enhanced: need,
@@ -974,7 +1002,7 @@ pub fn fire_ally_play(s: &mut GameState, p: PlayerIndex, iid: Iid, cid: CardIdx,
 /// 文脈の event は引いたカード
 pub fn fire_ally_draw(s: &mut GameState, p: PlayerIndex, drawn: &[Iid]) {
     for &iid in drawn {
-        fire_side(s, p, |s, t, src| match t {
+        fire_side(s, p, On::AllyDraw, |s, t, src| match t {
             Trigger::AllyDraw { filter }
                 if card_matches(s, &Ctx::new(p, src), iid, filter.as_ref()) =>
             {
@@ -987,7 +1015,7 @@ pub fn fire_ally_draw(s: &mut GameState, p: PlayerIndex, drawn: &[Iid]) {
 
 /// p のフォロワー attacker が攻撃するときの誘発（【自分のフォロワーが攻撃するとき】）を誘発待ちに入れる。文脈の event は攻撃するフォロワー
 pub fn fire_ally_attack(s: &mut GameState, p: PlayerIndex, attacker: Iid) {
-    fire_side(s, p, |s, t, src| match t {
+    fire_side(s, p, On::AllyAttack, |s, t, src| match t {
         Trigger::AllyAttack { filter }
             if card_matches(s, &Ctx::new(p, src), attacker, filter.as_ref()) =>
         {
@@ -998,7 +1026,7 @@ pub fn fire_ally_attack(s: &mut GameState, p: PlayerIndex, attacker: Iid) {
 }
 
 pub fn fire_ally_act(s: &mut GameState, p: PlayerIndex) {
-    fire_side(s, p, |_, t, _| {
+    fire_side(s, p, On::AllyAct, |_, t, _| {
         if matches!(t, Trigger::AllyAct) {
             Some(None)
         } else {
@@ -1008,7 +1036,7 @@ pub fn fire_ally_act(s: &mut GameState, p: PlayerIndex) {
 }
 
 pub fn fire_ally_fuse(s: &mut GameState, p: PlayerIndex) {
-    fire_side(s, p, |_, t, _| {
+    fire_side(s, p, On::AllyFuse, |_, t, _| {
         if matches!(t, Trigger::AllyFuse) {
             Some(None)
         } else {
@@ -1056,10 +1084,7 @@ pub fn fire_spellboost(s: &mut GameState, p: PlayerIndex, iid: Iid, times: i32) 
 
 /// 手札で働く能力（スペルブーストされたとき・手札にある間に味方が場を離れたとき）を持つか
 pub fn has_hand_trigger(c: CardIdx, on: On) -> bool {
-    abilities_of(c)
-        .abilities
-        .iter()
-        .any(|a| a.trigger.on() == on)
+    abilities_of(c).has_on(on)
 }
 
 /// 能力を解決する写しの局面（解決中の効果・誘発待ち・選択待ちを空にする）
