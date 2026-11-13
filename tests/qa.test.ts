@@ -940,6 +940,30 @@ describe("公式Q&A: 選ぶ対象の制限", () => {
     expect(follower(s, b.iid)).toBeUndefined();
     expect(follower(s, a.iid)).toBeDefined();
   });
+
+  // ロイドの「相手は能力でこれしか選べない」は、ロイドを選べる能力のときだけ働く（ユーザーの実機の確認 2026-11-13。
+  // 脅威の残滓の【エンハンス】でない能力で、ロイドと並ぶ改良型・操り人形を選べた）
+  it("ロイド: ロイドを選べない能力（相手の場の体力3以下のフォロワー）は縛られない。鉄拳の神父の【進化時】で改良型・操り人形を消滅", () => {
+    let { s, me, opp } = setup();
+    s = passTurns(s, 6);
+    const priest = toBoard(s, me, "鉄拳の神父");
+    const lloyd = toBoard(s, opp, "ロイド");
+    const puppet = toBoard(s, opp, "改良型・操り人形");
+    s = applyAction(s, { type: "evolve", iid: priest.iid });
+    if (s.pending) s = choose(s, [puppet.iid]);
+    expect(follower(s, puppet.iid)).toBeUndefined();
+    expect(follower(s, lloyd.iid)).toBeDefined();
+  });
+
+  it("ロイド: 自分の場のフォロワーを選ぶ能力は縛られない（魂の捕食）", () => {
+    let { s, me, opp } = setup();
+    const mine = toBoard(s, me, "キャラバンマンモス");
+    const lloyd = toBoard(s, opp, "ロイド");
+    s = applyAction(s, { type: "play", iid: toHand(s, me, "魂の捕食") });
+    if (s.pending) s = choose(s, [mine.iid]);
+    expect(follower(s, mine.iid)).toBeUndefined();
+    expect(follower(s, lloyd.iid)).toBeDefined();
+  });
 });
 
 describe("公式Q&A: 回復したとき", () => {
