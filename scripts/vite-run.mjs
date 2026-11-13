@@ -23,6 +23,9 @@ if (!isMainThread && workerData?.viteRun) {
   await main(workerData.viteRun.argv);
 } else {
   const [script, ...args] = process.argv.slice(2);
+  // ビルドだけするときの置き場所。下で呼ぶ build-wasm（rust-data をこのファイルで回す）には渡さない
+  const keep = process.env.VITE_RUN_OUT_DIR;
+  delete process.env.VITE_RUN_OUT_DIR;
   if (!script) {
     console.error("使い方: node scripts/vite-run.mjs <スクリプト.ts> [引数...]");
     process.exit(2);
@@ -33,7 +36,6 @@ if (!isMainThread && workerData?.viteRun) {
   }
   const { build } = await import("vite");
   // 同時に複数のスクリプトを実行してもぶつからないよう、実行ごとに別のディレクトリにビルドする
-  const keep = process.env.VITE_RUN_OUT_DIR;
   const outDir = keep ? keep : mkdtempSync(join(tmpdir(), "vite-run-"));
   try {
     const name = basename(script).replace(/\.[^.]+$/, "");

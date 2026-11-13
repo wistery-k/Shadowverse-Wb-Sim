@@ -1,6 +1,6 @@
 // 夜のキュー: ジョブを並べたファイルを上から順に、5〜10 分の区切りに分けて回す（npm run night）。運用は docs/night.md。
 //
-//   npm run night -- plan <ジョブのファイル> [--until 07:00] [--threads N] [--machine 名前] [--chunk-min 7.5] [--tz Asia/Tokyo]
+//   npm run night -- plan <ジョブのファイル> [--until 07:00] [--threads N] [--machine 名前] [--chunk-min 7.5] [--tz Asia/Tokyo] [--at 23:00]
 //   npm run night -- start <ジョブのファイル> --yes [--name 名前] [--until 07:00] [--threads N] [--chunk-min 7.5] [--allow-dirty]
 //   npm run night -- status [名前]
 //   npm run night -- stop [名前] [--now]
@@ -1873,7 +1873,7 @@ function cmdList(a: Args): number {
 }
 
 const USAGE = `使い方（docs/night.md）:
-  npm run night -- plan <ジョブのファイル> [--until 07:00] [--threads N] [--machine 名前] [--chunk-min 7.5] [--tz Asia/Tokyo]
+  npm run night -- plan <ジョブのファイル> [--until 07:00] [--threads N] [--machine 名前] [--chunk-min 7.5] [--tz Asia/Tokyo] [--at 23:00]
   npm run night -- start <ジョブのファイル> --yes [--name 名前] [--until 07:00] [--threads N] [--chunk-min 7.5] [--allow-dirty]
   npm run night -- status [名前]
   npm run night -- stop [名前] [--now]
@@ -1888,7 +1888,8 @@ export async function main(argv: string[]): Promise<number> {
     const a = parseArgs(rest);
     switch (cmd) {
       case "plan": {
-        known(a, ["--until", "--tz", "--threads", "--machine", "--chunk-min"], 1);
+        // --at: 始める時刻（見込みの表だけ。既定は今。--until と同じ形）
+        known(a, ["--until", "--tz", "--threads", "--machine", "--chunk-min", "--at"], 1);
         const file = a.pos[0];
         if (file === undefined) throw new Error("ジョブのファイルを渡します");
         const jobs = parseJobs(readFileSync(file, "utf8"));
@@ -1896,7 +1897,10 @@ export async function main(argv: string[]): Promise<number> {
         const session = sessionOf(a, machine);
         const chunkMin = Number(a.opts.get("--chunk-min") ?? "7.5");
         const parts = makePlanParts(jobs, repoLedger().runs, machine, session.threads, chunkMin, repoLedger().misses);
-        console.log(planText({ jobs, ...parts }, { threads: session.threads, machine, startAt: session.started, until: session.until, tz: session.tz, title: `夜のキュー（${file}）` }));
+        const at = a.opts.get("--at");
+        const startAt = at === undefined ? session.started : parseUntil(at, session.started, session.tz);
+        const until = at === undefined || a.opts.has("--until") ? session.until : parseUntil(a.opts.get("--until") ?? "07:00", startAt, session.tz);
+        console.log(planText({ jobs, ...parts }, { threads: session.threads, machine, startAt, until, tz: session.tz, title: `夜のキュー（${file}）` }));
         return 0;
       }
       case "start":
