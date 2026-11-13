@@ -931,6 +931,19 @@ describe("公式Q&A: 回復したとき", () => {
     s = applyAction(s, { type: "play", iid: toHand(s, opp, "森の神秘") }); // 0 回復
     expect(s.players[opp].leaderHp).toBe(hp - 1);
   });
+
+  it("ドレインでバリアを持つフォロワーを攻撃して与えたダメージが0でも、0回復として「回復したとき」が働く（ユーザーが実機で確認）", () => {
+    const { s, me, opp } = setup();
+    s.players[me].crests = [
+      { iid: 9000, crestId: crestOf("灼熱のアナテマ・バーンドナイト"), countdown: null, order: 9000, usedOncePerTurn: {} },
+    ];
+    s.players[me].leaderHp = 15;
+    const bat = toBoard(s, me, "バット");
+    const shield = toBoard(s, opp, "セイントシールダー");
+    const t = applyAction(s, { type: "attack", attacker: bat.iid, target: shield.iid });
+    expect((follower(t, shield.iid) as FollowerOnBoard).keywords).not.toContain("barrier");
+    expect(t.players[me].leaderHp).toBe(14); // 0 回復して、クレストの 1 ダメージ
+  });
 });
 
 describe("公式の用語説明", () => {

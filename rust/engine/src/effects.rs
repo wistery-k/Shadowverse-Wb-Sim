@@ -218,6 +218,7 @@ pub fn choose_candidates(s: &GameState, ctx: &Ctx, from: &Target) -> (Vec<Iid>, 
 
 /// count 枚を選ぶとき、(先に選んだことにするカード, 残りを選ぶ候補)。「これしか選べない」カードが count 枚以上あれば、
 /// その中から選ぶ。count 枚より少なければ、それを全部選んだうえで、残りをほかの候補から選ぶ
+/// 自分の側と相手の側をまたいで選ぶ能力で、自分の側のカードも候補から外れるかは未確認（スターターには無い。docs/rules.md 11 章「2枚以上を選ぶときのロイド」）
 pub fn choose_split(all: Vec<Iid>, only: Vec<Iid>, count: usize) -> (Vec<Iid>, Vec<Iid>) {
     if only.is_empty() {
         (Vec::new(), all)

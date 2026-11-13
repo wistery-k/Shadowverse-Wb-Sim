@@ -1032,8 +1032,8 @@ fn combat(s: &mut GameState, attacker_iid: Iid, target: AttackTarget) {
         let amount = a.attack_value();
         let drain = a.has_keyword(DRAIN);
         s.players[opponent(p)].leader_hp -= amount;
-        // ドレインは 1 以上のダメージを与えたときだけ回復する（0 のときは未確認。docs/rules.md 11 章「回復したとき」）
-        if drain && amount > 0 {
+        // ドレインは与えたダメージが 0 でも 0 回復として働く（docs/rules.md 11 章「回復したとき」）
+        if drain {
             heal_leader(s, p, amount);
         }
         s.check_leaders();
@@ -1045,10 +1045,10 @@ fn combat(s: &mut GameState, attacker_iid: Iid, target: AttackTarget) {
     // 交戦: 互いの攻撃力分のダメージを同時に与える
     let dealt = damage_follower(s, t, a_atk);
     damage_follower(s, attacker_iid, d_atk);
-    if dealt > 0
-        && s.follower(attacker_iid)
-            .map(|a| a.has_keyword(DRAIN))
-            .unwrap_or(false)
+    // ドレインは与えたダメージが 0（バリア等）でも 0 回復として働く（ユーザーが実機で確認。docs/rules.md 11 章「回復したとき」）
+    if s.follower(attacker_iid)
+        .map(|a| a.has_keyword(DRAIN))
+        .unwrap_or(false)
     {
         heal_leader(s, p, dealt);
     }
