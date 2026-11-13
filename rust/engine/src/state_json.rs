@@ -523,7 +523,6 @@ fn feff_json(e: &FEff) -> Json {
         FEff::StartTurn => op("_startTurn"),
         FEff::StartTurnDraw => op("_startTurnDraw"),
         FEff::FinishMulligan => op("_finishMulligan"),
-        FEff::SpellBoost => op("_spellBoost"),
     }
 }
 
@@ -1072,7 +1071,6 @@ fn feff_of(v: &Json) -> R<FEff> {
             "_startTurn" => FEff::StartTurn,
             "_startTurnDraw" => FEff::StartTurnDraw,
             "_finishMulligan" => FEff::FinishMulligan,
-            "_spellBoost" => FEff::SpellBoost,
             _ => return Err(format!("未知のエンジン内部の処理: {op}")),
         }),
         _ => effect_from(v).map(FEff::Dsl),

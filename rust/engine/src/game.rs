@@ -264,17 +264,6 @@ pub fn resolve_turn_end(prev: &GameState) -> Option<GameState> {
     Some(s)
 }
 
-/// プレイしたスペルによるスペルブースト: 手札のカードすべてを 1 回ブーストする
-fn spell_boost_hand(s: &mut GameState, p: PlayerIndex) {
-    if s.players[p].hand.iter().any(|c| !c.revealed) {
-        s.players[p].hand_log.push(HandEv::Boost { times: 1 });
-    }
-    let all: Vec<Iid> = s.players[p].hand.iter().map(|c| c.iid).collect();
-    for o in all {
-        fire_spellboost(s, p, o, 1);
-    }
-}
-
 pub(crate) fn handle_internal(s: &mut GameState, controller: PlayerIndex, eff: FEff) {
     match eff {
         FEff::StartTurn => start_turn(s, controller),
@@ -291,7 +280,6 @@ pub(crate) fn handle_internal(s: &mut GameState, controller: PlayerIndex, eff: F
         }
         FEff::Combat { attacker, target } => combat(s, attacker, target),
         FEff::CombatEnd => combat_end(s),
-        FEff::SpellBoost => spell_boost_hand(s, controller),
         FEff::Dsl(_) => unreachable!(),
     }
 }
@@ -943,9 +931,15 @@ fn apply_play(s: &mut GameState, iid: Iid) {
 
     if cd.ctype == CardType::Spell {
         s.players[p].graveyard += 1;
-        // 手札のカードは、スペルの効果（と、その解決中に誘発した能力）の後にスペルブーストされる。
-        // スペルで引いたカードもブーストされる（公式 Q&A。docs/rules.md 11 章「スペルブーストのタイミング」）
-        push_internal(s, &[FEff::SpellBoost], Ctx::new(p, iid));
+        // 手札の他のカードは、スペルの効果より前にスペルブーストされる（スペルで引いたカードはこの 1 回を受けない。
+        // ユーザーの実機の確認。公式 Q&A のオーバーディメンションとは違う。docs/rules.md 11 章「スペルブーストのタイミング」）
+        if s.players[p].hand.iter().any(|c| !c.revealed) {
+            s.players[p].hand_log.push(HandEv::Boost { times: 1 });
+        }
+        let others: Vec<Iid> = s.players[p].hand.iter().map(|c| c.iid).collect();
+        for o in others {
+            fire_spellboost(s, p, o, 1);
+        }
         // 【自分がカードをプレイしたとき】は誘発待ちに入り、スペルの効果の後に解決する（docs/rules.md 12章 質問 30）
         fire_ally_play(s, p, iid, h.card);
         push_own_abilities(s, h.card, On::Spell, &ctx);

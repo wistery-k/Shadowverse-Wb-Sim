@@ -447,18 +447,13 @@ impl Ctx {
 #[derive(Clone, Copy, Debug)]
 pub enum FEff {
     Dsl(&'static Effect),
-    Combat {
-        attacker: Iid,
-        target: Option<Iid>,
-    },
+    Combat { attacker: Iid, target: Option<Iid> },
     CombatEnd,
     EndTurn,
     Cleanup,
     StartTurn,
     StartTurnDraw,
     FinishMulligan,
-    /// プレイしたスペルによる手札のスペルブースト（スペルの効果の後。docs/rules.md 11 章「スペルブーストのタイミング」）
-    SpellBoost,
 }
 
 /// フレームの効果の並び。能力の効果はデータをそのまま指す（解決のたびに並びを作らない）

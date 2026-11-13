@@ -168,8 +168,7 @@ fn feff_eq(a: &FEff, b: &FEff) -> bool {
         | (FEff::Cleanup, FEff::Cleanup)
         | (FEff::StartTurn, FEff::StartTurn)
         | (FEff::StartTurnDraw, FEff::StartTurnDraw)
-        | (FEff::FinishMulligan, FEff::FinishMulligan)
-        | (FEff::SpellBoost, FEff::SpellBoost) => true,
+        | (FEff::FinishMulligan, FEff::FinishMulligan) => true,
         _ => false,
     }
 }
