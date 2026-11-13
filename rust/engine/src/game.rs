@@ -293,7 +293,7 @@ pub fn play_cost(c: &Card, pp: i32, hand: Option<&HandCard>) -> i32 {
     }
 }
 
-/// スペルの「選ぶ」に対象がいるか（使用するスペル自身は手札から除いて判定する）
+/// スペルの「選ぶ」に、選ぶ枚数だけ対象がいるか（使用するスペル自身は手札から除いて判定する。docs/rules.md 11 章）
 fn spell_has_targets(
     s: &GameState,
     p: PlayerIndex,
@@ -308,8 +308,8 @@ fn spell_has_targets(
             .filter(|a| a.trigger.on() == On::Spell)
             .flat_map(|a| a.effects.iter())
             .filter_map(|e| {
-                if let Effect::Choose { from, .. } = e {
-                    Some(from)
+                if let Effect::Choose { from, count, .. } = e {
+                    Some((from, *count as usize))
                 } else {
                     None
                 }
@@ -322,7 +322,7 @@ fn spell_has_targets(
     let t = scratch.get_or_insert_with(|| s.clone());
     let removed = t.players[p].hand.make_mut().remove(hi);
     let ctx = Ctx::new(p, removed.iid);
-    let ok = chooses().all(|from| !choose_candidates(t, &ctx, from).is_empty());
+    let ok = chooses().all(|(from, count)| choose_candidates(t, &ctx, from).len() >= count.max(1));
     t.players[p].hand.make_mut().insert(hi, removed);
     ok
 }
