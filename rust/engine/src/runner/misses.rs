@@ -1541,10 +1541,36 @@ fn check(argv: &[String]) -> Result<(), String> {
     let mut argv = argv.to_vec();
     let dir = take(&mut argv, "--dir")?.unwrap_or_else(|| MISSES_DIR.into());
     let write_logs = take_flag(&mut argv, "--write-hand-logs");
+    // 名前を挙げた問は、打ち直した局面に書き直す（エンジンやカードを直して問の局面が変わったとき。差を見て、合格の条件も見直す）
+    let rewrite: Vec<String> = take(&mut argv, "--write-replays")?
+        .map(|v| v.split(',').map(|x| x.trim().to_string()).collect())
+        .unwrap_or_default();
     no_rest(&argv)?;
     let ps = load(&dir)?;
+    for id in &rewrite {
+        if !ps.iter().any(|p| &p.id == id) {
+            return Err(format!("問がありません: {id}"));
+        }
+    }
     let mut differ = 0;
     for p in &ps {
+        if rewrite.contains(&p.id) {
+            match replay_origin(p) {
+                Some(Ok(s)) => {
+                    let mut raw = p.raw.clone();
+                    raw.set("state", state_to_json(&s));
+                    let mut text = String::new();
+                    pretty(&raw, 0, &mut text);
+                    text.push('\n');
+                    parse_problem(&text, &p.path)?;
+                    std::fs::write(&p.path, &text).map_err(|e| format!("{}: {e}", p.path))?;
+                    println!("{}: 読めた。打ち直した局面に書き直した", p.id);
+                    continue;
+                }
+                Some(Err(e)) => return Err(format!("{}: 記録から打ち直せない（{e}）", p.id)),
+                None => return Err(format!("{}: 記録が無いので打ち直せない", p.id)),
+            }
+        }
         // 打ち直した局面と手札の記録（handLog）だけが違う問は、記録を入れた局面に書き直す（2026-11-13 に記録を足したとき）
         if write_logs {
             if let (Some(Ok(s)), Some(stored)) = (replay_origin(p), p.raw.get("state")) {

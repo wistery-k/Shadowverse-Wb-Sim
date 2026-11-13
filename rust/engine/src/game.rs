@@ -316,7 +316,7 @@ pub fn play_as(h: &HandCard, pp: i32) -> Option<CardIdx> {
     }
 }
 
-/// スペル cid の「選ぶ」に対象がいるか（使用するスペル自身は手札から除いて判定する）
+/// スペル cid の「選ぶ」に、選ぶ枚数だけ対象がいるか（使用するスペル自身は手札から除いて判定する。docs/rules.md 11 章）
 fn spell_has_targets(
     s: &GameState,
     p: PlayerIndex,
@@ -331,8 +331,8 @@ fn spell_has_targets(
             .filter(|a| a.trigger.on() == On::Spell)
             .flat_map(|a| a.effects.iter())
             .filter_map(|e| {
-                if let Effect::Choose { from, .. } = e {
-                    Some(from)
+                if let Effect::Choose { from, count, .. } = e {
+                    Some((from, *count as usize))
                 } else {
                     None
                 }
@@ -345,7 +345,8 @@ fn spell_has_targets(
     let t = scratch.get_or_insert_with(|| s.clone());
     let removed = t.players[p].hand.make_mut().remove(hi);
     let ctx = Ctx::new(p, removed.iid);
-    let ok = chooses().all(|from| !choose_candidates(t, &ctx, from).is_empty());
+    let ok =
+        chooses().all(|(from, count)| choose_candidates(t, &ctx, from).0.len() >= count.max(1));
     t.players[p].hand.make_mut().insert(hi, removed);
     ok
 }
@@ -954,7 +955,9 @@ fn apply_play(s: &mut GameState, iid: Iid) {
 
     if cd.ctype == CardType::Spell {
         s.players[p].graveyard += 1;
-        // 手札の他のカードはスペルブーストされる
+        // 手札の他のカードは、スペルの効果より前にスペルブーストされる（スペルで引いたカードはこの 1 回を受けない）。
+        // それによる【スペルブースト時】は誘発待ちに入り、スペルの効果の後に解決する（山札に戻ったカードにも働く）。
+        // 公式 Q&A（オーバーディメンション）・公式の問い合わせの答え・ユーザーの実機の確認（docs/rules.md 11 章「スペルブーストのタイミング」）
         if s.players[p].hand.iter().any(|c| !c.revealed) {
             s.players[p].hand_log.push(HandEv::Boost { times: 1 });
         }
@@ -962,6 +965,7 @@ fn apply_play(s: &mut GameState, iid: Iid) {
         for o in others {
             fire_spellboost(s, p, o, 1);
         }
+        // 【自分がカードをプレイしたとき】は誘発待ちに入り、スペルの効果の後に解決する（docs/rules.md 12章 質問 30）
         fire_ally_play(s, p, iid, as_card);
         push_own_abilities(s, as_card, On::Spell, &ctx);
         return;
@@ -1057,6 +1061,7 @@ fn combat(s: &mut GameState, attacker_iid: Iid, target: AttackTarget) {
         let amount = a.attack_value();
         let drain = a.has_keyword(DRAIN);
         let dealt = damage_leader(s, opponent(p), amount);
+        // ドレインは与えたダメージが 0 でも 0 回復として働く（docs/rules.md 11 章「回復したとき」）
         if drain {
             heal_leader(s, p, dealt);
         }
@@ -1069,6 +1074,7 @@ fn combat(s: &mut GameState, attacker_iid: Iid, target: AttackTarget) {
     // 交戦: 互いの攻撃力分のダメージを同時に与える
     let dealt = damage_follower(s, t, a_atk);
     damage_follower(s, attacker_iid, d_atk);
+    // ドレインは与えたダメージが 0（バリア等）でも 0 回復として働く（ユーザーが実機で確認。docs/rules.md 11 章「回復したとき」）
     if s.follower(attacker_iid)
         .map(|a| a.has_keyword(DRAIN))
         .unwrap_or(false)

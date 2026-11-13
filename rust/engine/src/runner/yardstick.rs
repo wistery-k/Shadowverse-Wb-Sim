@@ -35,13 +35,13 @@ use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 /// 物差しの版（相手の手が変わって戻せないときに上げる）
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 5;
 
 /// 相手どうしの決まった試合（`fingerprint`）の手順のハッシュ
-pub const FINGERPRINT: &str = "3bf60123";
+pub const FINGERPRINT: &str = "0f818a8c";
 
 /// 強い相手の物差しの版
-pub const STRONG_VERSION: u32 = 3;
+pub const STRONG_VERSION: u32 = 4;
 
 /// 強い相手どうしの決まった試合の手順のハッシュ
 pub const STRONG_FINGERPRINT: &str = "66a09e01";

@@ -1214,28 +1214,66 @@ mod tests {
     #[test]
     fn round_trip() {
         let mut seen = [0usize; 6];
+        let mut check = |s: &GameState, g: u32| {
+            let j = state_to_json(s);
+            let back = state_from_json(&Json::parse(&j.stringify()).unwrap()).unwrap();
+            assert_eq!(state_canon(&back), state_canon(s), "試合 {g}");
+            assert_eq!(state_to_json(&back).canonical(), j.canonical(), "試合 {g}");
+            let any_board =
+                |f: &dyn Fn(&OnBoard) -> bool| s.players.iter().any(|p| p.board.iter().any(f));
+            let counts = [
+                !s.stack.is_empty(),
+                !s.queue.is_empty(),
+                any_board(&|b| !b.granted.is_empty()),
+                s.stack.iter().any(|f| !f.ctx.vars.is_empty()),
+                s.stack.iter().any(|f| !f.ctx.slots.is_empty()),
+                s.players
+                    .iter()
+                    .any(|p| p.hand.iter().any(|h| h.drawn_by.is_some())),
+            ];
+            for (n, c) in seen.iter_mut().zip(counts) {
+                *n += c as usize;
+            }
+        };
         for g in 0..400 {
-            play_random(g, g % 2 == 1, |_, s, _| {
-                let j = state_to_json(s);
-                let back = state_from_json(&Json::parse(&j.stringify()).unwrap()).unwrap();
-                assert_eq!(state_canon(&back), state_canon(s), "試合 {g}");
-                assert_eq!(state_to_json(&back).canonical(), j.canonical(), "試合 {g}");
-                let any_board =
-                    |f: &dyn Fn(&OnBoard) -> bool| s.players.iter().any(|p| p.board.iter().any(f));
-                let counts = [
-                    !s.stack.is_empty(),
-                    !s.queue.is_empty(),
-                    any_board(&|b| !b.granted.is_empty()),
-                    s.stack.iter().any(|f| !f.ctx.vars.is_empty()),
-                    s.stack.iter().any(|f| !f.ctx.slots.is_empty()),
-                    s.players
-                        .iter()
-                        .any(|p| p.hand.iter().any(|h| h.drawn_by.is_some())),
-                ];
-                for (n, c) in seen.iter_mut().zip(counts) {
-                    *n += c as usize;
-                }
-            });
+            play_random(g, g % 2 == 1, |_, s, _| check(s, g));
+        }
+        // 付与された能力（改境の再動の「相手のターン終了時、これを破壊。」）は、選ぶ 2 枚がそろわないとプレイできず
+        // ランダムな対戦ではまず出ないので、手で作った局面でも確かめる
+        {
+            use crate::game::{apply_action, create_game};
+            let by_name =
+                |n: &str| data().cards.iter().position(|c| c.name == n).unwrap() as CardIdx;
+            let deck = vec![by_name("キャラバンマンモス"); 40];
+            let mut s = create_game([&deck, &deck], 1);
+            for _ in 0..2 {
+                let p = crate::game::acting_player(&s);
+                s = apply_action(
+                    &s,
+                    &Action::Mulligan {
+                        player: p,
+                        swap: vec![],
+                    },
+                );
+            }
+            let p = s.active;
+            for n in [
+                "改境の再動",
+                "アタックアーティファクト",
+                "キャッスルアーティファクト",
+            ] {
+                let h = s.new_hand_card(by_name(n), None);
+                s.add_hand_card(p, h);
+            }
+            s.players[p].pp = 10;
+            let spell = s.players[p]
+                .hand
+                .iter()
+                .find(|h| h.card == by_name("改境の再動"))
+                .unwrap()
+                .iid;
+            let t = apply_action(&s, &Action::Play(spell));
+            check(&t, 400);
         }
         eprintln!("解決スタック・誘発待ち・付与された能力・変数・スロット・引いた条件のある局面: {seen:?}");
         // 選択待ちの局面で変数を持つ文脈はまだ現れない（変数は選択を挟まずに使い切る能力だけ）
