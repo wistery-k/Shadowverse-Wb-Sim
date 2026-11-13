@@ -657,13 +657,11 @@ pub fn damage_entity(s: &mut GameState, id: Iid, amount: i32) {
     }
 }
 
+/// リーダーを回復する。回復した量が 0 でも「回復したとき」は働く（公式 Q&A。docs/rules.md 11 章）
 pub fn heal_leader(s: &mut GameState, p: PlayerIndex, amount: i32) {
     let pl = &mut s.players[p];
     let healed = pl.leader_max_hp.min(pl.leader_hp + amount) - pl.leader_hp;
-    if healed <= 0 {
-        return;
-    }
-    pl.leader_hp += healed;
+    pl.leader_hp += healed.max(0);
     fire_side(s, p, |_, t, _| {
         if matches!(t, Trigger::LeaderHealed) {
             Some(None)
