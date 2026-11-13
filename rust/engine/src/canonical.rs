@@ -115,6 +115,10 @@ fn board_canon(c: &OnBoard) -> String {
     } else {
         v.extend([opt(c.countdown), opt(c.sigils), b(c.acted_this_turn).into()]);
     }
+    // 印（付いているときだけ足す）
+    if c.flags != 0 {
+        v.push(format!("fl{}", c.flags));
+    }
     v.join(":")
 }
 
@@ -149,6 +153,15 @@ fn player_canon(p: &PlayerState) -> String {
     let head = match p.followers_entered {
         Some(n) => format!("{head},link{n}"),
         None => head,
+    };
+    // 場に出た自分のカードの枚数（数えたときだけ足す）
+    let head = if p.entered_counts.is_empty() {
+        head
+    } else {
+        format!(
+            "{head},entered{}",
+            join(&p.entered_counts, |e| format!("{}x{}", cid(e.0), e.1), "+")
+        )
     };
     let mut out = [
         head,

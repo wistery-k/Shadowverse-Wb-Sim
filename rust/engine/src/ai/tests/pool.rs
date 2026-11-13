@@ -1,4 +1,5 @@
-//! 前期のローテーション（docs/pools/azvaldt.md）のプロのデッキのうち、能力を書いた型（スペルW・アグロNi・ランプD・アミュレットB）を
+//! 前期のローテーション（docs/pools/azvaldt.md）のプロのデッキのうち、能力を書いた型（スペルW・アグロNi・ランプD・アミュレットB・コンボE・海賊R・
+//! ミッドレンジNi・実験体W・クキシロB）を
 //! 探索 AI で最後まで打つ
 
 use super::*;
@@ -69,4 +70,26 @@ fn search_finishes_pool_combo_elf_vs_pirate_royal() {
         "../../../../../data/pools/azvaldt/decks/ps26-27-08b/CR_ロイヤル.txt"
     ));
     finish_both(&elf, &royal);
+}
+
+#[test]
+fn search_finishes_pool_midrange_nightmare_vs_subject_witch() {
+    let nightmare = pool_deck(include_str!(
+        "../../../../../data/pools/azvaldt/decks/ps26-27-08b/CR_ナイトメア.txt"
+    ));
+    let witch = pool_deck(include_str!(
+        "../../../../../data/pools/azvaldt/decks/ps26-27-08b/VL_ウィッチ.txt"
+    ));
+    finish_both(&nightmare, &witch);
+}
+
+#[test]
+fn search_finishes_pool_kukishiro_bishop_vs_midrange_nightmare() {
+    let bishop = pool_deck(include_str!(
+        "../../../../../data/pools/azvaldt/decks/ps26-27-09b/ZETA_ビショップ.txt"
+    ));
+    let nightmare = pool_deck(include_str!(
+        "../../../../../data/pools/azvaldt/decks/ps26-27-08b/CR_ナイトメア.txt"
+    ));
+    finish_both(&bishop, &nightmare);
 }

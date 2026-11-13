@@ -4,6 +4,7 @@ import type { CardAbilities } from "../../../engine/dsl";
 import {
   ENHANCED,
   OPP_LEADER,
+  OUGI,
   PLAYED_COST,
   allFollowers,
   allyFollowers,
@@ -15,10 +16,13 @@ import {
   countdown,
   damage,
   destroy,
+  discard,
   draw,
+  evolveIt,
   exists,
   fanfare,
   gainPp,
+  handCards,
   id,
   lastWords,
   mode,
@@ -91,4 +95,13 @@ export const NEUTRAL: Record<string, CardAbilities> = {
   [id("達筆の怪異")]: {
     abilities: [fanfare(when(exists(boardCards({ costEq: 1, excludeSelf: true })), [buff({ kind: "this" }, 1, 1)]))],
   },
+  [id("蒼い空を征く騎空士・グラン＆ジータ")]: {
+    abilities: [
+      fanfare(
+        mode([random(oppFollowers()), damage(slot(), 5)], [draw(2, { type: "follower" })]),
+        when(OUGI, [evolveIt()]),
+      ),
+    ],
+  },
+  [id("享楽の上位市民")]: { abilities: [fanfare(choose(handCards()), discard(slot()), damage(oppFollowers(), 2))] },
 };

@@ -5,19 +5,27 @@ import {
   EVENT,
   FAITH_STACKS,
   OPP_LEADER,
+  OWN_TURN,
   SELF_LEADER,
   addFaith,
   addLeaderMaxHp,
   addToHand,
+  allyCards,
   allyFollowers,
   buff,
   buffDeck,
   combo,
   crestIdOf,
   damage,
+  destroy,
   evolveIt,
+  exists,
+  grant,
   id,
+  lastWords,
   onAllyAmuletDestroyed,
+  onAllyAttack,
+  onAllyDraw,
   onAllyEnter,
   onAllyEvolved,
   onAllyPlay,
@@ -26,8 +34,15 @@ import {
   onTurnEnd,
   onTurnStart,
   oncePerOwnTurn,
+  oppFollowers,
+  random,
+  randomOption,
   repeat,
+  slot,
   specialId,
+  summon,
+  summonToOpponent,
+  union,
   when,
 } from "./helpers";
 
@@ -68,6 +83,38 @@ export const CRESTS: Record<string, CardAbilities> = {
     abilities: [
       onAllyPlayEnhanced(addFaith("旧き天剣・イドメタ", 1)),
       onAllyPlayEnhanced(repeat(FAITH_STACKS, buff(allyFollowers(), 1, 1))),
+    ],
+  },
+
+  // ミッドレンジNi・実験体W・クキシロB
+  [crestIdOf("イステンデッドVSマルチルゲート")]: {
+    abilities: [
+      onTurnEnd(
+        when(exists(allyCards({ lastWords: true })), [
+          random(allyCards({ lastWords: true }), 1, "a"),
+          random(oppFollowers(), 1, "b"),
+          destroy(union(slot("a"), slot("b"))),
+        ]),
+      ),
+    ],
+  },
+  [crestIdOf("万術の咎人・セフィー")]: {
+    abilities: [oncePerOwnTurn(onAllyEnter({ ids: [id("没入の実験体")] }, grant(EVENT, ["storm"])))],
+  },
+  [crestIdOf("魔恋の慕情・シイム")]: { abilities: [onAllyAttack({ ids: [id("天晶の魔手")] }, buff(EVENT, 1, 0))] },
+  [crestIdOf("希望の光彩・リテュエル")]: {
+    abilities: [lastWords(summon("希望の光彩・リテュエル", 1, "c"), evolveIt(slot("c")))],
+  },
+  [crestIdOf("霧巻花・クキシロ")]: {
+    abilities: [
+      onAllyDraw(
+        { costIn: [1, 3, 5] },
+        when(OWN_TURN, [randomOption([summon("清純なる白狐")], [summon("ホーリーファルコン")])]),
+      ),
+      onAllyDraw(
+        { costIn: [2, 4, 6] },
+        when(OWN_TURN, [randomOption([summonToOpponent("清純なる白狐")], [summonToOpponent("ホーリーファルコン")])]),
+      ),
     ],
   },
 };

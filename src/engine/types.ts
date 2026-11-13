@@ -82,6 +82,12 @@ interface OnBoardBase extends CardRef {
   granted: Ability[];
   /** 場に出た順の通し番号（古いもの優先の処理に使う） */
   order: number;
+  /** 【ラストワード】を失った（カードの元の【ラストワード】は働かない。無ければ省く） */
+  lostLastWords?: boolean;
+  /** 死者・タイプを持つ（リアニメイトで場に出た。無ければ省く） */
+  undead?: boolean;
+  /** 手札でこれに【融合】していた（「これに【融合】していたなら」を見るカードだけ。無ければ省く） */
+  fused?: boolean;
 }
 
 /** 場のフォロワー */
@@ -185,6 +191,8 @@ export interface PlayerState {
   leaderDamageZeroUntil?: number;
   /** このバトル中に場に出た自分のフォロワーの枚数（【連携】。デッキに【連携】のカードがあるときだけ数える） */
   followersEntered?: number;
+  /** このバトル中に場に出た自分のカードの枚数（カードID → 枚数。能力が見るカードだけ数える。無ければ省く） */
+  enteredCounts?: Record<string, number>;
 }
 
 export type Phase = "mulligan" | "main" | "ended";

@@ -62,13 +62,18 @@ export function engineData() {
     if (CARD_ABILITIES[key] || CREST_ABILITIES[key]) throw new Error(`スターターと同じ ID の定義を前期のローテーションに書いています: ${key}`);
   }
   const cardIndex = new Map(ENGINE_CARDS.map((c, i) => [c.id, i]));
+  // 「このバトル中に場に出た自分の『…』の枚数」（値 enteredCount）が見るカード。エンジンはこのカードだけ、場に出た枚数を数える
+  const allDefs = JSON.stringify([CARD_ABILITIES, CREST_ABILITIES, AZVALDT_CARD_ABILITIES, AZVALDT_CREST_ABILITIES]);
+  const countEntered = new Set(
+    [...allDefs.matchAll(/"kind":"enteredCount","ids":\[([^\]]*)\]/g)].flatMap((m) => JSON.parse(`[${m[1]}]`) as string[]),
+  );
   const crestIndex = new Map(ENGINE_CRESTS.map((c, i) => [c.id, i]));
   return {
     cards: ENGINE_CARDS.map((c) => {
       const st = staticInfoOf(c.text);
       const alt = ALT_PLAY_OF.get(c.id);
       const faith = FAITH_OF.get(c.id);
-      // 能力の定義が使う条件・値（エンジンはこれを持つカードだけ、奥義ゲージ・場に出たフォロワーの枚数・払ったコストを数える）
+      // 能力の定義が使う条件・値（エンジンはこれを持つカードだけ、奥義ゲージ・場に出たフォロワーの枚数・払ったコスト・融合していたかを数える）
       const defJson = JSON.stringify(AZVALDT_CARD_ABILITIES[c.id] ?? CARD_ABILITIES[c.id] ?? {});
       const uses = (kind: string) => defJson.includes(`"kind":"${kind}"`);
       return {
@@ -93,6 +98,8 @@ export function engineData() {
         ougi: uses("ougi"),
         link: uses("link"),
         paidCost: uses("paidCost"),
+        thisFused: uses("thisFused"),
+        countEntered: countEntered.has(c.id),
       };
     }),
     crests: ENGINE_CRESTS.map((c) => ({ id: c.id, countdown: c.countdown ?? null, faith: FAITH_CREST_IDS.has(c.id) })),

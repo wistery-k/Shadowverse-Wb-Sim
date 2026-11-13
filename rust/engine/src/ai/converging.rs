@@ -56,7 +56,8 @@ fn has_timing_sensitive_ability(s: &GameState) -> bool {
         let board_abs = pl.board.iter().flat_map(|c| c.abilities());
         for a in crest_abs.chain(board_abs) {
             let on = a.trigger.on();
-            if on == On::AllyDestroyed || on == On::LeaderHealed {
+            // 自分のフォロワーが攻撃するときの能力（クレスト：魔恋の慕情・シイム）は、どちらが攻撃するかで結果が変わる
+            if on == On::AllyDestroyed || on == On::LeaderHealed || on == On::AllyAttack {
                 return true;
             }
             if (on == On::TurnStart || on == On::TurnEnd) && touches_board(a) {
