@@ -123,7 +123,7 @@ export interface Crest {
 /**
  * 公式データの specific_effect_card_info のうちクレスト以外（種類 2〜4）。カードの能力テキストには書かれていない。
  * crystallize（結晶、種類 2）・accelerate（アクセラレート、種類 3）は別のコストでプレイしたときの姿、faith（信仰、種類 4）は信仰値の決まり。
- * 種類の名前は公式データの skill_names とカードの Q&A からの推定（docs/rules.md「前期のローテーション」）。
+ * 種類 2 が結晶なのはユーザー確認、種類 3 のアクセラレートはカードの Q&A から（docs/rules.md「12. 前期のローテーション」）。
  */
 export const SPECIAL_KINDS = ["crystallize", "accelerate", "faith"] as const;
 export type SpecialKind = (typeof SPECIAL_KINDS)[number];
