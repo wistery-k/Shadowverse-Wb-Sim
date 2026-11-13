@@ -297,7 +297,9 @@ fn self_reduction(c: CardIdx, sb: i32, leaves: i32) -> i32 {
                     target: Target::This,
                     amount,
                 } => (-*amount).max(0),
-                Effect::Mode { options } => options.iter().map(|o| walk(o)).sum(),
+                Effect::Mode { options, .. } | Effect::InOrder { options } => {
+                    options.iter().map(|o| walk(o)).sum()
+                }
                 Effect::If {
                     then, otherwise, ..
                 } => walk(then) + otherwise.as_ref().map_or(0, |o| walk(o)),
@@ -743,7 +745,7 @@ impl<'a> World<'a> {
             (true, _, On::AllyDestroyed) => c.my_fols,
             (false, _, On::AllyDestroyed) => c.opp_fols,
             // 回数を見積もれないので、何かを数える能力なら見積もらない（呼び出し側で扱う）
-            (_, _, On::LeaderHealed) => -1,
+            (_, _, On::LeaderHealed | On::AllyAmuletDestroyed) => -1,
         }
     }
 
@@ -935,7 +937,8 @@ impl<'a> World<'a> {
                 Effect::Choose { slot, from, count } | Effect::Random { slot, from, count } => {
                     fr.slots.push((*slot, SlotInfo::From(from, *count)));
                 }
-                Effect::Mode { options } => {
+                // すべてが働く【モード】・順に働く能力も、どれもが働くとして数える
+                Effect::Mode { options, .. } | Effect::InOrder { options } => {
                     for o in options {
                         self.walk(s, p, o, m, fr, acc);
                     }
@@ -963,6 +966,9 @@ impl<'a> World<'a> {
                     }
                 }
                 Effect::Destroy { .. }
+                | Effect::BanishCrests { .. }
+                | Effect::AddFaith { .. }
+                | Effect::LeaderDamageZero { .. }
                 | Effect::AddToDeck { .. }
                 | Effect::Banish { .. }
                 | Effect::Heal { .. }
@@ -1098,7 +1104,7 @@ impl<'a> World<'a> {
                         acc.opp_summons = add(acc.opp_summons, mul(m, *kinds));
                     }
                 }
-                Effect::SummonDestroyedAmulet => {
+                Effect::SummonDestroyedAmulet | Effect::SummonDestroyedAmulets { .. } => {
                     if fr.mine {
                         let mut seen: Vec<CardIdx> = Vec::new();
                         let pool = s.players[p].destroyed_amulets.iter().chain(&self.my_cards);
@@ -1256,7 +1262,9 @@ impl<'a> World<'a> {
                         acc.pp_gain = add(acc.pp_gain, mul(m, (*amount).max(0)));
                     }
                 }
-                Effect::EarthRite { then, .. } | Effect::Necromancy { then, .. } => {
+                Effect::EarthRite { then, .. }
+                | Effect::Necromancy { then, .. }
+                | Effect::SpendFaith { then, .. } => {
                     self.walk(s, p, then, m, fr, acc);
                 }
                 Effect::Crest { crest_id, side } => {
@@ -1364,6 +1372,13 @@ pub fn damage_bound_or_reason(s: &GameState, p: PlayerIndex, draws: bool) -> Res
     let _p = crate::prof::scope(crate::prof::Sec::DamageBound);
     if s.phase != Phase::Main || s.active != p {
         return Err(("not main", None));
+    }
+    // 相手のリーダーが「受ける1以上のダメージを0にする。」を持っていれば、このターンはダメージを与えられない
+    if s.players[opponent(p)]
+        .leader_damage_zero_until
+        .is_some_and(|u| s.turn <= u)
+    {
+        return Ok(0);
     }
     let mut acc = Acc::default();
     for _ in 0..MAX_ROUNDS {

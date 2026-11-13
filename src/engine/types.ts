@@ -122,6 +122,8 @@ export interface CrestInstance {
   countdown: number | null;
   order: number;
   usedOncePerTurn: Record<string, number>;
+  /** 信仰なら信仰値（クレストには無い。docs/rules.md「12」信仰） */
+  faith?: number;
 }
 
 /** このターン中に破壊された自分のフォロワーの記録（式神・貴人） */
@@ -175,6 +177,8 @@ export interface PlayerState {
   /** 「自分のリーダーが回復したとき」等、リーダーのターンごとに1回の能力の使用記録 */
   leaderOncePerTurn: Record<string, number>;
   mulliganDone: boolean;
+  /** このターン番号の終わりまで、リーダーは「受ける1以上のダメージを0にする。」を持つ（世界の味方・ゾーイ。無ければ省く） */
+  leaderDamageZeroUntil?: number;
 }
 
 export type Phase = "mulligan" | "main" | "ended";

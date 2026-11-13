@@ -8,7 +8,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { ENGINE_CARDS, ENGINE_CRESTS, poolsOfCard } from "../src/cards/pools";
+import { ALT_PLAY_OF, ENGINE_CARDS, ENGINE_CRESTS, FAITH_CREST_IDS, FAITH_OF, poolsOfCard } from "../src/cards/pools";
 import { CARD_ABILITIES, CREST_ABILITIES } from "../src/cards/abilities";
 import { AZVALDT_CARD_ABILITIES, AZVALDT_CREST_ABILITIES } from "../src/cards/abilities/azvaldt";
 import { APOCALYPSE_DECK } from "../src/cards/abilities/special";
@@ -61,9 +61,13 @@ export function engineData() {
   for (const key of [...Object.keys(AZVALDT_CARD_ABILITIES), ...Object.keys(AZVALDT_CREST_ABILITIES)]) {
     if (CARD_ABILITIES[key] || CREST_ABILITIES[key]) throw new Error(`スターターと同じ ID の定義を前期のローテーションに書いています: ${key}`);
   }
+  const cardIndex = new Map(ENGINE_CARDS.map((c, i) => [c.id, i]));
+  const crestIndex = new Map(ENGINE_CRESTS.map((c, i) => [c.id, i]));
   return {
     cards: ENGINE_CARDS.map((c) => {
       const st = staticInfoOf(c.text);
+      const alt = ALT_PLAY_OF.get(c.id);
+      const faith = FAITH_OF.get(c.id);
       return {
         id: c.id,
         name: c.name,
@@ -80,9 +84,12 @@ export function engineData() {
         enhance: enhanceCost(c.text),
         token: c.set === "token",
         pools: poolsOfCard(c.id),
+        // アクセラレート・結晶の姿（カードの表の番号）と、デッキに入れると置かれる信仰（クレストの表の番号）
+        altPlay: alt === undefined ? null : cardIndex.get(alt)!,
+        faith: faith === undefined ? null : crestIndex.get(faith)!,
       };
     }),
-    crests: ENGINE_CRESTS.map((c) => ({ id: c.id, countdown: c.countdown ?? null })),
+    crests: ENGINE_CRESTS.map((c) => ({ id: c.id, countdown: c.countdown ?? null, faith: FAITH_CREST_IDS.has(c.id) })),
     cardAbilities: CARD_ABILITIES,
     crestAbilities: CREST_ABILITIES,
     poolCardAbilities: AZVALDT_CARD_ABILITIES,

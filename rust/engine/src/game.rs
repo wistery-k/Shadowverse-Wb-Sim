@@ -32,6 +32,7 @@ fn new_player(deck: Vec<CardRef>) -> PlayerState {
         ep_evolved_this_turn: None,
         sep_evolved_this_turn: None,
         mulligan_done: false,
+        leader_damage_zero_until: None,
     }
 }
 
@@ -275,6 +276,10 @@ pub(crate) fn handle_internal(s: &mut GameState, controller: PlayerIndex, eff: F
         FEff::Cleanup => end_turn_cleanup(s),
         FEff::FinishMulligan => {
             s.phase = Phase::Main;
+            // 信仰は、マリガンが終わって先攻の 1 ターン目が始まる前にリーダーエリアに置かれる（docs/rules.md「12」）
+            for p in s.turn_order() {
+                place_faiths(s, p);
+            }
             let f = s.first;
             push_start_turn(s, f);
         }
@@ -298,14 +303,27 @@ pub fn play_cost(c: &Card, pp: i32, hand: Option<&HandCard>) -> i32 {
     }
 }
 
-/// スペルの「選ぶ」に対象がいるか（使用するスペル自身は手札から除いて判定する）
+/// 手札のカード h を PP pp でプレイするときの姿。普通のコストで払えるなら h のカード、払えずにアクセラレート・結晶のコスト以下なら
+/// その姿（docs/rules.md「12」。このプールのカードは別の姿を 1 つまでしか持たない）。どちらも払えなければ None
+pub fn play_as(h: &HandCard, pp: i32) -> Option<CardIdx> {
+    let c = card(h.card);
+    if play_cost(c, pp, Some(h)) <= pp {
+        return Some(h.card);
+    }
+    match c.alt_play {
+        Some(a) if card(a).cost <= pp => Some(a),
+        _ => None,
+    }
+}
+
+/// スペル cid の「選ぶ」に対象がいるか（使用するスペル自身は手札から除いて判定する）
 fn spell_has_targets(
     s: &GameState,
     p: PlayerIndex,
     hi: usize,
+    cid: CardIdx,
     scratch: &mut Option<GameState>,
 ) -> bool {
-    let cid = s.players[p].hand[hi].card;
     let chooses = || {
         abilities_of(cid)
             .abilities
@@ -335,17 +353,17 @@ fn spell_has_targets(
 fn can_play(s: &GameState, p: PlayerIndex, hi: usize, scratch: &mut Option<GameState>) -> bool {
     let pl = &s.players[p];
     let h = &pl.hand[hi];
-    let c = card(h.card);
     if abilities_of(h.card).unplayable {
         return false;
     }
-    if play_cost(c, pl.pp, Some(h)) > pl.pp {
+    let Some(cid) = play_as(h, pl.pp) else {
         return false;
-    }
+    };
+    let c = card(cid);
     if c.ctype != CardType::Spell && !s.can_add_to_board(p) {
         return false;
     }
-    if c.ctype == CardType::Spell && !spell_has_targets(s, p, hi, scratch) {
+    if c.ctype == CardType::Spell && !spell_has_targets(s, p, hi, cid, scratch) {
         return false;
     }
     true
@@ -912,10 +930,16 @@ fn apply_play(s: &mut GameState, iid: Iid) {
             .hand_log
             .push(HandEv::out_of(&h, card_shows_x(h.card)));
     }
-    let cd = card(h.card);
     let pl = &mut s.players[p];
-    let cost = play_cost(cd, pl.pp, Some(&h));
-    let enhanced = cd.enhance == Some(cost) && cost > hand_cost(&h);
+    // アクセラレート・結晶でプレイしたら、その姿のカードをプレイしたことになる（元のコストはその姿のコスト）
+    let as_card = play_as(&h, pl.pp).unwrap_or(h.card);
+    let cd = card(as_card);
+    let cost = if as_card == h.card {
+        play_cost(cd, pl.pp, Some(&h))
+    } else {
+        cd.cost
+    };
+    let enhanced = as_card == h.card && cd.enhance == Some(cost) && cost > hand_cost(&h);
     pl.pp -= cost;
     pl.combo += 1;
 
@@ -938,14 +962,14 @@ fn apply_play(s: &mut GameState, iid: Iid) {
         for o in others {
             fire_spellboost(s, p, o, 1);
         }
-        fire_ally_play(s, p, iid, h.card);
-        push_own_abilities(s, h.card, On::Spell, &ctx);
+        fire_ally_play(s, p, iid, as_card);
+        push_own_abilities(s, as_card, On::Spell, &ctx);
         return;
     }
-    let b = s.new_board_card(h.card, Some(&h));
+    let b = s.new_board_card(as_card, Some(&h));
     let fanfare = board_abilities_on(&b, On::Fanfare);
-    // 【自分がカードをプレイしたとき】は場に出たときより先に誘発する（処理順は未確認。docs/rules.md 12章）
-    fire_ally_play(s, p, iid, h.card);
+    // 【自分がカードをプレイしたとき】は場に出たときより先に誘発待ちに入り、【ファンファーレ】の後に働く（docs/rules.md 12章の 30）
+    fire_ally_play(s, p, iid, as_card);
     enter_board(s, p, b);
     push_abilities(s, &fanfare, &ctx);
 }
@@ -1032,9 +1056,9 @@ fn combat(s: &mut GameState, attacker_iid: Iid, target: AttackTarget) {
     let Some(t) = target else {
         let amount = a.attack_value();
         let drain = a.has_keyword(DRAIN);
-        s.players[opponent(p)].leader_hp -= amount;
+        let dealt = damage_leader(s, opponent(p), amount);
         if drain {
-            heal_leader(s, p, amount);
+            heal_leader(s, p, dealt);
         }
         s.check_leaders();
         return;
@@ -1079,7 +1103,7 @@ fn combat_end(s: &mut GameState) {
     if !at.super_evolved || !at.defender_destroyed {
         return;
     }
-    s.players[opponent(s.active)].leader_hp -= 1;
+    damage_leader(s, opponent(s.active), 1);
     s.check_leaders();
 }
 

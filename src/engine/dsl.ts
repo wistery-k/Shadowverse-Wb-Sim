@@ -32,6 +32,17 @@ export interface CardFilter {
   excludeEvent?: boolean;
   /** 「選んでいない」: スロットのカードを除く */
   excludeSlot?: string;
+  /** スロットのカードだけ（「〜を選んだなら」の確かめに使う） */
+  inSlot?: string;
+  costMin?: number;
+  /** このタイプでない（「アサイラントでない」） */
+  notTribe?: string;
+  /** 進化後（超進化後を含む） */
+  evolved?: boolean;
+  /** 超進化後 */
+  superEvolved?: boolean;
+  /** 【ラストワード】を持つ（カードの元の能力で見る） */
+  lastWords?: boolean;
 }
 
 /** 対象の集合。解決すると実体ID（iid、リーダーは負の値）の配列になる。 */
@@ -83,6 +94,10 @@ export type Condition =
   | { kind: "leaderHpAtMost"; value: number }
   /** 自分のリーダーの体力が相手のリーダーの体力より大きい */
   | { kind: "leaderHpAboveOpponent" }
+  /** これ（場のフォロワー）が進化後（超進化後を含む） */
+  | { kind: "thisEvolved" }
+  /** 対象が value 個以上ある */
+  | { kind: "countAtLeast"; of: Target; value: number }
   | { kind: "not"; cond: Condition };
 
 export type Duration = "permanent" | "endOfTurn";
@@ -91,7 +106,10 @@ export type Effect =
   // 選択・乱数
   | { op: "choose"; slot: string; from: Target; count: number }
   | { op: "random"; slot: string; from: Target; count: number }
-  | { op: "mode"; options: Effect[][] }
+  /** allIf の条件を満たすなら、1 つを選ぶのではなくすべて（上から順に） */
+  | { op: "mode"; options: Effect[][]; allIf?: Condition }
+  /** 働くたびに options の 1 つ目から順に 1 つ（最後の次は 1 つ目に戻る）。何回働いたかは、これ（場のフォロワー）の X で数える */
+  | { op: "inOrder"; options: Effect[][] }
   // ダメージ・破壊・移動
   | { op: "damage"; target: Target; amount: Value }
   | { op: "distribute"; target: Target; amount: Value }
@@ -113,6 +131,11 @@ export type Effect =
   | { op: "summonFromDeck"; filter: CardFilter; kinds: number }
   /** このバトル中に破壊された自分の元のコスト最大のアミュレットからランダム1枚と同名のカードを場に出す */
   | { op: "summonDestroyedAmulet" }
+  /**
+   * このバトル中に破壊された自分のアミュレット（filter に合うもの。コストは元のコスト）から、ランダム count 枚と同名のカードを 1 枚ずつ場に出す。
+   * 1 枚ずつ、破壊された回数に比例した確率で選ぶ。distinct なら count 種類（選んだものと同じカードを除いてから次を選ぶ）
+   */
+  | { op: "summonDestroyedAmulets"; filter: CardFilter; count: number; distinct: boolean }
   | { op: "returnToDeck"; target: Target }
   /** カードを生成して自分のデッキのランダムな位置に加える */
   | { op: "addToDeck"; cardId: string; count: Value }
@@ -138,6 +161,14 @@ export type Effect =
   | { op: "earthRite"; amount: number; then: Effect[] }
   | { op: "necromancy"; amount: number; then: Effect[] }
   | { op: "crest"; crestId: string; side: "self" | "opponent" }
+  /** クレストすべてを消滅（信仰は消えない） */
+  | { op: "banishCrests"; side: Side }
+  /** 自分の信仰 crestId の信仰値を amount 増やす（その信仰が無ければ何もしない） */
+  | { op: "addFaith"; crestId: string; amount: number }
+  /** 自分の信仰 crestId の信仰値が amount 以上なら、amount 減らして then を行う */
+  | { op: "spendFaith"; crestId: string; amount: number; then: Effect[] }
+  /** 相手のターン終了まで、自分のリーダーは「受ける1以上のダメージを0にする。」を持つ */
+  | { op: "leaderDamageZero"; until: "opponentTurnEnd" }
   | { op: "apocalypseDeck" }
   | { op: "setLeaderMaxHp"; side: "self" | "opponent"; value: number }
   /** リーダーの体力の最大値を増減する（体力は最大値まで下がる） */
@@ -181,6 +212,8 @@ export type Trigger =
   | { on: "discarded" }
   /** 自分のフォロワーが破壊されたとき */
   | { on: "allyDestroyed"; filter?: CardFilter }
+  /** 自分のアミュレットが破壊されたとき */
+  | { on: "allyAmuletDestroyed" }
   | { on: "leaderHealed" }
   /** 自分が他のカードをプレイしたとき（filter はプレイしたカードの条件。コストは元のコスト） */
   | { on: "allyPlay"; filter?: CardFilter }

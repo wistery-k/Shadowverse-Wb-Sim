@@ -1,114 +1,13 @@
 // 前期のローテーションのカード能力（src/cards/abilities/azvaldt/）のカード単位の最小シナリオ。
 // 今はプロのデッキのスペルW・アグロNi で使うカードと、そのために足した仕組み（docs/pools/azvaldt.md「段取り」）。
-// 局面のカードは前期のローテーションのカードの表から作る（src/engine の newHandCard・newBoardCard はスターターのカードだけを知っている）。
+// 局面の作り方は tests/poolScenario.ts。
 
 import { describe, expect, it } from "vitest";
 import { CARD_ABILITIES } from "../src/cards/abilities";
 import { AZVALDT_CARD_ABILITIES, id } from "../src/cards/abilities/azvaldt";
 import { ENGINE_CARDS } from "../src/cards/pools";
-import {
-  applyAction,
-  createGame,
-  legalActions,
-  resolveTurnEnd,
-  staticInfoOf,
-  type Action,
-  type AmuletOnBoard,
-  type FollowerOnBoard,
-  type GameState,
-  type HandCard,
-  type OnBoard,
-  type PlayerIndex,
-} from "../src/engine";
-
-const CARD = new Map(ENGINE_CARDS.map((c) => [c.id, c]));
-const nameOf = (cardId: string) => CARD.get(cardId)?.name;
-const initialX = (cardId: string) => (AZVALDT_CARD_ABILITIES[cardId] ?? CARD_ABILITIES[cardId])?.initialX ?? null;
-const FILLER = id("キャラバンマンモス");
-
-/** マリガン後、先攻のターン中の状態。手札は空、PP は 10 */
-function setup(seed = 1): { s: GameState; me: PlayerIndex; opp: PlayerIndex } {
-  let s = createGame({ decks: [Array(40).fill(FILLER), Array(40).fill(FILLER)], seed });
-  s = applyAction(s, { type: "mulligan", player: s.first, swap: [] });
-  s = applyAction(s, { type: "mulligan", player: (1 - s.first) as PlayerIndex, swap: [] });
-  const me = s.active;
-  const opp = (1 - me) as PlayerIndex;
-  s.players[me].hand = [];
-  s.players[opp].hand = [];
-  s.players[me].pp = s.players[me].maxPp = 10;
-  return { s, me, opp };
-}
-
-function toHand(s: GameState, p: PlayerIndex, name: string, opts: Partial<HandCard> = {}): number {
-  const cardId = id(name);
-  const h: HandCard = {
-    iid: s.nextIid++,
-    cardId,
-    costMod: 0,
-    attackMod: 0,
-    defenseMod: 0,
-    boosts: 0,
-    x: initialX(cardId),
-    keywords: [],
-    fusedKinds: [],
-    fusedThisTurn: false,
-    revealed: false,
-    drawnBy: null,
-    ...opts,
-  };
-  s.players[p].hand.push(h);
-  return h.iid;
-}
-
-function toBoard(s: GameState, p: PlayerIndex, name: string, opts: Partial<FollowerOnBoard> = {}): OnBoard {
-  const cardId = id(name);
-  const card = CARD.get(cardId)!;
-  const st = staticInfoOf(card.text);
-  const base = { iid: s.nextIid++, cardId, keywords: [...st.keywords], tempKeywords: [], granted: [], order: s.nextOrder++ };
-  const c: OnBoard =
-    card.type === "follower"
-      ? {
-          ...base,
-          kind: "follower",
-          attack: card.attack,
-          defense: card.defense,
-          maxDefense: card.defense,
-          tempAttack: 0,
-          maxAttacks: st.maxAttacks,
-          attacksThisTurn: 0,
-          enteredTurn: 0,
-          evolve: "none",
-          cannotAttackUntil: null,
-          x: initialX(cardId),
-          usedOncePerTurn: {},
-          ...opts,
-        }
-      : {
-          ...base,
-          kind: "amulet",
-          countdown: card.type === "amulet" ? (card.countdown ?? null) : null,
-          sigils: null,
-          actedThisTurn: false,
-        };
-  s.players[p].board.push(c);
-  return c;
-}
-
-const play = (s: GameState, iid: number) => applyAction(s, { type: "play", iid });
-const can = (s: GameState, a: Action) => legalActions(s).some((x) => JSON.stringify(x) === JSON.stringify(a));
-const board = (s: GameState, p: PlayerIndex) => s.players[p].board;
-const names = (s: GameState, p: PlayerIndex) => board(s, p).map((c) => nameOf(c.cardId));
-const handNames = (s: GameState, p: PlayerIndex) => s.players[p].hand.map((c) => nameOf(c.cardId));
-const follower = (s: GameState, iid: number) =>
-  [...s.players[0].board, ...s.players[1].board].find((c) => c.iid === iid) as FollowerOnBoard | undefined;
-const amulet = (s: GameState, iid: number) =>
-  [...s.players[0].board, ...s.players[1].board].find((c) => c.iid === iid) as AmuletOnBoard | undefined;
-
-/** 自分のターンを n 回進める（相手は何もしない） */
-function passTurns(s: GameState, n: number): GameState {
-  for (let i = 0; i < n; i++) s = applyAction(applyAction(s, { type: "endTurn" }), { type: "endTurn" });
-  return s;
-}
+import { applyAction, resolveTurnEnd, type AmuletOnBoard, type FollowerOnBoard } from "../src/engine";
+import { CARD, amulet, board, can, follower, handNames, nameOf, names, passTurns, play, setup, toBoard, toHand } from "./poolScenario";
 
 describe("前期のローテーション: 足した仕組み", () => {
   it("自分が他のカードをプレイしたとき（大遊戯世界）: 両方の場の、プレイしたカード以外の同じ元のコストのカードで数える", () => {
@@ -476,12 +375,12 @@ const deckFiles = import.meta.glob<string>("../data/pools/azvaldt/decks/*/*.txt"
   import: "default",
   eager: true,
 });
-const DONE_ARCHETYPES = /^名前: (スペルW|アグロNi)（/m;
+const DONE_ARCHETYPES = /^名前: (スペルW|アグロNi|ランプD|アミュレットB)（/m;
 /** 能力定義が不要な行（tests/abilities-coverage.test.ts と同じ） */
 const STATIC_LINE = /^(【(守護|疾走|突進|必殺|ドレイン|潜伏|威圧|バリア|オーラ|土の印|カウントダウン_\d+)】|1ターンに\d回攻撃できる。)$/;
 
 describe("前期のローテーション: 能力の定義", () => {
-  it("スペルW・アグロNi のデッキのカードと、それが手札・場に出すトークンには定義がある", () => {
+  it("能力を書いた型のデッキのカードと、それが手札・場に出すトークン・アクセラレートと結晶の姿には定義がある", () => {
     const byName = new Map(ENGINE_CARDS.filter((c) => c.set !== "token").map((c) => [c.name, c]));
     const names = new Set<string>();
     for (const text of Object.values(deckFiles).filter((t) => DONE_ARCHETYPES.test(t))) {
@@ -492,7 +391,13 @@ describe("前期のローテーション: 能力の定義", () => {
     }
     expect(names.size).toBeGreaterThan(25);
     const tokens = ["マナリアの魔弾", "ソニック・フォー", "大いなる回帰", "ガーディアンゴーレム", "壮麗なる隼", "バット", "ゴースト"];
-    const cards = [...[...names].map((n) => byName.get(n)!), ...tokens.map((n) => CARD.get(id(n))!)];
+    tokens.push("天刀の深淵", "赤色流し", "大海のオルカ", "天書の深淵", "ホーリーファルコン");
+    const deckCards = [...names].map((n) => byName.get(n)!);
+    const alts = deckCards.flatMap((c) => (c.specials ?? []).map((sp) => CARD.get(sp)).filter((c2) => c2 !== undefined));
+    expect(alts.map((c) => c.name)).toEqual(
+      expect.arrayContaining(["金銀絢爛・リュミオール＆アルジャンテ（アクセラレート）", "結晶：崇奉の怯者", "最古の獄卒（アクセラレート）"]),
+    );
+    const cards = [...deckCards, ...alts, ...tokens.map((n) => CARD.get(id(n))!)];
     const missing = cards
       .filter((c) => c.text.split("\n").some((line) => line !== "" && !STATIC_LINE.test(line)))
       .filter((c) => !AZVALDT_CARD_ABILITIES[c.id] && !CARD_ABILITIES[c.id])

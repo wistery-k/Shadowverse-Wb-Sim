@@ -2,24 +2,34 @@
 
 import type { CardAbilities } from "../../../engine/dsl";
 import {
+  ENHANCED,
+  OPP_LEADER,
   PLAYED_COST,
+  allFollowers,
   allyFollowers,
+  banish,
+  banishCrests,
   boardCards,
   buff,
   choose,
   countdown,
   damage,
+  destroy,
   draw,
   exists,
   fanfare,
+  gainPp,
   id,
   lastWords,
   mode,
   onAllyPlay,
+  onTurnEnd,
   oppFollowers,
   random,
   slot,
+  specialId,
   spell,
+  union,
   when,
 } from "./helpers";
 
@@ -51,7 +61,32 @@ export const NEUTRAL: Record<string, CardAbilities> = {
         damage(slot("r"), 2),
       ),
     ],
-    unimplemented: "アクセラレート（コスト1「相手の場のフォロワーからランダム1枚に2ダメージ。」）",
+  },
+  [specialId("最古の獄卒", "accelerate")]: { abilities: [spell(random(oppFollowers()), damage(slot(), 2))] },
+  [id("空の命運を握る少女・ルリア")]: {
+    abilities: [fanfare(when(ENHANCED, [draw(1, { type: "follower", costMin: 7 }), gainPp(7)]))],
+  },
+  [id("暗黒次元")]: { abilities: [onTurnEnd(damage(allFollowers({ notTribe: "アサイラント" }), 2))] },
+  [id("アルビオンバハムート")]: {
+    abilities: [
+      fanfare(
+        mode(
+          [banish(allFollowers({ excludeSelf: true }))],
+          [banish(boardCards({ type: "amulet" }))],
+          [banishCrests("both")],
+        ),
+      ),
+    ],
+  },
+  [id("《世界》の提示")]: {
+    abilities: [
+      spell(
+        draw(2),
+        random({ kind: "maxAttack", of: oppFollowers() }),
+        destroy(slot()),
+        when(ENHANCED, [damage(union(oppFollowers(), OPP_LEADER), 4)]),
+      ),
+    ],
   },
   [id("達筆の怪異")]: {
     abilities: [fanfare(when(exists(boardCards({ costEq: 1, excludeSelf: true })), [buff({ kind: "this" }, 1, 1)]))],
