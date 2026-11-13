@@ -1,6 +1,6 @@
 // 状態の不変条件。テストと自己対戦で呼び、ルール実装の破綻を早期に検出する。
 
-import { BOARD_LIMIT, HAND_LIMIT, MAX_PP } from "./constants";
+import { BOARD_LIMIT, HAND_LIMIT, LEADER_AREA_LIMIT, MAX_PP } from "./constants";
 import type { GameState } from "./types";
 
 /** 不変条件の違反を列挙する。空なら正常。 */
@@ -12,6 +12,8 @@ export function invariantViolations(state: GameState): string[] {
     const where = `プレイヤー${p}`;
     if (pl.hand.length > HAND_LIMIT) v.push(`${where}: 手札が${pl.hand.length}枚`);
     if (pl.board.length > BOARD_LIMIT) v.push(`${where}: 場が${pl.board.length}枚`);
+    if (pl.crests.length > LEADER_AREA_LIMIT) v.push(`${where}: クレストが${pl.crests.length}つ`);
+    if (new Set(pl.crests.map((c) => c.crestId)).size !== pl.crests.length) v.push(`${where}: 同じクレストが2つ`);
     if (pl.maxPp < 0 || pl.maxPp > MAX_PP) v.push(`${where}: 最大PPが${pl.maxPp}`);
     // エクストラPPで PP最大値を1超えることがある
     if (pl.pp < 0 || pl.pp > pl.maxPp + 1) v.push(`${where}: PPが${pl.pp}/${pl.maxPp}`);

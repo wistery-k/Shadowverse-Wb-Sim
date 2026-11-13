@@ -163,14 +163,14 @@ describe("公式Q&A: 同じクレストの2つ目は持たない（docs/rules.md
     expect(crestIds(s, me)).toEqual([crestOf("新たなる少女・エース")]);
   });
 
-  it("闇の賞金稼ぎ・バルト（Q&A なし。ほかの 6 枚と同じ扱いと推定 ⚠️）: すでに持っているとき、2つ目を持たない", () => {
+  it("闇の賞金稼ぎ・バルト（Q&A なし。ユーザー確認）: すでに持っているとき、2つ目を持たない", () => {
     let { s, me } = setup();
     s = applyAction(s, { type: "play", iid: toHand(s, me, "闇の賞金稼ぎ・バルト") });
     s = applyAction(refill(s, me), { type: "play", iid: toHand(s, me, "闇の賞金稼ぎ・バルト") });
     expect(crestIds(s, me)).toEqual([crestOf("闇の賞金稼ぎ・バルト")]);
   });
 
-  it("2つ目を持とうとしても、今のクレストのカウントダウンは戻らない（未確認 ⚠️。エンジンの暫定の扱い）", () => {
+  it("2つ目を持とうとしても、今のクレストのカウントダウンは戻らない（ユーザー確認）", () => {
     let { s, me } = setup();
     const a = toBoard(s, me, "常在戦場・カゲミツ");
     const b = toBoard(s, me, "常在戦場・カゲミツ");
@@ -181,6 +181,21 @@ describe("公式Q&A: 同じクレストの2つ目は持たない（docs/rules.md
     s = destroyOwn(s, me, b.iid);
     expect(s.players[me].crests).toHaveLength(1);
     expect(s.players[me].crests[0]?.countdown).toBe(1);
+  });
+
+  it("リーダーエリアにクレストが5つあるとき、6つ目は持たない（公式の用語説明・ユーザー確認）", () => {
+    let { s, me } = setup();
+    const k = toBoard(s, me, "常在戦場・カゲミツ");
+    const others = ALL_CRESTS.filter((c) => c.id !== crestOf("常在戦場・カゲミツ")).slice(0, 5);
+    s.players[me].crests = others.map((c, i) => ({
+      iid: 9000 + i,
+      crestId: c.id,
+      countdown: c.countdown ?? null,
+      order: 9000 + i,
+      usedOncePerTurn: {},
+    }));
+    s = destroyOwn(s, me, k.iid);
+    expect(crestIds(s, me)).toEqual(others.map((c) => c.id));
   });
 
   it("カウントダウンで消えた後なら、また持てる（カゲミツ）", () => {
@@ -502,8 +517,25 @@ describe("公式Q&A: オーバーディメンション", () => {
 });
 
 describe("公式Q&A: PP の回復", () => {
-  // 公式Q&Aと食い違う（C）: 今のエンジンは PP の回復を PP 最大値（9）までにする
-  it.fails("ベビーカーバンクル: PP最大値9でエクストラPPを使って10、コスト3をプレイして7のとき、【超進化時】でPPを3回復する", () => {
+  // 公式Q&A（ベビーカーバンクル）: PP最大値9でエクストラPPを使い、コスト3をプレイして7のとき、PPを3回復すると10。
+  // 実際のクライアントは、エクストラPPを押しても実際に使うまで消費しない（取り消せる）ので、このとき「PP 9 とエクストラPP」になる。
+  // エンジンはエクストラPPを押したときに +1 し、回復は PP最大値まで。要るときに押せば同じ PP を使える（ユーザー確認 2026-11-13。docs/rules.md 4 章「能力による PP の回復とエクストラPP」）
+  it("ベビーカーバンクル: PP最大値9でコスト3をプレイして6のとき、【超進化時】で3回復して9。その後エクストラPPで10（Q&Aの10と同じ）", () => {
+    let { s, me } = setup();
+    s = passTurns(s, 6);
+    const c = toBoard(s, me, "ベビーカーバンクル");
+    s.players[me].maxPp = 9;
+    s.players[me].pp = 9;
+    s.players[me].extraPpAvailable = true;
+    s = applyAction(s, { type: "play", iid: toHand(s, me, "熾天使の福音") });
+    expect(s.players[me].pp).toBe(6);
+    s = applyAction(s, { type: "superEvolve", iid: c.iid });
+    expect(s.players[me].pp).toBe(9);
+    s = applyAction(s, { type: "extraPp" });
+    expect(s.players[me].pp).toBe(10);
+  });
+
+  it("先にエクストラPPを押してから回復すると、回復は PP最大値で止まる（エンジンの扱い。要るときまで押さないのと戦略上は同じ）", () => {
     let { s, me } = setup();
     s = passTurns(s, 6);
     const c = toBoard(s, me, "ベビーカーバンクル");
@@ -512,7 +544,7 @@ describe("公式Q&A: PP の回復", () => {
     s = applyAction(s, { type: "play", iid: toHand(s, me, "熾天使の福音") });
     expect(s.players[me].pp).toBe(7);
     s = applyAction(s, { type: "superEvolve", iid: c.iid });
-    expect(s.players[me].pp).toBe(10);
+    expect(s.players[me].pp).toBe(9);
   });
 });
 
@@ -561,7 +593,8 @@ describe("公式Q&A: コンボ・場に出たとき・ターンごとに1回", (
     expect(dolls[1]!.keywords).not.toContain("bane");
   });
 
-  // 公式Q&Aと食い違う（G）: 公式データではムカンのタイプは「-」（死者ではない）。今のエンジンはデータどおり必殺を持たせない
+  // 公式Q&Aと食い違う（G）: リアニメイトで場に出たフォロワーは死者・タイプを持つ（公式の用語説明・ユーザー確認 2026-11-13）が、エンジンはまだ持たせない。
+  // 今の 7 デッキに死者・タイプを見るカードは無いので、直すのは後（docs/rules.md 8 章「リアニメイト_N」と「分かっているが、エンジンがまだ従っていない決まり」）
   it.fails("瞑地の天宮・ムカン: ジャグリングゴーストでリアニメイトしたムカンは必殺を持つ", () => {
     let { s, me } = setup();
     s.players[me].graveyard = 1;

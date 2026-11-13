@@ -94,6 +94,8 @@ pub const INITIAL_HAND: usize = 4;
 pub const HAND_LIMIT: usize = 9;
 pub const BOARD_LIMIT: usize = 5;
 pub const MAX_PP: i32 = 10;
+/// リーダーエリアに置けるクレスト（と信仰）の数（docs/rules.md「9. クレスト」）
+pub const MAX_LEADER_AREA: usize = 5;
 pub const EP: i32 = 2;
 pub const SEP: i32 = 2;
 pub const EVOLVE_BONUS: i32 = 2;

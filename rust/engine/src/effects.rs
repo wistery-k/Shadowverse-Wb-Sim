@@ -1562,13 +1562,10 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 data().crest_abilities[*crest_id as usize].is_some(),
                 "クレストの能力が未定義"
             );
-            // 同じクレストの 2 つ目は持たない（公式 Q&A。docs/rules.md「9. クレスト」）。
-            // 今のクレストのカウントダウンも戻さない（未確認）
-            if !s.players[holder]
-                .crests
-                .iter()
-                .any(|c| c.crest == *crest_id)
-            {
+            // 同じクレストの 2 つ目は持たない（公式 Q&A）。今のクレストのカウントダウンも戻さない。
+            // リーダーエリアは 5 つまでで、5 つあるときは持たない（docs/rules.md「9. クレスト」）
+            let crests = &s.players[holder].crests;
+            if crests.len() < MAX_LEADER_AREA && !crests.iter().any(|c| c.crest == *crest_id) {
                 let iid = s.new_iid();
                 let order = s.next_order;
                 s.next_order += 1;
