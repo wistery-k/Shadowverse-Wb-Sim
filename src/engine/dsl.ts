@@ -75,7 +75,13 @@ export type Value =
   /** このターン中に破壊された自分のフォロワー（条件付き）の元の攻撃力/体力の合計 */
   | { kind: "destroyedThisTurn"; stat: "attack" | "defense"; filter?: CardFilter }
   /** 【自分がカードをプレイしたとき】で、プレイしたカードの元のコスト */
-  | { kind: "playedCost" };
+  | { kind: "playedCost" }
+  /** -value */
+  | { kind: "neg"; of: Value }
+  /** この信仰に「自分の信仰は「…」を持つ」で付いた能力の数（信仰の能力の中で使う） */
+  | { kind: "faithStacks" }
+  /** これをプレイしたときに払ったコスト（「これのコストがNなら」） */
+  | { kind: "paidCost" };
 
 export type Condition =
   | { kind: "awakened" }
@@ -98,6 +104,12 @@ export type Condition =
   | { kind: "thisEvolved" }
   /** 対象が value 個以上ある */
   | { kind: "countAtLeast"; of: Target; value: number }
+  /** 【奥義】（level 10）・【解放奥義】（level 15）: これをプレイしたときの奥義ゲージが level 以上 */
+  | { kind: "ougi"; level: number }
+  /** 【連携_N】: このバトル中に場に出た自分のフォロワーの枚数が atLeast 以上 */
+  | { kind: "link"; atLeast: number }
+  /** value が eq と等しい */
+  | { kind: "valueEq"; value: Value; eq: number }
   | { kind: "not"; cond: Condition };
 
 export type Duration = "permanent" | "endOfTurn";
@@ -122,7 +134,8 @@ export type Effect =
   /** side が "opponent" なら相手が自身のデッキから引く */
   | { op: "draw"; count: Value; filter?: CardFilter; side?: "opponent" }
   | { op: "drawAll"; filter: CardFilter; slot?: string }
-  | { op: "addToHand"; cardId: string; count: Value }
+  /** slot に加えたカードを入れる（「それは…」） */
+  | { op: "addToHand"; cardId: string; count: Value; slot?: string }
   | { op: "summon"; cardId: string; count: Value; slot?: string }
   /** スロットのカードと同名のカードを場に出す（コピー） */
   | { op: "summonCopy"; from: string; slot?: string }
@@ -150,11 +163,15 @@ export type Effect =
   // 手札
   | { op: "spellboost"; target: Target; times: number }
   | { op: "costChange"; target: Target; amount: number }
+  /** 手札のカードのコストを cost にする */
+  | { op: "setCost"; target: Target; cost: number }
   | { op: "addX"; target: Target; amount: number }
   | { op: "countdown"; target: Target; amount: number }
   // リソース
   | { op: "gainPp"; amount: Value | "max" }
   | { op: "addMaxPp"; amount: number }
+  /** 自分のEPを amount 回復（上限は試合の始めの EP） */
+  | { op: "gainEp"; amount: number }
   | { op: "addCombo"; amount: number }
   | { op: "addGraveyard"; amount: number }
   | { op: "addSigils"; amount: Value }
@@ -167,6 +184,10 @@ export type Effect =
   | { op: "addFaith"; crestId: string; amount: number }
   /** 自分の信仰 crestId の信仰値が amount 以上なら、amount 減らして then を行う */
   | { op: "spendFaith"; crestId: string; amount: number; then: Effect[] }
+  /** 自分の信仰 crestId は「…」を持つ（信仰ごとに決まった能力。何回付いたかを数え、能力は faithStacks 回働く） */
+  | { op: "grantFaith"; crestId: string }
+  /** 自分のデッキの filter に合うカードすべては +attack/+defense する */
+  | { op: "buffDeck"; filter: CardFilter; attack: number; defense: number }
   /** 相手のターン終了まで、自分のリーダーは「受ける1以上のダメージを0にする。」を持つ */
   | { op: "leaderDamageZero"; until: "opponentTurnEnd" }
   | { op: "apocalypseDeck" }
@@ -215,8 +236,10 @@ export type Trigger =
   /** 自分のアミュレットが破壊されたとき */
   | { on: "allyAmuletDestroyed" }
   | { on: "leaderHealed" }
-  /** 自分が他のカードをプレイしたとき（filter はプレイしたカードの条件。コストは元のコスト） */
-  | { on: "allyPlay"; filter?: CardFilter }
+  /** 自分が他のカードをプレイしたとき（filter はプレイしたカードの条件。コストは元のコスト。enhanced なら【エンハンス】でプレイしたときだけ） */
+  | { on: "allyPlay"; filter?: CardFilter; enhanced?: boolean }
+  /** 自分のフォロワーが進化したとき（超進化・効果による進化を含む。docs/rules.md 12章の 15） */
+  | { on: "allyEvolved" }
   /** 手札にある間、自分のターン終了時（「手札で働く。自分のターン終了時」） */
   | { on: "turnEndInHand" };
 

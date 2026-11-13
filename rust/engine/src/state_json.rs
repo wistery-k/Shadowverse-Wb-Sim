@@ -328,7 +328,7 @@ fn hint_json(h: &DrawHint) -> Json {
 }
 
 fn hand_json(h: &HandCard) -> Json {
-    obj(vec![
+    let mut o = vec![
         ("iid", num(h.iid)),
         ("cardId", card_id(h.card)),
         ("costMod", num(h.cost_mod)),
@@ -344,7 +344,12 @@ fn hand_json(h: &HandCard) -> Json {
             "drawnBy",
             h.drawn_by.as_ref().map(hint_json).unwrap_or(Json::Null),
         ),
-    ])
+    ];
+    // 奥義ゲージのうち手札で数えた分（0 なら省く）
+    if h.ougi != 0 {
+        o.push(("ougi", num(h.ougi)));
+    }
+    obj(o)
 }
 
 fn evolve_name(e: Evolve) -> &'static str {
@@ -437,6 +442,10 @@ fn player_json(p: &PlayerState) -> Json {
                         if let Some(f) = c.faith {
                             o.push(("faith", num(f)));
                         }
+                        // 信仰に付いた能力の数（0 なら省く）
+                        if c.stacks != 0 {
+                            o.push(("stacks", num(c.stacks)));
+                        }
                         obj(o)
                     })
                     .collect(),
@@ -486,6 +495,10 @@ fn player_json(p: &PlayerState) -> Json {
     // リーダーの「受ける1以上のダメージを0にする。」（無ければ省く）
     if let Some(t) = p.leader_damage_zero_until {
         o.push(("leaderDamageZeroUntil", num(t)));
+    }
+    // 【連携】で数える、場に出た自分のフォロワーの枚数（数えないときは省く）
+    if let Some(n) = p.followers_entered {
+        o.push(("followersEntered", num(n)));
     }
     obj(o)
 }
@@ -878,6 +891,10 @@ fn hand_of(v: &Json) -> R<HandCard> {
         fused_this_turn: boolean(v, "fusedThisTurn")?,
         revealed: boolean(v, "revealed")?,
         drawn_by: hint_of(field(v, "drawnBy")?)?,
+        ougi: match v.get("ougi") {
+            None | Some(Json::Null) => 0,
+            Some(_) => int(v, "ougi")?,
+        },
     })
 }
 
@@ -990,6 +1007,10 @@ fn player_of(v: &Json) -> R<PlayerState> {
                         None | Some(Json::Null) => None,
                         Some(_) => Some(int(c, "faith")?),
                     },
+                    stacks: match c.get("stacks") {
+                        None | Some(Json::Null) => 0,
+                        Some(_) => int(c, "stacks")?,
+                    },
                 })
             })
             .collect::<R<_>>()?,
@@ -1023,6 +1044,10 @@ fn player_of(v: &Json) -> R<PlayerState> {
         leader_damage_zero_until: match v.get("leaderDamageZeroUntil") {
             None | Some(Json::Null) => None,
             Some(_) => Some(int(v, "leaderDamageZeroUntil")?),
+        },
+        followers_entered: match v.get("followersEntered") {
+            None | Some(Json::Null) => None,
+            Some(_) => Some(int(v, "followersEntered")?),
         },
     })
 }

@@ -4,14 +4,16 @@
 // カード名は ./helpers.ts の id() で引く（スターターの ../helpers.ts の id() はスターターのカードから引くので、
 // 同じ名前のストームブラスト 10131320 と 10831310 を取り違えないように）。
 // アクセラレート・結晶の姿の能力はその ID（specials.json）に、信仰の能力はクレストと同じ所に書く。
-// 今はプロのデッキのスペルW・アグロNi・ランプD・アミュレットB で使うカードだけ（docs/pools/azvaldt.md「段取り」）。
+// 今はプロのデッキのスペルW・アグロNi・ランプD・アミュレットB・コンボE・海賊R で使うカードだけ（docs/pools/azvaldt.md「段取り」）。
 
 import type { CardAbilities } from "../../../engine/dsl";
 import { BISHOP } from "./bishop";
 import { CRESTS } from "./crests";
 import { DRAGON } from "./dragon";
+import { ELF } from "./elf";
 import { NEUTRAL } from "./neutral";
 import { NIGHTMARE } from "./nightmare";
+import { ROYAL } from "./royal";
 import { WITCH } from "./witch";
 
 export { id } from "./helpers";
@@ -22,6 +24,8 @@ export const AZVALDT_CARD_ABILITIES: Readonly<Record<string, CardAbilities>> = {
   ...NIGHTMARE,
   ...DRAGON,
   ...BISHOP,
+  ...ELF,
+  ...ROYAL,
 };
 
 export const AZVALDT_CREST_ABILITIES: Readonly<Record<string, CardAbilities>> = CRESTS;

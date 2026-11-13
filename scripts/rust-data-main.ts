@@ -68,6 +68,9 @@ export function engineData() {
       const st = staticInfoOf(c.text);
       const alt = ALT_PLAY_OF.get(c.id);
       const faith = FAITH_OF.get(c.id);
+      // 能力の定義が使う条件・値（エンジンはこれを持つカードだけ、奥義ゲージ・場に出たフォロワーの枚数・払ったコストを数える）
+      const defJson = JSON.stringify(AZVALDT_CARD_ABILITIES[c.id] ?? CARD_ABILITIES[c.id] ?? {});
+      const uses = (kind: string) => defJson.includes(`"kind":"${kind}"`);
       return {
         id: c.id,
         name: c.name,
@@ -87,6 +90,9 @@ export function engineData() {
         // アクセラレート・結晶の姿（カードの表の番号）と、デッキに入れると置かれる信仰（クレストの表の番号）
         altPlay: alt === undefined ? null : cardIndex.get(alt)!,
         faith: faith === undefined ? null : crestIndex.get(faith)!,
+        ougi: uses("ougi"),
+        link: uses("link"),
+        paidCost: uses("paidCost"),
       };
     }),
     crests: ENGINE_CRESTS.map((c) => ({ id: c.id, countdown: c.countdown ?? null, faith: FAITH_CREST_IDS.has(c.id) })),

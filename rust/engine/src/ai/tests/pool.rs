@@ -59,3 +59,14 @@ fn search_finishes_pool_ramp_dragon_vs_amulet_bishop() {
     ));
     finish_both(&dragon, &bishop);
 }
+
+#[test]
+fn search_finishes_pool_combo_elf_vs_pirate_royal() {
+    let elf = pool_deck(include_str!(
+        "../../../../../data/pools/azvaldt/decks/ps26-27-08b/CR_エルフ.txt"
+    ));
+    let royal = pool_deck(include_str!(
+        "../../../../../data/pools/azvaldt/decks/ps26-27-08b/CR_ロイヤル.txt"
+    ));
+    finish_both(&elf, &royal);
+}

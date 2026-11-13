@@ -50,6 +50,7 @@ pub fn hand_eq_noid(a: &HandCard, b: &HandCard) -> bool {
         && a.keywords == b.keywords
         && a.fused_kinds == b.fused_kinds
         && a.fused_this_turn == b.fused_this_turn
+        && a.ougi == b.ougi
 }
 
 pub fn hand_eq(a: &HandCard, b: &HandCard) -> bool {
@@ -95,6 +96,7 @@ pub fn crest_eq_noid(a: &CrestInstance, b: &CrestInstance) -> bool {
     a.crest == b.crest
         && a.countdown == b.countdown
         && a.faith == b.faith
+        && a.stacks == b.stacks
         && map_eq(&a.used_once, &b.used_once)
 }
 
@@ -219,6 +221,7 @@ fn player_rest_eq(a: &PlayerState, b: &PlayerState) -> bool {
         && a.sep_evolved_this_turn == b.sep_evolved_this_turn
         && a.mulligan_done == b.mulligan_done
         && a.leader_damage_zero_until == b.leader_damage_zero_until
+        && a.followers_entered == b.followers_entered
 }
 
 fn player_eq(a: &PlayerState, b: &PlayerState) -> bool {

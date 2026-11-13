@@ -335,6 +335,14 @@ pub fn eval_value(s: &GameState, ctx: &Ctx, v: &Value) -> i32 {
             })
             .sum(),
         ValueObj::PlayedCost => ctx.var(data().var_played_cost),
+        ValueObj::Neg { of } => -eval_value(s, ctx, of),
+        ValueObj::FaithStacks => pl
+            .crests
+            .iter()
+            .find(|c| c.iid == ctx.source)
+            .map(|c| c.stacks)
+            .unwrap_or(0),
+        ValueObj::PaidCost => ctx.var(data().var_paid_cost),
     }
 }
 
@@ -364,6 +372,10 @@ pub fn eval_cond(s: &GameState, ctx: &Ctx, c: &Condition) -> bool {
             .map(|f| f.evolve != Evolve::None)
             .unwrap_or(false),
         Condition::CountAtLeast { of, value } => resolve_target(s, ctx, of).len() as i32 >= *value,
+        // 奥義ゲージは、プレイしたときに文脈の変数に入れたもの（docs/rules.md 12章）
+        Condition::Ougi { level } => ctx.var(data().var_ougi) >= *level,
+        Condition::Link { at_least } => pl.followers_entered.unwrap_or(0) >= *at_least,
+        Condition::ValueEq { value, eq } => eval_value(s, ctx, value) == *eq,
         Condition::Not { cond } => !eval_cond(s, ctx, cond),
     }
 }
@@ -551,6 +563,12 @@ pub fn enter_board(s: &mut GameState, p: PlayerIndex, mut c: OnBoard) -> bool {
     }
     let (iid, cid) = (c.iid, c.card);
     let enter = board_abilities_on(&c, On::Enter);
+    // 【連携】で数える、このバトル中に場に出た自分のフォロワーの枚数
+    if c.is_follower {
+        if let Some(n) = s.players[p].followers_entered.as_mut() {
+            *n += 1;
+        }
+    }
     s.players[p].board.make_mut().push(c);
     for a in enter {
         queue(s, a, Ctx::new(p, iid));
@@ -785,6 +803,22 @@ pub fn evolve_follower(s: &mut GameState, p: PlayerIndex, iid: Iid, kind: Evolve
     for a in evolved {
         queue(s, a, Ctx::new(p, iid));
     }
+    // 奥義ゲージ: 手札の【奥義】を持つカードは、自分のフォロワーが進化した回数を数える（超進化・効果による進化を含む。docs/rules.md 12章）
+    if s.players[p].hand.iter().any(|h| card(h.card).ougi) {
+        for h in s.players[p].hand.make_mut().iter_mut() {
+            if card(h.card).ougi {
+                h.ougi += 1;
+            }
+        }
+    }
+    // 自分のフォロワーが進化したとき
+    fire_side(s, p, |_, t, _| {
+        if matches!(t, Trigger::AllyEvolved) {
+            Some(Some(iid))
+        } else {
+            None
+        }
+    });
 }
 
 // ---- 誘発のきっかけ ----
@@ -849,13 +883,17 @@ fn played_card_matches(
             .is_none_or(|v| cd.cost == eval_value(s, ctx, v))
 }
 
-/// p がカード iid（cid）をプレイしたときの誘発（【自分がカードをプレイしたとき】）。
+/// p がカード iid（cid）をプレイしたときの誘発（【自分がカードをプレイしたとき】。enhanced は【エンハンス】でプレイしたか）。
 /// 文脈の event はプレイしたカード、変数 playedCost はその元のコスト
-pub fn fire_ally_play(s: &mut GameState, p: PlayerIndex, iid: Iid, cid: CardIdx) {
+pub fn fire_ally_play(s: &mut GameState, p: PlayerIndex, iid: Iid, cid: CardIdx, enhanced: bool) {
     let before = s.queue.len();
     fire_side(s, p, |s, t, src| match t {
-        Trigger::AllyPlay { filter }
-            if src != iid && played_card_matches(s, &Ctx::new(p, src), cid, filter.as_ref()) =>
+        Trigger::AllyPlay {
+            filter,
+            enhanced: need,
+        } if src != iid
+            && (!need || enhanced)
+            && played_card_matches(s, &Ctx::new(p, src), cid, filter.as_ref()) =>
         {
             Some(Some(iid))
         }
@@ -1237,6 +1275,7 @@ pub fn place_faiths(s: &mut GameState, p: PlayerIndex) {
             order,
             used_once: Vec::new(),
             faith: Some(0),
+            stacks: 0,
         });
     }
 }
@@ -1434,12 +1473,23 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 frame.ctx.set_slot(*sl, drawn);
             }
         }
-        Effect::AddToHand { card_id, count } => {
+        Effect::AddToHand {
+            card_id,
+            count,
+            slot,
+        } => {
+            let mut ids = Vec::new();
             let mut i = 0;
             while i < val!(count) {
                 let h = revealed_hand_card(s, *card_id, None);
-                s.add_hand_card(p, h);
+                let iid = h.iid;
+                if s.add_hand_card(p, h) {
+                    ids.push(iid);
+                }
                 i += 1;
+            }
+            if let Some(sl) = slot {
+                frame.ctx.set_slot(*sl, ids);
             }
         }
         Effect::Summon {
@@ -1725,6 +1775,14 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 }
             }
         }
+        Effect::SetCost { target, cost } => {
+            for id in targets!(target) {
+                if let Some((q, i)) = s.find_hand(id) {
+                    let h = &mut s.players[q].hand.make_mut()[i];
+                    h.cost_mod = cost - card(h.card).cost;
+                }
+            }
+        }
         Effect::AddX { target, amount } => {
             for id in targets!(target) {
                 if let Some((q, i)) = s.find_hand(id) {
@@ -1768,6 +1826,11 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
         Effect::AddMaxPp { amount } => {
             let pl = &mut s.players[p];
             pl.max_pp = MAX_PP.min(pl.max_pp + amount);
+        }
+        Effect::GainEp { amount } => {
+            // 回復は試合の始めの EP まで（PP の回復と同じ扱い。docs/rules.md 12章）
+            let pl = &mut s.players[p];
+            pl.ep = pl.ep.max(EP.min(pl.ep + amount));
         }
         Effect::AddCombo { amount } => s.players[p].combo += amount,
         Effect::AddGraveyard { amount } => s.players[p].graveyard += amount,
@@ -1824,6 +1887,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 order,
                 used_once: Vec::new(),
                 faith: None,
+                stacks: 0,
             });
         }
         Effect::ApocalypseDeck => {
@@ -1865,6 +1929,36 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                     c.faith = Some(c.faith.unwrap_or(0) - amount);
                     splice(frame, then, 1);
                     return true;
+                }
+            }
+        }
+        Effect::GrantFaith { crest_id } => {
+            // 「自分の信仰は「…」を持つ」: 付いた回数を数え、信仰の能力がその回数だけ働く（2 回付けると重なる。docs/rules.md「12」）
+            if let Some(i) = faith_index(s, p, *crest_id) {
+                s.players[p].crests.make_mut()[i].stacks += 1;
+            }
+        }
+        Effect::BuffDeck {
+            filter,
+            attack,
+            defense,
+        } => {
+            // デッキのカードの変化は、手札から戻ったカードの状態と同じく deck_kept に持つ（引くとこの状態で手札に入る）
+            let picked: Vec<(Iid, CardIdx)> = s.players[p]
+                .deck
+                .iter()
+                .filter(|r| deck_card_matches(s, &frame.ctx, p, r, filter))
+                .map(|r| (r.iid, r.card))
+                .collect();
+            for (iid, c) in picked {
+                let mut h = match s.take_kept(p, iid) {
+                    Some(k) => k,
+                    None => s.new_hand_card(c, Some(iid)),
+                };
+                h.attack_mod += attack;
+                h.defense_mod += defense;
+                if hand_state_changed(&h) {
+                    s.players[p].deck_kept.push(h);
                 }
             }
         }

@@ -10,6 +10,7 @@ import type { Ability, CardFilter, Condition, Effect, Target, Value } from "../.
 export {
   AWAKENED,
   BOTH_LEADERS,
+  COMBO,
   ENHANCED,
   EVENT,
   OPP_LEADER,
@@ -25,6 +26,7 @@ export {
   banish,
   buff,
   choose,
+  combo,
   costChange,
   count,
   damage,
@@ -32,6 +34,7 @@ export {
   discard,
   distribute,
   draw,
+  evolveIt,
   fanfare,
   gainPp,
   grant,
@@ -53,6 +56,7 @@ export {
   onSuperEvolveInstead,
   onTurnEnd,
   onTurnStart,
+  oncePerOwnTurn,
   oppFollowers,
   otherAllyFollowers,
   random,
@@ -61,6 +65,7 @@ export {
   slot,
   spell,
   spellboost,
+  superEvolveIt,
   union,
   v,
   when,
@@ -94,8 +99,12 @@ export function specialId(name: string, kind: "accelerate" | "crystallize" | "fa
 
 // ---- 名前で書く効果（前期のローテーションのカードから引く） ----
 
-export const addToHand = (name: string, count: Value = 1): Effect => ({ op: "addToHand", cardId: id(name), count });
-export const summon = (name: string, count: Value = 1): Effect => ({ op: "summon", cardId: id(name), count });
+/** 『name』count 枚を自分の手札に加える（slot を渡すと、加えたカードを「それ」として後の効果で使える） */
+export const addToHand = (name: string, count: Value = 1, slot?: string): Effect =>
+  slot ? { op: "addToHand", cardId: id(name), count, slot } : { op: "addToHand", cardId: id(name), count };
+/** 『name』count 枚を自分の場に出す（slot を渡すと、出したカードを「それ」として後の効果で使える） */
+export const summon = (name: string, count: Value = 1, slot?: string): Effect =>
+  slot ? { op: "summon", cardId: id(name), count, slot } : { op: "summon", cardId: id(name), count };
 export const transform = (target: Target, name: string): Effect => ({ op: "transform", target, cardId: id(name) });
 export const crest = (name: string, side: "self" | "opponent" = "self"): Effect => ({ op: "crest", crestId: crestIdOf(name), side });
 /** 『name』count 枚を自分のデッキ（のランダムな位置）に加える */
@@ -177,3 +186,35 @@ export const choseAllyAmulet = (name = "t"): Condition => ({
   of: { kind: "board", side: "self", filter: { type: "amulet", inSlot: name } },
 });
 
+// ---- コンボE・海賊R で足した仕組み ----
+
+/** -value */
+export const neg = (of: Value): Value => ({ kind: "neg", of });
+/** 【奥義】（奥義ゲージ 10 以上） */
+export const OUGI: Condition = { kind: "ougi", level: 10 };
+/** 【解放奥義】（奥義ゲージ 15 以上） */
+export const RELEASED_OUGI: Condition = { kind: "ougi", level: 15 };
+/** 【連携_N】 */
+export const link = (atLeast: number): Condition => ({ kind: "link", atLeast });
+/** value が eq と等しい */
+export const valueEq = (value: Value, eq: number): Condition => ({ kind: "valueEq", value, eq });
+/** これをプレイしたときに払ったコスト（「これのコストがNなら」） */
+export const PAID_COST: Value = { kind: "paidCost" };
+/** 自分のEPを amount 回復 */
+export const gainEp = (amount: number): Effect => ({ op: "gainEp", amount });
+/** 自分の【コンボ】を amount 増やす */
+export const addCombo = (amount: number): Effect => ({ op: "addCombo", amount });
+/** 手札のカードのコストを cost にする */
+export const setCost = (target: Target, cost: number): Effect => ({ op: "setCost", target, cost });
+/** 対象のアミュレットのカウントを amount だけ増減する */
+export const countdownOf = (target: Target, amount: number): Effect => ({ op: "countdown", target, amount });
+/** 自分のデッキの filter に合うカードすべては +attack/+defense する */
+export const buffDeck = (filter: CardFilter, attack: number, defense: number): Effect => ({ op: "buffDeck", filter, attack, defense });
+/** 「自分の信仰は「…」を持つ」（カード name の信仰。付く能力は信仰の定義に書く） */
+export const grantFaith = (name: string): Effect => ({ op: "grantFaith", crestId: specialId(name, "faith") });
+/** 信仰に「…」が付いた数（信仰の定義の中で使う） */
+export const FAITH_STACKS: Value = { kind: "faithStacks" };
+/** 自分のフォロワーが進化したとき（超進化・効果による進化を含む） */
+export const onAllyEvolved = (...effects: Effect[]): Ability => ({ trigger: { on: "allyEvolved" }, effects });
+/** 自分がカードを【エンハンス】でプレイしたとき */
+export const onAllyPlayEnhanced = (...effects: Effect[]): Ability => ({ trigger: { on: "allyPlay", enhanced: true }, effects });
