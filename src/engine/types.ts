@@ -60,6 +60,8 @@ export interface HandCard extends CardRef {
    * AI の determinization で、この条件に合うカードを割り当てるために使う
    */
   drawnBy: DrawHint | null;
+  /** 奥義ゲージのうち、手札にある間に自分のフォロワーが進化した回数（【奥義】を持つカードだけ。0 なら省く。docs/rules.md 12章） */
+  ougi?: number;
 }
 
 /** 条件付きのドローの条件（CardFilter のうち山札のカードに使うもの。コストは解決済みの値） */
@@ -124,6 +126,8 @@ export interface CrestInstance {
   usedOncePerTurn: Record<string, number>;
   /** 信仰なら信仰値（クレストには無い。docs/rules.md「12」信仰） */
   faith?: number;
+  /** 信仰に「自分の信仰は「…」を持つ」で付いた能力の数（0 なら省く） */
+  stacks?: number;
 }
 
 /** このターン中に破壊された自分のフォロワーの記録（式神・貴人） */
@@ -179,6 +183,8 @@ export interface PlayerState {
   mulliganDone: boolean;
   /** このターン番号の終わりまで、リーダーは「受ける1以上のダメージを0にする。」を持つ（世界の味方・ゾーイ。無ければ省く） */
   leaderDamageZeroUntil?: number;
+  /** このバトル中に場に出た自分のフォロワーの枚数（【連携】。デッキに【連携】のカードがあるときだけ数える） */
+  followersEntered?: number;
 }
 
 export type Phase = "mulligan" | "main" | "ended";

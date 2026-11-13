@@ -734,6 +734,9 @@ impl<'a> World<'a> {
             (true, _, On::SuperEvolve) => (u.evolvable && c.se_avail) as i32,
             (true, _, On::Evolved) => (u.evolvable && (any_evolve || c.evolve_effects > 0)) as i32,
             (false, _, On::Evolve | On::SuperEvolve | On::Evolved) => 0,
+            // 自分のフォロワーが進化しうる回数: 進化の操作（1 ターンに 1 回）と、進化させる効果の数
+            (true, _, On::AllyEvolved) => add(any_evolve as i32, c.evolve_effects),
+            (false, _, On::AllyEvolved) => 0,
             (true, _, On::AllyEnter) => c.enter_me,
             (false, _, On::AllyEnter) => c.enter_opp,
             (true, _, On::Act) => (!u.acted) as i32,
@@ -896,6 +899,18 @@ impl<'a> World<'a> {
                     ))
                 }
                 ValueObj::ThisX => Some(add(fr.unit.x.unwrap_or(0).max(0), self.c.sb)),
+                // 信仰に付いた能力の数（どの信仰でも、いちばん多いもの）
+                ValueObj::FaithStacks => {
+                    let q = if fr.mine { p } else { opponent(p) };
+                    Some(
+                        s.players[q]
+                            .crests
+                            .iter()
+                            .map(|c| c.stacks)
+                            .max()
+                            .unwrap_or(0),
+                    )
+                }
                 ValueObj::DestroyedThisTurn { stat, .. } if fr.mine => {
                     let done: i32 = s.players[p]
                         .destroyed_this_turn
@@ -979,7 +994,15 @@ impl<'a> World<'a> {
                 | Effect::Countdown { .. }
                 | Effect::AddSigils { .. }
                 | Effect::AddCombo { .. }
+                | Effect::GainEp { .. }
+                | Effect::BuffDeck { .. }
                 | Effect::AddGraveyard { .. } => {}
+                Effect::GrantFaith { .. } => {
+                    // 信仰に付いた能力は、このターンのうちに働きうる（ダメージの見積もりに足せない）
+                    if fr.mine {
+                        acc.unk("GrantFaith");
+                    }
+                }
                 Effect::Bounce { target } => {
                     // 自分のカードを手札に戻すと、出し直してもう一度働かせられる
                     let t = self.ti(target, fr);
@@ -1019,7 +1042,7 @@ impl<'a> World<'a> {
                         fr.slots.push((*sl, SlotInfo::Summoned(false, 0)));
                     }
                 }
-                Effect::AddToHand { card_id, count } => {
+                Effect::AddToHand { card_id, count, .. } => {
                     if fr.mine {
                         match self.vb(s, p, count, fr) {
                             Some(n) => push(&mut acc.adds, *card_id, mul(m, n.max(0))),
@@ -1245,6 +1268,11 @@ impl<'a> World<'a> {
                         acc.cost_down = true;
                     }
                 }
+                Effect::SetCost { target, .. } => {
+                    if fr.mine && !matches!(target, Target::This) {
+                        acc.cost_down = true;
+                    }
+                }
                 Effect::GainPp { amount } => {
                     if fr.mine {
                         let n = match amount {
@@ -1262,10 +1290,25 @@ impl<'a> World<'a> {
                         acc.pp_gain = add(acc.pp_gain, mul(m, (*amount).max(0)));
                     }
                 }
-                Effect::EarthRite { then, .. }
-                | Effect::Necromancy { then, .. }
-                | Effect::SpendFaith { then, .. } => {
+                Effect::EarthRite { then, .. } | Effect::Necromancy { then, .. } => {
                     self.walk(s, p, then, m, fr, acc);
+                }
+                Effect::SpendFaith {
+                    crest_id,
+                    amount,
+                    then,
+                } => {
+                    // 今の信仰値が足りなければ働かないとみなす（このターンのうちに信仰値が増える分は見込まない）
+                    let q = if fr.mine { p } else { opponent(p) };
+                    let have = s.players[q]
+                        .crests
+                        .iter()
+                        .find(|c| c.crest == *crest_id && c.faith.is_some())
+                        .and_then(|c| c.faith)
+                        .unwrap_or(0);
+                    if have >= *amount {
+                        self.walk(s, p, then, m, fr, acc);
+                    }
                 }
                 Effect::Crest { crest_id, side } => {
                     let (me, them) = rel(fr.mine, *side);

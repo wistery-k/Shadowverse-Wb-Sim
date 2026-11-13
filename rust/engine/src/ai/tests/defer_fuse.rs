@@ -249,6 +249,7 @@ fn fusion_that_lets_ace_crest_draw_is_kept() {
     let iid = s.new_iid();
     s.players[0].crests.make_mut().push(CrestInstance {
         faith: None,
+        stacks: 0,
         iid,
         crest,
         countdown: Some(3),
