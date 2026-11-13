@@ -6,13 +6,13 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
 ## 決定済みの前提（変更するときはユーザーに確認）
 
 - フォーマット: スターター / カードプール: 第1弾「伝説の幕開け」＋ベーシックのみ
-- 次のカードプール（ユーザー決定 2026-11-13）: 「前期のローテーション（能力調整後）」の 515 種とトークンに広げる。元データはユーザーが用意する。実装が済むまで、今のプールは上のスターターのまま（物差しとテストのために、スターターは当面残す）。今のローテーション（実際に遊ばれている環境。前期との入れ替わりは 76 種）へ進むかは決めていない。そのカードは、実際の対戦に転用されうるので、ユーザーに確認せずに足さない。進め方は `docs/STATE.md`
+- 次のカードプール（ユーザー決定 2026-11-13）: 「前期のローテーション（能力調整後）」の 515 種とトークンに広げる。元データはブランチ `wistery-k-patch-1` の `azvaldt*.json`（ユーザー提供 2026-11-13）で、`npm run cards -- --pool azvaldt` で `data/pools/azvaldt/` に変換する（`docs/pools/azvaldt.md`）。実装が済むまで、今のプールは上のスターターのまま（物差しとテストのために、スターターは当面残す）。今のローテーション（実際に遊ばれている環境。前期との入れ替わりは 76 種）へ進むかは決めていない。そのカードは、実際の対戦に転用されうるので、ユーザーに確認せずに足さない。進め方は `docs/STATE.md`
 - サーバーなし。静的サイトとして GitHub Pages で公開
 - **画像・音源・フォント等のアセットは一切使わない**（CDN 読み込み、絵文字依存の装飾、base64 埋め込み画像も不可）。表現は CSS とテキストのみ。クラスの識別は色＋文字で行う
 - スタック: TypeScript(strict) + Vite + 軽量UI(Preact想定) + Vitest。エンジンと AI は Rust（`rust/`）で、ブラウザでは WASM にして使う
 - AI: まずルールベース、次に MCTS。重い思考は Web Worker で実行
 - 自己対戦の高速化のため、エンジンと AI を Rust に移した（`rust/README.md`、検討は `docs/ai-notes.md`「エンジンを Rust に移す」）。段階 4 で TypeScript 版のエンジン・AI を消し、ブラウザも WASM を使う（ユーザー確認済み 2026-10-15）。ブラウザ向けにビルドした `.wasm` をサイトに置くのは可（ユーザー確認済み 2026-10-15。画像・音・フォント等のアセットの禁止はそのまま）。開発には Rust（cargo と `rustup target add wasm32-unknown-unknown`）が要る
-- カードデータは、ユーザーが提供した公式サイトのカード一覧APIのレスポンス（`data/raw/*.json`）を `npm run cards`（`scripts/convert-cards.ts`）で `data/cards.json` と `data/crests.json` に変換する。作業環境からは公式サイト・攻略サイトにアクセスできない
+- カードデータは、ユーザーが提供した公式サイトのカード一覧APIのレスポンス（`data/raw/*.json`）を `npm run cards`（`scripts/convert-cards.ts`）で `data/cards.json` と `data/crests.json` に変換する。作業環境からは公式サイト・攻略サイトにアクセスできない（例外: プロのデッキを取り込むため、クラウド環境の許可リストにシャドラボ `svlabo.jp` とそのデータファイルの置き場を足した。ユーザー承認 2026-11-13。`docs/pools/azvaldt.md`「プロのデッキ」）
 - 元データはブランチ `wistery-k-patch-1` の `cardList.json`〜`cardList_7.json`（全198枚、offset 0〜180）。再生成するときは `git show origin/wistery-k-patch-1:<file> > data/raw/<file>` で取り出す
 - ゲームの実際の対戦の最中に手を決める助けとして使うこと（ソフト打ち）は禁止（README「実際の対戦での利用の禁止」、ユーザー確認済み 2026-10-25）。ゲーム画面の読み取り、ゲームへの入力、対戦中の局面を手早く入れて AI の手を聞く仕組みなど、実際の対戦の支援につながる機能は作らない。これに当たりそうな機能を頼まれたら、作る前にユーザーに確認する。サンドボックス（好きな局面を作って AI に考えさせる）は公開サイトに出さず、開発サーバー（`npm run dev`）だけで出す（`src/ui/App.tsx` の `SANDBOX`）。リプレイ検索（手元の自己対戦の記録から条件に合うターンを探す）も開発サーバーだけ（`REPLAY_SEARCH`。ユーザーの依頼 2026-11-02。`vite build` では画面のモジュールを空のものに置き換える）。見落とし問題集の局面を見る「問題集」タブ（`src/ui/Misses.tsx`）は公開サイトにも出す（ユーザーの依頼 2026-11-12。問を確かめるのに開発サーバーを立ち上げなくてよいように）。条件: 見られるのはリポジトリの `misses/` にある決まった局面（シミュレータの中の試合から取ったもの）だけで、局面の編集・貼り付け・ファイルの読み込みや、URL に局面を入れて開くことは付けない（URL の `#misses/<問>` は問を選ぶだけ。実際の対戦の局面を入れて AI の手を聞けないようにする）。「サンドボックスで開く」は開発サーバーだけ。この条件を崩す変更はユーザーに確認する
 - ドキュメント・UI 文言・コミットメッセージは日本語。識別子・コードコメントの用語は英語でもよいが、ゲーム用語は `docs/rules.md` の対応表に従う
@@ -23,7 +23,7 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
 2. **決定的**: 乱数は注入するシード付き PRNG のみ。同じシード＋同じ行動列＝同じ結果（リプレイ・デバッグ・AI評価のため）
 3. **状態遷移は純関数的に**: `apply_action(state, action) -> state`。状態は JSON で TypeScript と受け渡す（形は `src/engine/types.ts`、変換は `rust/engine/src/state_json.rs`）。状態の型を変えたら両方を直す。複製は Rust の `Clone`
 4. **合法手列挙**: `legal_actions(state)` をエンジンが提供し、UI と AI は同じ API だけを使う。UI/AI がルール判定を再実装しない
-5. **カード効果はデータ駆動**: 効果は `src/cards/abilities/<クラス>.ts` にカードIDをキーに宣言的に記述し（DSL は `src/engine/dsl.ts`、補助関数は `src/cards/abilities/helpers.ts`）、エンジンの効果プリミティブ（ダメージ、ドロー、召喚、バフ、キーワード付与 等）の組み合わせで表現する。表現できない効果が出たらプリミティブを足す（`dsl.ts` と Rust 側の `rust/engine/src/data.rs`・`effects.rs`）。カード個別の `if (id === ...)` は書かない。能力の定義は `npm run rust-data` で JSON に書き出して Rust に埋め込む（`npm run wasm`・`npm test`・`npm run dev` が自動で行う）
+5. **カード効果はデータ駆動**: 効果は `src/cards/abilities/<クラス>.ts`（前期のローテーションにしか無いカードは `src/cards/abilities/azvaldt/`）にカードIDをキーに宣言的に記述し（DSL は `src/engine/dsl.ts`、補助関数は `src/cards/abilities/helpers.ts`）、エンジンの効果プリミティブ（ダメージ、ドロー、召喚、バフ、キーワード付与 等）の組み合わせで表現する。表現できない効果が出たらプリミティブを足す（`dsl.ts` と Rust 側の `rust/engine/src/data.rs`・`effects.rs`）。カード個別の `if (id === ...)` は書かない。能力の定義は `npm run rust-data` で JSON に書き出して Rust に埋め込む（`npm run wasm`・`npm test`・`npm run dev` が自動で行う）
 5.0 **エンジン・AI を変えたら**: `npm test` に加えて `cd rust && cargo test --release --workspace`（AI の単体テストと、決まった試合の結果を保存したものと比べるゴールデンテスト。CI でも行う）を通す。振る舞いを意図して変えたとき（カード能力の修正も含む）は `npm run svwb -- golden write` で保存し直し、結果が変わった理由をコミットに書く
 5.1 **能力の解決**: `rust/engine/src/effects.rs` が解決スタック（`state.stack`）と誘発待ち（`state.queue`）で解決する。プレイヤーの選択が必要になると `state.pending` を設定して中断し、`choose` / `mode` アクションで再開する。継続はデータ（効果の配列とプログラムカウンタ）で持つ
 6. **非公開情報**: AI は実際の局面を直接先読みせず、`rust/engine/src/ai/determinize.rs` で作った「視点のプレイヤーから見て矛盾しない局面」（相手の手札・山札の中身と山札の順番を並べ直し、乱数の状態も新しくしたもの）で手を試す。新しい AI もこれに従う
@@ -61,7 +61,7 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
 - `data/cards.json` を手で編集しない。変換スクリプトを直して再生成する
 - 元データには第2弾以降のカードも含まれる。カードIDの3桁目でセットを判別する（0=ベーシック、1=第1弾、2=第2弾…）。トークンは9始まりで、プールのカードから参照されるものだけを含める
 - 能力調整されたカードの当時の能力は `data/starter-overrides.json`（手で管理、コミットする）に書き、変換時に上書きする
-- 元データの変換スクリプトは `scripts/` に置く。元データは `data/raw/`（`.gitignore` 対象）に置く。**コミットするのは整形後の `data/cards.json` のみ**（元データはコミットしない）
+- 元データの変換スクリプトは `scripts/` に置く。元データは `data/raw/`（`.gitignore` 対象）に置く。**コミットするのは整形後のカードデータ（`data/cards.json`・`data/crests.json` と `data/pools/<プール>/`）のみ**（元データはコミットしない）
 - カード画像は取得・保存しない
 
 ## 実装順序

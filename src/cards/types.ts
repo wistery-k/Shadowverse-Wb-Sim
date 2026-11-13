@@ -30,13 +30,32 @@ export type CardType = (typeof CARD_TYPES)[number];
 export const RARITIES = ["bronze", "silver", "gold", "legend"] as const;
 export type Rarity = (typeof RARITIES)[number];
 
-/** 収録セット。token はデッキに入れられない生成専用カード。 */
-export const CARD_SETS = ["basic", "legend_dawn", "token"] as const;
+/**
+ * 収録セット。token はデッキに入れられない生成専用カード。
+ * スターターは basic・legend_dawn、前期のローテーション（data/pools/azvaldt/）は basic と six_dragons〜azvaldt_revenant。
+ */
+export const CARD_SETS = [
+  "basic",
+  "legend_dawn",
+  "six_dragons",
+  "flower_revelry",
+  "apocalypse_pact",
+  "godslayer_anathema",
+  "chronicle_of_destiny",
+  "azvaldt_revenant",
+  "token",
+] as const;
 export type CardSet = (typeof CARD_SETS)[number];
 
 export const SET_NAMES: Record<CardSet, string> = {
   basic: "ベーシック",
   legend_dawn: "伝説の幕開け",
+  six_dragons: "蒼空の六竜",
+  flower_revelry: "花酔遊戯",
+  apocalypse_pact: "アポカリプス・パクト",
+  godslayer_anathema: "神殺し・アナテマ",
+  chronicle_of_destiny: "クロニクル・オブ・デスティニー",
+  azvaldt_revenant: "アズヴォルト・レヴナント",
   token: "トークン",
 };
 
@@ -59,6 +78,8 @@ interface CardBase {
   related: string[];
   /** 能力で得るクレストのID（data/crests.json） */
   crest?: string;
+  /** 結晶・アクセラレート・信仰のID（プールの specials.json。スターターには無い） */
+  specials?: string[];
   /**
    * スターター用に当時の能力へ差し替えたカード
    * （公式データの is_starter_ability_changed、または data/starter-overrides.json で上書き）
@@ -96,5 +117,25 @@ export interface Crest {
   source: string;
   text: string;
   /** カウントダウンの初期値。持たないクレストには無い。 */
+  countdown?: number;
+}
+
+/**
+ * 公式データの specific_effect_card_info のうちクレスト以外（種類 2〜4）。カードの能力テキストには書かれていない。
+ * crystallize（結晶、種類 2）・accelerate（アクセラレート、種類 3）は別のコストでプレイしたときの姿、faith（信仰、種類 4）は信仰値の決まり。
+ * 種類 2 が結晶なのはユーザー確認、種類 3 のアクセラレートはカードの Q&A から（docs/rules.md「12. 前期のローテーション」）。
+ */
+export const SPECIAL_KINDS = ["crystallize", "accelerate", "faith"] as const;
+export type SpecialKind = (typeof SPECIAL_KINDS)[number];
+
+export interface SpecialEffect {
+  id: string;
+  kind: SpecialKind;
+  /** これを持つカードのID */
+  sources: string[];
+  /** その姿でプレイするときのコスト（信仰は 0） */
+  cost: number;
+  text: string;
+  /** カウントダウンの初期値（結晶） */
   countdown?: number;
 }

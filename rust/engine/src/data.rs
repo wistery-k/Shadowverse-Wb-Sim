@@ -835,6 +835,15 @@ pub struct CardAbilities {
 
 // ---- カード ----
 
+/// カードプール（docs/pools/azvaldt.md）。カードの表はスターターのカードを先頭に今の順のまま置き、
+/// 前期のローテーションにしか無いカードを後ろに足している（scripts/rust-data-main.ts）
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub enum Pool {
+    Starter,
+    Azvaldt,
+}
+
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Card {
@@ -856,6 +865,14 @@ pub struct Card {
     pub enhance: Option<i32>,
     /// デッキに入れられない生成専用カード
     pub token: bool,
+    /// 入っているカードプール（ベーシックと一部のトークンは両方）
+    pub pools: Vec<Pool>,
+}
+
+impl Card {
+    pub fn in_pool(&self, pool: Pool) -> bool {
+        self.pools.contains(&pool)
+    }
 }
 
 #[derive(Deserialize, Debug)]
@@ -905,6 +922,9 @@ struct RawData {
     crests: serde_json::Value,
     card_abilities: serde_json::Value,
     crest_abilities: serde_json::Value,
+    /// 前期のローテーションにしか無いカード・クレストの能力（スターターの能力の後に読む）
+    pool_card_abilities: serde_json::Value,
+    pool_crest_abilities: serde_json::Value,
     apocalypse_deck: Vec<(String, i32)>,
     decks: Vec<RawDeck>,
 }
@@ -952,6 +972,32 @@ pub fn load(json: &str) -> Data {
             .iter()
             .position(|c| c.id == id)
             .expect("未知のクレスト");
+        crest_abilities[n] = Some(a);
+    }
+    // 前期のローテーションの能力は、スターターの能力を読んだ後に読む（能力の中の名前の番号を、スターターの分は変えないため）
+    let pool_card_ab: HashMap<String, CardAbilities> =
+        serde_json::from_value(raw.pool_card_abilities)
+            .unwrap_or_else(|e| panic!("poolCardAbilities: {e}"));
+    let pool_crest_ab: HashMap<String, CardAbilities> =
+        serde_json::from_value(raw.pool_crest_abilities)
+            .unwrap_or_else(|e| panic!("poolCrestAbilities: {e}"));
+    for (id, a) in pool_card_ab {
+        let c = card_by_id[&id] as usize;
+        assert!(
+            abilities[c] == CardAbilities::default(),
+            "能力の定義が 2 つあります: {id}"
+        );
+        abilities[c] = a;
+    }
+    for (id, a) in pool_crest_ab {
+        let n = crests
+            .iter()
+            .position(|c| c.id == id)
+            .expect("未知のクレスト");
+        assert!(
+            crest_abilities[n].is_none(),
+            "クレストの能力の定義が 2 つあります: {id}"
+        );
         crest_abilities[n] = Some(a);
     }
     let apocalypse_deck = raw

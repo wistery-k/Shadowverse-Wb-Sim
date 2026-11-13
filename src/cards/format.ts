@@ -19,6 +19,24 @@ export const STARTER: Format = {
   sets: ["basic", "legend_dawn"],
 };
 
+/**
+ * 前期のローテーション（data/pools/azvaldt/。ユーザー決定 2026-11-13）: ベーシックと第4〜9弾。能力調整後の能力。
+ * カードの能力とエンジンはまだで、今はプールのデッキ（data/pools/azvaldt/decks/）の検査だけに使う。
+ */
+export const AZVALDT: Format = {
+  id: "azvaldt",
+  name: "前期のローテーション",
+  sets: [
+    "basic",
+    "six_dragons",
+    "flower_revelry",
+    "apocalypse_pact",
+    "godslayer_anathema",
+    "chronicle_of_destiny",
+    "azvaldt_revenant",
+  ],
+};
+
 /** デッキ構築ルールに違反していれば理由の一覧を返す。空なら合法。 */
 export function deckProblems(
   format: Format,

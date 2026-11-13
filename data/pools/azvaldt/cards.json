@@ -1,0 +1,8351 @@
+[
+  {
+    "id": "10001110",
+    "name": "不屈のファイター",
+    "class": "neutral",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【エンハンス_4】これは+3/+3する。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10001120",
+    "name": "ベルエンジェル・リア",
+    "class": "neutral",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【守護】\n【ラストワード】自分のデッキから1枚を引く。\n【進化時】自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "follower",
+    "attack": 0,
+    "defense": 2
+  },
+  {
+    "id": "10001130",
+    "name": "激震のゴリアテ",
+    "class": "neutral",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 5
+  },
+  {
+    "id": "10001210",
+    "name": "探偵のルーペ",
+    "class": "neutral",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【アクト】これを破壊。相手の場のフォロワー1枚を選ぶ。それは【守護】を失う。",
+    "related": [],
+    "type": "amulet"
+  },
+  {
+    "id": "10002110",
+    "name": "煌響の使者・アンリエット",
+    "class": "neutral",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【進化時】自分のリーダーを2回復。\n【超進化時】2回復ではなく4回復。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10002120",
+    "name": "キャラバンマンモス",
+    "class": "neutral",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 7,
+    "tribes": [],
+    "text": "",
+    "related": [],
+    "type": "follower",
+    "attack": 10,
+    "defense": 10
+  },
+  {
+    "id": "10002210",
+    "name": "冒険者のギルド",
+    "class": "neutral",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のデッキからフォロワー1枚を引く。\n【アクト】これを破壊。自分の場のフォロワー1枚を選ぶ。それは【突進】を持つ。",
+    "related": [],
+    "type": "amulet"
+  },
+  {
+    "id": "10011110",
+    "name": "フェアリーテイマー",
+    "class": "elf",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】『フェアリー』2枚を自分の手札に加える。",
+    "related": [
+      "90011110"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10011120",
+    "name": "ストレイビーストマン",
+    "class": "elf",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の【コンボ】を+1する。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10011130",
+    "name": "温厚なるトレント",
+    "class": "elf",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】【コンボ_3】これは進化する。\n【攻撃時】自分のリーダーを2回復。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10011210",
+    "name": "繚乱の庭",
+    "class": "elf",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】『フェアリー』1枚を自分の手札に加える。\n【カウントダウン_2】\n自分の妖精・フォロワーが場に出たとき、相手の場のフォロワーからランダム1枚に1ダメージ。",
+    "related": [
+      "90011110"
+    ],
+    "type": "amulet",
+    "countdown": 2
+  },
+  {
+    "id": "10012110",
+    "name": "アドベンチャーエルフ・メイ",
+    "class": "elf",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [],
+    "text": "【ファンファーレ】【コンボ_3】相手の場のフォロワー1枚を選ぶ。それに3ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10012120",
+    "name": "ソニックアーチャー・セルウィン",
+    "class": "elf",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 7,
+    "tribes": [],
+    "text": "【疾走】\n【超進化時】相手の場のフォロワー1枚を選ぶ。それを手札に戻す。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 6
+  },
+  {
+    "id": "10012310",
+    "name": "虫の知らせ",
+    "class": "elf",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [],
+    "text": "自分の場のカード1枚を選ぶ。それを手札に戻す。相手の場のフォロワーからランダム1枚に2ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10021110",
+    "name": "刹那のクイックブレイダー",
+    "class": "royal",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "【疾走】",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10021120",
+    "name": "バトルマーチャント",
+    "class": "royal",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "【突進】\n【ラストワード】自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 2
+  },
+  {
+    "id": "10021130",
+    "name": "ケンタウロスの騎士",
+    "class": "royal",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 8,
+    "tribes": [],
+    "text": "【疾走】",
+    "related": [],
+    "type": "follower",
+    "attack": 7,
+    "defense": 5
+  },
+  {
+    "id": "10021310",
+    "name": "メイドの作法",
+    "class": "royal",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "自分の手札1枚を選ぶ。それをデッキに戻す。自分のデッキからロイヤル・フォロワー2枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10022110",
+    "name": "王家の御者",
+    "class": "royal",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ラストワード】『ナイト』1枚を自分の場に出す。",
+    "related": [
+      "90021110"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 2
+  },
+  {
+    "id": "10022120",
+    "name": "魔煌のトリックスター・ラスティ",
+    "class": "royal",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【超進化時】自分のデッキから『魔煌のトリックスター・ラスティ』すべてを引く。それは【疾走】を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10022210",
+    "name": "正統なる王冠",
+    "class": "royal",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【カウントダウン_4】\n自分のフォロワーが場に出たとき、それは+1/+1する。",
+    "related": [],
+    "type": "amulet",
+    "countdown": 4
+  },
+  {
+    "id": "10031110",
+    "name": "閃光の魔法剣士",
+    "class": "witch",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】【モード】1つを選んでその能力が働く。\n（1）自分の手札すべては2回スペルブーストする。\n（2）【土の秘術_1】これは+2/+2して【守護】を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10031210",
+    "name": "魔女の錬金釜",
+    "class": "witch",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "土の印"
+    ],
+    "text": "【ファンファーレ】自分のデッキから1枚を引く。\n【土の印】\nコスト1【アクト】自分の場の土の印を+1する。",
+    "related": [
+      "90031210"
+    ],
+    "type": "amulet"
+  },
+  {
+    "id": "10031310",
+    "name": "知恵の輝き",
+    "class": "witch",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10031320",
+    "name": "真理の召喚",
+    "class": "witch",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "『クレイゴーレム』1枚を自分の場に出す。",
+    "related": [
+      "90031110"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10032110",
+    "name": "相貌の魔女・レミラミ",
+    "class": "witch",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】【土の秘術_1】『ガーディアンゴーレム』1枚を自分の場に出す。\n【超進化時】自分の場のゴーレム・フォロワー1枚を選ぶ。それは進化する。それは+3/+3する。",
+    "related": [
+      "90031120"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10032120",
+    "name": "ブレイズデストロイヤー",
+    "class": "witch",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 10,
+    "tribes": [],
+    "text": "【スペルブースト時】これのコストを-1する。",
+    "related": [],
+    "type": "follower",
+    "attack": 8,
+    "defense": 6
+  },
+  {
+    "id": "10032310",
+    "name": "イラプション",
+    "class": "witch",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "場のフォロワーすべてに2ダメージ。【土の秘術_1】自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10041110",
+    "name": "烈火のファイアリザード",
+    "class": "dragon",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに1ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10041120",
+    "name": "戦斧の竜殺し",
+    "class": "dragon",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 6,
+    "tribes": [],
+    "text": "【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 10
+  },
+  {
+    "id": "10041130",
+    "name": "シャークソルジャー",
+    "class": "dragon",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 8,
+    "tribes": [],
+    "text": "【ファンファーレ】相手のリーダーに6ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 6,
+    "defense": 6
+  },
+  {
+    "id": "10041310",
+    "name": "ドラゴニュートクラッシュ",
+    "class": "dragon",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "相手の場のフォロワー1枚を選ぶ。それに2ダメージ。【覚醒】なら、2ダメージではなく4ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10042110",
+    "name": "猛撃のドラゴンウォーリアー",
+    "class": "dragon",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【進化時】相手の場のフォロワー1枚を選ぶ。それに4ダメージ。\n【超進化時】1枚を選ぶのではなくすべて。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 5
+  },
+  {
+    "id": "10042120",
+    "name": "咆哮の竜使い",
+    "class": "dragon",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【エンハンス_7】『大翼のドラゴン』1枚を自分の場に出す。",
+    "related": [
+      "90041120"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10042310",
+    "name": "竜の啓示",
+    "class": "dragon",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "自分のPP最大値を+1する。その後、自分のPP最大値が10なら、自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10051110",
+    "name": "ウルフマスター",
+    "class": "nightmare",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 6,
+    "tribes": [],
+    "text": "【疾走】\n【必殺】",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 6
+  },
+  {
+    "id": "10051120",
+    "name": "夜の鬼人",
+    "class": "nightmare",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のリーダーに1ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 3
+  },
+  {
+    "id": "10051130",
+    "name": "悪辣のレッサーマミー",
+    "class": "nightmare",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】【ネクロマンス_4】これは【疾走】を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10051310",
+    "name": "カオティックカース",
+    "class": "nightmare",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【モード】1つを選んでその能力が働く。\n（1）自分のデッキからフォロワー1枚を引く。\n（2）【リアニメイト_2】を行う。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10052110",
+    "name": "魅惑のサキュバス・リリム",
+    "class": "nightmare",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [],
+    "text": "【ラストワード】『バット』1枚を自分の手札に加える。",
+    "related": [
+      "90051120"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10052120",
+    "name": "ラバーズネクロマンサー",
+    "class": "nightmare",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【進化時】『ゴースト』2枚を自分の場に出す。\n【超進化時】それは【ドレイン】を持つ。",
+    "related": [
+      "90051130"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 4
+  },
+  {
+    "id": "10052310",
+    "name": "魂の捕食",
+    "class": "nightmare",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "自分の場のフォロワー1枚を選ぶ。それを破壊。自分のデッキから2枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10061110",
+    "name": "癒しのシスター",
+    "class": "bishop",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のリーダーを5回復。\n【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 5
+  },
+  {
+    "id": "10061120",
+    "name": "清純なる白狐",
+    "class": "bishop",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 3
+  },
+  {
+    "id": "10061130",
+    "name": "ウィングウォーリアー",
+    "class": "bishop",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の場の他のフォロワー1枚を選ぶ。それは+1/+1する。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10061210",
+    "name": "投影の鳥像",
+    "class": "bishop",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "【カウントダウン_2】\n【ラストワード】『壮麗なる隼』1枚を自分の場に出す。\nコスト2【アクト】これのカウントを-2する。",
+    "related": [
+      "90061130"
+    ],
+    "type": "amulet",
+    "countdown": 2
+  },
+  {
+    "id": "10062110",
+    "name": "鉄拳の神父",
+    "class": "bishop",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【進化時】相手の場の体力3以下のフォロワー1枚を選ぶ。それを消滅。\n【超進化時】1枚を選ぶのではなくすべて。",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 4
+  },
+  {
+    "id": "10062120",
+    "name": "セイクリッドグリフォン",
+    "class": "bishop",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 8,
+    "tribes": [],
+    "text": "【守護】\n自分がアミュレットを【アクト】したとき、これは【疾走】を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 6,
+    "defense": 8
+  },
+  {
+    "id": "10062210",
+    "name": "有翼の石像",
+    "class": "bishop",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [],
+    "text": "【カウントダウン_4】\n【ラストワード】『ホーリーファルコン』1枚を自分の場に出す。\nコスト1【アクト】これのカウントを-1する。",
+    "related": [
+      "90061110"
+    ],
+    "type": "amulet",
+    "countdown": 4
+  },
+  {
+    "id": "10071110",
+    "name": "砲撃の猫獣人",
+    "class": "nemesis",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】『フューチャー・コア』1枚を自分の手札に加える。\n【突進】",
+    "related": [
+      "90071210",
+      "90072110",
+      "90073110",
+      "90073120",
+      "90073130",
+      "90074110"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 2
+  },
+  {
+    "id": "10071120",
+    "name": "マリオネットランサー",
+    "class": "nemesis",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】『改良型・操り人形』1枚を自分の手札に加える。",
+    "related": [
+      "90071120"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10071130",
+    "name": "獣性の鉄人",
+    "class": "nemesis",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 6,
+    "tribes": [],
+    "text": "【必殺】\n【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 9
+  },
+  {
+    "id": "10071310",
+    "name": "異次元からの銃撃",
+    "class": "nemesis",
+    "set": "basic",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "相手の場のフォロワー1枚を選ぶ。それを破壊。『フューチャー・コア』1枚と『パスト・コア』1枚を自分の手札に加える。",
+    "related": [
+      "90071210",
+      "90071220",
+      "90072110",
+      "90072120",
+      "90073110",
+      "90073120",
+      "90073130",
+      "90074110"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10072110",
+    "name": "エレクトロウィッパー",
+    "class": "nemesis",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】『パスト・コア』1枚を自分の手札に加える。",
+    "related": [
+      "90071220",
+      "90072120",
+      "90073110",
+      "90073120",
+      "90073130",
+      "90074110"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 3
+  },
+  {
+    "id": "10072120",
+    "name": "魔鋼の騎兵",
+    "class": "nemesis",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【守護】\n【進化時】『魔鋼の騎兵』1枚を自分の場に出す。\n【超進化時】1枚ではなく2枚。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10072210",
+    "name": "ドールズシアター",
+    "class": "nemesis",
+    "set": "basic",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】『操り人形』1枚を自分の手札に加える。\n【カウントダウン_2】\n自分のターン終了時、『操り人形』1枚を自分の手札に加える。",
+    "related": [
+      "90071110"
+    ],
+    "type": "amulet",
+    "countdown": 2
+  },
+  {
+    "id": "10401110",
+    "name": "空駆ける庇護者・カタリナ",
+    "class": "neutral",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】【奥義】相手の場のフォロワーからランダム2枚に5ダメージ。\n【守護】\n受ける4以上のダメージを3にする。",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10401120",
+    "name": "愛すべき相棒・ビィ",
+    "class": "neutral",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】超進化可能ターンなら、これは進化する。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10402110",
+    "name": "コスモスの御使い・ユニ",
+    "class": "neutral",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【オーラ】\n自分のターン終了時、自分の場のフォロワーすべてと自分のリーダーを1回復。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10403110",
+    "name": "蒼い空を征く騎空士・グラン＆ジータ",
+    "class": "neutral",
+    "set": "six_dragons",
+    "rarity": "gold",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】【モード】1つを選んでその能力が働く。【奥義】これは進化する。\n（1）相手の場のフォロワーからランダム1枚に5ダメージ。\n（2）自分のデッキからフォロワー2枚を引く。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 2
+  },
+  {
+    "id": "10403120",
+    "name": "空の命運を握る少女・ルリア",
+    "class": "neutral",
+    "set": "six_dragons",
+    "rarity": "gold",
+    "cost": 2,
+    "tribes": [],
+    "text": "【エンハンス_8】自分のデッキからコスト7以上のフォロワー1枚を引く。自分のPPを7回復。\n【バリア】",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10404110",
+    "name": "天司長の後継・サンダルフォン",
+    "class": "neutral",
+    "set": "six_dragons",
+    "rarity": "legend",
+    "cost": 6,
+    "tribes": [],
+    "text": "デッキで働く。自分のターン開始時、このバトル中に自分のフォロワーが進化した回数が6以上なら、これを【直接召喚】する。\nこれが【直接召喚】されたとき、自分は『クレスト：天司長の後継・サンダルフォン』を持つ。これを手札に戻す。\n【ファンファーレ】【解放奥義】「相手の場のフォロワーか相手のリーダーからランダム1枚に2ダメージ。」を5回行う。",
+    "related": [],
+    "crest": "10404112",
+    "type": "follower",
+    "attack": 7,
+    "defense": 6
+  },
+  {
+    "id": "10411110",
+    "name": "愛憎の舞手・コウ＆ヨウ",
+    "class": "elf",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 7,
+    "tribes": [],
+    "text": "1ターンに2回攻撃できる。\n【攻撃時】自分の場のフォロワーすべてと自分のリーダーを3回復。",
+    "related": [],
+    "type": "follower",
+    "attack": 8,
+    "defense": 6
+  },
+  {
+    "id": "10411120",
+    "name": "カワイイ花マル・マナマル",
+    "class": "elf",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "自分のターン終了時、これは進化する。\nこれが進化したとき、相手の場のフォロワーすべてに1ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10411310",
+    "name": "箒星",
+    "class": "elf",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "相手の場のフォロワー1枚を選ぶ。それに4ダメージ。自分の場に進化後のフォロワーがあるなら、自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10412110",
+    "name": "美粧の乙女・クロエ",
+    "class": "elf",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【エンハンス_8】自分の手札のフォロワー1枚を選ぶ。それを自分の場に出す。これを手札に戻す。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10412120",
+    "name": "緋焔の踊り子・アンスリア",
+    "class": "elf",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の場のフォロワーすべては【バリア】を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 4
+  },
+  {
+    "id": "10412310",
+    "name": "綺羅星",
+    "class": "elf",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [],
+    "text": "相手の場のフォロワーからランダム1枚に2ダメージ。【コンボ_5】自分は『クレスト：綺羅星』を持つ。",
+    "related": [],
+    "crest": "10412312",
+    "type": "spell"
+  },
+  {
+    "id": "10413110",
+    "name": "虹色の弓使い・クピタン",
+    "class": "elf",
+    "set": "six_dragons",
+    "rarity": "gold",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】【奥義】これは進化する。【解放奥義】相手のリーダーに3ダメージ。\nこれが進化したとき、「相手の場のフォロワーからランダム1枚に1ダメージ。」を7回行う。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 2
+  },
+  {
+    "id": "10413310",
+    "name": "アルフヘイム",
+    "class": "elf",
+    "set": "six_dragons",
+    "rarity": "gold",
+    "cost": 2,
+    "tribes": [],
+    "text": "【モード】1つを選んでその能力が働く。【解放奥義】1つを選ぶのではなくすべて。\n（1）自分のデッキから1枚を引く。自分のリーダーを1回復。\n（2）自分の場のフォロワーすべては+1/+0して【突進】を持つ。\n（3）自分の場のフォロワーすべては+0/+1して【守護】を持つ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10414110",
+    "name": "風の理・イーウィヤ",
+    "class": "elf",
+    "set": "six_dragons",
+    "rarity": "legend",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】【奥義】自分のEPを1回復。\n【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10414120",
+    "name": "調和の舞手・ユエル＆ソシエ",
+    "class": "elf",
+    "set": "six_dragons",
+    "rarity": "legend",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】「相手の場のフォロワーからランダム1枚に4ダメージ。」を2回行う。\n【超進化時】自分は『クレスト：調和の舞手・ユエル＆ソシエ』を持つ。",
+    "related": [],
+    "crest": "10414122",
+    "type": "follower",
+    "attack": 4,
+    "defense": 3
+  },
+  {
+    "id": "10421110",
+    "name": "信念の蹴撃・ランドル",
+    "class": "royal",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【エンハンス_5】これは【疾走】を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 2
+  },
+  {
+    "id": "10421120",
+    "name": "決意の輝竜・アーサー",
+    "class": "royal",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【守護】\n【進化時】『迷夢の獅子・モルドレッド』1枚を自分の場に出す。",
+    "related": [
+      "10421130"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 3
+  },
+  {
+    "id": "10421130",
+    "name": "迷夢の獅子・モルドレッド",
+    "class": "royal",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【疾走】\n【進化時】『決意の輝竜・アーサー』1枚を自分の場に出す。",
+    "related": [
+      "10421120"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10422110",
+    "name": "氷心の覇王・アグロヴァル",
+    "class": "royal",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワーすべてに3ダメージ。\n【威圧】",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 3
+  },
+  {
+    "id": "10422120",
+    "name": "燃え滾る闘志・フェザー",
+    "class": "royal",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 4
+  },
+  {
+    "id": "10422130",
+    "name": "花開く筋肉・フィオリト",
+    "class": "royal",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【潜伏】\n【必殺】",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 6
+  },
+  {
+    "id": "10423110",
+    "name": "真王の刃・黄金の騎士",
+    "class": "royal",
+    "set": "six_dragons",
+    "rarity": "gold",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】【モード】1つを選んでその能力が働く。\n（1）これは超進化する。\n（2）相手の場のフォロワーすべてに4ダメージ。\n（3）自分のリーダーを4回復。\n【エンハンス_8】1つを選ぶのではなくすべて。",
+    "related": [],
+    "type": "follower",
+    "attack": 6,
+    "defense": 6
+  },
+  {
+    "id": "10423310",
+    "name": "リッター・シュナイト",
+    "class": "royal",
+    "set": "six_dragons",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "【モード】1つを選んでその能力が働く。\n（1）自分の場のロイヤル・フォロワー左から1枚は「1ターンに2回攻撃できる。」を持つ。\n（2）自分の場のロイヤル・フォロワーすべては+1/+1して【バリア】を持つ。\n（3）自分のPPを2回復。自分のEPを1回復。\n（4）自分のリーダーを6回復。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10424110",
+    "name": "真紅と群青・ゼタ＆ベアトリクス",
+    "class": "royal",
+    "set": "six_dragons",
+    "rarity": "legend",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】『真紅と群青・ゼタ＆ベアトリクス』1枚を自分の場に出す。\n【エンハンス_6】それは【必殺】を持つ。これは【疾走】を持つ。\n【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 2
+  },
+  {
+    "id": "10424120",
+    "name": "十天衆の頭目・シエテ",
+    "class": "royal",
+    "set": "six_dragons",
+    "rarity": "legend",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】【奥義】自分の場の進化前のフォロワーすべては進化する。【解放奥義】進化するのではなく超進化する。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 3
+  },
+  {
+    "id": "10431110",
+    "name": "不可思議な哲学者・フィラソピラ",
+    "class": "witch",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のデッキからスペル1枚を引く。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 4
+  },
+  {
+    "id": "10431120",
+    "name": "さすらいの家庭教師・スフラマール",
+    "class": "witch",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "自分のターン終了時、自分の手札すべてはX回スペルブーストする。Xはこれの攻撃力である。\n【進化時】これは「フォロワーやリーダーを攻撃できない。」を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10431310",
+    "name": "ルーン・リチュオル",
+    "class": "witch",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 7,
+    "tribes": [],
+    "text": "相手の場のフォロワーすべてに6ダメージ。自分のリーダーを3回復。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10432110",
+    "name": "復讐の占師・エゼクレイン",
+    "class": "witch",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー2枚を選ぶ。それに4ダメージ。自分の場の土の印を+2する。",
+    "related": [
+      "90031210"
+    ],
+    "type": "follower",
+    "attack": 6,
+    "defense": 5
+  },
+  {
+    "id": "10432120",
+    "name": "辛苦の旅路・ミレイユ＆リゼット",
+    "class": "witch",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】『辛苦の旅路・ミレイユ＆リゼット』1枚を自分の場に出す。【土の秘術_2】それとこれは進化する。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10432310",
+    "name": "アンリーシュ",
+    "class": "witch",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【モード】1つを選んでその能力が働く。\n（1）自分のデッキから1枚を引く。相手の場のフォロワーからランダム1枚に4ダメージ。\n（2）自分のデッキから2枚を引く。相手の場のフォロワーからランダム2枚に4ダメージ。自分のリーダーに2ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10433110",
+    "name": "懐旧の送り火・エルモート",
+    "class": "witch",
+    "set": "six_dragons",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それは能力すべてを失う。それに3ダメージ。\n【超進化時】自分は『クレスト：懐旧の送り火・エルモート』を持つ。",
+    "related": [],
+    "crest": "10433112",
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10433310",
+    "name": "アルケミック・フレア",
+    "class": "witch",
+    "set": "six_dragons",
+    "rarity": "gold",
+    "cost": 2,
+    "tribes": [],
+    "text": "相手の場のフォロワー1枚を選ぶ。それに4ダメージ。自分の場の土の印を+1する。【奥義】相手のリーダーに2ダメージ。",
+    "related": [
+      "90031210"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10434110",
+    "name": "水の理・ワムデュス",
+    "class": "witch",
+    "set": "six_dragons",
+    "rarity": "legend",
+    "cost": 3,
+    "tribes": [],
+    "text": "【スペルブースト時】これは+1/+1する。\n【ファンファーレ】自分の手札すべては1回スペルブーストする。\n【超進化時】【モード】1つを選んでその能力が働く。\n（1）自分の場の他のフォロワーすべては【バリア】を持つ。\n（2）相手の場のフォロワーすべてにXダメージを割りふる。Xはこれの攻撃力である。",
+    "related": [],
+    "type": "follower",
+    "attack": 0,
+    "defense": 1
+  },
+  {
+    "id": "10434120",
+    "name": "天才美少女錬金術師・カリオストロ",
+    "class": "witch",
+    "set": "six_dragons",
+    "rarity": "legend",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の場の土の印を+2する。『アルス・マグナ』1枚を自分の手札に加える。【奥義】これは進化する。【解放奥義】自分は『クレスト：天才美少女錬金術師・カリオストロ』を持つ。",
+    "related": [
+      "90031210",
+      "90034320"
+    ],
+    "crest": "10434122",
+    "type": "follower",
+    "attack": 5,
+    "defense": 3
+  },
+  {
+    "id": "10441110",
+    "name": "大海を追う者・ジョエル",
+    "class": "dragon",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【守護】\n【オーラ】",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10441120",
+    "name": "メグの親友・まりっぺ",
+    "class": "dragon",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "手札で働く。自分の元のコスト3のフォロワーが超進化したとき、ターン終了まで、これのコストを0にする。\n自分のターン終了時、自分の場の超進化後のフォロワーからランダム1枚は+1/+1する。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10441310",
+    "name": "クレッセント・チューブ・ライド",
+    "class": "dragon",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "自分は『クレスト：クレッセント・チューブ・ライド』を持つ。",
+    "related": [],
+    "crest": "10441312",
+    "type": "spell"
+  },
+  {
+    "id": "10442110",
+    "name": "凍てつく定め・イシュミール",
+    "class": "dragon",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のPP最大値が10なら、これは進化する。\nこれが進化したとき、相手の場のフォロワーすべてに3ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 4
+  },
+  {
+    "id": "10442120",
+    "name": "純朴の鋼体・ムゲン",
+    "class": "dragon",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 8,
+    "tribes": [],
+    "text": "【ファンファーレ】【解放奥義】これは【疾走】を持つ。\n【超進化時】相手の場のフォロワー2枚を選ぶ。それを破壊。",
+    "related": [],
+    "type": "follower",
+    "attack": 10,
+    "defense": 8
+  },
+  {
+    "id": "10442310",
+    "name": "ラヴマックス・ボンバー",
+    "class": "dragon",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "相手の場のフォロワー1枚を選ぶ。それに3ダメージ。相手のターン終了まで、それは「フォロワーやリーダーを攻撃できない。」を持つ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10443110",
+    "name": "どこにでもいるフツーの女の子・メグ",
+    "class": "dragon",
+    "set": "six_dragons",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】【奥義】これは超進化する。\n自分の元のコスト2のフォロワーが場に出たとき、これは【守護】を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10443310",
+    "name": "星晶獣の吸収",
+    "class": "dragon",
+    "set": "six_dragons",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "相手の場のカード1枚を選ぶ。それを消滅して、同名のカード1枚を自分の手札に加える。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10444110",
+    "name": "炎の理・ウィルナス",
+    "class": "dragon",
+    "set": "six_dragons",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに8ダメージ。\n【威圧】\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 8,
+    "defense": 6
+  },
+  {
+    "id": "10444120",
+    "name": "世界の味方・ゾーイ",
+    "class": "dragon",
+    "set": "six_dragons",
+    "rarity": "legend",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のPP最大値を+1する。\n【エンハンス_10】これは【疾走】を持つ。自分のリーダーの体力の最大値を1にする。相手のターン終了まで、自分のリーダーは「受ける1以上のダメージを0にする。」を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10451110",
+    "name": "憧憬の鉄槌・アルメイダ",
+    "class": "nightmare",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【エンハンス_4】これは進化する。これは+1/+1する。\n【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 1
+  },
+  {
+    "id": "10451120",
+    "name": "不屈の鋭刃・バザラガ",
+    "class": "nightmare",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 6,
+    "tribes": [],
+    "text": "【威圧】\n【ラストワード】『不屈の鋭刃・バザラガ』1枚を自分の場に出す。自分のリーダーに2ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 7
+  },
+  {
+    "id": "10451310",
+    "name": "ヴァリアントエッジ",
+    "class": "nightmare",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "自分のリーダーに2ダメージ。自分は『クレスト：ヴァリアントエッジ』を持つ。",
+    "related": [],
+    "crest": "10451312",
+    "type": "spell"
+  },
+  {
+    "id": "10452110",
+    "name": "覇空の武神・ナタク",
+    "class": "nightmare",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 6,
+    "tribes": [],
+    "text": "【突進】\n自分のターン終了時、相手の場のフォロワーからランダム1枚に4ダメージ。相手の場のフォロワーからランダム1枚に2ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 8,
+    "defense": 6
+  },
+  {
+    "id": "10452120",
+    "name": "愛の旅人・サテュロス",
+    "class": "nightmare",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の場に進化後のフォロワーがあるなら、これは進化する。\n【オーラ】",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10452130",
+    "name": "元素の共鳴・バアル",
+    "class": "nightmare",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】【モード】1つを選んでその能力が働く。\n（1）自分の場の他のフォロワーからランダム1枚とこれは+1/+1する。\n（2）相手の場のフォロワーからランダム1枚に3ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10453110",
+    "name": "生滅の技巧・ネハン",
+    "class": "nightmare",
+    "set": "six_dragons",
+    "rarity": "gold",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の場の進化前のフォロワーすべては進化する。自分のリーダーに2ダメージ。\n【ドレイン】",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 4
+  },
+  {
+    "id": "10453310",
+    "name": "コラプション",
+    "class": "nightmare",
+    "set": "six_dragons",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "場のフォロワーすべては-2/-2する。自分と相手は『クレスト：コラプション』を持つ。【解放奥義】自分の『クレスト：コラプション』を破壊。",
+    "related": [],
+    "crest": "10453312",
+    "type": "spell"
+  },
+  {
+    "id": "10454110",
+    "name": "闇の理・フェディエル",
+    "class": "nightmare",
+    "set": "six_dragons",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】【ネクロマンス_6】【リアニメイト_2】と【リアニメイト_1】を行う。それは進化する。\n自分のターン終了時、相手の場のフォロワーすべては-2/-2する。",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10454120",
+    "name": "狡知の堕天司・ベリアル",
+    "class": "nightmare",
+    "set": "six_dragons",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】場の他のフォロワーすべてに10ダメージ。【解放奥義】自分は『クレスト：狡知の堕天司・ベリアル』を持つ。\n【超進化時】自分の『クレスト：狡知の堕天司・ベリアル』のカウントを-1する。",
+    "related": [],
+    "crest": "10454122",
+    "type": "follower",
+    "attack": 7,
+    "defense": 6
+  },
+  {
+    "id": "10461110",
+    "name": "英雄幻視・トルー",
+    "class": "bishop",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【疾走】\n自分がアミュレットを【アクト】したとき、これは【ドレイン】を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10461120",
+    "name": "清く正しい修道女・ラムレッダ",
+    "class": "bishop",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "自分のターン終了時、これが進化後なら、場のフォロワーすべてに2ダメージ。\n【進化時】ターン終了まで、これは「フォロワーやリーダーを攻撃できない。」を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 4
+  },
+  {
+    "id": "10461210",
+    "name": "リーリエ・ライツ",
+    "class": "bishop",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 0,
+    "tribes": [],
+    "text": "コスト2【アクト】これを破壊。自分の場のフォロワー1枚を選ぶ。それは『リーリエ・ライツ』に変身する。自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "amulet"
+  },
+  {
+    "id": "10462110",
+    "name": "砂神の巫女・サラ",
+    "class": "bishop",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【エンハンス_6】これは+0/+10する。\n【守護】\n【進化時】相手の場のダメージを受けているフォロワー1枚を選ぶ。それを破壊。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 5
+  },
+  {
+    "id": "10462120",
+    "name": "ゼエン教の僧侶・ソフィア",
+    "class": "bishop",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のデッキのコスト2以下のビショップ・フォロワーからランダム1枚を自分の場に出す。\n【超進化時】自分の場の他のフォロワーすべては【バリア】を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 5
+  },
+  {
+    "id": "10462210",
+    "name": "空を征く艇",
+    "class": "bishop",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "手札で働く。自分がアミュレットを【アクト】したとき、これのコストを-1する。\n【アクト】これを破壊。自分の場の進化前のフォロワー1枚を選ぶ。それは進化する。",
+    "related": [],
+    "type": "amulet"
+  },
+  {
+    "id": "10463110",
+    "name": "魔杖の外科医・ティコ",
+    "class": "bishop",
+    "set": "six_dragons",
+    "rarity": "gold",
+    "cost": 1,
+    "tribes": [],
+    "text": "自分がアミュレットを【アクト】したとき、自分のリーダーを1回復。\n【進化時】相手の場のフォロワー1枚を選ぶ。それに3ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 0,
+    "defense": 4
+  },
+  {
+    "id": "10463210",
+    "name": "レ・フィーエの宝石",
+    "class": "bishop",
+    "set": "six_dragons",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [],
+    "text": "【アクト】これを破壊。【モード】1つを選んでその能力が働く。\n（1）相手の場のフォロワーからランダム1枚を破壊。\n（2）自分のデッキから2枚を引く。",
+    "related": [],
+    "type": "amulet"
+  },
+  {
+    "id": "10464110",
+    "name": "土の理・ガレヲン",
+    "class": "bishop",
+    "set": "six_dragons",
+    "rarity": "legend",
+    "cost": 3,
+    "tribes": [],
+    "text": "【守護】\nフォロワーやリーダーを攻撃できない。\n自分のターン終了時、超進化可能ターンなら、自分の場の「このターン中に攻撃していない、進化前のフォロワー」からランダム1枚は進化する。",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10464120",
+    "name": "威容なる星晶騎士・ヴィーラ",
+    "class": "bishop",
+    "set": "six_dragons",
+    "rarity": "legend",
+    "cost": 8,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー2枚を選ぶ。それを消滅。【解放奥義】これは超進化する。\n【守護】\n受ける4以上のダメージを3にする。",
+    "related": [],
+    "type": "follower",
+    "attack": 6,
+    "defense": 8
+  },
+  {
+    "id": "10471110",
+    "name": "再起の夜王・ショウ",
+    "class": "nemesis",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】超進化可能ターンなら、これは【バリア】を持つ。\n【疾走】",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10471120",
+    "name": "爆燃の総長・ツバサ",
+    "class": "nemesis",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の手札すべての奥義ゲージを+1する。\n【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 1
+  },
+  {
+    "id": "10471130",
+    "name": "報恩の技師・アイザック",
+    "class": "nemesis",
+    "set": "six_dragons",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ラストワード】『アタックアーティファクト』1枚を自分の手札に加える。",
+    "related": [
+      "90072110",
+      "90073110",
+      "90073120",
+      "90073130",
+      "90074110"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10472110",
+    "name": "轟雷の閃狼・ユーステス",
+    "class": "nemesis",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】【奥義】自分の場の他の進化前のフォロワー1枚を選ぶ。それとこれは進化する。\n【交戦時】交戦相手に3ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 4
+  },
+  {
+    "id": "10472120",
+    "name": "厳烈なる教官・イルザ",
+    "class": "nemesis",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】【モード】1つを選んでその能力が働く。\n（1）「相手の場のフォロワーからランダム1枚に4ダメージ。」を3回行う。\n（2）相手のリーダーに4ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 7,
+    "defense": 6
+  },
+  {
+    "id": "10472310",
+    "name": "ストーン・ブレイク",
+    "class": "nemesis",
+    "set": "six_dragons",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "「相手の場のフォロワーからランダム1枚に1ダメージ。」を6回行う。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10473110",
+    "name": "空慕う帰還者・カシウス",
+    "class": "nemesis",
+    "set": "six_dragons",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の手札のアーティファクト・フォロワー1枚を選ぶ。相手の場のフォロワーすべてにXダメージ。Xは選んだフォロワーの攻撃力である。\n【ラストワード】『キャッスルアーティファクト』1枚を自分の手札に加える。",
+    "related": [
+      "90072120",
+      "90073110",
+      "90073120",
+      "90073130",
+      "90074110"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 2
+  },
+  {
+    "id": "10473310",
+    "name": "ケイオス・レギオン",
+    "class": "nemesis",
+    "set": "six_dragons",
+    "rarity": "gold",
+    "cost": 6,
+    "tribes": [],
+    "text": "相手の場のフォロワーすべてと相手のリーダーに3ダメージ。【解放奥義】3ダメージではなく6ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10474110",
+    "name": "光の理・ル・オー",
+    "class": "nemesis",
+    "set": "six_dragons",
+    "rarity": "legend",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】「相手の場のフォロワーからランダム1枚に1ダメージ。」を6回行う。相手の手札のフォロワーすべては+1/+0する。【奥義】自分は『クレスト：光の理・ル・オー』を持つ。",
+    "related": [],
+    "crest": "10474112",
+    "type": "follower",
+    "attack": 6,
+    "defense": 6
+  },
+  {
+    "id": "10474120",
+    "name": "全一の王・ベルゼバブ",
+    "class": "nemesis",
+    "set": "six_dragons",
+    "rarity": "legend",
+    "cost": 9,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー2枚を選ぶ。それは能力すべてを失う。それに9ダメージ。相手のリーダーは「受けるダメージを+1する。」を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 9,
+    "defense": 9
+  },
+  {
+    "id": "10501110",
+    "name": "達筆の怪異",
+    "class": "neutral",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "【ファンファーレ】場に他の元のコスト1のカードがあるなら、これは+1/+1する。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10502110",
+    "name": "スターライトゴッデス",
+    "class": "neutral",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【進化時】自分の手札3枚を選ぶ。それを捨てる。自分の手札左から3枚のコピー1枚ずつを非公開で自分の手札に加える。",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10502120",
+    "name": "軍配の偉丈夫",
+    "class": "neutral",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【進化時】自分の手札の元のコストの大きい順に3枚の合計が相手の手札の元のコストの大きい順に3枚の合計より大きいなら、相手の場のフォロワーすべてを破壊。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 5
+  },
+  {
+    "id": "10503210",
+    "name": "大遊戯世界",
+    "class": "neutral",
+    "set": "flower_revelry",
+    "rarity": "gold",
+    "cost": 1,
+    "tribes": [],
+    "text": "【カウントダウン_5】\n自分が他のカードをプレイしたとき、場にそれ以外の元のコストXのカードがあるなら、これのカウントを-1する。Xはプレイしたカードの元のコストである。\n【ラストワード】自分のデッキから2枚を引く。",
+    "related": [],
+    "type": "amulet",
+    "countdown": 5
+  },
+  {
+    "id": "10503310",
+    "name": "《世界》の提示",
+    "class": "neutral",
+    "set": "flower_revelry",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "自分のデッキから2枚を引く。相手の場の攻撃力最大のフォロワーからランダム1枚を破壊。\n【エンハンス_10】相手の場のフォロワーすべてと相手のリーダーに4ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10504110",
+    "name": "八界花・ゲテンオウ",
+    "class": "neutral",
+    "set": "flower_revelry",
+    "rarity": "legend",
+    "cost": 8,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の手札すべてを捨てる。【モード】1つを選んでその能力が働く。\n（1）自分のデッキから8枚を引く。\n（2）自分のデッキから2枚を引く。それのコストを-8する。",
+    "related": [],
+    "type": "follower",
+    "attack": 8,
+    "defense": 8
+  },
+  {
+    "id": "10511110",
+    "name": "賢慮の狸",
+    "class": "elf",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【潜伏】\n【進化時】自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 3
+  },
+  {
+    "id": "10511120",
+    "name": "森羽子板の匠",
+    "class": "elf",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】『フェアリー』1枚を自分の場に出す。\n自分の妖精・フォロワーが場に出たとき、相手のリーダーに1ダメージ。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [
+      "90011110"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10511310",
+    "name": "虫風花の飛翔",
+    "class": "elf",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "相手の場のフォロワーすべてに3ダメージを割りふる。『フェアリー』1枚を自分の手札に加える。",
+    "related": [
+      "90011110"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10512110",
+    "name": "バディングバディーズ",
+    "class": "elf",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】【コンボ_5】『バディングバディーズ』1枚を自分の場に出す。それとこれは進化する。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10512120",
+    "name": "和気藹々の妖精",
+    "class": "elf",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【突進】\n【必殺】\n【ドレイン】",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 6
+  },
+  {
+    "id": "10512310",
+    "name": "静かなる応援",
+    "class": "elf",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "相手の場のフォロワーすべてと相手のリーダーに1ダメージ。【コンボ_3】1ダメージではなく2ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10513110",
+    "name": "導きの船頭",
+    "class": "elf",
+    "set": "flower_revelry",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】『フェアリー』3枚を自分の場に出す。\n【進化時】【ファンファーレ】と同じ能力が働く。\n【超進化時】自分の場の妖精・フォロワーすべては【必殺】を持つ。",
+    "related": [
+      "90011110"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 3
+  },
+  {
+    "id": "10513310",
+    "name": "優雅なる虫風花",
+    "class": "elf",
+    "set": "flower_revelry",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [],
+    "text": "自分のデッキからX枚を引く。Xは自分の【コンボ】である。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10514110",
+    "name": "天踏む《吊るされた男》・ローフラッド",
+    "class": "elf",
+    "set": "flower_revelry",
+    "rarity": "legend",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】これは+X/+Xする。Xは自分の【コンボ】である。\n【進化時】自分の手札すべてを捨てる。相手のデッキからランダム5枚のコピー1枚ずつを非公開で自分の手札に加える。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10514120",
+    "name": "虫風花・ミロク",
+    "class": "elf",
+    "set": "flower_revelry",
+    "rarity": "legend",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】【モード】1つを選んでその能力が働く。\n（1）『フェアリー』2枚を自分の手札に加える。\n（2）自分のPPを2回復。\n（3）相手の場のフォロワーすべてに3ダメージを割りふる。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [
+      "90011110"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10521110",
+    "name": "喜捨の名士",
+    "class": "royal",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の手札1枚を選ぶ。それを捨てる。自分のリーダーを3回復。スペルを選んだなら、3回復ではなく6回復。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 6
+  },
+  {
+    "id": "10521120",
+    "name": "煙管の美玉",
+    "class": "royal",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の手札のスペルの枚数が2以上なら、これは+1/+1して【守護】を持つ。\n【進化時】『輝く金貨』1枚を自分の手札に加える。",
+    "related": [
+      "90021350"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10521310",
+    "name": "麗金花の散財",
+    "class": "royal",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "自分の手札のスペル1枚を選ぶ。それを捨てる。「相手の場のフォロワーからランダム1枚に3ダメージ。」を2回行う。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10522110",
+    "name": "剽疾の武闘家",
+    "class": "royal",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 6,
+    "tribes": [],
+    "text": "これを引いたとき、ターン終了まで、これのコストを3にする。\n【ファンファーレ】自分のデッキから1枚を引く。自分のリーダーを3回復。\n【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10522120",
+    "name": "吉祥蛙",
+    "class": "royal",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 7,
+    "tribes": [],
+    "text": "自分のターン終了時、自分の手札のスペルの枚数が2以上なら、相手の場のフォロワーすべてに5ダメージ。\n【進化時】『輝く金貨』2枚を自分の手札に加える。",
+    "related": [
+      "90021350"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10522310",
+    "name": "優しき援軍",
+    "class": "royal",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "『ナイト』2枚を自分の場に出す。\n【エンハンス_4】2枚ではなく4枚。",
+    "related": [
+      "90021110"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10523110",
+    "name": "不動の将校",
+    "class": "royal",
+    "set": "flower_revelry",
+    "rarity": "gold",
+    "cost": 4,
+    "tribes": [],
+    "text": "フォロワーやリーダーを攻撃できない。\n自分のターン終了時、『スティールナイト』1枚を自分の場に出す。\n【超進化時】自分の場の他のフォロワーすべては+3/+3する。",
+    "related": [
+      "90021120"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 6
+  },
+  {
+    "id": "10523310",
+    "name": "栄耀なる麗金花",
+    "class": "royal",
+    "set": "flower_revelry",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [],
+    "text": "『輝く金貨』2枚を自分の手札に加える。\n【エンハンス_5】2枚ではなく4枚。",
+    "related": [
+      "90021350"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10524110",
+    "name": "猛る《戦車》・オルオーン",
+    "class": "royal",
+    "set": "flower_revelry",
+    "rarity": "legend",
+    "cost": 9,
+    "tribes": [],
+    "text": "自分のターン終了時、これが進化前なら、相手の場のフォロワーすべてに7ダメージ。進化後なら、「場の他のフォロワーか自分のリーダーか相手のリーダーからランダム1枚に7ダメージ。」を3回行う。",
+    "related": [],
+    "type": "follower",
+    "attack": 7,
+    "defense": 7
+  },
+  {
+    "id": "10524120",
+    "name": "麗金花・ウンケイ",
+    "class": "royal",
+    "set": "flower_revelry",
+    "rarity": "legend",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それを消滅。『輝く金貨』1枚を自分の手札に加える。\n【超進化時】自分は『クレスト：麗金花・ウンケイ』を持つ。",
+    "related": [
+      "90021350"
+    ],
+    "crest": "10524122",
+    "type": "follower",
+    "attack": 2,
+    "defense": 4
+  },
+  {
+    "id": "10531110",
+    "name": "シェイプウィザード",
+    "class": "witch",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の場の土の印を+2する。\n【超進化時】『ガーディアンゴーレム』2枚を自分の場に出す。",
+    "related": [
+      "90031120",
+      "90031210"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10531120",
+    "name": "流動の符操師",
+    "class": "witch",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワーからランダム3枚に3ダメージ。自分の手札すべては3回スペルブーストする。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10531310",
+    "name": "明越花の転変",
+    "class": "witch",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "自分の手札1枚を選ぶ。それを捨てる。自分のデッキから2枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10532110",
+    "name": "インソムニアウィッチ",
+    "class": "witch",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】自分は『クレスト：インソムニアウィッチ』を持つ。\n【進化時】自分の『クレスト：インソムニアウィッチ』を破壊。",
+    "related": [],
+    "crest": "10532112",
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10532120",
+    "name": "余情の俳人",
+    "class": "witch",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 6,
+    "tribes": [],
+    "text": "【スペルブースト時】これのコストを-1する。\n【ファンファーレ】自分のデッキから1枚を引く。\n【ラストワード】自分の手札すべては1回スペルブーストする。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10532310",
+    "name": "キティトリック",
+    "class": "witch",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [],
+    "text": "【土の秘術_2】下記の能力からランダム2つの能力が働く。\n（1）『クレイゴーレム』1枚を自分の場に出す。\n（2）自分のリーダーを2回復。\n（3）自分の場の土の印を+3する。",
+    "related": [
+      "90031110",
+      "90031210"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10533110",
+    "name": "エレメンタルガバナー",
+    "class": "witch",
+    "set": "flower_revelry",
+    "rarity": "gold",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】『ガーディアンゴーレム』2枚を自分の場に出す。\n自分のゴーレム・フォロワーが場に出たとき、【土の秘術_1】それは進化する。",
+    "related": [
+      "90031120"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10533310",
+    "name": "壮美なる明越花",
+    "class": "witch",
+    "set": "flower_revelry",
+    "rarity": "gold",
+    "cost": 7,
+    "tribes": [],
+    "text": "自分の場のフォロワーすべてはそれぞれ、自分のデッキのフォロワーからランダム1枚のコピーに変身する。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10534110",
+    "name": "歩む《愚者》・リンクル",
+    "class": "witch",
+    "set": "flower_revelry",
+    "rarity": "legend",
+    "cost": 1,
+    "tribes": [],
+    "text": "【ファンファーレ】自分は『クレスト：歩む《愚者》・リンクル』を持つ。\n【突進】\n【超進化時】『歩む《愚者》・リンクル』10枚を自分のデッキに加える。",
+    "related": [],
+    "crest": "10534112",
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10534120",
+    "name": "明越花・アラ",
+    "class": "witch",
+    "set": "flower_revelry",
+    "rarity": "legend",
+    "cost": 10,
+    "tribes": [],
+    "text": "【スペルブースト時】これのコストを-1する。\n【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに10ダメージ。\n【進化時】場の他のフォロワー1枚を選ぶ。それは『壮麗なる隼』に変身する。",
+    "related": [
+      "90061130"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10541110",
+    "name": "湧水の汲み手",
+    "class": "dragon",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【進化時】相手の場のフォロワー1枚を選ぶ。それに5ダメージ。\n【超進化時】1枚ではなく2枚。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10541120",
+    "name": "雫の囃子方",
+    "class": "dragon",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】『大海のオルカ』1枚を自分の場に出す。\n自分の海洋・フォロワーが場に出たとき、自分のリーダーを2回復。",
+    "related": [
+      "90041130"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10541310",
+    "name": "波揺花の断裁",
+    "class": "dragon",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "自分のデッキからフォロワー1枚を引く。相手の場のフォロワーからランダム1枚にXダメージ。Xはこれで引いたカードのコストである。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10542110",
+    "name": "鉄槌のドラグーン",
+    "class": "dragon",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 8,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに7ダメージ。『大翼のドラゴン』1枚を自分の場に出す。",
+    "related": [
+      "90041120"
+    ],
+    "type": "follower",
+    "attack": 7,
+    "defense": 7
+  },
+  {
+    "id": "10542120",
+    "name": "クラゲの舞姫",
+    "class": "dragon",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】『大海のオルカ』1枚を自分の手札に加える。\n自分の海洋・フォロワーが場に出たとき、これは【突進】と【必殺】を持つ。",
+    "related": [
+      "90041130"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10542310",
+    "name": "プロミネンスロア",
+    "class": "dragon",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "場のフォロワーすべてにXダメージ。Xは場のフォロワーの枚数である。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10543110",
+    "name": "ルインジェノサイダー",
+    "class": "dragon",
+    "set": "flower_revelry",
+    "rarity": "gold",
+    "cost": 7,
+    "tribes": [],
+    "text": "【超進化時】自分のデッキのコスト1、3、5、7、9のカードすべてを消滅。相手の場のフォロワーすべてにXダメージを割りふる。Xはこれで消滅したカードの枚数である。",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10543310",
+    "name": "怠惰なる波揺花",
+    "class": "dragon",
+    "set": "flower_revelry",
+    "rarity": "gold",
+    "cost": 2,
+    "tribes": [],
+    "text": "「相手の場のフォロワーからランダム1枚に2ダメージ。」を2回行う。【覚醒】なら、相手のリーダーに2ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10544110",
+    "name": "律する《正義》・イランツァ",
+    "class": "dragon",
+    "set": "flower_revelry",
+    "rarity": "legend",
+    "cost": 10,
+    "tribes": [],
+    "text": "【守護】\n自分のターン終了時、これが進化前なら、相手の場のフォロワーからランダム2枚に8ダメージ。自分のリーダーを8回復。進化後なら、相手のリーダーに8ダメージ。\n【進化時】これは【守護】を失う。これは【威圧】を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 8,
+    "defense": 8
+  },
+  {
+    "id": "10544120",
+    "name": "波揺花・ユウベ",
+    "class": "dragon",
+    "set": "flower_revelry",
+    "rarity": "legend",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】『大海のオルカ』1枚を自分の場に出す。\n【進化時】自分の手札1枚を選ぶ。それを捨てる。自分は『クレスト：波揺花・ユウベ』を持つ。",
+    "related": [
+      "90041130"
+    ],
+    "crest": "10544122",
+    "type": "follower",
+    "attack": 1,
+    "defense": 2
+  },
+  {
+    "id": "10551110",
+    "name": "リリーブウルフ",
+    "class": "nightmare",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【エンハンス_6】これは+0/+6して【必殺】と【バリア】を持つ。\n【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10551120",
+    "name": "紅札の魂魄使い",
+    "class": "nightmare",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】【リアニメイト_2】を行う。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 2
+  },
+  {
+    "id": "10551310",
+    "name": "奥夜花の開戦",
+    "class": "nightmare",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "相手の場のフォロワー1枚を選ぶ。それに5ダメージ。『奥夜花の開戦』1枚を自分のデッキに加える。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10552110",
+    "name": "トラブルネクロマンサー",
+    "class": "nightmare",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】『ゴースト』1枚と『スケルトン』1枚を自分の場に出す。\n【進化時】『腐臭のゾンビ』1枚を自分の場に出す。",
+    "related": [
+      "90051110",
+      "90051130",
+      "90051140"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10552120",
+    "name": "橋渡しの青鬼",
+    "class": "nightmare",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。相手のターン終了まで、それは「フォロワーやリーダーを攻撃できない。」を持つ。自分のデッキから1枚を引く。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 5
+  },
+  {
+    "id": "10552310",
+    "name": "残虐の炸裂",
+    "class": "nightmare",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "体力最小のリーダーすべてに3ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10553110",
+    "name": "フェイタルテイカー",
+    "class": "nightmare",
+    "set": "flower_revelry",
+    "rarity": "gold",
+    "cost": 9,
+    "tribes": [],
+    "text": "【ファンファーレ】場の他のフォロワーすべては『スケルトン』に変身する。\n『スケルトン』が破壊されたとき、自分のリーダーを1回復。\n【進化時】場の他のフォロワーすべてに1ダメージ。",
+    "related": [
+      "90051110"
+    ],
+    "type": "follower",
+    "attack": 7,
+    "defense": 7
+  },
+  {
+    "id": "10553310",
+    "name": "厳酷なる奥夜花",
+    "class": "nightmare",
+    "set": "flower_revelry",
+    "rarity": "gold",
+    "cost": 2,
+    "tribes": [],
+    "text": "自分は『クレスト：厳酷なる奥夜花』を持つ。",
+    "related": [
+      "90051110"
+    ],
+    "crest": "10553312",
+    "type": "spell"
+  },
+  {
+    "id": "10554110",
+    "name": "充つ《恋人と節制》・ミルティオ＆ルーゼン",
+    "class": "nightmare",
+    "set": "flower_revelry",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】【リアニメイト_4】と【リアニメイト_2】を行う。\nこれが進化したとき、場の他のフォロワーからランダム6枚を破壊。\nこれが超進化したとき、自分は『クレスト：充つ《恋人と節制》・ミルティオ＆ルーゼン』を持つ。",
+    "related": [],
+    "crest": "10554112",
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10554120",
+    "name": "奥夜花・シャクドウ",
+    "class": "nightmare",
+    "set": "flower_revelry",
+    "rarity": "legend",
+    "cost": 10,
+    "tribes": [],
+    "text": "【ファンファーレ】「自分の手札すべてをデッキに戻す。自分のデッキからX枚を引く。Xはこれでデッキに戻した枚数である。その後、自分の手札に4枚以上同じコストがあるなら、相手の場のフォロワーすべてと相手のリーダーに4ダメージ。」を2回行う。\n【超進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10561110",
+    "name": "フォアサイトプリースト",
+    "class": "bishop",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに2ダメージ。\n【守護】\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10561120",
+    "name": "結びの使徒",
+    "class": "bishop",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "【エンハンス_4】自分のデッキから1枚を引く。これは【必殺】を持つ。\n自分がカードを引いたとき、自分のターンなら、これは【突進】を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10561310",
+    "name": "霧巻花の激憤",
+    "class": "bishop",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "自分の手札からランダム1枚をデッキに戻す。自分のデッキから3枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10562110",
+    "name": "イムーバブルパラディン",
+    "class": "bishop",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 8,
+    "tribes": [],
+    "text": "【ファンファーレ】『イムーバブルパラディン』3枚を自分の場に出す。\n【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10562120",
+    "name": "窮鼠の斎女",
+    "class": "bishop",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のデッキから1枚を引く。\n自分がカードを引いたとき、自分のターンなら、相手の場のフォロワーすべてに1ダメージ。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 3
+  },
+  {
+    "id": "10562210",
+    "name": "プロテクションシェル",
+    "class": "bishop",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【アクト】これを破壊。自分のデッキからX枚を引く。Xは自分の場の【守護】を持つフォロワーの枚数である。",
+    "related": [],
+    "type": "amulet"
+  },
+  {
+    "id": "10563110",
+    "name": "威徳の至聖",
+    "class": "bishop",
+    "set": "flower_revelry",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のリーダーを1回復。\n【守護】\n自分のリーダーが回復したとき、自分のターンなら、『清純なる白狐』1枚を自分の場に出す。\n【進化時】【ファンファーレ】と同じ能力が働く。\n【超進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [
+      "10061120"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 3
+  },
+  {
+    "id": "10563210",
+    "name": "堅固なる霧巻花",
+    "class": "bishop",
+    "set": "flower_revelry",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに5ダメージ。\n【アクト】これを破壊。自分の手札からランダム2枚をデッキに戻す。自分のデッキから2枚を引く。",
+    "related": [],
+    "type": "amulet"
+  },
+  {
+    "id": "10564110",
+    "name": "想う《力》・ソフィーナ",
+    "class": "bishop",
+    "set": "flower_revelry",
+    "rarity": "legend",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】【モード】1つを選んでその能力が働く。\n（1）これは進化する。\n（2）自分の場の他の「【守護】を持つ、進化前のフォロワー」からランダム1枚は進化する。それは+1/+1する。\n【守護】\n自分のターン終了時、これが進化後なら、場の他のフォロワーすべては-1/-1する。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10564120",
+    "name": "霧巻花・クキシロ",
+    "class": "bishop",
+    "set": "flower_revelry",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】自分は『クレスト：霧巻花・クキシロ』を持つ。自分の手札からランダム2枚をデッキに戻す。自分のデッキから2枚を引く。\n【突進】",
+    "related": [
+      "10061120",
+      "90061110"
+    ],
+    "crest": "10564122",
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10571110",
+    "name": "ステージメーカー",
+    "class": "nemesis",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】『改良型・操り人形』1枚と『操り人形』1枚を自分の場に出す。\n【エンハンス_7】それは【疾走】を持つ。",
+    "related": [
+      "90071110",
+      "90071120"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10571120",
+    "name": "満開の技術屋",
+    "class": "nemesis",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のデッキからスペル1枚を引く。\n自分がスペルをプレイしたとき、相手の場のフォロワーすべてに3ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10571310",
+    "name": "尽小花の照臨",
+    "class": "nemesis",
+    "set": "flower_revelry",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10572110",
+    "name": "ネオジオグラファー",
+    "class": "nemesis",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】『デストロイアーティファクトβ』1枚を自分の手札に加える。\n【超進化時】自分の手札のコスト5以下のアーティファクト・フォロワー1枚を選ぶ。それのコピー1枚を自分の場に出す。",
+    "related": [
+      "90073120"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10572120",
+    "name": "清宵の偶兎",
+    "class": "nemesis",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【守護】\n自分がスペルをプレイしたとき、これは進化する。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10572310",
+    "name": "リヴァイブチューニング",
+    "class": "nemesis",
+    "set": "flower_revelry",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [],
+    "text": "自分の手札1枚を選ぶ。それを捨てる。このバトル中に破壊された自分のフォロワーからランダム2種類と同名のカード1枚ずつを非公開で自分の手札に加える。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10573110",
+    "name": "ニューロンインタラプター",
+    "class": "nemesis",
+    "set": "flower_revelry",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のPPをX回復。Xは自分の場の他のフォロワーの枚数である。\n【突進】\n【ラストワード】自分のデッキから2枚を引く。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 2
+  },
+  {
+    "id": "10573310",
+    "name": "誠心なる尽小花",
+    "class": "nemesis",
+    "set": "flower_revelry",
+    "rarity": "gold",
+    "cost": 1,
+    "tribes": [],
+    "text": "場のカード1枚を選ぶ。それは『イマリの小鬼』に変身する。",
+    "related": [
+      "90074140"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10574110",
+    "name": "廻る《運命の輪》・スロース",
+    "class": "nemesis",
+    "set": "flower_revelry",
+    "rarity": "legend",
+    "cost": 3,
+    "tribes": [],
+    "text": "【潜伏】\n自分のターン終了時、これが進化後なら、相手は『クレスト：廻る《運命の輪》・スロース』を持つ。これを消滅。\n自分のターン開始時、下記の能力から働いていないランダム1つの能力が働く。\n（1）ターン終了まで、自分の手札すべてのコストを-1する。\n（2）自分の場のフォロワーすべては+2/+2する。\n（3）自分のリーダーを3回復。",
+    "related": [],
+    "crest": "10574112",
+    "type": "follower",
+    "attack": 0,
+    "defense": 2
+  },
+  {
+    "id": "10574120",
+    "name": "尽小花・イマリ",
+    "class": "nemesis",
+    "set": "flower_revelry",
+    "rarity": "legend",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の手札1枚を選ぶ。それを捨てる。自分のデッキからスペル1枚を引く。\n自分がスペルをプレイしたとき、これが進化後なら、『イマリの小鬼』1枚を自分の場に出す。\n【超進化時】自分のデッキからコスト1のスペル2種類を引く。",
+    "related": [
+      "90074140"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10601110",
+    "name": "混濁せし民",
+    "class": "neutral",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ラストワード】相手のリーダーに1ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10601120",
+    "name": "這い寄られし者",
+    "class": "neutral",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それを破壊。\n【必殺】",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10602210",
+    "name": "侵略されし世界",
+    "class": "neutral",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【アクト】自分の手札1枚を選ぶ。それは相手のデッキからランダム1枚のコピーに変身する。",
+    "related": [],
+    "type": "amulet"
+  },
+  {
+    "id": "10603110",
+    "name": "闇を彷徨う獣",
+    "class": "neutral",
+    "set": "apocalypse_pact",
+    "rarity": "gold",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】これは【疾走】【必殺】【威圧】【ドレイン】【オーラ】【バリア】からランダム3つの能力を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10603210",
+    "name": "暗黒次元",
+    "class": "neutral",
+    "set": "apocalypse_pact",
+    "rarity": "gold",
+    "cost": 4,
+    "tribes": [],
+    "text": "【カウントダウン_2】\n自分のターン終了時、場のアサイラントでないフォロワーすべてに2ダメージ。",
+    "related": [],
+    "type": "amulet",
+    "countdown": 2
+  },
+  {
+    "id": "10604110",
+    "name": "畏怖の象徴・オメガオテプ",
+    "class": "neutral",
+    "set": "apocalypse_pact",
+    "rarity": "legend",
+    "cost": 9,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "【ファンファーレ】下記の能力からランダム2つの能力が働く。\n（1）相手の場のフォロワーからランダム1枚を破壊。\n（2）相手のリーダーに2ダメージ。\n（3）自分のPPを2回復。\n（4）これは+4/+4する。これの【ファンファーレ】を働かせる。\n【超進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10611110",
+    "name": "慈育の森人",
+    "class": "elf",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】『新緑のフェアリー』1枚を自分の手札に加える。\n【進化時】『新緑のフェアリー』1枚を自分の場に出す。",
+    "related": [
+      "90011120"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10611120",
+    "name": "パラダイスモンキー",
+    "class": "elf",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】【コンボ_3】これは進化する。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10611310",
+    "name": "天槍授与",
+    "class": "elf",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 7,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "相手の場のフォロワーすべてに4ダメージ。『新緑のフェアリー』2枚を自分の場に出す。",
+    "related": [
+      "90011120"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10612110",
+    "name": "慈顔の担い手",
+    "class": "elf",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】『新緑のフェアリー』1枚を自分の手札に加える。",
+    "related": [
+      "90011120"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 2
+  },
+  {
+    "id": "10612120",
+    "name": "ハウリングウルフマン",
+    "class": "elf",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 6,
+    "tribes": [],
+    "text": "【疾走】",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 3
+  },
+  {
+    "id": "10612310",
+    "name": "大輪への献上",
+    "class": "elf",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "手札で働く。自分のフォロワーが進化したとき、これのコストを-1する。\n自分のデッキから2枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10613110",
+    "name": "慈恵の側近",
+    "class": "elf",
+    "set": "apocalypse_pact",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】『新緑のフェアリー』1枚を自分の場に出す。\n自分のフォロワーが進化したとき、自分のリーダーを1回復。",
+    "related": [
+      "90011120"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10613310",
+    "name": "慈愛の天槍",
+    "class": "elf",
+    "set": "apocalypse_pact",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "【モード】1つを選んでその能力が働く。\n（1）相手の場の攻撃力最大のフォロワーからランダム1枚を破壊。\n（2）『新緑のフェアリー』1枚を自分の場に出す。",
+    "related": [
+      "90011120"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10614110",
+    "name": "慈愛の凛華・オルテニア",
+    "class": "elf",
+    "set": "apocalypse_pact",
+    "rarity": "legend",
+    "cost": 8,
+    "tribes": [],
+    "text": "【ファンファーレ】『新緑のフェアリー』3枚を自分の場に出す。\n1ターンに2回攻撃できる。\n【超進化時】相手の場のフォロワー1枚を選ぶ。それを破壊。",
+    "related": [
+      "90011120"
+    ],
+    "type": "follower",
+    "attack": 7,
+    "defense": 7
+  },
+  {
+    "id": "10614120",
+    "name": "旧き天槍・ササニド",
+    "class": "elf",
+    "set": "apocalypse_pact",
+    "rarity": "legend",
+    "cost": 1,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "【ファンファーレ】信仰値を-10して、『天槍の深淵』1枚を自分の手札に加える。自分の信仰は「自分のフォロワーが進化したとき、相手のリーダーに1ダメージ。」を持つ。\n【ドレイン】",
+    "related": [
+      "90014330"
+    ],
+    "specials": [
+      "10614122"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10621110",
+    "name": "勇烈の兵士",
+    "class": "royal",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【エンハンス_3】これは+1/+1する。\n【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10621120",
+    "name": "レイジーメイド",
+    "class": "royal",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の手札1枚を選ぶ。それをデッキに戻す。自分のデッキからロイヤル・フォロワー2枚を引く。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 5
+  },
+  {
+    "id": "10621310",
+    "name": "天剣授与",
+    "class": "royal",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 5,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "『勇烈の兵士』3枚を自分の場に出す。\n【エンハンス_7】それは+2/+2する。",
+    "related": [
+      "10621110"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10622110",
+    "name": "忠烈の近衛兵",
+    "class": "royal",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【エンハンス_4】これは+2/+2する。\n【守護】\n【進化時】相手の場のフォロワー1枚を選ぶ。それに3ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10622120",
+    "name": "キャットネイビー",
+    "class": "royal",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 8,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場の体力1のフォロワーすべてを破壊。\n【疾走】",
+    "related": [],
+    "type": "follower",
+    "attack": 6,
+    "defense": 6
+  },
+  {
+    "id": "10622310",
+    "name": "威風の行軍",
+    "class": "royal",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [],
+    "text": "自分は『クレスト：威風の行軍』を持つ。\n【エンハンス_3】自分の『クレスト：威風の行軍』のカウントを+2する。",
+    "related": [
+      "10621110"
+    ],
+    "crest": "10622312",
+    "type": "spell"
+  },
+  {
+    "id": "10623110",
+    "name": "苛烈の参謀",
+    "class": "royal",
+    "set": "apocalypse_pact",
+    "rarity": "gold",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それを破壊。\n【エンハンス_6】自分のPPを3回復。『勇烈の兵士』1枚を自分の手札に加える。",
+    "related": [
+      "10621110"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10623310",
+    "name": "凄烈の天剣",
+    "class": "royal",
+    "set": "apocalypse_pact",
+    "rarity": "gold",
+    "cost": 1,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "【モード】1つを選んでその能力が働く。\n（1）自分のデッキから1枚を引く。\n（2）相手の場のフォロワーからランダム1枚に3ダメージ。\n【エンハンス_3】1つを選ぶのではなくすべて。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10624110",
+    "name": "凄烈の剣王・ロードノエル四世",
+    "class": "royal",
+    "set": "apocalypse_pact",
+    "rarity": "legend",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】『勇烈の兵士』1枚を自分の場に出す。それは【必殺】を持つ。\n【エンハンス_7】『勇烈の兵士』1枚を自分の場に出す。それは【ドレイン】を持つ。\n【エンハンス_8】『勇烈の兵士』1枚を自分の場に出す。それは【疾走】を持つ。\n【超進化時】自分の場の他のフォロワーすべては+1/+1する。",
+    "related": [
+      "10621110"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 5
+  },
+  {
+    "id": "10624120",
+    "name": "旧き天剣・イドメタ",
+    "class": "royal",
+    "set": "apocalypse_pact",
+    "rarity": "legend",
+    "cost": 2,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "【ファンファーレ】『天剣の深淵』1枚を自分の手札に加える。\n【進化時】信仰値を-5して、自分の信仰は「自分がカードを【エンハンス】でプレイしたとき、自分の場のフォロワーすべては+1/+1する。」を持つ。",
+    "related": [
+      "90024320"
+    ],
+    "specials": [
+      "10624122"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 2
+  },
+  {
+    "id": "10631110",
+    "name": "天晶の魔手",
+    "class": "witch",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10631120",
+    "name": "空想の司書",
+    "class": "witch",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】『キャラバンマンモス』1枚を自分の場に出す。\n【超進化時】自分の場の他のフォロワーすべては【突進】を持つ。",
+    "related": [
+      "10002120"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10631310",
+    "name": "天晶授与",
+    "class": "witch",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "『天晶の魔手』2枚を自分の場に出す。",
+    "related": [
+      "10631110"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10632110",
+    "name": "魔境の生徒",
+    "class": "witch",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】『天晶の魔手』2枚を自分の場に出す。\n自分の『天晶の魔手』が場に出たとき、自分のリーダーを1回復。",
+    "related": [
+      "10631110"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 4
+  },
+  {
+    "id": "10632120",
+    "name": "ベンチャーグリモワール",
+    "class": "witch",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【エンハンス_6】『ベンチャーグリモワール』2枚を自分の場に出す。\n【突進】\n【ラストワード】自分の手札すべては1回スペルブーストする。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10632310",
+    "name": "正常の侵食",
+    "class": "witch",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [],
+    "text": "自分の場の『天晶の魔手』1枚を選ぶ。それを破壊。自分のデッキから2枚を引く。",
+    "related": [
+      "10631110"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10633110",
+    "name": "魔酔の教師",
+    "class": "witch",
+    "set": "apocalypse_pact",
+    "rarity": "gold",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】『天晶の魔手』2枚を自分の場に出す。\n【進化時】自分の場の『天晶の魔手』すべては+1/+0する。",
+    "related": [
+      "10631110"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 4
+  },
+  {
+    "id": "10633310",
+    "name": "魔恋の天晶",
+    "class": "witch",
+    "set": "apocalypse_pact",
+    "rarity": "gold",
+    "cost": 4,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "【モード】1つを選んでその能力が働く。\n（1）『天晶の魔手』1枚を自分の場に出す。それは+1/+0して【疾走】を持つ。\n（2）『天晶の魔手』2枚を自分の場に出す。それは+1/+0する。\n【エンハンス_6】1つを選ぶのではなくすべて。",
+    "related": [
+      "10631110"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10634110",
+    "name": "魔恋の慕情・シイム",
+    "class": "witch",
+    "set": "apocalypse_pact",
+    "rarity": "legend",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】『天晶の魔手』2枚を自分の場に出す。\n【ドレイン】\n【超進化時】自分は『クレスト：魔恋の慕情・シイム』を持つ。",
+    "related": [
+      "10631110"
+    ],
+    "crest": "10634112",
+    "type": "follower",
+    "attack": 1,
+    "defense": 2
+  },
+  {
+    "id": "10634120",
+    "name": "旧き天晶・カルギデンスラ",
+    "class": "witch",
+    "set": "apocalypse_pact",
+    "rarity": "legend",
+    "cost": 10,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "手札で働く。自分の『天晶の魔手』が場に出たとき、これのコストを-1する。\n【ファンファーレ】『天晶の魔手』2枚を自分の場に出す。それは【疾走】を持つ。\n【進化時】『天晶の深淵』1枚を自分の手札に加える。",
+    "related": [
+      "10631110",
+      "90034330"
+    ],
+    "specials": [
+      "10634122"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10641110",
+    "name": "果断のドラゴニュート",
+    "class": "dragon",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の手札1枚を選ぶ。それを捨てる。\n【ラストワード】自分のデッキから2枚を引く。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 3
+  },
+  {
+    "id": "10641120",
+    "name": "完熟の海魚",
+    "class": "dragon",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【エンハンス_6】『完熟の海魚』2枚を自分の場に出す。\n【ラストワード】自分のリーダーを1回復。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10641310",
+    "name": "天刀授与",
+    "class": "dragon",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "これが捨てられたとき、これのコストが4なら、『天刀授与』1枚を自分の手札に加える。それのコストを2にする。\n自分の場のフォロワー1枚を選ぶ。それは+2/+2する。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10642110",
+    "name": "即断の剣聖",
+    "class": "dragon",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の手札1枚を選ぶ。それを捨てる。\n【突進】\n【バリア】",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 5
+  },
+  {
+    "id": "10642120",
+    "name": "スパイクドラゴン",
+    "class": "dragon",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 8,
+    "tribes": [],
+    "text": "自分のターン終了時、これは進化する。\nこれが進化したとき、相手の場のフォロワーすべてと相手のリーダーに3ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10642310",
+    "name": "赤色流し",
+    "class": "dragon",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [],
+    "text": "自分の手札1枚を選ぶ。それを捨てる。相手の場のフォロワー1枚を選ぶ。それを破壊。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10643110",
+    "name": "遮断の竜闘士",
+    "class": "dragon",
+    "set": "apocalypse_pact",
+    "rarity": "gold",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の手札1枚を選ぶ。それを捨てる。相手の場のフォロワーからランダム1枚に6ダメージ。\n【守護】\n【バリア】\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 6,
+    "defense": 9
+  },
+  {
+    "id": "10643310",
+    "name": "断頭の天刀",
+    "class": "dragon",
+    "set": "apocalypse_pact",
+    "rarity": "gold",
+    "cost": 7,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "これが捨てられたとき、これのコストが7なら、『断頭の天刀』1枚を自分の手札に加える。それのコストを5にする。5なら、『断頭の天刀』1枚を自分の手札に加える。それのコストを3にする。\n相手の場のフォロワーすべてにXダメージ。Xはこれのコストである。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10644110",
+    "name": "断頭の斬姫・サガツマツ",
+    "class": "dragon",
+    "set": "apocalypse_pact",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の手札1枚を選ぶ。それを捨てる。『赤色流し』2枚を自分の手札に加える。\n【疾走】\n【必殺】\n【オーラ】",
+    "related": [
+      "10642310"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 4
+  },
+  {
+    "id": "10644120",
+    "name": "旧き天刀・ヴォーラライ",
+    "class": "dragon",
+    "set": "apocalypse_pact",
+    "rarity": "legend",
+    "cost": 2,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "これが捨てられたとき、『旧き天刀・ヴォーラライ』1枚を自分の場に出す。\n【必殺】\n【進化時】『天刀の深淵』1枚を自分の手札に加える。\n【超進化時】1枚ではなく3枚。",
+    "related": [
+      "90044330"
+    ],
+    "type": "follower",
+    "attack": 0,
+    "defense": 2
+  },
+  {
+    "id": "10651110",
+    "name": "渇仰の悪魔",
+    "class": "nightmare",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ラストワード】自分のデッキから1枚を引く。自分のリーダーに1ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10651120",
+    "name": "ゴーストエスケーパー",
+    "class": "nightmare",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【突進】\n【ラストワード】『ゴースト』1枚を自分の手札に加える。",
+    "related": [
+      "90051130"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 2
+  },
+  {
+    "id": "10651310",
+    "name": "天眼授与",
+    "class": "nightmare",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "自分のデッキから2枚を引く。【ネクロマンス_4】自分のリーダーを2回復。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10652110",
+    "name": "渇欲のネクロマンサー",
+    "class": "nightmare",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【エンハンス_8】【リアニメイト_9】を行う。\n【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10652120",
+    "name": "ロストラブデビル",
+    "class": "nightmare",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【エンハンス_7】これは【疾走】を持つ。\n【進化時】相手の場のフォロワー1枚を選ぶ。それに4ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 5
+  },
+  {
+    "id": "10652310",
+    "name": "『最強』の魅惑",
+    "class": "nightmare",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 7,
+    "tribes": [],
+    "text": "相手の場のフォロワー1枚を選ぶ。それを消滅して、コピー1枚を自分の場に出す。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10653110",
+    "name": "渇命の破壊者",
+    "class": "nightmare",
+    "set": "apocalypse_pact",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の場の他のフォロワー1枚を選ぶ。選んだなら、それを破壊。これは進化する。\nこれが進化したとき、『バット』1枚を自分の場に出す。それは進化する。",
+    "related": [
+      "90051120"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10653310",
+    "name": "枯渇の天眼",
+    "class": "nightmare",
+    "set": "apocalypse_pact",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "【モード】1つを選んでその能力が働く。\n（1）自分のEPを1回復。\n（2）相手の場のフォロワーすべてに2ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10654110",
+    "name": "枯渇の神魔・アルメス",
+    "class": "nightmare",
+    "set": "apocalypse_pact",
+    "rarity": "legend",
+    "cost": 9,
+    "tribes": [],
+    "text": "【オーラ】\n能力によって破壊できない。\n【交戦時】交戦相手を破壊。\n【超進化時】これは「1ターンに3回攻撃できる。」を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 10,
+    "defense": 10
+  },
+  {
+    "id": "10654120",
+    "name": "旧き天眼・ビバティー",
+    "class": "nightmare",
+    "set": "apocalypse_pact",
+    "rarity": "legend",
+    "cost": 4,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "【ファンファーレ】【ネクロマンス_4】これは進化する。\nこれが進化したとき、『天眼の深淵』1枚を自分の手札に加える。",
+    "related": [
+      "90054330"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10661110",
+    "name": "崇奉の怯者",
+    "class": "bishop",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 5,
+    "tribes": [],
+    "text": "これが場に出たとき、自分のリーダーを2回復。\n【必殺】\n【守護】",
+    "related": [],
+    "specials": [
+      "10661112"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 5
+  },
+  {
+    "id": "10661210",
+    "name": "汚濁の聖水",
+    "class": "bishop",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【カウントダウン_3】\n【ラストワード】自分のデッキから1枚を引く。相手の場のフォロワーからランダム1枚を破壊。\nコスト1【アクト】これのカウントを-1する。",
+    "related": [],
+    "type": "amulet",
+    "countdown": 3
+  },
+  {
+    "id": "10661310",
+    "name": "天書授与",
+    "class": "bishop",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "自分のデッキからアミュレット2枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10662110",
+    "name": "崇敬の塗布者",
+    "class": "bishop",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【突進】\n【必殺】",
+    "related": [],
+    "specials": [
+      "10662112"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 3
+  },
+  {
+    "id": "10662120",
+    "name": "ペガサスの乗り手",
+    "class": "bishop",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】『ホーリーファルコン』1枚を自分の場に出す。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [
+      "90061110"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10662210",
+    "name": "救済の聖典",
+    "class": "bishop",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【カウントダウン_4】\n【ラストワード】自分のデッキから2枚を引く。相手の場のフォロワーすべてに2ダメージ。自分のリーダーを2回復。",
+    "related": [],
+    "type": "amulet",
+    "countdown": 4
+  },
+  {
+    "id": "10663110",
+    "name": "崇拝の聖騎士",
+    "class": "bishop",
+    "set": "apocalypse_pact",
+    "rarity": "gold",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】『崇拝の聖騎士』1枚を自分の場に出す。\n【必殺】\n【オーラ】\n【進化時】相手の場のフォロワー1枚を選ぶ。それを破壊。",
+    "related": [],
+    "specials": [
+      "10663112"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 4
+  },
+  {
+    "id": "10663210",
+    "name": "崇高の天書",
+    "class": "bishop",
+    "set": "apocalypse_pact",
+    "rarity": "gold",
+    "cost": 4,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "【ファンファーレ】場の他のカード1枚を選ぶ。それを破壊。自分のアミュレットを選んだなら、自分のPPを2回復。\n【カウントダウン_2】\n【ラストワード】このバトル中に破壊された自分の「元のコスト2以下の、【ラストワード】を持つアミュレット」からランダム1枚と同名のカード1枚を自分の場に出す。",
+    "related": [],
+    "type": "amulet",
+    "countdown": 2
+  },
+  {
+    "id": "10664110",
+    "name": "崇高の憎悪・カンディマ",
+    "class": "bishop",
+    "set": "apocalypse_pact",
+    "rarity": "legend",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】このバトル中に破壊された自分の「元のコスト2以下の、【ラストワード】を持つアミュレット」からランダム2種類と同名のカード1枚ずつを自分の場に出す。\n【超進化時】場の他のカード1枚を選ぶ。それを破壊。自分のアミュレットを選んだなら、相手の場のフォロワーすべてに3ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10664120",
+    "name": "旧き天書・リアントース",
+    "class": "bishop",
+    "set": "apocalypse_pact",
+    "rarity": "legend",
+    "cost": 9,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "【ファンファーレ】場の他のカード3枚を選ぶ。それを破壊。\n【守護】\n自分のターン終了時、信仰値を-10して、『天書の深淵』1枚を自分の手札に加える。",
+    "related": [
+      "90064320"
+    ],
+    "specials": [
+      "10664122"
+    ],
+    "type": "follower",
+    "attack": 9,
+    "defense": 9
+  },
+  {
+    "id": "10671110",
+    "name": "低劣の玩具",
+    "class": "nemesis",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のデッキから3枚を引く。\n【守護】",
+    "related": [],
+    "specials": [
+      "10671112"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 3
+  },
+  {
+    "id": "10671120",
+    "name": "ブライトクリエイター",
+    "class": "nemesis",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】『デストロイアーティファクトα』1枚を自分の場に出す。それは【必殺】と【守護】を持つ。",
+    "related": [
+      "90073110",
+      "90073120",
+      "90073130",
+      "90074110"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10671310",
+    "name": "天斧授与",
+    "class": "nemesis",
+    "set": "apocalypse_pact",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "相手の場のフォロワー1枚を選ぶ。それに4ダメージ。自分の場に元のコスト5以上のフォロワーがあるなら、自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10672110",
+    "name": "拙劣の人形",
+    "class": "nemesis",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】『拙劣の人形』1枚を自分の場に出す。それとこれは進化する。",
+    "related": [],
+    "specials": [
+      "10672112"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10672120",
+    "name": "小胆のパイオニア",
+    "class": "nemesis",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場の体力3以下のフォロワー1枚を選ぶ。それを消滅。\n【潜伏】",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10672310",
+    "name": "凡百の製図",
+    "class": "nemesis",
+    "set": "apocalypse_pact",
+    "rarity": "silver",
+    "cost": 6,
+    "tribes": [],
+    "text": "『愚劣の兵器』1枚と『低劣の玩具』1枚と『拙劣の人形』1枚を自分の場に出す。それは+0/+1する。",
+    "related": [
+      "10671110",
+      "10672110",
+      "10673110"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10673110",
+    "name": "愚劣の兵器",
+    "class": "nemesis",
+    "set": "apocalypse_pact",
+    "rarity": "gold",
+    "cost": 8,
+    "tribes": [],
+    "text": "【ファンファーレ】『愚劣の兵器』2枚を自分の場に出す。\n自分のターン終了時、相手の場のフォロワーすべてに3ダメージを割りふる。\n【進化時】相手の場のフォロワーすべてに3ダメージを割りふる。",
+    "related": [],
+    "specials": [
+      "10673112"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 4
+  },
+  {
+    "id": "10673310",
+    "name": "劣悪の天斧",
+    "class": "nemesis",
+    "set": "apocalypse_pact",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "手札で働く。自分の元のコスト5以上のフォロワーが場に出たとき、ターン終了まで、これのコストを-1する。\n自分の場の「元のコスト5以上の、進化前のフォロワー」からランダム1枚は進化する。相手の場のフォロワーからランダム1枚に6ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10674110",
+    "name": "劣悪の純心・カミシラ",
+    "class": "nemesis",
+    "set": "apocalypse_pact",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】『低劣の玩具』1枚と『拙劣の人形』1枚を自分の場に出す。\n自分の他の元のコスト5以上のフォロワーが場に出たとき、それは進化する。\n【超進化時】相手のリーダーにXダメージ。Xは自分の場の元のコスト5以上のフォロワーの枚数である。",
+    "related": [
+      "10671110",
+      "10672110"
+    ],
+    "type": "follower",
+    "attack": 6,
+    "defense": 6
+  },
+  {
+    "id": "10674120",
+    "name": "旧き天斧・ヨグゼンタ",
+    "class": "nemesis",
+    "set": "apocalypse_pact",
+    "rarity": "legend",
+    "cost": 2,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "【ファンファーレ】自分の場に元のコスト5以上のフォロワーがあるなら、『天斧の深淵』1枚を自分の手札に加える。\n【突進】",
+    "related": [
+      "90074320"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10701110",
+    "name": "ピュアリィキッズ",
+    "class": "neutral",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【進化時】自分のデッキからニュートラル・カード1枚を引く。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10701310",
+    "name": "退廃の涙",
+    "class": "neutral",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "相手の場のカード1枚を選ぶ。それを消滅。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10702110",
+    "name": "ゴッズレポーター",
+    "class": "neutral",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ラストワード】自分のデッキから1枚を引く。\n【超進化時】『ゴッズレポーター』2枚を自分の場に出す。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 2
+  },
+  {
+    "id": "10703110",
+    "name": "享楽の上位市民",
+    "class": "neutral",
+    "set": "godslayer_anathema",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の手札1枚を選ぶ。それを捨てる。相手の場のフォロワーすべてに2ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10703210",
+    "name": "バベロンシティ",
+    "class": "neutral",
+    "set": "godslayer_anathema",
+    "rarity": "gold",
+    "cost": 1,
+    "tribes": [],
+    "text": "【カウントダウン_1】\n自分のターン終了時、下記の能力から順に1つの能力が働く。\n（1）相手の場のフォロワーからランダム1枚に2ダメージ。\n（2）自分のリーダーを2回復。\n（3）相手のリーダーに2ダメージ。これを破壊。\nコスト1【アクト】自分の手札1枚を選ぶ。それを捨てる。これのカウントを+1する。",
+    "related": [],
+    "type": "amulet",
+    "countdown": 1
+  },
+  {
+    "id": "10704110",
+    "name": "特記標的・ヘイレムハニィ",
+    "class": "neutral",
+    "set": "godslayer_anathema",
+    "rarity": "legend",
+    "cost": 6,
+    "tribes": [],
+    "text": "【攻撃時】フォロワーへの攻撃なら、これは【バリア】を持つ。交戦相手は「フォロワーやリーダーを攻撃できない。」と「自分のターン終了時、これを消滅。」を持つ。\n【ラストワード】自分は『クレスト：特記標的・ヘイレムハニィ』を持つ。",
+    "related": [],
+    "crest": "10704112",
+    "type": "follower",
+    "attack": 1,
+    "defense": 4
+  },
+  {
+    "id": "10704120",
+    "name": "バベロンメイヤー・エルタロ",
+    "class": "neutral",
+    "set": "godslayer_anathema",
+    "rarity": "legend",
+    "cost": 3,
+    "tribes": [],
+    "text": "【潜伏】\n自分のターン終了時、自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "follower",
+    "attack": 0,
+    "defense": 3
+  },
+  {
+    "id": "10711110",
+    "name": "グロースベア",
+    "class": "elf",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 8,
+    "tribes": [],
+    "text": "【ファンファーレ】これのコピー1枚を自分の場に出す。\n【突進】\n【守護】\n受ける4以上のダメージを3にする。",
+    "related": [],
+    "type": "follower",
+    "attack": 6,
+    "defense": 6
+  },
+  {
+    "id": "10711120",
+    "name": "エルフトラッパー",
+    "class": "elf",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の手札1枚を選ぶ。それをデッキに戻す。『フェアリー』2枚を自分の手札に加える。",
+    "related": [
+      "90011110"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10711310",
+    "name": "マインドシフト",
+    "class": "elf",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "自分の手札2枚を選ぶ。それをデッキに戻す。自分のデッキから2枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10712110",
+    "name": "緑風のレイピア使い",
+    "class": "elf",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】【コンボ_3】これは【疾走】を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10712120",
+    "name": "弓兵の采配者",
+    "class": "elf",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに4ダメージ。自分の【コンボ】を+1する。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10712310",
+    "name": "憂慮の縮小",
+    "class": "elf",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "自分のリーダーを1回復。【コンボ_3】自分は『クレスト：憂慮の縮小』を持つ。",
+    "related": [
+      "10713310"
+    ],
+    "crest": "10712312",
+    "type": "spell"
+  },
+  {
+    "id": "10713110",
+    "name": "凍矢の射手",
+    "class": "elf",
+    "set": "godslayer_anathema",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それにXダメージ。Xはこれの攻撃力である。\n自分のターン終了時、【コンボ_3】自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 1
+  },
+  {
+    "id": "10713310",
+    "name": "害意の拡大",
+    "class": "elf",
+    "set": "godslayer_anathema",
+    "rarity": "gold",
+    "cost": 1,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "相手の場のフォロワーからランダム1枚に2ダメージ。【コンボ_3】自分は『クレスト：害意の拡大』を持つ。",
+    "related": [
+      "10712310"
+    ],
+    "crest": "10713312",
+    "type": "spell"
+  },
+  {
+    "id": "10714110",
+    "name": "操嵩のアナテマ・ダストデイズ",
+    "class": "elf",
+    "set": "godslayer_anathema",
+    "rarity": "legend",
+    "cost": 4,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それは-0/-Xする。Xはこれの攻撃力である。自分の【コンボ】を+1する。\n【進化時】自分は『クレスト：操嵩のアナテマ・ダストデイズ』を持つ。",
+    "related": [],
+    "crest": "10714112",
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10714120",
+    "name": "氷界の鹿王",
+    "class": "elf",
+    "set": "godslayer_anathema",
+    "rarity": "legend",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】『森の神秘』2枚を自分の手札に加える。\n自分のターン終了時、相手の場のフォロワーすべてにXダメージを割りふる。Xはこれの攻撃力である。\n【超進化時】自分は『クレスト：氷界の鹿王』を持つ。",
+    "related": [
+      "90011310"
+    ],
+    "crest": "10714122",
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10721110",
+    "name": "曲走の工兵",
+    "class": "royal",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "手札で働く。自分のフォロワーが超進化したとき、これのコストを1にする。\n【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに3ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10721120",
+    "name": "調伝の連絡兵",
+    "class": "royal",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】『ナイト』1枚を自分の場に出す。『スティールナイト』1枚を自分の手札に加える。",
+    "related": [
+      "90021110",
+      "90021120"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 3
+  },
+  {
+    "id": "10721310",
+    "name": "彼我の調律",
+    "class": "royal",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "相手の場のフォロワー1枚を選ぶ。それに3ダメージ。【連携_10】相手のターン終了まで、それは「フォロワーやリーダーを攻撃できない。」を持つ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10722110",
+    "name": "聴略の諜報兵",
+    "class": "royal",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ラストワード】『ナイト』1枚を自分の場に出す。\n【進化時】相手の場のフォロワー1枚を選ぶ。それに3ダメージ。",
+    "related": [
+      "90021110"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10722120",
+    "name": "斬奏の衛生兵",
+    "class": "royal",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のデッキから2枚を引く。『ナイト』2枚を自分の場に出す。\n【進化時】相手の場のフォロワー1枚を選ぶ。それに3ダメージ。",
+    "related": [
+      "90021110"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 3
+  },
+  {
+    "id": "10722310",
+    "name": "無音の包囲",
+    "class": "royal",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "『スティールナイト』1枚を自分の手札に加える。それは【突進】を持つ。【連携_10】1枚ではなく2枚。",
+    "related": [
+      "90021120"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10723110",
+    "name": "響爪の分班長",
+    "class": "royal",
+    "set": "godslayer_anathema",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】『ナイト』3枚を自分の場に出す。【モード】1つを選んでその能力が働く。\n（1）自分の場の他のフォロワーすべては+1/+0して【突進】を持つ。\n（2）自分の場の他のフォロワーすべては+0/+1して【守護】を持つ。",
+    "related": [
+      "90021110"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 2
+  },
+  {
+    "id": "10723310",
+    "name": "静粛齎す抜刀",
+    "class": "royal",
+    "set": "godslayer_anathema",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "相手の場のフォロワー1枚を選ぶ。それに6ダメージ。【連携_10】相手の場のフォロワーすべてにXダメージ。Xは自分の場のフォロワーの枚数である。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10724110",
+    "name": "統音のアナテマ・ギルダリア",
+    "class": "royal",
+    "set": "godslayer_anathema",
+    "rarity": "legend",
+    "cost": 4,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "【ファンファーレ】【連携_20】自分は『クレスト：統音のアナテマ・ギルダリア』を持つ。これは進化する。\n自分の他のフォロワーが場に出たとき、自分のターンなら、それは【突進】を持つ。\nこれが進化したとき、『スティールナイト』2枚を自分の場に出す。",
+    "related": [
+      "90021120"
+    ],
+    "crest": "10724112",
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10724120",
+    "name": "寛厳の音帥・セザール",
+    "class": "royal",
+    "set": "godslayer_anathema",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】『スティールナイト』2枚を自分の場に出す。自分の場の他のロイヤル・フォロワーすべては+1/+3して【守護】を持つ。\n【守護】\n【超進化時】相手の場のフォロワー1枚を選ぶ。それを破壊。",
+    "related": [
+      "90021120"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 7
+  },
+  {
+    "id": "10731110",
+    "name": "ディンキークリーチャー",
+    "class": "witch",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】【土の秘術_1】これは進化する。\n【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 6
+  },
+  {
+    "id": "10731120",
+    "name": "リトルビースト",
+    "class": "witch",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに1ダメージ。自分の場の土の印を+1する。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [
+      "90031210"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10731310",
+    "name": "スレイヴコール",
+    "class": "witch",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "手札で働く。自分が【土の秘術】したとき、これのコストを-1する。\n自分のデッキから2枚を引く。自分の場の土の印を+1する。",
+    "related": [
+      "90031210"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10732110",
+    "name": "チャーミングモンスター",
+    "class": "witch",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【突進】\n【ラストワード】自分の場の土の印を+2する。\n【超進化時】【土の秘術_2】『チャーミングモンスター』2枚を自分の場に出す。",
+    "related": [
+      "90031210"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 2
+  },
+  {
+    "id": "10732120",
+    "name": "プリティープレデター",
+    "class": "witch",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の場の土の印を+2する。\n【守護】",
+    "related": [
+      "90031210"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 3
+  },
+  {
+    "id": "10732310",
+    "name": "暴食の間食",
+    "class": "witch",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "【モード】1つを選んでその能力が働く。\n（1）自分の場の土の印を+4する。\n（2）【土の秘術_2】相手の場のフォロワーすべてに2ダメージ。",
+    "related": [
+      "90031210"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10733110",
+    "name": "スウィートエンティティ",
+    "class": "witch",
+    "set": "godslayer_anathema",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】【土の秘術_1】【モード】1つを選んでその能力が働く。\n（1）相手の場のフォロワーすべてに3ダメージ。\n（2）自分のデッキから2枚を引く。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10733310",
+    "name": "グラトンスペル",
+    "class": "witch",
+    "set": "godslayer_anathema",
+    "rarity": "gold",
+    "cost": 4,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "手札で働く。自分が【土の秘術】したとき、これのコストを-1する。\n相手の場のフォロワー1枚を選ぶ。それを破壊。自分の場の土の印を+2する。",
+    "related": [
+      "90031210"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10734110",
+    "name": "万食のアナテマ・ララアンセム",
+    "class": "witch",
+    "set": "godslayer_anathema",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "【ファンファーレ】【土の秘術_1】自分は『クレスト：万食のアナテマ・ララアンセム』を持つ。\n【オーラ】\n【進化時】【土の秘術_1】相手の場のフォロワー1枚を選ぶ。それを破壊。",
+    "related": [],
+    "crest": "10734112",
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10734120",
+    "name": "ラブリーマスターピース",
+    "class": "witch",
+    "set": "godslayer_anathema",
+    "rarity": "legend",
+    "cost": 8,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワーすべてに6ダメージ。\n【守護】\n【ラストワード】【土の秘術_2】相手のリーダーに3ダメージ。\n【超進化時】『ラブリーマスターピース』1枚を自分の場に出す。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 8
+  },
+  {
+    "id": "10741110",
+    "name": "喧伝の龍人",
+    "class": "dragon",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【エンハンス_4】『喧伝の龍人』2枚を自分の場に出す。\n【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10741120",
+    "name": "キャリーワイバーン",
+    "class": "dragon",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の場の他のフォロワー1枚を選ぶ。それは+2/+2する。\n【進化時】自分の手札のフォロワー1枚を選ぶ。それは+2/+2する。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 2
+  },
+  {
+    "id": "10741310",
+    "name": "退屈な睥睨",
+    "class": "dragon",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "自分のPP最大値を+1する。自分の手札と自分のデッキの『退屈な睥睨』すべては『焦龍の午睡』に変身する。",
+    "related": [
+      "10742310"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10742110",
+    "name": "豪龍の門番",
+    "class": "dragon",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それを破壊。\n【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 10,
+    "defense": 10
+  },
+  {
+    "id": "10742120",
+    "name": "ドラゴニックサーバー",
+    "class": "dragon",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のPP最大値が10なら、これは進化する。\n自分のターン終了時、自分のリーダーを1回復。これが進化後なら、1回復ではなく2回復。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 3
+  },
+  {
+    "id": "10742310",
+    "name": "焦龍の午睡",
+    "class": "dragon",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "自分のリーダーを3回復。【覚醒】なら、自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10743110",
+    "name": "ドラゴニュートの先導者",
+    "class": "dragon",
+    "set": "godslayer_anathema",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】【モード】1つを選んでその能力が働く。相手の場の攻撃力最大のフォロワーからランダム1枚を破壊。\n（1）これは進化する。\n（2）これは【潜伏】を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 3
+  },
+  {
+    "id": "10743310",
+    "name": "黒炎の奔流",
+    "class": "dragon",
+    "set": "godslayer_anathema",
+    "rarity": "gold",
+    "cost": 7,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "相手の場のフォロワーすべてに5ダメージ。相手のリーダーに3ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10744110",
+    "name": "焦灰のアナテマ・バーンドナイト",
+    "class": "dragon",
+    "set": "godslayer_anathema",
+    "rarity": "legend",
+    "cost": 9,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "【ファンファーレ】相手の場のフォロワーすべてに9ダメージ。\n【超進化時】相手は『クレスト：焦灰のアナテマ・バーンドナイト』を持つ。",
+    "related": [],
+    "crest": "10744112",
+    "type": "follower",
+    "attack": 9,
+    "defense": 9
+  },
+  {
+    "id": "10744120",
+    "name": "龍谷のエルダードラゴン",
+    "class": "dragon",
+    "set": "godslayer_anathema",
+    "rarity": "legend",
+    "cost": 10,
+    "tribes": [],
+    "text": "【ファンファーレ】『大翼のドラゴン』1枚を自分の場に出す。自分は『クレスト：龍谷のエルダードラゴン』を持つ。\n【守護】\n【超進化時】自分の『クレスト：龍谷のエルダードラゴン』のカウントを+2する。",
+    "related": [
+      "90041120"
+    ],
+    "crest": "10744122",
+    "type": "follower",
+    "attack": 7,
+    "defense": 7
+  },
+  {
+    "id": "10751110",
+    "name": "ヴァンプキーボード・ルルミ",
+    "class": "nightmare",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【突進】\n【ラストワード】『バット』1枚を自分の手札に加える。",
+    "related": [
+      "90051120"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10751120",
+    "name": "デーモンドラム・ラズ",
+    "class": "nightmare",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ラストワード】『スケルトン』1枚を自分の場に出す。\n【進化時】相手の場のフォロワー1枚を選ぶ。それに3ダメージ。",
+    "related": [
+      "90051110"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 2
+  },
+  {
+    "id": "10751310",
+    "name": "ソウルチューニング",
+    "class": "nightmare",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "自分の場のフォロワー2枚を選ぶ。それは+0/+1する。自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10752110",
+    "name": "タイトロープキャット",
+    "class": "nightmare",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに3ダメージ。『スケルトン』1枚を自分の場に出す。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [
+      "90051110"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 5
+  },
+  {
+    "id": "10752120",
+    "name": "ジャグラークロウ",
+    "class": "nightmare",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それを破壊。【リアニメイト_2】を行う。",
+    "related": [],
+    "type": "follower",
+    "attack": 6,
+    "defense": 5
+  },
+  {
+    "id": "10752310",
+    "name": "青春の謳歌",
+    "class": "nightmare",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 7,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "『ゴースト』1枚と『バット』1枚と『スケルトン』1枚を自分の場に出す。それは進化する。",
+    "related": [
+      "90051110",
+      "90051120",
+      "90051130"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10753110",
+    "name": "テイマースケルトン",
+    "class": "nightmare",
+    "set": "godslayer_anathema",
+    "rarity": "gold",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】『腐臭のゾンビ』1枚と『スケルトン』1枚を自分の場に出す。\n自分の死者・フォロワーが場に出たとき、それは【疾走】を持つ。\n【超進化時】自分の場の他のフォロワー1枚を選ぶ。選んだなら、それを破壊。相手の場のフォロワーからランダム1枚を破壊。",
+    "related": [
+      "90051110",
+      "90051140"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 4
+  },
+  {
+    "id": "10753310",
+    "name": "夜の唱のライブ",
+    "class": "nightmare",
+    "set": "godslayer_anathema",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "相手の場のフォロワーすべてに6ダメージを割りふる。【ネクロマンス_6】相手のリーダーに2ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10754110",
+    "name": "傍死のアナテマ・徒姫",
+    "class": "nightmare",
+    "set": "godslayer_anathema",
+    "rarity": "legend",
+    "cost": 6,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "【ファンファーレ】自分のデッキのコスト2以下のナイトメア・フォロワーからランダム2種類を自分の場に出す。\n自分の他のナイトメア・フォロワーが場に出たとき、それは【突進】を持つ。\n【超進化時】自分の場の他のナイトメア・フォロワーすべては+2/+2する。",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 4
+  },
+  {
+    "id": "10754120",
+    "name": "デッドプレゼンター・マクミラン",
+    "class": "nightmare",
+    "set": "godslayer_anathema",
+    "rarity": "legend",
+    "cost": 9,
+    "tribes": [],
+    "text": "【ファンファーレ】【ネクロマンス_10】『腐臭のゾンビ』3枚を自分の場に出す。\n自分の死者・フォロワーが場に出たとき、自分のターンなら、それは+1/+0して【突進】と【守護】を持つ。相手のリーダーに1ダメージ。",
+    "related": [
+      "90051140"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10761110",
+    "name": "営利の支援者",
+    "class": "bishop",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の場のアミュレットの枚数が3以上なら、『営利の支援者』1枚を自分の場に出す。\n【突進】\n【ラストワード】自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 2
+  },
+  {
+    "id": "10761120",
+    "name": "ブロードミッショナリー",
+    "class": "bishop",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のデッキからアミュレット2枚を引く。\n【進化時】相手の場のフォロワーすべてにXダメージ。Xは自分の手札のアミュレットの枚数である。",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10761210",
+    "name": "陽光の耳飾り",
+    "class": "bishop",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "【ファンファーレ】自分の手札1枚を選ぶ。それをデッキに戻す。自分のデッキから1枚を引く。\n【アクト】これを破壊。【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "amulet"
+  },
+  {
+    "id": "10762110",
+    "name": "ホーリープランナー",
+    "class": "bishop",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の場のアミュレットの枚数が3以上なら、相手の場のフォロワー1枚を選ぶ。それに5ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10762120",
+    "name": "伝達の聖鳥",
+    "class": "bishop",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 8,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それを消滅。自分の場のアミュレットの枚数が3以上なら、自分のリーダーを3回復。\n【疾走】",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 3
+  },
+  {
+    "id": "10762210",
+    "name": "無欠の時計",
+    "class": "bishop",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "【エンハンス_4】相手の場のフォロワーすべてに1ダメージ。\n【アクト】これを破壊。相手の場のフォロワーすべてに1ダメージ。",
+    "related": [],
+    "type": "amulet"
+  },
+  {
+    "id": "10763110",
+    "name": "審理の守衛",
+    "class": "bishop",
+    "set": "godslayer_anathema",
+    "rarity": "gold",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の場のアミュレットの枚数が3以上なら、これは進化する。これは【バリア】を持つ。\n【守護】\n【ラストワード】自分のリーダーを3回復。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 6
+  },
+  {
+    "id": "10763210",
+    "name": "海蝕の三叉槍",
+    "class": "bishop",
+    "set": "godslayer_anathema",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに4ダメージ。\n【アクト】これを破壊。相手の場のフォロワー1枚を選ぶ。それに2ダメージ。",
+    "related": [],
+    "type": "amulet"
+  },
+  {
+    "id": "10764110",
+    "name": "裁神のアナテマ・ロデオ",
+    "class": "bishop",
+    "set": "godslayer_anathema",
+    "rarity": "legend",
+    "cost": 8,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "【ファンファーレ】『月影の指輪』1枚を自分の場に出す。\n【進化時】自分の場の『月影の指輪』からランダム1枚のカウントを+1する。",
+    "related": [
+      "90064210"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10764120",
+    "name": "アドアマネージャー・イニシア",
+    "class": "bishop",
+    "set": "godslayer_anathema",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それを消滅。自分の場のアミュレットの枚数が3以上なら、自分のリーダーを3回復。\n【守護】\n【オーラ】\n【超進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 7
+  },
+  {
+    "id": "10771110",
+    "name": "エッジーマスター",
+    "class": "nemesis",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "自分のアーティファクト・フォロワーが場に出たとき、自分のリーダーを1回復。\n【進化時】『ミスティックアーティファクト』1枚を自分の場に出す。",
+    "related": [
+      "90071150"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10771120",
+    "name": "ドープダンサー",
+    "class": "nemesis",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】『ドープダンサー』1枚を自分の場に出す。このバトル中に場に出た自分のアーティファクト・フォロワーの種類が3以上なら、1枚ではなく2枚。\n【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 4
+  },
+  {
+    "id": "10771310",
+    "name": "ストリートラン",
+    "class": "nemesis",
+    "set": "godslayer_anathema",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "【モード】1つを選んでその能力が働く。このバトル中に場に出た自分のアーティファクト・フォロワーの種類が3以上なら、1つを選ぶのではなくすべて。\n（1）『アナライズアーティファクト』1枚を自分の手札に加える。\n（2）『エンシェントアーティファクト』1枚を自分の手札に加える。",
+    "related": [
+      "90071130",
+      "90071140"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10772110",
+    "name": "チルスケーター",
+    "class": "nemesis",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】『エンシェントアーティファクト』1枚を自分の手札に加える。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [
+      "90071140"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10772120",
+    "name": "ボールドペインター",
+    "class": "nemesis",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それを破壊。このバトル中に場に出た自分のアーティファクト・フォロワーの種類が3以上なら、『エンシェントアーティファクト』1枚と『ミスティックアーティファクト』1枚を自分の場に出す。",
+    "related": [
+      "90071140",
+      "90071150"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10772310",
+    "name": "フラッシュブリンク",
+    "class": "nemesis",
+    "set": "godslayer_anathema",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "自分の場のフォロワーすべては+1/+0する。超進化可能ターンなら、自分の手札のフォロワーすべては+1/+0する。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10773110",
+    "name": "ワイルドキャスター",
+    "class": "nemesis",
+    "set": "godslayer_anathema",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】『アナライズアーティファクト』1枚を自分の場に出す。\n【エンハンス_5】『ミスティックアーティファクト』1枚を自分の場に出す。\n自分のアーティファクト・フォロワーが場に出たとき、それは【突進】を持つ。",
+    "related": [
+      "90071130",
+      "90071150"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10773310",
+    "name": "テレポートスラッシュ",
+    "class": "nemesis",
+    "set": "godslayer_anathema",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "相手の場のフォロワーすべてにXダメージ。Xはこのバトル中に場に出た自分のアーティファクト・フォロワーの種類である。相手のリーダーに1ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10774110",
+    "name": "虚刻のアナテマ・スカーレット",
+    "class": "nemesis",
+    "set": "godslayer_anathema",
+    "rarity": "legend",
+    "cost": 8,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "【ファンファーレ】相手の場のフォロワーすべてにXダメージ。Xはこのバトル中に場に出た自分のアーティファクト・フォロワーの種類である。\n【疾走】\n【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 6,
+    "defense": 6
+  },
+  {
+    "id": "10774120",
+    "name": "奮励の追走・ミュー",
+    "class": "nemesis",
+    "set": "godslayer_anathema",
+    "rarity": "legend",
+    "cost": 4,
+    "tribes": [],
+    "text": "自分のアーティファクト・フォロワーが場に出たとき、相手の場のフォロワーからランダム1枚に3ダメージ。\n【進化時】『エンシェントアーティファクト』1枚を自分の場に出す。\n【超進化時】その後、このバトル中に場に出た自分のアーティファクト・フォロワーの種類が3以上なら、これは【疾走】を持つ。",
+    "related": [
+      "90071140"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 5
+  },
+  {
+    "id": "10801110",
+    "name": "克己の聖鳥・ハンサ",
+    "class": "neutral",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【進化時】これは+5/+5する。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10801120",
+    "name": "タイムレスジャーニー・レイナ",
+    "class": "neutral",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のEPを1回復。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10802110",
+    "name": "早鐘の歓喜・アルフィード",
+    "class": "neutral",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに4ダメージ。\n【進化時】これは【疾走】を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 3
+  },
+  {
+    "id": "10802310",
+    "name": "救世の勇姿",
+    "class": "neutral",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "相手の手札からランダム1枚のコピー1枚を非公開で自分の手札に加える。それのコストを-1する。自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10803110",
+    "name": "忘失の無垢・アイカ",
+    "class": "neutral",
+    "set": "chronicle_of_destiny",
+    "rarity": "gold",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】このバトル中に破壊された自分のフォロワーからランダム1枚と同名のカード1枚を非公開で自分の手札に加える。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10803310",
+    "name": "相承の意思",
+    "class": "neutral",
+    "set": "chronicle_of_destiny",
+    "rarity": "gold",
+    "cost": 2,
+    "tribes": [],
+    "text": "【モード】1つを選んでその能力が働く。\n（1）相手の場のフォロワーからランダム1枚に3ダメージ。\n（2）【リアニメイト_2】を行う。\n（3）自分の場のフォロワーすべては+1/+0する。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10804110",
+    "name": "アルビオンバハムート",
+    "class": "neutral",
+    "set": "chronicle_of_destiny",
+    "rarity": "legend",
+    "cost": 9,
+    "tribes": [],
+    "text": "【ファンファーレ】【モード】1つを選んでその能力が働く。\n（1）場の他のフォロワーすべてを消滅。\n（2）場のアミュレットすべてを消滅。\n（3）クレストすべてを消滅。",
+    "related": [],
+    "type": "follower",
+    "attack": 13,
+    "defense": 13
+  },
+  {
+    "id": "10804120",
+    "name": "気高き黒翼・オリヴィエ",
+    "class": "neutral",
+    "set": "chronicle_of_destiny",
+    "rarity": "legend",
+    "cost": 9,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のSEPを2回復。\n【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 7,
+    "defense": 7
+  },
+  {
+    "id": "10811110",
+    "name": "昔日の天秤・マーロン",
+    "class": "elf",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワーからランダムX枚を破壊。Xは「相手の場のフォロワーの枚数から、自分の場のフォロワーの枚数を引いた数」である。",
+    "related": [],
+    "type": "follower",
+    "attack": 6,
+    "defense": 6
+  },
+  {
+    "id": "10811120",
+    "name": "ヘレティックハーミット・シトラス",
+    "class": "elf",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】『フェアリー』2枚を自分の場に出す。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [
+      "90011110"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10811130",
+    "name": "グルーミーガール・モエル",
+    "class": "elf",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の手札1枚を選ぶ。それをデッキに戻す。自分のデッキから1枚を引く。\n【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10812110",
+    "name": "太古の妖精・ルフレ",
+    "class": "elf",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "これの攻撃力か体力が場で+されたとき、自分のターンごとに1回、『フェアリー』1枚を自分の場に出す。\n【ラストワード】『フェアリー』1枚を自分の手札に加える。",
+    "related": [
+      "90011110"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10812120",
+    "name": "情念の毒茨・リコリス",
+    "class": "elf",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】『優しき読心者・ミツェル』1枚を自分の場に出す。\n【突進】\n【必殺】",
+    "related": [
+      "10813110"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 4
+  },
+  {
+    "id": "10812310",
+    "name": "穏やかなる孤独",
+    "class": "elf",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "相手の場のフォロワー1枚を選ぶ。それを破壊。自分のリーダーを2回復。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10813110",
+    "name": "優しき読心者・ミツェル",
+    "class": "elf",
+    "set": "chronicle_of_destiny",
+    "rarity": "gold",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】『情念の毒茨・リコリス』1枚を自分の場に出す。自分の場のフォロワーすべては【バリア】を持つ。\n【守護】",
+    "related": [
+      "10812120"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10813310",
+    "name": "水鏡の信頼",
+    "class": "elf",
+    "set": "chronicle_of_destiny",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "自分のデッキのコスト2以下のフォロワーからランダム2種類を自分の場に出す。自分の場のフォロワーすべては+1/+1する。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10814110",
+    "name": "離合の有終・セタス＆メイシア",
+    "class": "elf",
+    "set": "chronicle_of_destiny",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それを破壊。自分の場の他のフォロワーすべては+1/+1する。\n【疾走】\n【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 6
+  },
+  {
+    "id": "10814120",
+    "name": "エターナルクリスタリア・ティア",
+    "class": "elf",
+    "set": "chronicle_of_destiny",
+    "rarity": "legend",
+    "cost": 2,
+    "tribes": [],
+    "text": "【エンハンス_4】自分の場のフォロワーすべては+1/+1する。\n【突進】\nこれの攻撃力か体力が場で+されたとき、自分のターンごとに1回、『ソードクリスタリア・イヴ』1枚を自分の手札に加える。",
+    "related": [
+      "90014110"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10821110",
+    "name": "武力と治安・ナハト・ナハト＆ヴィンセント",
+    "class": "royal",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】『ナハトの私兵』1枚を自分の場に出す。相手の場のフォロワーすべてに3ダメージ。\n【超進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [
+      "90021130"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 4
+  },
+  {
+    "id": "10821120",
+    "name": "寡黙なアサシン・シャイリィ",
+    "class": "royal",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【潜伏】\n【進化時】相手の場のフォロワー1枚を選ぶ。相手のターン終了まで、それは「フォロワーやリーダーを攻撃できない。」を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10821130",
+    "name": "悠久の騎士・サーシャ",
+    "class": "royal",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】『スティールナイト』1枚を自分の場に出す。それは【突進】を持つ。\n【進化時】『スティールナイト』1枚を自分の場に出す。それは【守護】を持つ。",
+    "related": [
+      "90021120"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10822110",
+    "name": "ジェイルブレイク・カッツェ",
+    "class": "royal",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "自分がスペルをプレイしたとき、自分のターンごとに1回、相手の場のフォロワーからランダム1枚に2ダメージ。\n【進化時】『輝く金貨』1枚を自分の手札に加える。",
+    "related": [
+      "90021350"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 4
+  },
+  {
+    "id": "10822120",
+    "name": "織田信長",
+    "class": "royal",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 10,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワーすべてに6ダメージ。\n【威圧】",
+    "related": [],
+    "type": "follower",
+    "attack": 10,
+    "defense": 10
+  },
+  {
+    "id": "10822310",
+    "name": "リライブリライフ",
+    "class": "royal",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "相手の場の攻撃力最大のフォロワーからランダム1枚は-10/-10する。\n【エンハンス_6】『異形』3枚を自分の場に出す。",
+    "related": [
+      "90022110"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10823110",
+    "name": "沖田総司",
+    "class": "royal",
+    "set": "chronicle_of_destiny",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】超進化可能ターンなら、これは進化する。\n【突進】\n【攻撃時】フォロワーへの攻撃なら、「交戦相手に3ダメージ。」を1回行う。これが進化後なら、1回ではなく3回。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10823310",
+    "name": "二等分の日常",
+    "class": "royal",
+    "set": "chronicle_of_destiny",
+    "rarity": "gold",
+    "cost": 2,
+    "tribes": [],
+    "text": "【モード】1つを選んでその能力が働く。自分の場のカードの枚数が2以上なら、1つを選ぶのではなくすべて。\n（1）相手の場のフォロワーからランダム1枚に4ダメージ。\n（2）自分のリーダーを2回復。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10824110",
+    "name": "天命の弾丸・バニー＆バロン",
+    "class": "royal",
+    "set": "chronicle_of_destiny",
+    "rarity": "legend",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】『天命の弾丸・バニー＆バロン』1枚を自分の場に出す。【連携_20】相手のリーダーに4ダメージ。\n【突進】\n【進化時】『デスペラードショット』1枚を自分の手札に加える。",
+    "related": [
+      "90024330"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10824120",
+    "name": "焦がれし炎将・マーズ",
+    "class": "royal",
+    "set": "chronicle_of_destiny",
+    "rarity": "legend",
+    "cost": 8,
+    "tribes": [],
+    "text": "【ファンファーレ】『ナイト』3枚を自分の場に出す。\n【疾走】\n【必殺】\n自分の兵士・フォロワーが場に出たとき、それは+2/+0して【突進】を持つ。これは+1/+0する。\n【超進化時】『ナイト』1枚を自分の場に出す。",
+    "related": [
+      "90021110"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 5
+  },
+  {
+    "id": "10831110",
+    "name": "緑の幸・ムニャール＆マンマル2号＆ジーナ",
+    "class": "witch",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに1ダメージ。自分の手札すべては1回スペルブーストする。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10831120",
+    "name": "マナリアクラーク・ポピー",
+    "class": "witch",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [
+      "マナリア"
+    ],
+    "text": "【ファンファーレ】『マナリアの魔弾』1枚を自分の手札に加える。",
+    "related": [
+      "90031310"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10831310",
+    "name": "ストームブラスト",
+    "class": "witch",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "Xは2から始まる。\n【スペルブースト時】これのXを+1する。\n相手の場のフォロワー1枚を選ぶ。それにXダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10832110",
+    "name": "ハッピーフラワー・サミー＆マリー",
+    "class": "witch",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【スペルブースト時】これのコストを-1する。\n【ファンファーレ】自分のデッキから2枚を引く。相手は自身のデッキから1枚を引く。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 2
+  },
+  {
+    "id": "10832310",
+    "name": "睦まやかな団欒",
+    "class": "witch",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "自分のリーダーを2回復。自分の手札すべては1回スペルブーストする。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10832320",
+    "name": "地を這う雷撃",
+    "class": "witch",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "相手の場の攻撃力最大のフォロワーからランダム1枚に8ダメージ。相手のリーダーに2ダメージ。【土の秘術_2】『地を這う雷撃』1枚を自分の手札に加える。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10833110",
+    "name": "マナリアスクリプター・ティコ",
+    "class": "witch",
+    "set": "chronicle_of_destiny",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [
+      "マナリア"
+    ],
+    "text": "【ファンファーレ】『マナリアの魔弾』2枚を自分の手札に加える。\n【進化時】自分の手札のマナリア・スペルすべてのコストを-1する。\n【超進化時】自分は『クレスト：マナリアスクリプター・ティコ』を持つ。",
+    "related": [
+      "90031310"
+    ],
+    "crest": "10833112",
+    "type": "follower",
+    "attack": 3,
+    "defense": 2
+  },
+  {
+    "id": "10833310",
+    "name": "鋼鉄の微睡み",
+    "class": "witch",
+    "set": "chronicle_of_destiny",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [],
+    "text": "Xは0から始まる。\n【スペルブースト時】これのXを+1する。\n自分のデッキから2枚を引く。Xが5以上なら、自分のリーダーを2回復。自分のPPを2回復。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10834110",
+    "name": "恩愛の大地・テトラ＆ラティカ",
+    "class": "witch",
+    "set": "chronicle_of_destiny",
+    "rarity": "legend",
+    "cost": 6,
+    "tribes": [],
+    "text": "Xは0から始まる。\n【スペルブースト時】これのXを+1する。\n【ファンファーレ】Xが10以上なら、『ソニック・フォー』1枚を自分の手札に加える。20以上なら、『大いなる回帰』1枚を自分の手札に加える。\n【疾走】",
+    "related": [
+      "90034340",
+      "90034350"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10834120",
+    "name": "災いの言霊・ジンジャー",
+    "class": "witch",
+    "set": "chronicle_of_destiny",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】『ガーディアンゴーレム』2枚を自分の場に出す。\n自分の他のフォロワーが場に出たとき、それは【突進】を持つ。自分の手札すべては1回スペルブーストする。\n【進化時】『ガーディアンゴーレム』1枚を自分の場に出す。",
+    "related": [
+      "90031120"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10841110",
+    "name": "人狼族の長・ギド",
+    "class": "dragon",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のリーダーの体力が10以下なら、これは進化する。\n【必殺】\n【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 7
+  },
+  {
+    "id": "10841120",
+    "name": "砂塵の宝物番",
+    "class": "dragon",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 7,
+    "tribes": [],
+    "text": "【守護】\n【ラストワード】自分のデッキから3枚を引く。",
+    "related": [],
+    "type": "follower",
+    "attack": 7,
+    "defense": 11
+  },
+  {
+    "id": "10841130",
+    "name": "わだつみの精",
+    "class": "dragon",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】『大海のオルカ』1枚を自分の手札に加える。\n【進化時】自分は『クレスト：わだつみの精』を持つ。",
+    "related": [
+      "90041130"
+    ],
+    "crest": "10841132",
+    "type": "follower",
+    "attack": 1,
+    "defense": 2
+  },
+  {
+    "id": "10842110",
+    "name": "キラキラサウンド・リーフ＆ロロ",
+    "class": "dragon",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】『キラキラサウンド・リーフ＆ロロ』1枚を自分の場に出す。\n【突進】\n自分のターン終了時、『大海のオルカ』1枚を自分の手札に加える。",
+    "related": [
+      "90041130"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 4
+  },
+  {
+    "id": "10842120",
+    "name": "笑顔の調理・キミカ",
+    "class": "dragon",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の手札1枚を選ぶ。それを捨てる。自分のデッキから1枚を引く。自分のリーダーを1回復。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10842310",
+    "name": "末世死化粧",
+    "class": "dragon",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 6,
+    "tribes": [],
+    "text": "相手の場のフォロワーからランダム1枚に4ダメージ。相手のリーダーに4ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10843110",
+    "name": "天頂の戦火・ジェアーダ",
+    "class": "dragon",
+    "set": "chronicle_of_destiny",
+    "rarity": "gold",
+    "cost": 6,
+    "tribes": [],
+    "text": "【突進】\n【威圧】\n【攻撃時】これは【バリア】を持つ。フォロワーへの攻撃なら、ターン終了まで、これは「1ターンに2回攻撃できる。」を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 6,
+    "defense": 2
+  },
+  {
+    "id": "10843310",
+    "name": "狐火陽炎",
+    "class": "dragon",
+    "set": "chronicle_of_destiny",
+    "rarity": "gold",
+    "cost": 1,
+    "tribes": [],
+    "text": "相手の場のフォロワー1枚か相手のリーダーを選ぶ。それに1ダメージ。『狐火陽炎』1枚を自分のデッキに加える。【覚醒】なら、自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10844110",
+    "name": "反照の赤紅・ドラーク＆アルザード",
+    "class": "dragon",
+    "set": "chronicle_of_destiny",
+    "rarity": "legend",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】これは+X/+Xする。Xが2以上なら、これは進化する。Xはこのバトル中に場に出た自分の他の『反照の赤紅・ドラーク＆アルザード』の枚数である。\n【守護】\n【ラストワード】自分は『クレスト：反照の赤紅・ドラーク＆アルザード』を持つ。",
+    "related": [],
+    "crest": "10844112",
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10844120",
+    "name": "金銀絢爛・リュミオール＆アルジャンテ",
+    "class": "dragon",
+    "set": "chronicle_of_destiny",
+    "rarity": "legend",
+    "cost": 8,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の手札2枚を選ぶ。それを捨てる。相手の場のフォロワーすべてと相手のリーダーに4ダメージ。\n【超進化時】自分のデッキから3枚を引く。",
+    "related": [],
+    "specials": [
+      "10844122"
+    ],
+    "type": "follower",
+    "attack": 6,
+    "defense": 6
+  },
+  {
+    "id": "10851110",
+    "name": "透き通る信念・アンサージュ",
+    "class": "nightmare",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "【疾走】\n【守護】を無視して攻撃できる。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 3
+  },
+  {
+    "id": "10851120",
+    "name": "キュートな悪魔・リリム",
+    "class": "nightmare",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "【攻撃時】リーダーすべてに1ダメージ。\n【ラストワード】『バット』1枚を自分の手札に加える。",
+    "related": [
+      "90051120"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10851130",
+    "name": "バニーな悪魔・リミル",
+    "class": "nightmare",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のリーダーの体力が相手のリーダーの体力より大きいなら、『バット』2枚を自分の場に出す。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [
+      "90051120"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10852110",
+    "name": "マザーな悪魔・フィオレ",
+    "class": "nightmare",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】『バット』3枚を自分の場に出す。\n自分の『バット』が場に出たとき、それは【突進】を持つ。",
+    "related": [
+      "90051120"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 5
+  },
+  {
+    "id": "10852120",
+    "name": "ダークナイト・マーシャ",
+    "class": "nightmare",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワーすべてとリーダーすべてに1ダメージ。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 4
+  },
+  {
+    "id": "10852310",
+    "name": "旅立ちの退出",
+    "class": "nightmare",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【モード】2つを選んでその能力が働く。\n（1）相手のリーダーに1ダメージ。\n（2）自分のリーダーを2回復。\n（3）相手の場のフォロワーからランダム1枚に3ダメージ。\n（4）自分の墓場を+4する。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10853110",
+    "name": "誠実なる呪い屋・スージー",
+    "class": "nightmare",
+    "set": "chronicle_of_destiny",
+    "rarity": "gold",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それは-0/-3する。\n【進化時】自分の手札のフォロワー1枚を選ぶ。それは+3/+0する。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10853310",
+    "name": "変わりし流れ",
+    "class": "nightmare",
+    "set": "chronicle_of_destiny",
+    "rarity": "gold",
+    "cost": 2,
+    "tribes": [],
+    "text": "自分の手札1枚を選ぶ。それをデッキに戻す。自分のデッキから2枚を引く。超進化可能ターンなら、それのコストを-1する。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10854110",
+    "name": "出発の憧憬・イツルギ＆タケツミ",
+    "class": "nightmare",
+    "set": "chronicle_of_destiny",
+    "rarity": "legend",
+    "cost": 8,
+    "tribes": [],
+    "text": "【ファンファーレ】【モード】1つを選んでその能力が働く。\n（1）相手のリーダーに4ダメージ。自分のリーダーを4回復。\n（2）相手の場のフォロワーすべてに5ダメージ。自分のEPを1回復。\n【進化時】【モード】1つを選んでその能力が働く。\n（1）自分のデッキから2枚を引く。\n（2）自分のPPを2回復。",
+    "related": [],
+    "type": "follower",
+    "attack": 6,
+    "defense": 5
+  },
+  {
+    "id": "10854120",
+    "name": "陽と月の薔薇・セレス",
+    "class": "nightmare",
+    "set": "chronicle_of_destiny",
+    "rarity": "legend",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】【ネクロマンス_20】自分の手札のナイトメア・カードすべてのコストを-2する。\n【交戦時】交戦相手に4ダメージ。\n自分のターン終了時、自分のリーダーを4回復。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 4
+  },
+  {
+    "id": "10861110",
+    "name": "図書室の魔女・リリウム",
+    "class": "bishop",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ラストワード】自分のデッキから1枚を引く。\n【進化時】相手の場のフォロワー1枚を選ぶ。それは能力すべてを失う。それに2ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10861120",
+    "name": "エルゴンプリーステス・テレサ",
+    "class": "bishop",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】『癒しのシスター』1枚を自分の場に出す。それは+2/-2して【疾走】を持つ。",
+    "related": [
+      "10061110"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10861130",
+    "name": "イモータルハンター・グラント",
+    "class": "bishop",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それを破壊。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 2
+  },
+  {
+    "id": "10862110",
+    "name": "天陽の使徒・エーディット",
+    "class": "bishop",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 8,
+    "tribes": [],
+    "text": "【守護】\n【オーラ】\n【ラストワード】『天陽の使徒・エーディット』1枚を自分の場に出す。それは【ラストワード】を失う。\n【超進化時】相手の場のフォロワー1枚を選ぶ。それを破壊。",
+    "related": [],
+    "type": "follower",
+    "attack": 6,
+    "defense": 7
+  },
+  {
+    "id": "10862120",
+    "name": "アビスリサーチャー・ヴィーチェ",
+    "class": "bishop",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 6,
+    "tribes": [],
+    "text": "手札で働く。自分のフォロワーが超進化したとき、これのコストを-3する。\n【突進】\n【必殺】",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 4
+  },
+  {
+    "id": "10862310",
+    "name": "脅威の残滓",
+    "class": "bishop",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "相手の場の体力3以下のフォロワー1枚を選ぶ。それを消滅。\n【エンハンス_5】1枚を選ぶのではなくすべて。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10863110",
+    "name": "セイントエクソシスト・コレット",
+    "class": "bishop",
+    "set": "chronicle_of_destiny",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の場に進化後のフォロワーがあるなら、これは進化する。\n【守護】\nこれが進化したとき、「相手の場のフォロワーからランダム1枚に1ダメージ。」を2回行う。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 4
+  },
+  {
+    "id": "10863210",
+    "name": "朋友の学級",
+    "class": "bishop",
+    "set": "chronicle_of_destiny",
+    "rarity": "gold",
+    "cost": 2,
+    "tribes": [],
+    "text": "【カウントダウン_2】\n自分のターン終了時、自分のデッキから1枚を引く。自分の場に進化後のフォロワーがあるなら、自分のリーダーを1回復。自分の場に超進化後のフォロワーがあるなら、1回復ではなく2回復。",
+    "related": [],
+    "type": "amulet",
+    "countdown": 2
+  },
+  {
+    "id": "10864110",
+    "name": "飛躍の姉妹・ベルディリア＆カステル",
+    "class": "bishop",
+    "set": "chronicle_of_destiny",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のデッキのコスト2以下のフォロワーからランダム1枚を自分の場に出す。それは超進化する。\n【超進化時】自分は『クレスト：飛躍の姉妹・ベルディリア＆カステル』を持つ。",
+    "related": [],
+    "crest": "10864112",
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10864120",
+    "name": "希望の光彩・リテュエル",
+    "class": "bishop",
+    "set": "chronicle_of_destiny",
+    "rarity": "legend",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】【モード】1つを選んでその能力が働く。これに3ダメージ。\n（1）相手の場のフォロワーすべてに3ダメージ。\n（2）相手のリーダーに3ダメージ。\n（3）自分のリーダーを3回復。\n【進化時】自分は『クレスト：希望の光彩・リテュエル』を持つ。",
+    "related": [],
+    "crest": "10864122",
+    "type": "follower",
+    "attack": 2,
+    "defense": 4
+  },
+  {
+    "id": "10871110",
+    "name": "ありふれた幸福・クラトス",
+    "class": "nemesis",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 7,
+    "tribes": [],
+    "text": "【守護】\n【ラストワード】『ありふれた幸福・クラトス』1枚を自分の場に出す。それは【ラストワード】を失う。",
+    "related": [],
+    "type": "follower",
+    "attack": 7,
+    "defense": 7
+  },
+  {
+    "id": "10871120",
+    "name": "エクセシブガーディアン・リオナ",
+    "class": "nemesis",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【守護】\n【超進化時】自分の場の他のフォロワー1枚を選ぶ。それは【潜伏】を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10871130",
+    "name": "デバイスマニピュレーター・ジルク",
+    "class": "nemesis",
+    "set": "chronicle_of_destiny",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "【ファンファーレ】このバトル中に破壊された自分のアーティファクト・フォロワーからランダム1枚と同名のカード1枚を非公開で自分の手札に加える。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10872110",
+    "name": "アーティフィシャルギフト・レイラ",
+    "class": "nemesis",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【突進】\n【ラストワード】『エンシェントアーティファクト』1枚を自分の手札に加える。",
+    "related": [
+      "90071140"
+    ],
+    "type": "follower",
+    "attack": 6,
+    "defense": 4
+  },
+  {
+    "id": "10872120",
+    "name": "ポータルコネクター・ラズリ",
+    "class": "nemesis",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】『レディアントアーティファクト』1枚を自分の手札に加える。",
+    "related": [
+      "90071160"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10872310",
+    "name": "穢れなき日々",
+    "class": "nemesis",
+    "set": "chronicle_of_destiny",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "自分のデッキから2枚を引く。超進化可能ターンなら、自分のリーダーを2回復。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10873110",
+    "name": "レシプロケイト・ミリアム",
+    "class": "nemesis",
+    "set": "chronicle_of_destiny",
+    "rarity": "gold",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それを破壊。『レディアントアーティファクト』1枚を自分の場に出す。",
+    "related": [
+      "90071160"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10873310",
+    "name": "切り拓く未来",
+    "class": "nemesis",
+    "set": "chronicle_of_destiny",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [],
+    "text": "相手の場のフォロワー1枚を選ぶ。それに6ダメージ。このバトル中に場に出た自分のアーティファクト・フォロワーの種類が3以上なら、自分のEPを1回復。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10874110",
+    "name": "決断の交差・アシュレイ＆リディア",
+    "class": "nemesis",
+    "set": "chronicle_of_destiny",
+    "rarity": "legend",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それは【守護】を持つ。\n【エンハンス_9】これは進化する。これは【疾走】を持つ。\nこれが進化したとき、相手の場の【守護】を持つフォロワーからランダム2枚を破壊。",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10874120",
+    "name": "アナタの先輩・エース",
+    "class": "nemesis",
+    "set": "chronicle_of_destiny",
+    "rarity": "legend",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】『アナライズアーティファクト』1枚を自分の手札に加える。\n【進化時】自分の場の他の進化前のフォロワー1枚を選ぶ。それは進化する。",
+    "related": [
+      "90071130"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10901110",
+    "name": "最古の獄卒",
+    "class": "neutral",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに6ダメージ。相手の場の選んでいないフォロワーからランダム1枚に2ダメージ。\n【守護】",
+    "related": [],
+    "specials": [
+      "10901112"
+    ],
+    "type": "follower",
+    "attack": 6,
+    "defense": 6
+  },
+  {
+    "id": "10901310",
+    "name": "輪廻転衝",
+    "class": "neutral",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "このバトル中に破壊された自分の元のコスト最大のフォロワーからランダム1枚と同名のカード1枚を非公開で自分のデッキに加える。自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10902110",
+    "name": "ブレードエンジェル",
+    "class": "neutral",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の場の他のフォロワー2枚を選ぶ。それは+3/+3する。",
+    "related": [],
+    "type": "follower",
+    "attack": 6,
+    "defense": 6
+  },
+  {
+    "id": "10903110",
+    "name": "無我の看守",
+    "class": "neutral",
+    "set": "azvaldt_revenant",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】『最古の獄卒』1枚を自分の手札に加える。相手の場のフォロワーからランダム2枚にXダメージ。Xは自分の手札のニュートラル・カードの枚数である。\n【進化時】自分のPPを1回復。",
+    "related": [
+      "10901110"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10903210",
+    "name": "混迷の監獄・アズヴォルト",
+    "class": "neutral",
+    "set": "azvaldt_revenant",
+    "rarity": "gold",
+    "cost": 8,
+    "tribes": [],
+    "text": "自分のターン終了時、このバトル中に自分がプレイしたカードの元のコストに1～8すべてが含まれているなら、これを破壊。\n【ラストワード】このバトル中に破壊された自分のフォロワーからランダム4種類と同名のカード1枚ずつを自分の場に出す。自分の場のフォロワーすべては+3/+3する。",
+    "related": [],
+    "type": "amulet"
+  },
+  {
+    "id": "10904110",
+    "name": "途絶した輪廻・ゼラエル",
+    "class": "neutral",
+    "set": "azvaldt_revenant",
+    "rarity": "legend",
+    "cost": 9,
+    "tribes": [],
+    "text": "デッキで働く。自分のターン終了時、このバトル中に自分がプレイしたカードの元のコストに1～8すべてが含まれているなら、これを【直接召喚】する。\n【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに9ダメージ。\n【威圧】",
+    "related": [],
+    "type": "follower",
+    "attack": 9,
+    "defense": 9
+  },
+  {
+    "id": "10911110",
+    "name": "発芽の組員",
+    "class": "elf",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "【ファンファーレ】【コンボ_3】自分のデッキから1枚を引く。\n【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10911120",
+    "name": "コングフレンド",
+    "class": "elf",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 7,
+    "tribes": [],
+    "text": "【威圧】",
+    "related": [],
+    "type": "follower",
+    "attack": 10,
+    "defense": 8
+  },
+  {
+    "id": "10911210",
+    "name": "森林の罠",
+    "class": "elf",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "相手のフォロワーが場に出たとき、それとこれを破壊。",
+    "related": [],
+    "type": "amulet"
+  },
+  {
+    "id": "10912110",
+    "name": "根差の刺客",
+    "class": "elf",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】『フェアリー』1枚を自分の手札に加える。【コンボ_3】それは【必殺】を持つ。",
+    "related": [
+      "90011110"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10912120",
+    "name": "スパリゾートモンキー",
+    "class": "elf",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の手札からランダム1枚のコピー1枚を非公開で自分の手札に加える。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10912310",
+    "name": "緑傘会の二枚看板",
+    "class": "elf",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【モード】1つを選んでその能力が働く。【コンボ_3】1つを選ぶのではなくすべて。\n（1）相手の場のフォロワーからランダム1枚に4ダメージ。\n（2）『森の神秘』1枚と『フェアリー』1枚を自分の手札に加える。",
+    "related": [
+      "90011110",
+      "90011310"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10913110",
+    "name": "枝葉の舎弟頭",
+    "class": "elf",
+    "set": "azvaldt_revenant",
+    "rarity": "gold",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】【コンボ_3】自分のデッキから2枚を引く。\n【進化時】自分の場の他のフォロワー1枚を選ぶ。それは+1/+1して【突進】を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 3
+  },
+  {
+    "id": "10913310",
+    "name": "緋岸橙酔",
+    "class": "elf",
+    "set": "azvaldt_revenant",
+    "rarity": "gold",
+    "cost": 4,
+    "tribes": [],
+    "text": "手札で働く。自分のターン終了時、【コンボ_3】これのコストを-1する。\n相手の場のフォロワー1枚を選ぶ。それを破壊。自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10914110",
+    "name": "煙管の咎人・マガチヨ",
+    "class": "elf",
+    "set": "azvaldt_revenant",
+    "rarity": "legend",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに4ダメージ。【コンボ_3】1枚を選ぶのではなくすべて。\n【超進化時】これは【疾走】を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10914120",
+    "name": "香風の変貌・ヒエン",
+    "class": "elf",
+    "set": "azvaldt_revenant",
+    "rarity": "legend",
+    "cost": 9,
+    "tribes": [],
+    "text": "手札で働く。自分がカードをプレイしたとき、ターン終了まで、これのコストを-1する。\n【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに4ダメージ。\n【ラストワード】『香風の変貌・ヒエン』1枚を自分の場に出す。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10921110",
+    "name": "海域の斥候",
+    "class": "royal",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】『戦慄の海賊旗』1枚を自分の場に出す。\n【進化時】『黄金の靴』1枚を自分の手札に加える。",
+    "related": [
+      "90021210",
+      "90021330"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10921120",
+    "name": "団結の騎兵",
+    "class": "royal",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "【突進】\n【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "10921310",
+    "name": "ファランクス",
+    "class": "royal",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "『スティールナイト』1枚を自分の場に出す。それは【守護】を持つ。\n【エンハンス_6】1枚ではなく5枚。",
+    "related": [
+      "90021120"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10922110",
+    "name": "渦潮の砲手",
+    "class": "royal",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】『戦慄の海賊旗』1枚を自分の場に出す。『黄金の杯』1枚を自分の手札に加える。\n【突進】",
+    "related": [
+      "90021210",
+      "90021320"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 2
+  },
+  {
+    "id": "10922120",
+    "name": "獰猛なる指揮官",
+    "class": "royal",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】『スティールナイト』2枚を自分の場に出す。\n【エンハンス_7】それとこれは+3/+0して【突進】を持つ。",
+    "related": [
+      "90021120"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10922310",
+    "name": "燃え落ちる縁",
+    "class": "royal",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "相手の場のフォロワー1枚を選ぶ。それに5ダメージ。これのコストが3なら、『燃え落ちる縁』1枚を自分の手札に加える。それのコストを1にする。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10923110",
+    "name": "波濤の副船長",
+    "class": "royal",
+    "set": "azvaldt_revenant",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに3ダメージ。『戦慄の海賊旗』1枚を自分の場に出す。\n【進化時】【ファンファーレ】と同じ能力が働く。\n【超進化時】『黄金の小剣』1枚と『黄金の首飾り』1枚を自分の手札に加える。それのコストを0にする。",
+    "related": [
+      "90021210",
+      "90021310",
+      "90021340"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10923310",
+    "name": "アージュドール",
+    "class": "royal",
+    "set": "azvaldt_revenant",
+    "rarity": "gold",
+    "cost": 4,
+    "tribes": [],
+    "text": "『戦慄の海賊旗』1枚を自分の場に出す。相手の場のフォロワーすべてに2ダメージ。\n【エンハンス_6】1枚ではなく2枚。2ダメージではなく4ダメージ。",
+    "related": [
+      "90021210"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10924110",
+    "name": "逆行の咎人・バルバロス",
+    "class": "royal",
+    "set": "azvaldt_revenant",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】『戦慄の海賊旗』1枚を自分の場に出す。自分の場の『戦慄の海賊旗』すべてのカウントを-5する。\n【疾走】",
+    "related": [
+      "90021210"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 3
+  },
+  {
+    "id": "10924120",
+    "name": "武皇の変貌・ベルテゾール",
+    "class": "royal",
+    "set": "azvaldt_revenant",
+    "rarity": "legend",
+    "cost": 10,
+    "tribes": [],
+    "text": "【疾走】\n【必殺】\n【守護】\n【オーラ】\n1ターンに3回攻撃できる。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 12
+  },
+  {
+    "id": "10931110",
+    "name": "没入の実験体",
+    "class": "witch",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "これが場に出たとき、このバトル中に場に出た自分の他の『没入の実験体』の枚数が5以上なら、これは+3/+3する。\n【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10931120",
+    "name": "キースピリット",
+    "class": "witch",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それに7ダメージ。相手のリーダーに4ダメージ。\n【進化時】自分の手札の【スペルブースト時】を持つカード1枚を選ぶ。それは4回スペルブーストする。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 3
+  },
+  {
+    "id": "10931310",
+    "name": "過剰反応",
+    "class": "witch",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "『真理の召喚』3枚を自分の手札に加える。",
+    "related": [
+      "10031320",
+      "90031110"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10932110",
+    "name": "心酔の研究者",
+    "class": "witch",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】『没入の実験体』2枚を自分の場に出す。\n【エンハンス_8】2枚ではなく3枚。それは【守護】を持つ。\n【進化時】自分の場の『没入の実験体』1枚を選ぶ。それは【必殺】を持つ。",
+    "related": [
+      "10931110"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10932120",
+    "name": "高潔なる哲学者",
+    "class": "witch",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】自分の手札すべてをデッキに戻す。自分のデッキからX枚を引く。Xはこれでデッキに戻した枚数である。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 3
+  },
+  {
+    "id": "10932310",
+    "name": "人らしい愛",
+    "class": "witch",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "『没入の実験体』1枚を自分の場に出す。それは+1/+0する。『没入の実験体』1枚を自分の手札に加える。それは+1/+0する。",
+    "related": [
+      "10931110"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10933110",
+    "name": "恍惚の才媛",
+    "class": "witch",
+    "set": "azvaldt_revenant",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "【融合】カード\n【ファンファーレ】自分のデッキから2枚を引く。『没入の実験体』1枚を自分の場に出す。\n【超進化時】これに【融合】していたなら、自分の場の『没入の実験体』1枚を選ぶ。それは【ドレイン】を持つ。",
+    "related": [
+      "10931110"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 3
+  },
+  {
+    "id": "10933310",
+    "name": "烏ノ涅",
+    "class": "witch",
+    "set": "azvaldt_revenant",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "『没入の実験体』1枚を自分の場に出す。「相手の場のフォロワーからランダム1枚に7ダメージ。」を2回行う。",
+    "related": [
+      "10931110"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10934110",
+    "name": "万術の咎人・セフィー",
+    "class": "witch",
+    "set": "azvaldt_revenant",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [],
+    "text": "【融合】カード\nこれに【融合】したとき、自分のPPを2消費して、『没入の実験体』1枚を自分の場に出す。\n【ファンファーレ】『没入の実験体』2枚を自分の場に出す。\n【超進化時】自分は『クレスト：万術の咎人・セフィー』を持つ。",
+    "related": [
+      "10931110"
+    ],
+    "crest": "10934112",
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10934120",
+    "name": "破式の変貌・フィーリン",
+    "class": "witch",
+    "set": "azvaldt_revenant",
+    "rarity": "legend",
+    "cost": 10,
+    "tribes": [],
+    "text": "【スペルブースト時】これのコストを-1する。\n【必殺】\n【守護】\n【オーラ】",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 6
+  },
+  {
+    "id": "10941110",
+    "name": "寸裂の盗人",
+    "class": "dragon",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "【ファンファーレ】直前の自分のターンに自分のフォロワーがリーダーを攻撃していたなら、これは【疾走】を持つ。\n【ラストワード】『寸裂の盗人』1枚を自分の手札に加える。それは【ラストワード】を失う。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10941120",
+    "name": "ケイブドラゴン",
+    "class": "dragon",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】【覚醒】なら、これは進化する。\n【潜伏】",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 3
+  },
+  {
+    "id": "10941310",
+    "name": "幼竜の癇癪",
+    "class": "dragon",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "『ベビーファイアドレイク』1枚を自分の場に出す。\n【エンハンス_3】相手の場のフォロワーからランダム1枚に3ダメージ。",
+    "related": [
+      "90041110"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10942110",
+    "name": "絶倒の襲撃者",
+    "class": "dragon",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【疾走】\n【攻撃時】直前の自分のターンに自分のフォロワーがリーダーを攻撃していたなら、ターン終了まで、これは+1/+0する。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 2
+  },
+  {
+    "id": "10942120",
+    "name": "ドラゴニュートバトラー",
+    "class": "dragon",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 8,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のリーダーを3回復。自分のPPを3回復。\n【進化時】自分の場の他のフォロワー1枚を選ぶ。それは+3/+3する。",
+    "related": [],
+    "type": "follower",
+    "attack": 6,
+    "defense": 9
+  },
+  {
+    "id": "10942310",
+    "name": "顎門の別れ",
+    "class": "dragon",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "自分の手札2枚を選ぶ。それを捨てる。相手の場のフォロワーからランダム1枚と相手のリーダーに3ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10943110",
+    "name": "塵土の無頼漢",
+    "class": "dragon",
+    "set": "azvaldt_revenant",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】「相手の場のフォロワーからランダム1枚に4ダメージ。」を1回行う。直前の自分のターンに自分のフォロワーがリーダーを攻撃していたなら、1回ではなく2回。\n【進化時】『絶倒の襲撃者』1枚を自分の場に出す。",
+    "related": [
+      "10942110"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10943310",
+    "name": "ウンギア",
+    "class": "dragon",
+    "set": "azvaldt_revenant",
+    "rarity": "gold",
+    "cost": 2,
+    "tribes": [],
+    "text": "相手の場のフォロワーすべてに3ダメージを割りふる。直前の自分のターンに自分のフォロワーがリーダーを攻撃していたなら、3ダメージではなく6ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10944110",
+    "name": "穿孔の咎人・アンテマリア",
+    "class": "dragon",
+    "set": "azvaldt_revenant",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】直前の自分のターンに自分のフォロワーがリーダーを攻撃していたなら、これは【疾走】を持つ。\n【突進】\n【守護】を無視して攻撃できる。",
+    "related": [],
+    "type": "follower",
+    "attack": 6,
+    "defense": 5
+  },
+  {
+    "id": "10944120",
+    "name": "禁牙の変貌・ノマグダラ",
+    "class": "dragon",
+    "set": "azvaldt_revenant",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】【モード】1つを選んでその能力が働く。\n（1）自分のデッキから1枚を引く。自分のリーダーを3回復。\n（2）相手の場のフォロワーすべては-0/-4する。\n【守護】\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 6
+  },
+  {
+    "id": "10951110",
+    "name": "強襲の特攻隊長",
+    "class": "nightmare",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ファンファーレ】リーダーすべてに2ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10951120",
+    "name": "幽冥の中尉",
+    "class": "nightmare",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【ラストワード】『幽冥の中尉』1枚を自分の場に出す。それは+1/+0して【突進】を持つ。それは【ラストワード】を失う。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10951310",
+    "name": "ホラーサプライズ",
+    "class": "nightmare",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "『ゴースト』1枚と『腐臭のゾンビ』1枚を自分の場に出す。",
+    "related": [
+      "90051130",
+      "90051140"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10952110",
+    "name": "淵底の大佐",
+    "class": "nightmare",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 6,
+    "tribes": [],
+    "text": "【守護】\n【ラストワード】相手の場のフォロワーからランダム1枚を破壊。自分のリーダーを2回復。",
+    "related": [],
+    "specials": [
+      "10952112"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 6
+  },
+  {
+    "id": "10952120",
+    "name": "トゥインクルデビル",
+    "class": "nightmare",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それを破壊。相手のリーダーに2ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 7,
+    "defense": 7
+  },
+  {
+    "id": "10952310",
+    "name": "鉄鎖の繋がり",
+    "class": "nightmare",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "「相手の場のフォロワーからランダム1枚に3ダメージ。リーダーすべてに1ダメージ。」を1回行う。\n【エンハンス_4】1回ではなく2回。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10953110",
+    "name": "激烈の副総長",
+    "class": "nightmare",
+    "set": "azvaldt_revenant",
+    "rarity": "gold",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワーすべてに3ダメージ。リーダーすべてに3ダメージ。\n【超進化時】自分のデッキから2枚を引く。リーダーすべてに1ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10953310",
+    "name": "死神払い",
+    "class": "nightmare",
+    "set": "azvaldt_revenant",
+    "rarity": "gold",
+    "cost": 2,
+    "tribes": [],
+    "text": "自分の場のフォロワー1枚を選ぶ。それは「【ラストワード】これと同名のカード1枚を自分の場に出す。」を持つ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10954110",
+    "name": "イステンデッドVSマルチルゲート",
+    "class": "nightmare",
+    "set": "azvaldt_revenant",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】【リアニメイト_2】を3回行う。相手の場のフォロワーすべてに2ダメージ。\n【超進化時】自分は『クレスト：イステンデッドVSマルチルゲート』を持つ。",
+    "related": [],
+    "crest": "10954112",
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10954120",
+    "name": "ガロダートVSゼット",
+    "class": "nightmare",
+    "set": "azvaldt_revenant",
+    "rarity": "legend",
+    "cost": 8,
+    "tribes": [],
+    "text": "手札で働く。自分のターン終了時、自分のリーダーの体力が12以下なら、これのコストを-1する。\n【ファンファーレ】【モード】1つを選んでその能力が働く。\n（1）これは【疾走】を持つ。自分のリーダーに2ダメージ。\n（2）これは【守護】を持つ。相手の場のフォロワーすべてに8ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 8,
+    "defense": 8
+  },
+  {
+    "id": "10961110",
+    "name": "条規の構成員",
+    "class": "bishop",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【守護】\n自分のリーダーが回復したとき、自分のターンなら、これは進化する。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "10961120",
+    "name": "ペリュトン",
+    "class": "bishop",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】『ペリュトン』2枚を自分の場に出す。\n【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 4
+  },
+  {
+    "id": "10961210",
+    "name": "咆哮の聖堂",
+    "class": "bishop",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [],
+    "text": "【カウントダウン_3】\n【ラストワード】『ホーリーフレイムタイガー』1枚を自分の場に出す。相手の場のフォロワーからランダム1枚に4ダメージ。\nコスト3【アクト】これのカウントを-3する。",
+    "related": [
+      "90061120"
+    ],
+    "type": "amulet",
+    "countdown": 3
+  },
+  {
+    "id": "10962110",
+    "name": "紀律の諜報員",
+    "class": "bishop",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【ファンファーレ】相手のターン終了まで、これは【潜伏】を持つ。\n自分のターン終了時、自分のリーダーを1回復。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 4
+  },
+  {
+    "id": "10962120",
+    "name": "ミラクルアルミラージ",
+    "class": "bishop",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [],
+    "text": "【疾走】",
+    "related": [],
+    "specials": [
+      "10962122"
+    ],
+    "type": "follower",
+    "attack": 2,
+    "defense": 1
+  },
+  {
+    "id": "10962310",
+    "name": "刻みし約束",
+    "class": "bishop",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [],
+    "text": "【モード】1つを選んでその能力が働く。自分の場に元のコスト6以上のカードがあるなら、1つを選ぶのではなくすべて。\n（1）相手の場のフォロワーからランダム1枚に3ダメージ。\n（2）自分のリーダーを2回復。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10963110",
+    "name": "誓言の幹部",
+    "class": "bishop",
+    "set": "azvaldt_revenant",
+    "rarity": "gold",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のリーダーを2回復。\n【守護】\n自分のリーダーが回復したとき、自分のターンなら、相手の場のフォロワーからランダム1枚を破壊。\n【超進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [],
+    "type": "follower",
+    "attack": 6,
+    "defense": 6
+  },
+  {
+    "id": "10963210",
+    "name": "神紋ユラティオ",
+    "class": "bishop",
+    "set": "azvaldt_revenant",
+    "rarity": "gold",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】場のフォロワーすべてを破壊。\nコスト1【アクト】これを破壊。自分のデッキから1枚を引く。自分のリーダーを1回復。",
+    "related": [],
+    "type": "amulet"
+  },
+  {
+    "id": "10964110",
+    "name": "神紋の咎人・エルラーデ",
+    "class": "bishop",
+    "set": "azvaldt_revenant",
+    "rarity": "legend",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それを破壊。\n【進化時】自分は『クレスト：神紋の咎人・エルラーデ』を持つ。",
+    "related": [],
+    "crest": "10964112",
+    "type": "follower",
+    "attack": 6,
+    "defense": 6
+  },
+  {
+    "id": "10964120",
+    "name": "翼天の変貌・オルメリオ",
+    "class": "bishop",
+    "set": "azvaldt_revenant",
+    "rarity": "legend",
+    "cost": 6,
+    "tribes": [],
+    "text": "自分のアミュレットが破壊されたとき、下記の能力から順に1つの能力が働く。\n（1）相手の場のフォロワーからランダム2枚に3ダメージ。\n（2）自分のリーダーを2回復。\n（3）『ホーリーファルコン』1枚を自分の場に出す。\n【進化時】自分の場のアミュレットすべてを破壊。",
+    "related": [
+      "90061110"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 5
+  },
+  {
+    "id": "10971110",
+    "name": "青錆の下っ端",
+    "class": "nemesis",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のデッキに重複するカードがないなら、相手の場のフォロワー1枚を選ぶ。それに5ダメージ。\n【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10971120",
+    "name": "ツインドローンガール",
+    "class": "nemesis",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】『アナライズアーティファクト』1枚を自分の場に出す。\n【進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [
+      "90071130"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10971310",
+    "name": "次元の選定",
+    "class": "nemesis",
+    "set": "azvaldt_revenant",
+    "rarity": "bronze",
+    "cost": 6,
+    "tribes": [],
+    "text": "【モード】1つを選んでその能力が働く。\n（1）相手の場のフォロワーすべてに5ダメージ。\n（2）『ミスティックアーティファクト』2枚を自分の場に出す。",
+    "related": [
+      "90071150"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "10972110",
+    "name": "錬磨の用心棒",
+    "class": "nemesis",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 4,
+    "tribes": [],
+    "text": "【ファンファーレ】自分のデッキに重複するカードがないなら、相手の場のフォロワー1枚を選ぶ。それに4ダメージ。自分のリーダーを4回復。\n【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10972120",
+    "name": "ナイフストリンガー",
+    "class": "nemesis",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 6,
+    "tribes": [],
+    "text": "【ファンファーレ】『改良型・操り人形』1枚と『操り人形』1枚を自分の場に出す。\n自分の人形・フォロワーが場に出たとき、相手のリーダーに1ダメージ。",
+    "related": [
+      "90071110",
+      "90071120"
+    ],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "10972310",
+    "name": "屈辱なる放逐",
+    "class": "nemesis",
+    "set": "azvaldt_revenant",
+    "rarity": "silver",
+    "cost": 1,
+    "tribes": [],
+    "text": "自分の手札1枚を選ぶ。それを捨てる。自分のデッキから【必殺】を持つネメシス・フォロワー1枚を引く。その後、自分のデッキに重複するカードがないなら、自分のデッキから2枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10973110",
+    "name": "鋳鉄の腹心",
+    "class": "nemesis",
+    "set": "azvaldt_revenant",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [],
+    "text": "【ファンファーレ】相手の場のフォロワー1枚を選ぶ。それを破壊。自分のデッキに重複するカードがないなら、これは【疾走】を持つ。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "10973310",
+    "name": "ハクガ燐斂",
+    "class": "nemesis",
+    "set": "azvaldt_revenant",
+    "rarity": "gold",
+    "cost": 3,
+    "tribes": [],
+    "text": "相手の場のフォロワー1枚を選ぶ。それを破壊。自分のデッキに重複するカードがないなら、1枚を選ぶのではなくすべて。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "10974110",
+    "name": "束刃の咎人・カットスロート",
+    "class": "nemesis",
+    "set": "azvaldt_revenant",
+    "rarity": "legend",
+    "cost": 1,
+    "tribes": [],
+    "text": "【必殺】\n【進化時】自分のデッキから【必殺】を持つネメシス・フォロワー1枚を引く。その後、自分のデッキに重複するカードがないなら、自分は『クレスト：束刃の咎人・カットスロート』を持つ。",
+    "related": [],
+    "crest": "10974112",
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "10974120",
+    "name": "弾哭の変貌・アイズエデン",
+    "class": "nemesis",
+    "set": "azvaldt_revenant",
+    "rarity": "legend",
+    "cost": 7,
+    "tribes": [],
+    "text": "【ファンファーレ】『撃針の看守』1枚を自分の場に出す。\n自分のアーティファクト・フォロワーが場に出たとき、相手の場のフォロワーからランダム1枚を破壊。\n【超進化時】【ファンファーレ】と同じ能力が働く。",
+    "related": [
+      "90074150"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "90011110",
+    "name": "フェアリー",
+    "class": "elf",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "妖精"
+    ],
+    "text": "【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "90011120",
+    "name": "新緑のフェアリー",
+    "class": "elf",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [
+      "妖精"
+    ],
+    "text": "【守護】\n自分のターン終了時、これは進化する。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "90011310",
+    "name": "森の神秘",
+    "class": "elf",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 0,
+    "tribes": [],
+    "text": "自分のリーダーを1回復。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "90014110",
+    "name": "ソードクリスタリア・イヴ",
+    "class": "elf",
+    "set": "token",
+    "rarity": "legend",
+    "cost": 3,
+    "tribes": [],
+    "text": "【疾走】\n【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "90014330",
+    "name": "天槍の深淵",
+    "class": "elf",
+    "set": "token",
+    "rarity": "legend",
+    "cost": 1,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "自分の場の進化前のフォロワー1枚を選ぶ。それは進化する。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "90021110",
+    "name": "ナイト",
+    "class": "royal",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 0,
+    "tribes": [
+      "兵士"
+    ],
+    "text": "",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "90021120",
+    "name": "スティールナイト",
+    "class": "royal",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "兵士"
+    ],
+    "text": "",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "90021130",
+    "name": "ナハトの私兵",
+    "class": "royal",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [
+      "兵士"
+    ],
+    "text": "",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "90021210",
+    "name": "戦慄の海賊旗",
+    "class": "royal",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "【カウントダウン_7】\n自分がスペルをプレイしたとき、これのカウントを-1する。\n【ラストワード】相手のリーダーに2ダメージ。",
+    "related": [],
+    "type": "amulet",
+    "countdown": 7
+  },
+  {
+    "id": "90021310",
+    "name": "黄金の小剣",
+    "class": "royal",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "財宝"
+    ],
+    "text": "相手の場のフォロワー1枚か相手のリーダーを選ぶ。それに1ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "90021320",
+    "name": "黄金の杯",
+    "class": "royal",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "財宝"
+    ],
+    "text": "自分のリーダーを2回復。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "90021330",
+    "name": "黄金の靴",
+    "class": "royal",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "財宝"
+    ],
+    "text": "自分の場のフォロワー1枚を選ぶ。それは+1/+0して【突進】を持つ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "90021340",
+    "name": "黄金の首飾り",
+    "class": "royal",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "財宝"
+    ],
+    "text": "自分の場のフォロワー1枚を選ぶ。それは+0/+1して【守護】を持つ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "90021350",
+    "name": "輝く金貨",
+    "class": "royal",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 0,
+    "tribes": [],
+    "text": "【モード】1つを選んでその能力が働く。\n（1）自分のデッキから1枚を引く。\n（2）相手の場のフォロワーからランダム1枚に2ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "90022110",
+    "name": "異形",
+    "class": "royal",
+    "set": "token",
+    "rarity": "silver",
+    "cost": 2,
+    "tribes": [],
+    "text": "【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 1
+  },
+  {
+    "id": "90024320",
+    "name": "天剣の深淵",
+    "class": "royal",
+    "set": "token",
+    "rarity": "legend",
+    "cost": 0,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "相手の場のフォロワー1枚を選ぶ。それに1ダメージ。\n【エンハンス_1】1ダメージではなく3ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "90024330",
+    "name": "デスペラードショット",
+    "class": "royal",
+    "set": "token",
+    "rarity": "legend",
+    "cost": 1,
+    "tribes": [],
+    "text": "「相手の場のフォロワーからランダム1枚に4ダメージ。」を2回行う。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "90031110",
+    "name": "クレイゴーレム",
+    "class": "witch",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "ゴーレム"
+    ],
+    "text": "",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "90031120",
+    "name": "ガーディアンゴーレム",
+    "class": "witch",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [
+      "ゴーレム"
+    ],
+    "text": "【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "90031210",
+    "name": "大地の魔片",
+    "class": "witch",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "土の印"
+    ],
+    "text": "【土の印】\nコスト1【アクト】自分の場の土の印を+1する。",
+    "related": [],
+    "type": "amulet"
+  },
+  {
+    "id": "90031310",
+    "name": "マナリアの魔弾",
+    "class": "witch",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "マナリア"
+    ],
+    "text": "相手の場のフォロワーからランダム1枚に3ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "90034320",
+    "name": "アルス・マグナ",
+    "class": "witch",
+    "set": "token",
+    "rarity": "legend",
+    "cost": 1,
+    "tribes": [],
+    "text": "相手の場のフォロワー1枚か相手のリーダーを選ぶ。それに2ダメージ。自分のリーダーを1回復。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "90034330",
+    "name": "天晶の深淵",
+    "class": "witch",
+    "set": "token",
+    "rarity": "legend",
+    "cost": 6,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "『天晶の魔手』1枚を自分の場に出す。それは+X/+Xする。自分のリーダーをY回復。相手のリーダーにZダメージ。X/Y/Zは合計が信仰値になるようにランダムに決まる。",
+    "related": [
+      "10631110"
+    ],
+    "specials": [
+      "10634122"
+    ],
+    "type": "spell"
+  },
+  {
+    "id": "90034340",
+    "name": "ソニック・フォー",
+    "class": "witch",
+    "set": "token",
+    "rarity": "legend",
+    "cost": 1,
+    "tribes": [],
+    "text": "相手の場のフォロワーすべてに5ダメージ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "90034350",
+    "name": "大いなる回帰",
+    "class": "witch",
+    "set": "token",
+    "rarity": "legend",
+    "cost": 1,
+    "tribes": [],
+    "text": "自分の場のフォロワー1枚を選ぶ。それは「1ターンに2回攻撃できる。」を持つ。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "90041110",
+    "name": "ベビーファイアドレイク",
+    "class": "dragon",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "【威圧】",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "90041120",
+    "name": "大翼のドラゴン",
+    "class": "dragon",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 5,
+    "tribes": [],
+    "text": "【威圧】",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 5
+  },
+  {
+    "id": "90041130",
+    "name": "大海のオルカ",
+    "class": "dragon",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 2,
+    "tribes": [
+      "海洋"
+    ],
+    "text": "【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "90044330",
+    "name": "天刀の深淵",
+    "class": "dragon",
+    "set": "token",
+    "rarity": "legend",
+    "cost": 2,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "これが捨てられたとき、相手のリーダーに1ダメージ。自分のリーダーを1回復。\n相手のリーダーに1ダメージ。自分のリーダーを1回復。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "90051110",
+    "name": "スケルトン",
+    "class": "nightmare",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 0,
+    "tribes": [
+      "死者"
+    ],
+    "text": "",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "90051120",
+    "name": "バット",
+    "class": "nightmare",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [],
+    "text": "【ドレイン】",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "90051130",
+    "name": "ゴースト",
+    "class": "nightmare",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "死者"
+    ],
+    "text": "【疾走】\n場を離れる場合、これを消滅。\n自分のターン終了時、これを消滅。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "90051140",
+    "name": "腐臭のゾンビ",
+    "class": "nightmare",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [
+      "死者"
+    ],
+    "text": "【ラストワード】『腐臭のゾンビ』1枚を自分の場に出す。それは【ラストワード】を失う。",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "90054330",
+    "name": "天眼の深淵",
+    "class": "nightmare",
+    "set": "token",
+    "rarity": "legend",
+    "cost": 1,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "自分のデッキから2枚を引く。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "90061110",
+    "name": "ホーリーファルコン",
+    "class": "bishop",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [],
+    "text": "【疾走】",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "90061120",
+    "name": "ホーリーフレイムタイガー",
+    "class": "bishop",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 4,
+    "tribes": [],
+    "text": "【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "90061130",
+    "name": "壮麗なる隼",
+    "class": "bishop",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 6,
+    "tribes": [],
+    "text": "【疾走】",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "90064210",
+    "name": "月影の指輪",
+    "class": "bishop",
+    "set": "token",
+    "rarity": "legend",
+    "cost": 8,
+    "tribes": [
+      "アナテマ"
+    ],
+    "text": "【カウントダウン_1】\n【オーラ】\n自分のターン終了時、自分の場のアミュレットの枚数が3以上なら、相手の場のフォロワーすべてと相手のリーダーに3ダメージ。",
+    "related": [],
+    "type": "amulet",
+    "countdown": 1
+  },
+  {
+    "id": "90064320",
+    "name": "天書の深淵",
+    "class": "bishop",
+    "set": "token",
+    "rarity": "legend",
+    "cost": 1,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "場のカード1枚を選ぶ。それを破壊。自分のアミュレットを選んだなら、相手のリーダーに2ダメージ。『天書の深淵』1枚を自分の手札に加える。",
+    "related": [],
+    "type": "spell"
+  },
+  {
+    "id": "90071110",
+    "name": "操り人形",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 0,
+    "tribes": [
+      "人形"
+    ],
+    "text": "【突進】\n相手のターン終了時、これを破壊。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "90071120",
+    "name": "改良型・操り人形",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "人形"
+    ],
+    "text": "【突進】\n相手のターン終了時、これを破壊。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "90071130",
+    "name": "アナライズアーティファクト",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "これが場に出たとき、自分のデッキから1枚を引く。",
+    "related": [],
+    "type": "follower",
+    "attack": 1,
+    "defense": 1
+  },
+  {
+    "id": "90071140",
+    "name": "エンシェントアーティファクト",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 1
+  },
+  {
+    "id": "90071150",
+    "name": "ミスティックアーティファクト",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "【守護】",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 5
+  },
+  {
+    "id": "90071160",
+    "name": "レディアントアーティファクト",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 3,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "【疾走】",
+    "related": [],
+    "type": "follower",
+    "attack": 2,
+    "defense": 2
+  },
+  {
+    "id": "90071210",
+    "name": "フューチャー・コア",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "【融合】アーティファクト・アミュレット\nこれに【融合】したとき、これは『アタックアーティファクト』に変身する。\nプレイできない。",
+    "related": [
+      "90072110",
+      "90073110",
+      "90073120",
+      "90073130",
+      "90074110"
+    ],
+    "type": "amulet"
+  },
+  {
+    "id": "90071220",
+    "name": "パスト・コア",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "bronze",
+    "cost": 1,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "【融合】アーティファクト・アミュレット\nこれに【融合】したとき、これは『キャッスルアーティファクト』に変身する。\nプレイできない。",
+    "related": [
+      "90072120",
+      "90073110",
+      "90073120",
+      "90073130",
+      "90074110"
+    ],
+    "type": "amulet"
+  },
+  {
+    "id": "90072110",
+    "name": "アタックアーティファクト",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "【融合】アーティファクト・カード\nこれに【融合】したカードのコストの合計によって変身する。\n　1　⇒『デストロイアーティファクトα』\n　2　⇒『デストロイアーティファクトβ』\n3以上⇒『デストロイアーティファクトγ』\n【突進】",
+    "related": [
+      "90073110",
+      "90073120",
+      "90073130"
+    ],
+    "type": "follower",
+    "attack": 5,
+    "defense": 1
+  },
+  {
+    "id": "90072120",
+    "name": "キャッスルアーティファクト",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "silver",
+    "cost": 3,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "【融合】アーティファクト・カード\nこれに【融合】したカードのコストの合計によって変身する。\n　1　⇒『デストロイアーティファクトα』\n　2　⇒『デストロイアーティファクトβ』\n3以上⇒『デストロイアーティファクトγ』\n【守護】",
+    "related": [
+      "90073110",
+      "90073120",
+      "90073130"
+    ],
+    "type": "follower",
+    "attack": 1,
+    "defense": 5
+  },
+  {
+    "id": "90073110",
+    "name": "デストロイアーティファクトα",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "【融合】『デストロイアーティファクトβ』や『デストロイアーティファクトγ』\nこれに【融合】したとき、これに【融合】した種類が2なら、これは『イクシードアーティファクトΩ』に変身する。\n自分のターン終了時、自分のリーダーを3回復。",
+    "related": [
+      "90073120",
+      "90073130",
+      "90074110"
+    ],
+    "type": "follower",
+    "attack": 3,
+    "defense": 5
+  },
+  {
+    "id": "90073120",
+    "name": "デストロイアーティファクトβ",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "自分のターン終了時、相手のリーダーに3ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 4,
+    "defense": 4
+  },
+  {
+    "id": "90073130",
+    "name": "デストロイアーティファクトγ",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "gold",
+    "cost": 5,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "自分のターン終了時、相手の場のフォロワーすべてに3ダメージ。",
+    "related": [],
+    "type": "follower",
+    "attack": 5,
+    "defense": 3
+  },
+  {
+    "id": "90074110",
+    "name": "イクシードアーティファクトΩ",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "legend",
+    "cost": 10,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "【ファンファーレ】相手の場のフォロワーすべてに5ダメージ。自分のリーダーを5回復。\n【疾走】\n【守護】\n【オーラ】",
+    "related": [],
+    "type": "follower",
+    "attack": 10,
+    "defense": 10
+  },
+  {
+    "id": "90074140",
+    "name": "イマリの小鬼",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "legend",
+    "cost": 2,
+    "tribes": [],
+    "text": "【突進】",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "90074150",
+    "name": "撃針の看守",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "legend",
+    "cost": 3,
+    "tribes": [
+      "アーティファクト"
+    ],
+    "text": "【守護】\n【ラストワード】自分のリーダーを2回復。",
+    "related": [],
+    "type": "follower",
+    "attack": 3,
+    "defense": 3
+  },
+  {
+    "id": "90074320",
+    "name": "天斧の深淵",
+    "class": "nemesis",
+    "set": "token",
+    "rarity": "legend",
+    "cost": 0,
+    "tribes": [
+      "アサイラント"
+    ],
+    "text": "自分の場の元のコスト5以上のフォロワー1枚を選ぶ。それと同名のカード1枚を非公開で自分の手札に加える。それのコストを-3する。",
+    "related": [],
+    "type": "spell"
+  }
+]

@@ -15,7 +15,7 @@
 
 use super::aidata::ai_data;
 use super::beam_key::beam_features;
-use crate::data::{data, CardIdx, WARD};
+use crate::data::{data, CardIdx, Pool, WARD};
 use crate::game::{can_attack_followers, can_attack_leader};
 use crate::state::{hand_cost, opponent, Evolve, GameState, Phase, PlayerIndex};
 use serde::Deserialize;
@@ -70,9 +70,15 @@ pub const P_SCALARS: [&str; 24] = [
     "first",
 ];
 
-/// 入力を作るときの語彙（カードの ID の並び。学習のデータの見出しとモデルに書く）
+/// 入力を作るときの語彙（カードの ID の並び。学習のデータの見出しとモデルに書く）。
+/// スターターのカードだけ（カードの表の先頭に今の順で並ぶ）。前期のローテーションの入力の形は段階 4 で決める（docs/pools/azvaldt.md）
 pub fn default_vocab() -> Vec<String> {
-    data().cards.iter().map(|c| c.id.clone()).collect()
+    data()
+        .cards
+        .iter()
+        .filter(|c| c.in_pool(Pool::Starter))
+        .map(|c| c.id.clone())
+        .collect()
 }
 
 /// 入力の作り方（語彙からカードの添字への対応）
