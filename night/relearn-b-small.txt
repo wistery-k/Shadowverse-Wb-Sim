@@ -28,4 +28,5 @@ compare 50 '{"valueNet":"@/xpa.json"}' '{"valueNet":"@/npa.json"}' 0 --with ミ�
 td train --model @/xpa.json --data @/s-1.jsonl.gz --onlyDecks ミッドレンジナイトメア --out @/y.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 30
 td prune --model @/y.json --data @/s-{1..2}.jsonl.gz --out @/yp.json --est 20
 td attr --model @/yp.json --out @/ypa.json --keepA 0 --est 20
-compare 50 '{"valueNet":"@/ypa.json"}' '{"valueNet":"@/npa.json"}' 0 --with ミッドレンジナイトメア --label B小-学び足し --est 0.6
+compare 25 '{"valueNet":"@/ypa.json"}' '{"valueNet":"@/npa.json"}' 0 --with ミッドレンジナイトメア --label B小-学び足し --est 0.6
+compare 25 '{"valueNet":"@/ypa.json"}' '{"valueNet":"@/npa.json"}' 0 --without ミッドレンジナイトメア --label B小-学び足し-ほか --est 0.6

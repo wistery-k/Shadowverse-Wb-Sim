@@ -46,7 +46,7 @@ describe("ジョブの行", () => {
   it("compare・yardstick・profile・misses を読み、キューで使えない引数は断る", () => {
     const c = parseJob(`compare 3000 '{"beamWidth":128}' '{}' 100000 リノセウスエルフ --no-mirror --label 幅 --est 0.1`, 1);
     expect(c).toMatchObject({ label: "幅", games: 3000, start: 100000, est: 0.1 });
-    expect(c.spec).toEqual({ kind: "compare", a: '{"beamWidth":128}', b: "{}", vs: "リノセウスエルフ", noMirror: true, decks: null, with: null });
+    expect(c.spec).toEqual({ kind: "compare", a: '{"beamWidth":128}', b: "{}", vs: "リノセウスエルフ", noMirror: true, decks: null, with: null, without: null });
     const y = parseJob("svwb yardstick --ref strong --games 4000 --label 強", 2);
     expect(y).toMatchObject({ games: 4000, start: 0, spec: { kind: "yardstick", ref: "strong", opts: "{}" } });
     expect(parseJob("profile", 3)).toMatchObject({ games: 49, label: "", spec: { kind: "profile", rhino: false } });
@@ -74,6 +74,10 @@ describe("ジョブの行", () => {
     const w = parseJob("compare 100 '{}' '{}' 0 --with ミッドレンジナイトメア --label x", 6);
     expect(w.spec).toMatchObject({ kind: "compare", with: "ミッドレンジナイトメア" });
     expect(jobArgv(w, 0, 10, "/r")).toEqual(["compare", "10", "{}", "{}", "0", "--with", "ミッドレンジナイトメア", "--label", "x"]);
+    const wo = parseJob("compare 100 '{}' '{}' 0 --without ミッドレンジナイトメア --label y", 7);
+    expect(wo.spec).toMatchObject({ with: null, without: "ミッドレンジナイトメア" });
+    expect(jobArgv(wo, 0, 10, "/r")).toEqual(["compare", "10", "{}", "{}", "0", "--without", "ミッドレンジナイトメア", "--label", "y"]);
+    expect(() => parseJob("compare 100 '{}' '{}' 0 --with a --without b --label z", 8)).toThrow(/一緒に使えません/);
     expect(() => parseJobs("# だけ\n\n")).toThrow(/ジョブがありません/);
     expect(() => parseJobs("profile\nyardstick --ref weak --label x")).toThrow(/2 行目/);
   });

@@ -2,7 +2,8 @@
 # 回す前に決めた問い・見込み・試合数・合否の線は STATE.md にある。ここの試合数と線は、それを変えずに書いたもの（変えるなら回す前に審査とユーザーに）。
 # PC（svwb-docker、28 スレッド）で 2 晩ほど。止まっても resume で続きから（作ったファイルのあるジョブは飛ばす）。
 # --est は PC の見込み（relearn9 の時間と、2026-11-13 にクラウド環境で小さく通した night/relearn-b-small.txt の比から。docs/ai-notes/13-2026-11-13.md「学び直しの流れを夜のキュー 1 本にする」）。
-# 入力ありの学習はメモリのピークが 12〜13GB ほど（入力なしは relearn9 で 7.8GB）。足りずに落ちても、それを読まないジョブ（問い 3）は回る
+# 入力ありの学習はメモリのピークが 12〜13GB ほど（入力なしは relearn9 で 7.8GB）。回す前に PC のコンテナで 16GB ほど使えるか確かめる。
+# 足りずに落ちても、それを読まないジョブ（問い 3）は回る
 # 朝: finish --commit で compare の行を台帳に足す。モデル（@/ の *.json）は pack-run で共有フォルダの data/models/relearn-b/ へ
 
 # 0. 自己対戦を打つ補正: 今の既定（relearn9）に、足した入力（myDeckCards・oppUnseen）の行を 0 で足したもの。打つ手と速さは今の既定と同じ
@@ -41,8 +42,10 @@ td attr --model @/xp.json --out @/xpa.json --keepA 0 --est 60
 compare 10000 '{"valueNet":"@/xpa.json"}' '{"valueNet":"@/npa.json"}' 0 --with ミッドレンジナイトメア --label B-外す --est 0.1
 
 # 学び足し: 外した補正から、s-1〜s-5（1.5 万試合）のうち外したデッキの絡む試合（約 4000 試合）だけを同じ学び方で学ぶ。間引きは全部の自己対戦で
-# 線: 入力なしとの差（A の勝率 − 50%）の 95% の下限が −1.5 ポイントより上なら「学び足しで足りる」（4 万試合）
+# 入力なしとの差（A の勝率 − 50%）を、外したデッキの絡む組 2 万試合と絡まない組 2 万試合に分けて測る（2026-11-13 の審査で分けた。合わせて 4 万試合のまま）。
+# 「学び足しで足りる」は両方を越えたとき: 絡む組は差の 95% の下限が −1.5 ポイントより上、絡まない組は −1.0 より上（ほかのデッキどうしの判断を壊していない）
 td train --model @/xpa.json --data @/s-{1..5}.jsonl.gz --onlyDecks ミッドレンジナイトメア --out @/y.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 300
 td prune --model @/y.json --data @/s-{1..20}.jsonl.gz --out @/yp.json --est 600
 td attr --model @/yp.json --out @/ypa.json --keepA 0 --est 60
-compare 20000 '{"valueNet":"@/ypa.json"}' '{"valueNet":"@/npa.json"}' 0 --with ミッドレンジナイトメア --label B-学び足し --est 0.1
+compare 10000 '{"valueNet":"@/ypa.json"}' '{"valueNet":"@/npa.json"}' 0 --with ミッドレンジナイトメア --label B-学び足し --est 0.1
+compare 10000 '{"valueNet":"@/ypa.json"}' '{"valueNet":"@/npa.json"}' 0 --without ミッドレンジナイトメア --label B-学び足し-ほか --est 0.12

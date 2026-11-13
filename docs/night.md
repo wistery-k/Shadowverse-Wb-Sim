@@ -67,8 +67,8 @@ compare 5600 '{"valueNet":"data/models/x.json"}' '{}' 200000 --label 補正x
 profile --games 49
 ```
 
-- **compare**: `compare <試合数> '<A>' '<B>' [最初の試合番号] [B のデッキ] [--no-mirror] [--decks …] [--with <デッキ名>] --label 名前`（`npm run compare` と同じ。
-  `--with` はそのデッキの絡む組だけ。試合番号はそのデッキの絡む k 番目の番号）
+- **compare**: `compare <試合数> '<A>' '<B>' [最初の試合番号] [B のデッキ] [--no-mirror] [--decks …] [--with <デッキ名> | --without <デッキ名>] --label 名前`（`npm run compare` と同じ。
+  `--with` はそのデッキの絡む組だけ、`--without` は絡まない組だけ。試合番号はその組の k 番目の番号）
 - **yardstick**: `yardstick [--ref classic|strong] [--opts '<設定>'] [--games 1000] [--start 0] --label 名前`
 - **profile**（速さ）: `profile [--opts '<設定>'] [--games 49] [--start 0] [--rhino]`。結果は回のフォルダの `speed-<番号>.md`・`.json`（`svwb profile` の報告）
 - **misses**（見落とし問題集、`docs/misses.md`）: `misses [run] [--opts '<設定>'] [--trials 24] [--seed 1] --label 名前`。分けずに 1 区切りで回す。

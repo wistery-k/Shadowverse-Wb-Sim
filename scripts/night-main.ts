@@ -55,7 +55,7 @@ const HARD_GRACE = 15 * 60;
 // ---------------------------------------------------------------- ジョブのファイル
 
 export type JobSpec =
-  | { kind: "compare"; a: string; b: string; vs: string | null; noMirror: boolean; decks: string | null; with: string | null }
+  | { kind: "compare"; a: string; b: string; vs: string | null; noMirror: boolean; decks: string | null; with: string | null; without: string | null }
   | { kind: "yardstick"; ref: "classic" | "strong"; opts: string }
   | { kind: "profile"; opts: string; rhino: boolean }
   /** 見落とし問題集（docs/misses.md）。games は 1 問を打つ回数（--trials） */
@@ -201,6 +201,8 @@ export function parseJob(line: string, index: number): Job {
       const noMirror = flag("--no-mirror");
       const decks = take("--decks");
       const withDeck = take("--with");
+      const withoutDeck = take("--without");
+      if (withDeck !== null && withoutDeck !== null) throw new Error("--with と --without は一緒に使えません");
       noUnknown();
       const [g, a = "{}", b = "{}", s = "0", vs, ...extra] = rest;
       if (g === undefined) throw new Error("compare の試合数（1 つ目の引数）がありません");
@@ -212,7 +214,7 @@ export function parseJob(line: string, index: number): Job {
         games: intOf(g, "試合数", 1),
         start: intOf(s, "最初の試合番号", 0),
         est,
-        spec: { kind, a: jsonObject(a, "A の設定"), b: jsonObject(b, "B の設定"), vs: vs === undefined || vs === "" ? null : vs, noMirror, decks, with: withDeck },
+        spec: { kind, a: jsonObject(a, "A の設定"), b: jsonObject(b, "B の設定"), vs: vs === undefined || vs === "" ? null : vs, noMirror, decks, with: withDeck, without: withoutDeck },
       };
     }
     case "yardstick": {
@@ -464,6 +466,7 @@ function jobArgvRaw(job: Job, first: number, count: number, dir: string): string
         ...(s.noMirror ? ["--no-mirror"] : []),
         ...(s.decks === null ? [] : ["--decks", s.decks]),
         ...(s.with === null ? [] : ["--with", s.with]),
+        ...(s.without === null ? [] : ["--without", s.without]),
         "--label",
         job.label,
       ];
@@ -537,7 +540,7 @@ function surveyOpts(s: Extract<JobSpec, { kind: "survey" }>): string {
 /** ジョブの短い名前（表に出す） */
 export function jobTitle(job: Job): string {
   const s = job.spec;
-  if (s.kind === "compare") return `compare A ${s.a} 対 B ${s.b}${s.vs ? `（B は ${s.vs}）` : ""}${s.noMirror ? "（鏡なし）" : ""}${s.with ? `（${s.with} の絡む組だけ）` : ""}`;
+  if (s.kind === "compare") return `compare A ${s.a} 対 B ${s.b}${s.vs ? `（B は ${s.vs}）` : ""}${s.noMirror ? "（鏡なし）" : ""}${s.with ? `（${s.with} の絡む組だけ）` : ""}${s.without ? `（${s.without} の絡まない組だけ）` : ""}`;
   if (s.kind === "yardstick") return `yardstick ${s.ref}${s.opts === "{}" ? "" : ` ${s.opts}`}`;
   if (s.kind === "misses") return `misses（見落とし問題集）${s.opts === "{}" ? "" : ` ${s.opts}`}`;
   if (s.kind === "survey") return `survey（候補の打ち比べ）${surveyOpts(s) === "" ? "" : ` ${surveyOpts(s)}`}`;
@@ -581,6 +584,7 @@ function sameComparison(job: Job, r: RunRow): boolean {
       (r.vs ?? null) === s.vs &&
       r.mirror === !s.noMirror &&
       (r.with ?? null) === s.with &&
+      (r.without ?? null) === s.without &&
       (s.decks === null) === (r.decks.length === 7 && !r.cmd.includes("--decks"))
     );
   }
@@ -1500,6 +1504,7 @@ function validate(bin: string, jobs: Job[]): void {
           ...(s.vs === null ? [] : [s.vs]),
           ...(s.decks === null ? [] : ["--decks", s.decks]),
           ...(s.with === null ? [] : ["--with", s.with]),
+          ...(s.without === null ? [] : ["--without", s.without]),
           "--no-ledger",
         ];
       } else if (s.kind === "misses") {
