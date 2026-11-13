@@ -13,6 +13,14 @@ pub fn card_matches(s: &GameState, ctx: &Ctx, iid: Iid, filter: Option<&CardFilt
     if f.exclude_self && iid == ctx.source {
         return false;
     }
+    if f.exclude_event && ctx.event == Some(iid) {
+        return false;
+    }
+    if let Some(sl) = f.exclude_slot {
+        if ctx.slot(sl).contains(&iid) {
+            return false;
+        }
+    }
     let board = s.board_card(iid);
     let hand = if board.is_some() {
         None
@@ -174,6 +182,15 @@ fn resolve_into(s: &GameState, ctx: &Ctx, t: &Target, out: &mut Vec<Iid>) {
                 }
             }
         }
+        Target::LowestHpLeaders => {
+            let order = s.turn_order();
+            let min = order.iter().map(|&p| s.players[p].leader_hp).min();
+            for p in order {
+                if Some(s.players[p].leader_hp) == min {
+                    out.push(leader_id(p));
+                }
+            }
+        }
     }
 }
 
@@ -280,6 +297,7 @@ pub fn eval_value(s: &GameState, ctx: &Ctx, v: &Value) -> i32 {
                 }
             })
             .sum(),
+        ValueObj::PlayedCost => ctx.var(data().var_played_cost),
     }
 }
 
@@ -299,6 +317,11 @@ pub fn eval_cond(s: &GameState, ctx: &Ctx, c: &Condition) -> bool {
         Condition::VarAtLeast { name, value } => ctx.var(*name) >= *value,
         Condition::ThisXAtLeast { value } => source_x(s, ctx) >= *value,
         Condition::MaxPp { at_least } => pl.max_pp >= *at_least,
+        Condition::Exists { of } => !resolve_target(s, ctx, of).is_empty(),
+        Condition::LeaderHpAtMost { value } => pl.leader_hp <= *value,
+        Condition::LeaderHpAboveOpponent => {
+            pl.leader_hp > s.players[opponent(ctx.controller)].leader_hp
+        }
         Condition::Not { cond } => !eval_cond(s, ctx, cond),
     }
 }
@@ -724,6 +747,10 @@ pub fn fire_turn_end(s: &mut GameState) {
             None
         }
     });
+    // 手札で働く「自分のターン終了時」は、手番のプレイヤーの場の能力の後（処理順は未確認。docs/rules.md 12章）
+    for hi in 0..s.players[me].hand.len() {
+        fire_hand(s, me, hi, On::TurnEndInHand);
+    }
     fire_side(s, opp, |_, t, _| {
         if matches!(
             t,
@@ -736,6 +763,43 @@ pub fn fire_turn_end(s: &mut GameState) {
             None
         }
     });
+}
+
+/// プレイしたカード cid が filter に合うか（場・手札に無くてもよいように、カードの元のデータで見る）
+fn played_card_matches(
+    s: &GameState,
+    ctx: &Ctx,
+    cid: CardIdx,
+    filter: Option<&CardFilter>,
+) -> bool {
+    let Some(f) = filter else { return true };
+    let cd = card(cid);
+    f.ctype.is_none_or(|t| cd.ctype == t)
+        && f.tribe.is_none_or(|t| cd.tribes.contains(&t))
+        && f.class.is_none_or(|c| cd.class == c)
+        && f.ids.as_ref().is_none_or(|ids| ids.contains(&cid))
+        && f.cost_max.is_none_or(|m| cd.cost <= m)
+        && f.cost_eq
+            .as_ref()
+            .is_none_or(|v| cd.cost == eval_value(s, ctx, v))
+}
+
+/// p がカード iid（cid）をプレイしたときの誘発（【自分がカードをプレイしたとき】）。
+/// 文脈の event はプレイしたカード、変数 playedCost はその元のコスト
+pub fn fire_ally_play(s: &mut GameState, p: PlayerIndex, iid: Iid, cid: CardIdx) {
+    let before = s.queue.len();
+    fire_side(s, p, |s, t, src| match t {
+        Trigger::AllyPlay { filter }
+            if src != iid && played_card_matches(s, &Ctx::new(p, src), cid, filter.as_ref()) =>
+        {
+            Some(Some(iid))
+        }
+        _ => None,
+    });
+    let (var, cost) = (data().var_played_cost, card(cid).cost);
+    for q in s.queue.iter_mut().skip(before) {
+        q.ctx.set_var(var, cost);
+    }
 }
 
 pub fn fire_ally_act(s: &mut GameState, p: PlayerIndex) {
@@ -1182,8 +1246,17 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 }
             }
         }
-        Effect::Draw { count, filter } => {
+        Effect::Draw {
+            count,
+            filter,
+            side,
+        } => {
             let n = val!(count);
+            let p = if *side == Some(Side::Opponent) {
+                opponent(p)
+            } else {
+                p
+            };
             match filter {
                 Some(f) => {
                     let hint = draw_hint(s, &frame.ctx, f);
@@ -1334,6 +1407,21 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 let mut deck = std::mem::take(&mut s.players[p].deck).into_vec();
                 s.shuffle(&mut deck);
                 s.players[p].deck = deck.into();
+            }
+        }
+        Effect::AddToDeck { card_id, count } => {
+            // デッキのランダムな位置に 1 枚ずつ入れる（docs/rules.md 12章「デッキに加える」）
+            let n = val!(count);
+            for _ in 0..n.max(0) {
+                let iid = s.new_iid();
+                let k = s.rng_int(s.players[p].deck.len() + 1);
+                s.players[p].deck.make_mut().insert(
+                    k,
+                    CardRef {
+                        iid,
+                        card: *card_id,
+                    },
+                );
             }
         }
         Effect::Discard { target } => {
@@ -1577,6 +1665,11 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             let t = &mut s.players[if *side == Side::Me { p } else { opponent(p) }];
             t.leader_max_hp = *value;
             t.leader_hp = t.leader_hp.min(*value);
+        }
+        Effect::AddLeaderMaxHp { side, amount } => {
+            let t = &mut s.players[if *side == Side::Me { p } else { opponent(p) }];
+            t.leader_max_hp += amount;
+            t.leader_hp = t.leader_hp.min(t.leader_max_hp);
         }
         Effect::If {
             cond,

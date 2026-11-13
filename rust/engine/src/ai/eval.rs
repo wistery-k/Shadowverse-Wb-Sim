@@ -50,6 +50,7 @@ fn is_passive(a: &Ability) -> bool {
             | Trigger::AllyLeaveInHand
             | Trigger::AllyDestroyed { .. }
             | Trigger::LeaderHealed
+            | Trigger::AllyPlay { .. }
     ) && !a.effects.iter().any(|e| {
         matches!(
             e,
@@ -142,6 +143,7 @@ fn countdown_payoff_of(c: CardIdx) -> Option<CountdownPayoff> {
             Effect::Draw {
                 count: Value::Num(n),
                 filter: None,
+                side: None,
             } => p.draws += n,
             _ => return None,
         }
