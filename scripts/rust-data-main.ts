@@ -8,11 +8,12 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { ALL_CARDS, ALL_CRESTS } from "../src/cards";
+import { ENGINE_CARDS, ENGINE_CRESTS, poolsOfCard } from "../src/cards/pools";
 import { CARD_ABILITIES, CREST_ABILITIES } from "../src/cards/abilities";
+import { AZVALDT_CARD_ABILITIES, AZVALDT_CREST_ABILITIES } from "../src/cards/abilities/azvaldt";
 import { APOCALYPSE_DECK } from "../src/cards/abilities/special";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
-import { enhanceCost, staticOf } from "../src/engine";
+import { enhanceCost, staticInfoOf } from "../src/engine";
 import { id } from "../src/cards/abilities/helpers";
 import { CLASS_WEIGHTS, DEFAULT_WEIGHTS, MODEL_FEATURES, MULLIGAN_MODEL, MULLIGAN_ROLES, MULLIGAN_WEIGHTS, ROLES, SEARCH_WEIGHTS } from "../src/ai/data";
 import valueNet from "../data/value-net.json";
@@ -51,10 +52,18 @@ export function sourcesText(): string {
   return `# npm run rust-data が書き出す。元のファイルの中身の指紋（FNV-1a 32 ビット）。rust/engine/build.rs が確かめる\n${lines.join("\n")}\n`;
 }
 
+/**
+ * カードの表は src/cards/pools.ts の ENGINE_CARDS（スターターの全カードを今の順で先頭に、前期のローテーションにしか無いカードを後ろに）。
+ * 能力の定義は、スターターのもの（cardAbilities・crestAbilities）と前期のローテーションにしか無いもの（poolCardAbilities・poolCrestAbilities）を
+ * 分けて渡す。Rust はスターターのものから読むので、能力の中の名前（スロット・変数）の番号もスターターの分は変わらない。
+ */
 export function engineData() {
+  for (const key of [...Object.keys(AZVALDT_CARD_ABILITIES), ...Object.keys(AZVALDT_CREST_ABILITIES)]) {
+    if (CARD_ABILITIES[key] || CREST_ABILITIES[key]) throw new Error(`スターターと同じ ID の定義を前期のローテーションに書いています: ${key}`);
+  }
   return {
-    cards: ALL_CARDS.map((c) => {
-      const st = staticOf(c.id);
+    cards: ENGINE_CARDS.map((c) => {
+      const st = staticInfoOf(c.text);
       return {
         id: c.id,
         name: c.name,
@@ -70,11 +79,14 @@ export function engineData() {
         earthSigil: st.earthSigil,
         enhance: enhanceCost(c.text),
         token: c.set === "token",
+        pools: poolsOfCard(c.id),
       };
     }),
-    crests: ALL_CRESTS.map((c) => ({ id: c.id, countdown: c.countdown ?? null })),
+    crests: ENGINE_CRESTS.map((c) => ({ id: c.id, countdown: c.countdown ?? null })),
     cardAbilities: CARD_ABILITIES,
     crestAbilities: CREST_ABILITIES,
+    poolCardAbilities: AZVALDT_CARD_ABILITIES,
+    poolCrestAbilities: AZVALDT_CREST_ABILITIES,
     apocalypseDeck: APOCALYPSE_DECK,
     decks: DEFAULT_DECKS.map((d) => ({ key: d.key, name: d.name, cards: d.cards })),
   };

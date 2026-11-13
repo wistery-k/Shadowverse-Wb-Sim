@@ -1,6 +1,6 @@
 //! ゴールデンテスト・計測用の対戦（ランダムな手で打つ試合と、AI どうしの試合）。
 
-use crate::data::{data, CardIdx, ClassId};
+use crate::data::{data, CardIdx, ClassId, Pool};
 use crate::game::{apply_action, create_game, legal_actions};
 use crate::state::*;
 
@@ -16,14 +16,16 @@ const CLASSES: [ClassId; 7] = [
     ClassId::Nemesis,
 ];
 
-/// ランダムなデッキ（クラスとニュートラルのトークン以外のカードから 40 枚）
+/// ランダムなデッキ（スターターの、クラスとニュートラルのトークン以外のカードから 40 枚）
 fn random_deck(g: u32, i: u32) -> Vec<CardIdx> {
     let cls = CLASSES[((g + i * 3) % 7) as usize];
     let pool: Vec<CardIdx> = data()
         .cards
         .iter()
         .enumerate()
-        .filter(|(_, c)| !c.token && (c.class == cls || c.class == ClassId::Neutral))
+        .filter(|(_, c)| {
+            !c.token && c.in_pool(Pool::Starter) && (c.class == cls || c.class == ClassId::Neutral)
+        })
         .map(|(i, _)| i as CardIdx)
         .collect();
     let mut pick = Chooser::new((g * 2 + i + 1).wrapping_mul(40503));
