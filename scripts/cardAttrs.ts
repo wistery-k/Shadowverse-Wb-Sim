@@ -169,6 +169,8 @@ export function rowCanOccur(zone: string, vocabId: string): boolean {
     case "myHand":
     case "myHandBoost":
     case "oppHandRevealed":
+    case "myDeckCards":
+    case "oppUnseen":
       return true;
     case "myBoard":
     case "oppBoard":

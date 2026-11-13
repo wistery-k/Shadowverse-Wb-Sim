@@ -13,6 +13,8 @@ describe("まとめ方（scripts/pack-run-main.ts）", () => {
   it("自己対戦・モデル・それ以外を、ファイル名と先頭で分ける", () => {
     expect(classify("f0.jsonl", '{"g":1,"decks":["a","b"],"winner":0,"turns":3,"samples":[[]]}\n{"g":2}')).toBe("selfplay");
     expect(classify("f0.jsonl.gz", '{"g":1,"samples":[]}\n')).toBe("selfplay");
+    // 2026-11-13 からの自己対戦は先頭の行が入力の並び
+    expect(classify("s-1.jsonl.gz", '{"tdLayout":{"vocab":["a"],"zones":[],"scalars":[]}}\n{"g":1,"samples":[]}\n')).toBe("selfplay");
     expect(classify("rc-base.jsonl", '{"g":0,"seat":0,"won":true}\n{"samples":1}')).toBe("logs");
     expect(classify("rfp.json", '{"kind":"td-value-net","version":1,"vocab":[]}')).toBe("models");
     expect(classify("m1.json", '{"kind":"potential-net","version":1,"vocab":[]}')).toBe("models");

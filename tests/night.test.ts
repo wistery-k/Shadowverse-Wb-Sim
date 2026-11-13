@@ -1,14 +1,18 @@
 // 夜のキュー（scripts/night-main.ts・docs/night.md）。svwb の代わりに、台帳の行だけを書く偽物を回して、区切り・再開・止め方・まとめを確かめる
 
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gunzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseLedger, type MissesRow, type RunRow, type SurveyRow } from "../scripts/ledger-main";
 import {
   chunkJob,
   combineRows,
   estimate,
+  expandBraces,
+  jobInputs,
+  jobProducts,
   main,
   parseJob,
   parseJobs,
@@ -17,6 +21,7 @@ import {
   runWorker,
   shellLine,
   shellWords,
+  standIn,
   jobArgv,
   wallClock,
   type WorkerControl,
@@ -41,7 +46,7 @@ describe("ジョブの行", () => {
   it("compare・yardstick・profile・misses を読み、キューで使えない引数は断る", () => {
     const c = parseJob(`compare 3000 '{"beamWidth":128}' '{}' 100000 リノセウスエルフ --no-mirror --label 幅 --est 0.1`, 1);
     expect(c).toMatchObject({ label: "幅", games: 3000, start: 100000, est: 0.1 });
-    expect(c.spec).toEqual({ kind: "compare", a: '{"beamWidth":128}', b: "{}", vs: "リノセウスエルフ", noMirror: true, decks: null });
+    expect(c.spec).toEqual({ kind: "compare", a: '{"beamWidth":128}', b: "{}", vs: "リノセウスエルフ", noMirror: true, decks: null, with: null, without: null });
     const y = parseJob("svwb yardstick --ref strong --games 4000 --label 強", 2);
     expect(y).toMatchObject({ games: 4000, start: 0, spec: { kind: "yardstick", ref: "strong", opts: "{}" } });
     expect(parseJob("profile", 3)).toMatchObject({ games: 49, label: "", spec: { kind: "profile", rhino: false } });
@@ -65,9 +70,55 @@ describe("ジョブの行", () => {
     expect(() => parseJob("survey --games 0-9 --label x --out a.jsonl", 1)).toThrow(/--out/);
     expect(() => parseJob("survey --games 0-9 --label x --rate 2", 1)).toThrow(/--rate/);
     expect(() => parseJob("survey --games 0-9 --start 3 --label x", 1)).toThrow(/--start/);
-    expect(() => parseJob("td selfplay", 1)).toThrow(/compare・yardstick・profile/);
+    expect(() => parseJob("rhino-compare --games 10", 1)).toThrow(/compare・yardstick・profile/);
+    const w = parseJob("compare 100 '{}' '{}' 0 --with ミッドレンジナイトメア --label x", 6);
+    expect(w.spec).toMatchObject({ kind: "compare", with: "ミッドレンジナイトメア" });
+    expect(jobArgv(w, 0, 10, "/r")).toEqual(["compare", "10", "{}", "{}", "0", "--with", "ミッドレンジナイトメア", "--label", "x"]);
+    const wo = parseJob("compare 100 '{}' '{}' 0 --without ミッドレンジナイトメア --label y", 7);
+    expect(wo.spec).toMatchObject({ with: null, without: "ミッドレンジナイトメア" });
+    expect(jobArgv(wo, 0, 10, "/r")).toEqual(["compare", "10", "{}", "{}", "0", "--without", "ミッドレンジナイトメア", "--label", "y"]);
+    expect(() => parseJob("compare 100 '{}' '{}' 0 --with a --without b --label z", 8)).toThrow(/一緒に使えません/);
     expect(() => parseJobs("# だけ\n\n")).toThrow(/ジョブがありません/);
     expect(() => parseJobs("profile\nyardstick --ref weak --label x")).toThrow(/2 行目/);
+  });
+
+  it("学び直しの流れのジョブ（td selfplay・beam-gap・td・potential・pick）を読み、回のフォルダのファイルのつながりを確かめる", () => {
+    expect(expandBraces("@/s-{1..3}.jsonl.gz,x.json")).toBe("@/s-1.jsonl.gz,@/s-2.jsonl.gz,@/s-3.jsonl.gz,x.json");
+    expect(expandBraces('{"beamWidth":8}')).toBe('{"beamWidth":8}');
+    const sp = parseJob("td selfplay --model @/net0.json --games 10 --start 100 --chunk 4 --eps 0.1 --out @/s-{k}.jsonl.gz --est 0.5", 2);
+    expect(sp).toMatchObject({ games: 10, start: 100, est: 0.5, label: "" });
+    expect(sp.spec).toEqual({ kind: "data", cmd: ["td", "selfplay"], startFlag: "--start", outFlag: "--out", out: "@/s-{k}.jsonl.gz", chunk: 4, args: ["--model", "@/net0.json", "--eps", "0.1"] });
+    // 10 試合を 4 試合ずつ → 4・4・2 の 3 区切り。ファイルは区切りの番号で
+    expect(chunkJob(sp, 0.5, 1).map((c) => [c.first, c.count])).toEqual([[100, 4], [104, 4], [108, 2]]);
+    expect(jobProducts(sp)).toEqual(["@/s-1.jsonl.gz", "@/s-2.jsonl.gz", "@/s-3.jsonl.gz"]);
+    expect(jobInputs(sp)).toEqual(["@/net0.json"]);
+    expect(jobArgv(sp, 104, 4, "/r")).toEqual(["td", "selfplay", "--games", "4", "--start", "104", "--model", "/r/net0.json", "--eps", "0.1", "--out", "/r/s-2.jsonl.tmp"]);
+    const bg = parseJob(`beam-gap --games 4 --from 1000 --chunk 2 --ref '{"valueNet":"@/q.json"}' --inputs @/pot-{k}.jsonl --out @/pot-{k}-rows.jsonl --est 1`, 3);
+    expect(jobInputs(bg)).toEqual(["@/q.json"]);
+    expect(jobArgv(bg, 1002, 2, "/r")).toEqual(["beam-gap", "--games", "2", "--from", "1002", "--ref", '{"valueNet":"/r/q.json"}', "--out", "/r/pot-2-rows.jsonl", "--inputs", "/r/pot-2.jsonl.tmp"]);
+    const tr = parseJob("td train --model @/net0.json --data @/s-{1..3}.jsonl.gz --out @/a.json --epochs 3 --est 600", 4);
+    expect(tr).toMatchObject({ games: 1, est: 600, spec: { kind: "node", tool: "td", out: "@/a.json" } });
+    expect(jobInputs(tr)).toEqual(["@/net0.json", "@/s-1.jsonl.gz", "@/s-2.jsonl.gz", "@/s-3.jsonl.gz"]);
+    expect(jobArgv(tr, 0, 1, "/r")).toEqual(["td", "train", "--model", "/r/net0.json", "--data", "/r/s-1.jsonl.gz,/r/s-2.jsonl.gz,/r/s-3.jsonl.gz", "--out", "/r/a.json.tmp", "--epochs", "3"]);
+    expect(chunkJob(tr, 600, 60)).toHaveLength(1);
+    const pk = parseJob("pick --compare q1 --pass @/a.json --fail @/b.json --out @/q.json", 5);
+    expect(pk.spec).toEqual({ kind: "pick", from: "q1", pass: "@/a.json", fail: "@/b.json", out: "@/q.json" });
+    expect(() => parseJob("td selfplay --games 10 --chunk 4 --out @/s.jsonl --est 1", 1)).toThrow(/\{k\}/);
+    expect(() => parseJob("td selfplay --games 10 --out @/s-{k}.jsonl --est 1", 1)).toThrow(/--chunk/);
+    expect(() => parseJob("td selfplay --games 10 --chunk 4 --out @/s-{k}.jsonl", 1)).toThrow(/--est/);
+    expect(() => parseJob("td train --model a.json --est 1", 1)).toThrow(/--out/);
+    expect(() => parseJob("potential train --out @/p.json", 1)).toThrow(/--est/);
+    expect(() => parseJob("pick --compare q1 --pass @/a.json --out @/q.json", 1)).toThrow(/--fail/);
+    // 前のジョブが作らないファイルを読む・同じファイルを 2 つのジョブが作る・前に無い compare を選ぶ
+    expect(() => parseJobs("td train --model @/net0.json --out @/a.json --est 1")).toThrow(/@\/net0.json を作るジョブが前にありません/);
+    expect(() => parseJobs("td extend --model x.json --out @/a.json --est 1\ntd extend --model x.json --out @/a.json --est 1")).toThrow(/2 つあります/);
+    expect(() => parseJobs("td extend --model x.json --out @/a.json --est 1\npick --compare q1 --pass @/a.json --fail @/a.json --out @/q.json")).toThrow(/q1 の compare/);
+    expect(() => parseJobs(`compare 10 '{"valueNet":"@/a.json"}' '{}' --label q1`)).toThrow(/作るジョブが前にありません/);
+    // 確かめる間は、回のフォルダのモデルを今の既定のモデルにする
+    expect(standIn('{"valueNet":"@/a.json","beamWidth":8,"v":{"w":{"potentialNet":"@/p.json"}}}')).toBe(
+      '{"valueNet":"data/value-net.json","beamWidth":8,"v":{"w":{"potentialNet":"data/potential-net.json"}}}',
+    );
+    expect(() => standIn('{"model":"@/a.json"}')).toThrow(/valueNet/);
   });
 
   it("区切りは大きさをそろえ、試合番号をすき間なく覆う", () => {
@@ -126,6 +177,8 @@ describe("ジョブの行", () => {
     expect(() => parseUntil("朝", now, "Asia/Tokyo")).toThrow(/--until/);
   });
 });
+
+const chunkRowsOf = (file: string): RunRow[] => parseLedger(readFileSync(file, "utf8")).runs;
 
 /** 区切りの行（偽物の svwb が書く形） */
 function chunkRow(first: number, count: number, seKind: "pairs" | "binomial"): RunRow {
@@ -227,12 +280,23 @@ else if (kind === "misses") {
   fs.appendFileSync(process.env.SVWB_LEDGER, JSON.stringify(row) + "\\n");
   process.exit(0);
 }
+else if ((kind === "td" && argv[1] === "selfplay") || kind === "beam-gap") {
+  const g = Number(flag("--games"));
+  const s = Number(flag(kind === "td" ? "--start" : "--from"));
+  if (g > 0 && process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, shellLine(argv) + "\\n");
+  if (String(s) === process.env.FAKE_FAIL) { console.error("わざと失敗"); process.exit(3); }
+  let t = kind === "td" ? JSON.stringify({ tdLayout: {} }) + "\\n" : "";
+  for (let i = s; i < s + g; i++) t += JSON.stringify({ g: i }) + "\\n";
+  fs.writeFileSync(flag(kind === "td" ? "--out" : "--inputs"), t);
+  if (kind === "beam-gap" && flag("--out")) fs.writeFileSync(flag("--out"), "");
+  process.exit(0);
+}
 if (count === 0) process.exit(0);
 if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, shellLine(argv) + "\\n");
 if (String(first) === process.env.FAKE_FAIL) { console.error("わざと失敗"); process.exit(3); }
 const finish = () => {
   const pairs = [0, 0, 0]; let wins = 0;
-  for (let g = first; g < first + count; g++) { const w = (g * 7) % 3; pairs[w]++; wins += w; }
+  for (let g = first; g < first + count; g++) { const w = process.env.FAKE_WIN ? 2 : (g * 7) % 3; pairs[w]++; wins += w; }
   const n = 2 * count;
   const row = { v: 1, kind, date: "2026-11-11", at: "2026-11-11T00:00:00Z", commit: process.env.SVWB_COMMIT, branch: process.env.SVWB_BRANCH,
     label: flag("--label"), a, b, decks: ["X"], mirror: true, g: [first, first + count - 1], n, wins, rate: wins / n, se: 0.01,
@@ -250,7 +314,7 @@ describe("区切って回す（偽物の svwb で）", () => {
   let jobs = "";
   let fake = "";
   let fakeLog = "";
-  const env = ["FAKE_FAIL", "FAKE_HANG", "FAKE_STOP_AT", "FAKE_LOG"];
+  const env = ["FAKE_FAIL", "FAKE_HANG", "FAKE_STOP_AT", "FAKE_LOG", "FAKE_WIN", "FAKE_TD_FAIL"];
 
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "night-"));
@@ -377,6 +441,103 @@ describe("区切って回す（偽物の svwb で）", () => {
     expect(await start("--foreground", "--until", "+20s")).toBe(1);
     expect(existsSync(join(dir(), "done"))).toBe(false);
     expect(readStatus(dir())?.reason).toMatch(/止める時刻/);
+  });
+
+  it("学び直しの流れ: 自己対戦のファイル・学習・pick・見込みを順に作り、失敗したら後ろのジョブは入力が無いので飛ばし、resume で続きから", async () => {
+    // td・potential の代わり（--out に引数を書く。FAKE_TD_FAIL を含む引数なら失敗）
+    const nodeBin = join(tmp, "nodebin");
+    const fakeTool = (tool: string) =>
+      [
+        `import { appendFileSync, writeFileSync } from "node:fs";`,
+        `export async function main(argv) {`,
+        `  if (process.env.FAKE_LOG) appendFileSync(process.env.FAKE_LOG, "${tool} " + argv.join(" ") + "\\n");`,
+        `  if (process.env.FAKE_TD_FAIL && argv.join(" ").includes(process.env.FAKE_TD_FAIL)) return 1;`,
+        `  writeFileSync(argv[argv.indexOf("--out") + 1], JSON.stringify({ tool: "${tool}", argv }));`,
+        `  return 0;`,
+        `}`,
+      ].join("\n");
+    for (const tool of ["td", "potential"]) {
+      mkdirSync(join(nodeBin, tool), { recursive: true });
+      writeFileSync(join(nodeBin, tool, `${tool}-main.mjs`), fakeTool(tool));
+    }
+    writeFileSync(
+      jobs,
+      [
+        "td extend --model data/value-net.json --out @/net0.json --est 1",
+        "td selfplay --model @/net0.json --games 10 --start 100 --chunk 4 --eps 0.1 --out @/s-{k}.jsonl.gz --est 0.1",
+        "td train --model @/net0.json --data @/s-{1..3}.jsonl.gz --out @/a.json --est 1",
+        "td train --model data/value-net.json --data @/s-{1..3}.jsonl.gz --out @/b.json --est 1",
+        `compare 6 '{"valueNet":"@/a.json"}' '{"valueNet":"@/b.json"}' 0 --label q1 --est 0.1`,
+        "pick --compare q1 --pass @/a.json --fail @/b.json --out @/q2.json",
+        `beam-gap --games 4 --from 1000 --chunk 2 --ref '{"beamWidth":4096,"valueNet":"@/q2.json"}' --sample 100 --inputs @/pot-{k}.jsonl --out @/pot-{k}-rows.jsonl --est 0.1`,
+        "potential train --data @/pot-{1..2}.jsonl --valid 1003-1003 --out @/q2pot.json --est 1",
+        `compare 4 '{"valueNet":"@/q2.json","potentialNet":"@/q2pot.json"}' '{}' 0 --label q2 --est 0.1`,
+      ].join("\n"),
+    );
+    // 自己対戦の 2 つ目の区切り（g104〜）が失敗する
+    process.env.FAKE_FAIL = "104";
+    expect(await start("--foreground", "--node-bin", nodeBin)).toBe(1);
+    const f = (name: string) => join(dir(), name);
+    expect(existsSync(f("net0.json")) && existsSync(f("s-1.jsonl.gz"))).toBe(true);
+    expect(existsSync(f("s-2.jsonl.gz")) || existsSync(f("a.json")) || existsSync(f("q2.json"))).toBe(false);
+    const failed = JSON.parse(readFileSync(f("failed.json"), "utf8")) as Record<string, string>;
+    expect(Object.keys(failed)).toEqual(["2", "3", "4", "5", "6", "7", "8", "9"]);
+    expect(failed["3"]).toMatch(/入力がありません: s-2.jsonl.gz・s-3.jsonl.gz/);
+    delete process.env.FAKE_FAIL;
+    const before = calls().length;
+    process.env.FAKE_WIN = "1";
+    expect(await resume()).toBe(0);
+    const after = calls().slice(before);
+    // 済んだ区切り（td extend・自己対戦の 1 つ目）は回さない
+    expect(after.filter((c) => c.startsWith("td extend") || c.includes("--start 100 "))).toEqual([]);
+    expect(after.filter((c) => c.startsWith("td selfplay")).map((c) => c.split(" ").slice(2, 6).join(" "))).toEqual(["--games 4 --start 104", "--games 2 --start 108"]);
+    expect(after.find((c) => c.startsWith("td train --model data/value-net.json"))).toBe(
+      `td train --model data/value-net.json --data ${f("s-1.jsonl.gz")},${f("s-2.jsonl.gz")},${f("s-3.jsonl.gz")} --out ${f("b.json")}.tmp`,
+    );
+    // 自己対戦のファイルは gzip してある
+    expect(gunzipSync(readFileSync(f("s-3.jsonl.gz"))).toString().trim().split("\n")).toEqual(['{"tdLayout":{}}', '{"g":108}', '{"g":109}']);
+    expect(existsSync(f("s-3.jsonl.tmp"))).toBe(false);
+    // A が全部勝つ → 線を越えて a.json を選ぶ。見込みは選んだ補正で学ぶ
+    expect(readFileSync(f("q2.json"), "utf8")).toBe(readFileSync(f("a.json"), "utf8"));
+    expect(JSON.parse(readFileSync(f("pick-6.json"), "utf8"))).toMatchObject({ compare: "q1", n: 12, pass: true, chosen: "@/a.json" });
+    expect(after.find((c) => c.startsWith("beam-gap"))).toContain(`"valueNet":"${f("q2.json")}"`);
+    expect(JSON.parse(readFileSync(f("q2pot.json"), "utf8"))).toMatchObject({ tool: "potential" });
+    const rows = chunkRowsOf(f("ledger.jsonl"));
+    expect(rows.map((r) => r.label)).toEqual(["q1", "q2"]);
+    expect(rows[1]?.a).toEqual({ valueNet: f("q2.json"), potentialNet: f("q2pot.json") });
+    // 作ったファイルがあれば、印が無くても回さない
+    unlinkSync(join(dir(), "done", "3-1.json"));
+    const n = calls().length;
+    expect(await resume()).toBe(0);
+    expect(calls().length).toBe(n);
+    expect(JSON.parse(readFileSync(join(dir(), "done", "3-1.json"), "utf8"))).toMatchObject({ recovered: true });
+    // finish は compare の行だけを足し、pick の結果を書き添える
+    const target = join(tmp, "ledger.jsonl");
+    writeFileSync(target, "");
+    expect(await main(["finish", "n1", "--root", root, "--ledger", target])).toBe(0);
+    expect(parseLedger(readFileSync(target, "utf8")).runs.map((r) => r.label)).toEqual(["q1", "q2"]);
+    expect(readFileSync(f("summary.md"), "utf8")).toMatch(/ジョブ 6（pick）: q1: 100.00%.*越えた。@\/q2.json は @\/a.json/);
+  });
+
+  it("pick は線を越えなければ fail のファイルを選ぶ", async () => {
+    const nodeBin = join(tmp, "nodebin");
+    mkdirSync(join(nodeBin, "td"), { recursive: true });
+    writeFileSync(
+      join(nodeBin, "td", "td-main.mjs"),
+      `import { writeFileSync } from "node:fs";\nexport async function main(argv) { writeFileSync(argv[argv.indexOf("--out") + 1], argv.join(" ")); return 0; }\n`,
+    );
+    writeFileSync(
+      jobs,
+      [
+        "td extend --model x.json --out @/a.json --est 1",
+        "td extend --model y.json --out @/b.json --est 1",
+        `compare 30 '{"valueNet":"@/a.json"}' '{"valueNet":"@/b.json"}' 0 --label q1 --est 0.1`,
+        "pick --compare q1 --pass @/a.json --fail @/b.json --out @/q2.json",
+      ].join("\n"),
+    );
+    expect(await start("--foreground", "--node-bin", nodeBin)).toBe(0);
+    expect(readFileSync(join(dir(), "q2.json"), "utf8")).toContain("y.json");
+    expect(JSON.parse(readFileSync(join(dir(), "pick-4.json"), "utf8"))).toMatchObject({ pass: false, chosen: "@/b.json" });
   });
 
   it("すぐ止める（stop --now）と回していた区切りを捨て、resume で回し直す", async () => {
