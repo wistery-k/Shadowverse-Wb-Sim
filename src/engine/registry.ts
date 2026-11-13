@@ -35,12 +35,16 @@ export interface StaticInfo {
 
 const staticCache = new Map<string, StaticInfo>();
 
+/** 能力テキストから読む常在型キーワード等 */
+export function staticInfoOf(text: string): StaticInfo {
+  return { ...parseStaticAbilities(text), earthSigil: text.split("\n").includes("【土の印】") };
+}
+
 /** カードの常在型キーワード等（キャッシュ付き） */
 export function staticOf(cardId: string): StaticInfo {
   let info = staticCache.get(cardId);
   if (!info) {
-    const text = cardOf(cardId).text;
-    info = { ...parseStaticAbilities(text), earthSigil: text.split("\n").includes("【土の印】") };
+    info = staticInfoOf(cardOf(cardId).text);
     staticCache.set(cardId, info);
   }
   return info;
