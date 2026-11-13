@@ -9,6 +9,8 @@ import {
   AZVALDT_CRESTS,
   ENGINE_CARDS,
   ENGINE_CRESTS,
+  FAITH_CRESTS,
+  SPECIAL_CARDS,
   poolsOfCard,
   poolsOfCrest,
 } from "../src/cards/pools";
@@ -23,11 +25,15 @@ describe("エンジンのカードの表", () => {
     const ids = new Set(ENGINE_CARDS.map((c) => c.id));
     expect(ids.size).toBe(ENGINE_CARDS.length);
     expect(AZVALDT_CARDS.filter((c) => !ids.has(c.id))).toEqual([]);
-    expect(ENGINE_CARDS).toHaveLength(241 + 490);
+    // アクセラレート・結晶の姿 10 件は一番後ろ
+    expect(ENGINE_CARDS).toHaveLength(241 + 490 + 10);
+    expect(ENGINE_CARDS.slice(-10)).toEqual(SPECIAL_CARDS);
     const crestIds = new Set(ENGINE_CRESTS.map((c) => c.id));
     expect(crestIds.size).toBe(ENGINE_CRESTS.length);
     expect(AZVALDT_CRESTS.filter((c) => !crestIds.has(c.id))).toEqual([]);
-    expect(ENGINE_CRESTS).toHaveLength(7 + 38);
+    // 信仰 4 件は一番後ろ
+    expect(ENGINE_CRESTS).toHaveLength(7 + 38 + 4);
+    expect(ENGINE_CRESTS.slice(-4)).toEqual(FAITH_CRESTS);
   });
 
   it("プール: ベーシックとトークンの一部は両方、ストームブラストは ID ごとに別", () => {
@@ -35,6 +41,7 @@ describe("エンジンのカードの表", () => {
     expect(poolsOfCard("10131320")).toEqual(["starter"]);
     expect(poolsOfCard("10831310")).toEqual(["azvaldt"]);
     expect(poolsOfCard("90031210")).toEqual(["starter", "azvaldt"]); // 大地の魔片
+    expect(poolsOfCard("10661112")).toEqual(["azvaldt"]); // 結晶：崇奉の怯者
     expect(ENGINE_CARDS.every((c) => poolsOfCard(c.id).length > 0)).toBe(true);
     expect(ENGINE_CRESTS.every((c) => poolsOfCrest(c.id).length > 0)).toBe(true);
   });

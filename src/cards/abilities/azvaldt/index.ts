@@ -3,10 +3,13 @@
 // エンジンには、スターターの定義の後に読ませる（scripts/rust-data-main.ts の poolCardAbilities・poolCrestAbilities）。
 // カード名は ./helpers.ts の id() で引く（スターターの ../helpers.ts の id() はスターターのカードから引くので、
 // 同じ名前のストームブラスト 10131320 と 10831310 を取り違えないように）。
-// 今はプロのデッキのスペルW・アグロNi で使うカードだけ（docs/pools/azvaldt.md「段取り」）。
+// アクセラレート・結晶の姿の能力はその ID（specials.json）に、信仰の能力はクレストと同じ所に書く。
+// 今はプロのデッキのスペルW・アグロNi・ランプD・アミュレットB で使うカードだけ（docs/pools/azvaldt.md「段取り」）。
 
 import type { CardAbilities } from "../../../engine/dsl";
+import { BISHOP } from "./bishop";
 import { CRESTS } from "./crests";
+import { DRAGON } from "./dragon";
 import { NEUTRAL } from "./neutral";
 import { NIGHTMARE } from "./nightmare";
 import { WITCH } from "./witch";
@@ -17,6 +20,8 @@ export const AZVALDT_CARD_ABILITIES: Readonly<Record<string, CardAbilities>> = {
   ...NEUTRAL,
   ...WITCH,
   ...NIGHTMARE,
+  ...DRAGON,
+  ...BISHOP,
 };
 
 export const AZVALDT_CREST_ABILITIES: Readonly<Record<string, CardAbilities>> = CRESTS;

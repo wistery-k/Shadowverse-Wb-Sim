@@ -23,19 +23,65 @@ export const AZVALDT_SPECIALS: readonly SpecialEffect[] = validateSpecials(rawRo
 const AZVALDT_CARD_IDS = new Set(AZVALDT_CARDS.map((c) => c.id));
 const AZVALDT_CREST_IDS = new Set(AZVALDT_CRESTS.map((c) => c.id));
 
-/** エンジンのカードの表: スターターの全カード（今の順）→ 前期のローテーションにしか無いカード */
-export const ENGINE_CARDS: readonly Card[] = [...ALL_CARDS, ...AZVALDT_CARDS.filter((c) => !CARDS_BY_ID.has(c.id))];
-/** エンジンのクレストの表: スターターの全クレスト（今の順）→ 前期のローテーションにしか無いクレスト */
+const AZVALDT_BY_ID = new Map(AZVALDT_CARDS.map((c) => [c.id, c]));
+const sourceOf = (sp: SpecialEffect): Card => {
+  const c = AZVALDT_BY_ID.get(sp.sources[0] ?? "");
+  if (!c) throw new Error(`特殊効果 ${sp.id} の元のカードがありません`);
+  return c;
+};
+
+/**
+ * アクセラレート・結晶でプレイしたときの姿（エンジンでは別のカードとして持つ。docs/rules.md「12」）。
+ * アクセラレートはスペル、結晶はアミュレット「結晶：<元の名前>」（元のカードと同名ではない）。デッキには入れられない（token）
+ */
+export const SPECIAL_CARDS: readonly Card[] = AZVALDT_SPECIALS.filter((sp) => sp.kind !== "faith").map((sp): Card => {
+  const src = sourceOf(sp);
+  const base = { id: sp.id, class: src.class, set: "token" as const, rarity: src.rarity, cost: sp.cost, tribes: [], text: sp.text, related: [] };
+  return sp.kind === "accelerate"
+    ? { ...base, name: `${src.name}（アクセラレート）`, type: "spell" }
+    : { ...base, name: `結晶：${src.name}`, type: "amulet", ...(sp.countdown !== undefined ? { countdown: sp.countdown } : {}) };
+});
+/**
+ * 信仰。ルールではクレストではない（docs/rules.md 12章）が、エンジンではリーダーエリアの表の一種として持ち、信仰値（`faith`）を数える。
+ * クレストを消す効果（`banishCrests`。アルビオンバハムート）は、信仰値を持つものを消さない
+ */
+export const FAITH_CRESTS: readonly Crest[] = AZVALDT_SPECIALS.filter((sp) => sp.kind === "faith").map((sp) => ({
+  id: sp.id,
+  name: `信仰：${sourceOf(sp).name}`,
+  source: sourceOf(sp).id,
+  text: sp.text,
+}));
+const SPECIAL_IDS = new Set(AZVALDT_SPECIALS.map((sp) => sp.id));
+/** 信仰の ID */
+export const FAITH_CREST_IDS: ReadonlySet<string> = new Set(FAITH_CRESTS.map((c) => c.id));
+
+/** エンジンのカードの表: スターターの全カード（今の順）→ 前期のローテーションにしか無いカード → アクセラレート・結晶の姿 */
+export const ENGINE_CARDS: readonly Card[] = [
+  ...ALL_CARDS,
+  ...AZVALDT_CARDS.filter((c) => !CARDS_BY_ID.has(c.id)),
+  ...SPECIAL_CARDS,
+];
+/** エンジンのクレストの表: スターターの全クレスト（今の順）→ 前期のローテーションにしか無いクレスト → 信仰 */
 export const ENGINE_CRESTS: readonly Crest[] = [
   ...ALL_CRESTS,
   ...AZVALDT_CRESTS.filter((c) => !CRESTS_BY_ID.has(c.id)),
+  ...FAITH_CRESTS,
 ];
+
+/** アクセラレート・結晶の姿を持つカードの ID → その姿の ID（1 枚に 1 つまで） */
+export const ALT_PLAY_OF: ReadonlyMap<string, string> = new Map(
+  AZVALDT_SPECIALS.filter((sp) => sp.kind !== "faith").flatMap((sp) => sp.sources.map((src) => [src, sp.id] as const)),
+);
+/** 信仰を持つカードの ID → 信仰の ID */
+export const FAITH_OF: ReadonlyMap<string, string> = new Map(
+  AZVALDT_SPECIALS.filter((sp) => sp.kind === "faith").flatMap((sp) => sp.sources.map((src) => [src, sp.id] as const)),
+);
 
 /** カードが入っているプール（トークンも、そのプールのデータにあれば入る） */
 export function poolsOfCard(cardId: string): PoolId[] {
   const pools: PoolId[] = [];
   if (CARDS_BY_ID.has(cardId)) pools.push("starter");
-  if (AZVALDT_CARD_IDS.has(cardId)) pools.push("azvaldt");
+  if (AZVALDT_CARD_IDS.has(cardId) || SPECIAL_IDS.has(cardId)) pools.push("azvaldt");
   return pools;
 }
 
@@ -43,6 +89,6 @@ export function poolsOfCard(cardId: string): PoolId[] {
 export function poolsOfCrest(crestId: string): PoolId[] {
   const pools: PoolId[] = [];
   if (CRESTS_BY_ID.has(crestId)) pools.push("starter");
-  if (AZVALDT_CREST_IDS.has(crestId)) pools.push("azvaldt");
+  if (AZVALDT_CREST_IDS.has(crestId) || SPECIAL_IDS.has(crestId)) pools.push("azvaldt");
   return pools;
 }

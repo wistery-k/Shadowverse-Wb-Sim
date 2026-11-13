@@ -21,6 +21,11 @@ pub fn card_matches(s: &GameState, ctx: &Ctx, iid: Iid, filter: Option<&CardFilt
             return false;
         }
     }
+    if let Some(sl) = f.in_slot {
+        if !ctx.slot(sl).contains(&iid) {
+            return false;
+        }
+    }
     let board = s.board_card(iid);
     let hand = if board.is_some() {
         None
@@ -43,6 +48,11 @@ pub fn card_matches(s: &GameState, ctx: &Ctx, iid: Iid, filter: Option<&CardFilt
             return false;
         }
     }
+    if let Some(t) = f.not_tribe {
+        if cd.tribes.contains(&t) {
+            return false;
+        }
+    }
     if let Some(c) = f.class {
         if cd.class != c {
             return false;
@@ -53,12 +63,20 @@ pub fn card_matches(s: &GameState, ctx: &Ctx, iid: Iid, filter: Option<&CardFilt
             return false;
         }
     }
+    if f.last_words && !has_last_words(cid) {
+        return false;
+    }
     let cost = match hand {
         Some(h) => hand_cost(h),
         None => cd.cost,
     };
     if let Some(m) = f.cost_max {
         if cost > m {
+            return false;
+        }
+    }
+    if let Some(m) = f.cost_min {
+        if cost < m {
             return false;
         }
     }
@@ -92,10 +110,29 @@ pub fn card_matches(s: &GameState, ctx: &Ctx, iid: Iid, filter: Option<&CardFilt
         if f.not_evolved && (!c.is_follower || c.evolve != Evolve::None) {
             return false;
         }
-    } else if f.keyword.is_some() || f.defense_max.is_some() || f.not_evolved {
+        if f.evolved && (!c.is_follower || c.evolve == Evolve::None) {
+            return false;
+        }
+        if f.super_evolved && (!c.is_follower || c.evolve != Evolve::SuperEvolved) {
+            return false;
+        }
+    } else if f.keyword.is_some()
+        || f.defense_max.is_some()
+        || f.not_evolved
+        || f.evolved
+        || f.super_evolved
+    {
         return false;
     }
     true
+}
+
+/// カードが【ラストワード】を持つか（カードの元の能力で見る）
+pub fn has_last_words(cid: CardIdx) -> bool {
+    abilities_of(cid)
+        .abilities
+        .iter()
+        .any(|a| a.trigger.on() == On::LastWords)
 }
 
 fn side_players(s: &GameState, ctx: &Ctx, side: Side) -> ([PlayerIndex; 2], usize) {
@@ -352,6 +389,11 @@ pub fn eval_cond(s: &GameState, ctx: &Ctx, c: &Condition) -> bool {
         Condition::LeaderHpAboveOpponent => {
             pl.leader_hp > s.players[opponent(ctx.controller)].leader_hp
         }
+        Condition::ThisEvolved => s
+            .follower(ctx.source)
+            .map(|f| f.evolve != Evolve::None)
+            .unwrap_or(false),
+        Condition::CountAtLeast { of, value } => resolve_target(s, ctx, of).len() as i32 >= *value,
         Condition::Not { cond } => !eval_cond(s, ctx, cond),
     }
 }
@@ -590,6 +632,12 @@ pub fn leave_board(s: &mut GameState, iid: Iid, mut reason: LeaveReason) {
             _ => None,
         });
     }
+    if reason == LeaveReason::Destroy && !is_follower {
+        fire_side(s, p, |_, t, src| match t {
+            Trigger::AllyAmuletDestroyed if src != iid => Some(Some(iid)),
+            _ => None,
+        });
+    }
     let idx = s.players[p]
         .board
         .iter()
@@ -697,12 +745,26 @@ pub fn damage_follower(s: &mut GameState, iid: Iid, amount: i32) -> i32 {
     amount
 }
 
+/// リーダーにダメージを与え、実際に与えたダメージを返す（「受ける1以上のダメージを0にする。」を見る）
+pub fn damage_leader(s: &mut GameState, p: PlayerIndex, amount: i32) -> i32 {
+    if amount <= 0 {
+        return 0;
+    }
+    let turn = s.turn;
+    let pl = &mut s.players[p];
+    if pl.leader_damage_zero_until.is_some_and(|u| turn <= u) {
+        return 0;
+    }
+    pl.leader_hp -= amount;
+    amount
+}
+
 pub fn damage_entity(s: &mut GameState, id: Iid, amount: i32) {
     if amount <= 0 {
         return;
     }
     if is_leader(id) {
-        s.players[leader_owner(id)].leader_hp -= amount;
+        damage_leader(s, leader_owner(id), amount);
         return;
     }
     if s.follower(id).is_some() {
@@ -804,9 +866,12 @@ fn played_card_matches(
     let cd = card(cid);
     f.ctype.is_none_or(|t| cd.ctype == t)
         && f.tribe.is_none_or(|t| cd.tribes.contains(&t))
+        && f.not_tribe.is_none_or(|t| !cd.tribes.contains(&t))
         && f.class.is_none_or(|c| cd.class == c)
         && f.ids.as_ref().is_none_or(|ids| ids.contains(&cid))
         && f.cost_max.is_none_or(|m| cd.cost <= m)
+        && f.cost_min.is_none_or(|m| cd.cost >= m)
+        && (!f.last_words || has_last_words(cid))
         && f.cost_eq
             .as_ref()
             .is_none_or(|v| cd.cost == eval_value(s, ctx, v))
@@ -1124,7 +1189,7 @@ pub fn answer_mode(s: &mut GameState, index: usize) {
         panic!("モード選択待ちではありません")
     };
     let frame = s.stack.last_mut().expect("モード選択待ちではありません");
-    let FEff::Dsl(Effect::Mode { options }) = frame.effects.get(frame.pc) else {
+    let FEff::Dsl(Effect::Mode { options, .. }) = frame.effects.get(frame.pc) else {
         panic!("モード選択の効果がありません")
     };
     splice(
@@ -1150,6 +1215,60 @@ fn splice(frame: &mut Frame, effects: &'static [Effect], times: usize) {
     }
     v.extend((pc + 1..n).map(|i| frame.effects.get(i)));
     frame.effects = Effects::List(v);
+}
+
+/// 現在の効果を、lists を上から順につないだもので置き換える（【モード】のすべてが働くとき）
+fn splice_all(frame: &mut Frame, lists: &'static [Vec<Effect>]) {
+    let pc = frame.pc;
+    let n = frame.effects.len();
+    let mut v = Vec::with_capacity(n + lists.iter().map(|l| l.len()).sum::<usize>());
+    v.extend((0..pc).map(|i| frame.effects.get(i)));
+    for l in lists {
+        v.extend(l.iter().map(FEff::Dsl));
+    }
+    v.extend((pc + 1..n).map(|i| frame.effects.get(i)));
+    frame.effects = Effects::List(v);
+}
+
+/// p の信仰 crest の、クレストの並びの中の位置
+fn faith_index(s: &GameState, p: PlayerIndex, crest: CrestIdx) -> Option<usize> {
+    s.players[p]
+        .crests
+        .iter()
+        .position(|c| c.crest == crest && c.faith.is_some())
+}
+
+/// p のデッキ（と、マリガンの後の手札）のカードが持つ信仰を、リーダーエリアに置く（docs/rules.md「12」信仰）。
+/// 同じ信仰は 1 つだけ。置く順はクレストの表の順
+pub fn place_faiths(s: &mut GameState, p: PlayerIndex) {
+    let mut faiths: Vec<CrestIdx> = s.players[p]
+        .deck
+        .iter()
+        .map(|r| r.card)
+        .chain(s.players[p].hand.iter().map(|h| h.card))
+        .filter_map(|c| card(c).faith)
+        .collect();
+    if faiths.is_empty() {
+        return;
+    }
+    faiths.sort_unstable();
+    faiths.dedup();
+    for crest in faiths {
+        if s.players[p].crests.len() >= MAX_LEADER_AREA {
+            break;
+        }
+        let iid = s.new_iid();
+        let order = s.next_order;
+        s.next_order += 1;
+        s.players[p].crests.make_mut().push(CrestInstance {
+            iid,
+            crest,
+            countdown: None,
+            order,
+            used_once: Vec::new(),
+            faith: Some(0),
+        });
+    }
 }
 
 fn pick_random(s: &mut GameState, mut pool: Vec<Iid>, count: usize) -> Vec<Iid> {
@@ -1206,12 +1325,39 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             let v = pick_random(s, pool, *count as usize);
             frame.ctx.set_slot(*slot, v);
         }
-        Effect::Mode { options } => {
+        Effect::Mode { options, all_if } => {
+            // 条件を満たすなら、1 つを選ぶのではなくすべて（上から順に。刻みし約束）
+            if all_if.as_ref().is_some_and(|c| eval_cond(s, &frame.ctx, c)) {
+                splice_all(frame, options);
+                return true;
+            }
             s.pending = Some(Pending::Mode {
                 player: p,
                 options: options.len(),
             });
             return false;
+        }
+        Effect::InOrder { options } => {
+            // 何回目かは、これ（場のフォロワー）の X で数える（翼天の変貌・オルメリオ。(3) の次は (1)）
+            let k = match s.find_follower(frame.ctx.source) {
+                Some((q, i)) => {
+                    let f = &mut s.players[q].board.make_mut()[i];
+                    let k = f.x.unwrap_or(0);
+                    f.x = Some(k + 1);
+                    k
+                }
+                None => 0,
+            };
+            if options.is_empty() {
+                frame.pc += 1;
+                return true;
+            }
+            splice(
+                frame,
+                &options[k.rem_euclid(options.len() as i32) as usize],
+                1,
+            );
+            return true;
         }
         Effect::Damage { target, amount } => {
             let amount = val!(amount);
@@ -1450,6 +1596,36 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                     .collect();
                 let k = s.rng_int(best.len());
                 let c = s.new_board_card(best[k], None);
+                enter_board(s, p, c);
+            }
+        }
+        Effect::SummonDestroyedAmulets {
+            filter,
+            count,
+            distinct,
+        } => {
+            // 破壊された回数に比例した確率で 1 枚ずつ選ぶ。distinct なら、選んだものと同じカードを除いてから次を選ぶ
+            // （ユーザーが実機で確認。docs/rules.md 12章の 31）
+            let mut pool: Vec<CardIdx> = s.players[p]
+                .destroyed_amulets
+                .iter()
+                .copied()
+                .filter(|&c| played_card_matches(s, &frame.ctx, c, Some(filter)))
+                .collect();
+            let mut picked: Vec<CardIdx> = Vec::new();
+            for _ in 0..(*count).max(0) {
+                if pool.is_empty() {
+                    break;
+                }
+                let k = s.rng_int(pool.len());
+                let cid = pool.swap_remove(k);
+                if *distinct {
+                    pool.retain(|&c| c != cid);
+                }
+                picked.push(cid);
+            }
+            for cid in picked {
+                let c = s.new_board_card(cid, None);
                 enter_board(s, p, c);
             }
         }
@@ -1708,6 +1884,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                     countdown,
                     order,
                     used_once: Vec::new(),
+                    faith: None,
                 });
             }
         }
@@ -1722,6 +1899,40 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             s.shuffle(&mut deck);
             s.players[p].deck = deck.into();
             s.players[p].deck_kept.clear();
+        }
+        Effect::BanishCrests { side } => {
+            // 信仰はクレストではないので消えない（アルビオンバハムートの Q&A）
+            let (ps, n) = side_players(s, &frame.ctx, *side);
+            for &q in &ps[..n] {
+                if s.players[q].crests.iter().any(|c| c.faith.is_none()) {
+                    s.players[q].crests.make_mut().retain(|c| c.faith.is_some());
+                }
+            }
+        }
+        Effect::AddFaith { crest_id, amount } => {
+            if let Some(i) = faith_index(s, p, *crest_id) {
+                let c = &mut s.players[p].crests.make_mut()[i];
+                c.faith = Some(c.faith.unwrap_or(0) + amount);
+            }
+        }
+        Effect::SpendFaith {
+            crest_id,
+            amount,
+            then,
+        } => {
+            // 信仰値が足りなければ働かない（0 未満にならない。docs/rules.md「12」）
+            if let Some(i) = faith_index(s, p, *crest_id) {
+                if s.players[p].crests[i].faith.unwrap_or(0) >= *amount {
+                    let c = &mut s.players[p].crests.make_mut()[i];
+                    c.faith = Some(c.faith.unwrap_or(0) - amount);
+                    splice(frame, then, 1);
+                    return true;
+                }
+            }
+        }
+        Effect::LeaderDamageZero { .. } => {
+            // 相手のターン（次のターン）の終わりまで
+            s.players[p].leader_damage_zero_until = Some(s.turn + 1);
         }
         Effect::SetLeaderMaxHp { side, value } => {
             let t = &mut s.players[if *side == Side::Me { p } else { opponent(p) }];
@@ -1822,6 +2033,11 @@ fn deck_card_matches(
     let cost = s.deck_cost(p, r);
     if let Some(m) = f.cost_max {
         if cost > m {
+            return false;
+        }
+    }
+    if let Some(m) = f.cost_min {
+        if cost < m {
             return false;
         }
     }
