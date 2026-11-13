@@ -990,3 +990,45 @@ describe("公式の用語説明", () => {
     expect(n / trials).toBeLessThan(0.85);
   });
 });
+
+describe("ランダムに選ぶときの重み（ユーザーの実機の確認 2026-11-13）", () => {
+  it("大地の守護神・ミーヴェ: 同名のアミュレットが何回も破壊されていれば、そのぶん選ばれやすい（禁密の聖地 3 回・獣姫の誓約 1 回なら 3:1）", () => {
+    const sanctum = id("禁密の聖地");
+    const oath = id("獣姫の誓約");
+    const trials = 200;
+    let n = 0;
+    for (let seed = 1; seed <= trials; seed++) {
+      let { s, me } = setup(seed);
+      s.players[me].destroyedAmulets = [sanctum, sanctum, sanctum, oath];
+      toBoard(s, me, "大地の守護神・ミーヴェ");
+      // 魂の捕食で自分のミーヴェを破壊する（候補が 1 枚なので自動で選ぶ）
+      s = applyAction(s, { type: "play", iid: toHand(s, me, "魂の捕食") });
+      expect(s.pending).toBeNull();
+      const got = s.players[me].board.filter((c) => c.cardId === sanctum || c.cardId === oath);
+      expect(got).toHaveLength(1);
+      if (got[0]!.cardId === sanctum) n++;
+    }
+    // 名前ごとに等しく選ぶなら 1/2、回数どおりなら 3/4
+    expect(n / trials).toBeGreaterThan(0.65);
+    expect(n / trials).toBeLessThan(0.85);
+  });
+
+  it("裁決のアナテマ・ロデオ: 「ランダム3種類」は、デッキに多い名前ほど選ばれやすく、同じ名前は2度選ばない", () => {
+    const sanctum = id("禁密の聖地");
+    const others = ["獣姫の誓約", "探偵のルーペ", "冒険者のギルド", "有翼の石像"].map(id);
+    const trials = 200;
+    let n = 0;
+    for (let seed = 1; seed <= trials; seed++) {
+      let { s, me } = setup(seed);
+      // 禁密の聖地 5 枚と、ほかの 4 種類を 1 枚ずつ（すべてコスト3以下のアミュレット）
+      s.players[me].deck = [...Array(5).fill(sanctum), ...others].map((cardId: string) => ({ iid: s.nextIid++, cardId }));
+      s = applyAction(s, { type: "play", iid: toHand(s, me, "裁決のアナテマ・ロデオ") });
+      const amulets = s.players[me].board.filter((c) => c.kind === "amulet").map((c) => c.cardId);
+      expect(amulets).toHaveLength(3);
+      expect(new Set(amulets).size).toBe(3);
+      if (amulets.includes(sanctum)) n++;
+    }
+    // 名前ごとに等しく選ぶなら 3/5、枚数どおりに 1 枚ずつ選ぶなら 1 - (4/9)(3/8)(2/7) ≒ 0.95
+    expect(n / trials).toBeGreaterThan(0.85);
+  });
+});

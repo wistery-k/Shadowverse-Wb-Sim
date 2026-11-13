@@ -1398,23 +1398,38 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             }
         }
         Effect::SummonFromDeck { filter, kinds } => {
-            let mut ks: Vec<CardIdx> = Vec::new();
-            for r in &s.players[p].deck {
-                if !ks.contains(&r.card) && deck_card_matches(s, &frame.ctx, p, r, filter) {
-                    ks.push(r.card);
+            // 条件に合うデッキのカードから 1 枚ずつランダムに選ぶので、同名のカードが多いほど選ばれやすい。
+            // 2 種類目からは、それまでに選んだカードと同名のものを除いて選ぶ（ユーザーの実機の確認 2026-11-13。
+            // docs/rules.md 11 章「ランダムに選ぶときの重み」）。選んだ写しをそのまま出す（手札でコストが変わったものを含む）
+            let mut picked: Vec<Iid> = Vec::new();
+            let mut names: Vec<CardIdx> = Vec::new();
+            for _ in 0..(*kinds).max(0) {
+                let cands: Vec<Iid> = s.players[p]
+                    .deck
+                    .iter()
+                    .filter(|r| {
+                        !names.contains(&r.card) && deck_card_matches(s, &frame.ctx, p, r, filter)
+                    })
+                    .map(|r| r.iid)
+                    .collect();
+                if cands.is_empty() {
+                    break;
                 }
+                let iid = cands[s.rng_int(cands.len())];
+                let card_id = s.players[p]
+                    .deck
+                    .iter()
+                    .find(|r| r.iid == iid)
+                    .unwrap()
+                    .card;
+                picked.push(iid);
+                names.push(card_id);
             }
-            s.shuffle(&mut ks);
-            for &cid in ks.iter().take((*kinds).max(0) as usize) {
+            for iid in picked {
                 if !s.can_add_to_board(p) {
                     break;
                 }
-                // 同じカードが複数あれば、条件に合うもの（手札でコストが変わったものを含む）を出す
-                let idx = s.players[p]
-                    .deck
-                    .iter()
-                    .position(|r| r.card == cid && deck_card_matches(s, &frame.ctx, p, r, filter))
-                    .unwrap();
+                let idx = s.players[p].deck.iter().position(|r| r.iid == iid).unwrap();
                 let r = s.players[p].deck.make_mut().remove(idx);
                 // 場に出したカードには手札で付いた状態を使わない（山札から出すのはアミュレットだけで、場では状態が効かない）
                 s.take_kept(p, r.iid);
@@ -1426,12 +1441,13 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
         Effect::SummonDestroyedAmulet => {
             let da = &s.players[p].destroyed_amulets;
             if let Some(max) = da.iter().map(|&id| card(id).cost).max() {
-                let mut best: Vec<CardIdx> = Vec::new();
-                for &id in da {
-                    if card(id).cost == max && !best.contains(&id) {
-                        best.push(id);
-                    }
-                }
+                // 同名のアミュレットが何回も破壊されていれば、そのぶん選ばれやすい
+                // （ユーザーの実機の確認 2026-11-13。docs/rules.md 11 章「ランダムに選ぶときの重み」）
+                let best: Vec<CardIdx> = da
+                    .iter()
+                    .copied()
+                    .filter(|&id| card(id).cost == max)
+                    .collect();
                 let k = s.rng_int(best.len());
                 let c = s.new_board_card(best[k], None);
                 enter_board(s, p, c);
