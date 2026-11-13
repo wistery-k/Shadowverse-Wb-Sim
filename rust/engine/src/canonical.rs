@@ -187,6 +187,13 @@ fn player_canon(p: &PlayerState) -> String {
             join(&p.hidden_discards, |c| cid(*c).to_string(), ",")
         ));
     }
+    // 手札の伏せた枠に起きた公開の出来事（無ければ書かない）
+    if !p.hand_log.is_empty() {
+        out.push_str(&format!(
+            ";L{}",
+            crate::state_json::hand_log_text(&p.hand_log)
+        ));
+    }
     out
 }
 

@@ -123,6 +123,108 @@ fn ability_json(a: &'static Ability) -> Json {
         .expect("能力のデータに無い能力")
 }
 
+fn has_kind(v: &Json, kind: &str) -> bool {
+    match v {
+        Json::Obj(items) => items.iter().any(|(k, x)| {
+            (k == "kind" && matches!(x, Json::Str(t) if t == kind)) || has_kind(x, kind)
+        }),
+        Json::Arr(xs) => xs.iter().any(|x| has_kind(x, kind)),
+        _ => false,
+    }
+}
+
+/// カード c の X が、出したときに相手に見えるか（手札で働く能力以外の能力が X の値を使う。ダメージ等で分かる。
+/// docs/rules.md「伏せた手札のスペルブーストの回数」）
+pub fn card_shows_x(c: CardIdx) -> bool {
+    static V: OnceLock<Vec<bool>> = OnceLock::new();
+    V.get_or_init(|| {
+        let ix = dsl_index();
+        data()
+            .abilities
+            .iter()
+            .map(|ca| {
+                ca.abilities
+                    .iter()
+                    .filter(|a| !matches!(a.trigger.on(), On::Spellboost | On::AllyLeaveInHand))
+                    .any(|a| {
+                        ix.ability_json
+                            .get(&addr(a))
+                            .is_some_and(|v| has_kind(v, "thisX"))
+                    })
+            })
+            .collect()
+    })[c as usize]
+}
+
+/// 手札の記録（PlayerState::hand_log）の文字列。出来事を空白で区切る（i<山札の枚数> 入った・w<回数> 公開から伏せた・
+/// o<カードID>/<コスト>/<X か _>/<攻撃力の変化>/<体力の変化> 出した・u 中身の分からないものが出た・d 山札に戻った・
+/// D<回数> 公開されていたものが山札に戻った・b<回数> 全部をスペルブースト・B<回数> 1 枚をスペルブースト・a<回数> 味方が場を離れた）
+pub fn hand_log_text(log: &HandLog) -> String {
+    log.to_vec()
+        .iter()
+        .map(|e| match *e {
+            HandEv::In { deck } => format!("i{deck}"),
+            HandEv::InWith { boosts } => format!("w{boosts}"),
+            HandEv::Out {
+                card,
+                cost,
+                x,
+                atk,
+                def,
+            } => {
+                let x = if x == X_HIDDEN {
+                    "_".to_string()
+                } else {
+                    x.to_string()
+                };
+                format!("o{}/{cost}/{x}/{atk}/{def}", data().cards[card as usize].id)
+            }
+            HandEv::OutUnknown => "u".into(),
+            HandEv::ToDeck => "d".into(),
+            HandEv::ToDeckWith { boosts } => format!("D{boosts}"),
+            HandEv::Boost { times } => format!("b{times}"),
+            HandEv::BoostOne { times } => format!("B{times}"),
+            HandEv::AllyLeft { times } => format!("a{times}"),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+pub fn parse_hand_log(text: &str) -> Result<HandLog, String> {
+    let bad = |t: &str| format!("手札の記録が読めません: {t}");
+    let mut evs = Vec::new();
+    for t in text.split_whitespace() {
+        let (head, rest) = t.split_at(1);
+        let n = || rest.parse::<u16>().map_err(|_| bad(t));
+        evs.push(match head {
+            "i" => HandEv::In { deck: n()? },
+            "w" => HandEv::InWith { boosts: n()? },
+            "u" if rest.is_empty() => HandEv::OutUnknown,
+            "d" if rest.is_empty() => HandEv::ToDeck,
+            "D" => HandEv::ToDeckWith { boosts: n()? },
+            "b" => HandEv::Boost { times: n()? },
+            "B" => HandEv::BoostOne { times: n()? },
+            "a" => HandEv::AllyLeft { times: n()? },
+            "o" => {
+                let f: Vec<&str> = rest.split('/').collect();
+                if f.len() != 5 {
+                    return Err(bad(t));
+                }
+                let num = |x: &str| x.parse::<i16>().map_err(|_| bad(t));
+                HandEv::Out {
+                    card: card_of(f[0])?,
+                    cost: num(f[1])?,
+                    x: if f[2] == "_" { X_HIDDEN } else { num(f[2])? },
+                    atk: num(f[3])?,
+                    def: num(f[4])?,
+                }
+            }
+            _ => return Err(bad(t)),
+        });
+    }
+    Ok(HandLog::from_events(&evs))
+}
+
 /// 能力の JSON の文字列（DSL の形。src/engine/dsl.ts）。自己対戦の書き出しで、場のカードに付与された能力を書くのに使う
 pub fn ability_json_text(a: &'static Ability) -> String {
     ability_json(a).stringify()
@@ -334,6 +436,10 @@ fn player_json(p: &PlayerState) -> Json {
     // 相手に分からない捨てたカード（無ければ省く）
     if !p.hidden_discards.is_empty() {
         o.push(("hiddenDiscards", cards(&p.hidden_discards)));
+    }
+    // 手札の伏せた枠に起きた公開の出来事（無ければ省く）
+    if !p.hand_log.is_empty() {
+        o.push(("handLog", Json::Str(hand_log_text(&p.hand_log))));
     }
     o.extend([
         (
@@ -869,6 +975,11 @@ fn player_of(v: &Json) -> R<PlayerState> {
         hidden_discards: match v.get("hiddenDiscards") {
             None | Some(Json::Null) => Shared::default(),
             Some(_) => card_list(v, "hiddenDiscards")?.into(),
+        },
+        hand_log: match v.get("handLog") {
+            None | Some(Json::Null) => HandLog::default(),
+            Some(Json::Str(t)) => parse_hand_log(t)?,
+            Some(_) => return Err("\"handLog\" は文字列".into()),
         },
         destroyed_this_turn: array(v, "destroyedThisTurn")?
             .iter()

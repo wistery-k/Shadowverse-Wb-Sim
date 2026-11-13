@@ -55,6 +55,28 @@ fn lethal_key(s: &GameState, with_hp: bool) -> String {
     .canonical()
 }
 
+/// 局面の JSON から、手札の記録（handLog。局面の同一判定では比べない）を除いたもの
+fn canon_without_log(s: &GameState) -> String {
+    let mut j = state_to_json(s);
+    strip_logs(&mut j);
+    j.canonical()
+}
+
+fn strip_logs(j: &mut Json) {
+    if let Some(Json::Arr(pls)) = j.get("players").cloned() {
+        let pls = pls
+            .into_iter()
+            .map(|pl| match pl {
+                Json::Obj(fields) => {
+                    Json::Obj(fields.into_iter().filter(|(k, _)| k != "handLog").collect())
+                }
+                x => x,
+            })
+            .collect();
+        j.set("players", Json::Arr(pls));
+    }
+}
+
 /// カードの iid 等を除いた JSON を並べ替えたもの（keySet.ts の sortedWithoutIds）
 fn sorted_without_ids(cards: &Json) -> Json {
     let mut items: Vec<String> = arr(cards)
@@ -79,7 +101,8 @@ fn sorted_without_ids(cards: &Json) -> Json {
 
 /// 手の順番だけが違う局面を同じにするキー（keySet.ts の turnOrderKey）
 fn turn_order_key(s: &GameState) -> String {
-    let j = state_to_json(s);
+    let mut j = state_to_json(s);
+    strip_logs(&mut j);
     if !s.stack.is_empty() || !s.queue.is_empty() || s.pending.is_some() || s.attack.is_some() {
         return j.canonical();
     }
@@ -137,7 +160,7 @@ type Key = fn(&GameState) -> String;
 fn eq_sets_match_json_sets() {
     // 同一判定でまとめた集合が JSON 文字列の集合と同じものをまとめ、JSON が同じ局面は同じハッシュになる
     let projections: [(Eq, Hash, Key); 3] = [
-        (state_eq, lethal_key_hash, canon),
+        (state_eq, lethal_key_hash, canon_without_log),
         (lethal_key_eq, lethal_key_hash, |s| lethal_key(s, true)),
         (setup_key_eq, setup_key_hash, |s| lethal_key(s, false)),
     ];

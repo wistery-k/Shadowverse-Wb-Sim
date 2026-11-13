@@ -40,10 +40,14 @@ export class SandboxError extends Error {
   }
 }
 
-/** 局面を複製して f で書き換えた局面（f は複製を書き換える） */
+/**
+ * 局面を複製して f で書き換えた局面（f は複製を書き換える）。
+ * 手で書き換えた局面には対戦の経過が無いので、手札の記録（handLog。相手の AI がスペルブーストの回数を見込むのに使う）は消す
+ */
 export function edit(state: GameState, f: (s: GameState) => void): GameState {
   const s = structuredClone(state);
   f(s);
+  for (const pl of s.players) delete pl.handLog;
   return s;
 }
 

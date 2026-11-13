@@ -95,6 +95,8 @@ pub fn reference_options() -> SearchOptions {
         opp_hand_common: false,
         read_own_deck_apart: false,
         peek_opp_hand: false,
+        // 伏せた手札のスペルブーストの見込み（2026-11-13 に足した設定）は、凍結した相手では切る
+        opp_hand_boosts: false,
         rescore_mix: 0.0,
         rescore_race: None,
         draw_split: None,
@@ -177,6 +179,8 @@ pub fn strong_reference_options() -> SearchOptions {
         opp_hand_common: true,
         read_own_deck_apart: false,
         peek_opp_hand: false,
+        // 伏せた手札のスペルブーストの見込み（2026-11-13 に足した設定）は、凍結した相手では切る
+        opp_hand_boosts: false,
         rescore_mix: 0.0,
         rescore_race: None,
         draw_split: None,

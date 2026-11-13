@@ -191,7 +191,8 @@ fn queued_eq(a: &Queued, b: &Queued) -> bool {
     ability_eq(a.ability, b.ability) && ctx_eq(&a.ctx, &b.ctx)
 }
 
-/// プレイヤーの、山札・手札・場・クレスト以外が同じか
+/// プレイヤーの、山札・手札・場・クレスト以外が同じか。手札の記録（hand_log）は比べない
+/// （ルールに効かない相手の決定化のための記録なので、同じ局面に別の順番で着いても同じ局面とみなす）
 fn player_rest_eq(a: &PlayerState, b: &PlayerState) -> bool {
     a.leader_hp == b.leader_hp
         && a.leader_max_hp == b.leader_max_hp

@@ -481,6 +481,8 @@ struct Problem {
     state: String,
     /// ファイルの中身全部（指紋と書き戻し用）
     raw: Json,
+    /// 読んだファイル
+    path: String,
 }
 
 fn str_of(v: &Json, k: &str) -> Result<String, String> {
@@ -535,6 +537,7 @@ fn parse_problem(text: &str, file: &str) -> Result<Problem, String> {
             pass,
             state: sj.stringify(),
             raw: v.clone(),
+            path: file.to_string(),
         })
     })();
     r.map_err(|e| format!("{file}: {e}"))
@@ -1461,11 +1464,43 @@ fn list(argv: &[String]) -> Result<(), String> {
 
 /// 出どころの記録から打ち直して、同じ局面になるか（エンジンやカードが変わったかを見る）。記録の無い問は None
 fn replays_same(p: &Problem) -> Option<Result<bool, String>> {
+    replay_origin(p).map(|r| {
+        r.map(|s| {
+            let stored = p
+                .raw
+                .get("state")
+                .map(|x| x.canonical())
+                .unwrap_or_default();
+            state_to_json(&s).canonical() == stored
+        })
+    })
+}
+
+/// 局面の JSON から手札の記録（handLog）を除いたもの
+fn without_hand_logs(j: &Json) -> Json {
+    let mut j = j.clone();
+    if let Some(Json::Arr(pls)) = j.get("players").cloned() {
+        let pls = pls
+            .into_iter()
+            .map(|pl| match pl {
+                Json::Obj(fields) => {
+                    Json::Obj(fields.into_iter().filter(|(k, _)| k != "handLog").collect())
+                }
+                x => x,
+            })
+            .collect();
+        j.set("players", Json::Arr(pls));
+    }
+    j
+}
+
+/// 記録のある問を打ち直した局面（記録の無い問は None）
+fn replay_origin(p: &Problem) -> Option<Result<GameState, String>> {
     let o = p.raw.get("origin")?;
     let Some(Json::Arr(acts)) = o.get("actions") else {
         return None;
     };
-    let r = (|| -> Result<bool, String> {
+    let r = (|| -> Result<GameState, String> {
         let seed = match o.get("seed") {
             Some(Json::Num(x)) => *x as u32,
             _ => return Err("seed がありません".into()),
@@ -1497,12 +1532,7 @@ fn replays_same(p: &Problem) -> Option<Result<bool, String>> {
             }
             s = apply_legal(&s, &a);
         }
-        let stored = p
-            .raw
-            .get("state")
-            .map(|x| x.canonical())
-            .unwrap_or_default();
-        Ok(state_to_json(&s).canonical() == stored)
+        Ok(s)
     })();
     Some(r)
 }
@@ -1510,10 +1540,30 @@ fn replays_same(p: &Problem) -> Option<Result<bool, String>> {
 fn check(argv: &[String]) -> Result<(), String> {
     let mut argv = argv.to_vec();
     let dir = take(&mut argv, "--dir")?.unwrap_or_else(|| MISSES_DIR.into());
+    let write_logs = take_flag(&mut argv, "--write-hand-logs");
     no_rest(&argv)?;
     let ps = load(&dir)?;
     let mut differ = 0;
     for p in &ps {
+        // 打ち直した局面と手札の記録（handLog）だけが違う問は、記録を入れた局面に書き直す（2026-11-13 に記録を足したとき）
+        if write_logs {
+            if let (Some(Ok(s)), Some(stored)) = (replay_origin(p), p.raw.get("state")) {
+                let j = state_to_json(&s);
+                if j.canonical() != stored.canonical()
+                    && without_hand_logs(&j).canonical() == without_hand_logs(stored).canonical()
+                {
+                    let mut raw = p.raw.clone();
+                    raw.set("state", j);
+                    let mut text = String::new();
+                    pretty(&raw, 0, &mut text);
+                    text.push('\n');
+                    parse_problem(&text, &p.path)?;
+                    std::fs::write(&p.path, &text).map_err(|e| format!("{}: {e}", p.path))?;
+                    println!("{}: 読めた。記録から打ち直すと、手札の記録だけが違ったので、記録を入れた局面に書き直した", p.id);
+                    continue;
+                }
+            }
+        }
         let r = match replays_same(p) {
             None => "記録なし（手で作った局面・サンドボックス）".to_string(),
             Some(Ok(true)) => "記録から打ち直すと同じ局面".to_string(),

@@ -4,6 +4,7 @@
 use crate::data::*;
 use crate::game::handle_internal;
 use crate::state::*;
+use crate::state_json::card_shows_x;
 
 // ---- 対象 ----
 
@@ -573,6 +574,9 @@ pub fn leave_board(s: &mut GameState, iid: Iid, mut reason: LeaveReason) {
     }
 
     if c.is_follower {
+        if s.players[p].hand.iter().any(|h| !h.revealed) {
+            s.players[p].hand_log.push(HandEv::AllyLeft { times: 1 });
+        }
         for hi in 0..s.players[p].hand.len() {
             fire_hand(s, p, hi, On::AllyLeaveInHand);
         }
@@ -754,6 +758,30 @@ pub fn fire_ally_fuse(s: &mut GameState, p: PlayerIndex) {
     });
 }
 
+/// 手札のカード ids を times 回スペルブーストすることを、手札の記録に足す。伏せたカードすべてなら Boost、
+/// 一部なら 1 枚ずつ BoostOne（どの枠かは相手に分からない）
+fn log_spellboost(s: &mut GameState, ids: &[Iid], times: i32) {
+    let times = sat_u16(times);
+    for pl in s.players.iter_mut() {
+        let hidden = pl.hand.iter().filter(|h| !h.revealed).count();
+        let hit = pl
+            .hand
+            .iter()
+            .filter(|h| !h.revealed && ids.contains(&h.iid))
+            .count();
+        if hit == 0 {
+            continue;
+        }
+        if hit == hidden {
+            pl.hand_log.push(HandEv::Boost { times });
+        } else {
+            for _ in 0..hit {
+                pl.hand_log.push(HandEv::BoostOne { times });
+            }
+        }
+    }
+}
+
 /// 手札のカード（iid）をスペルブーストする
 pub fn fire_spellboost(s: &mut GameState, p: PlayerIndex, iid: Iid, times: i32) {
     for _ in 0..times {
@@ -762,6 +790,130 @@ pub fn fire_spellboost(s: &mut GameState, p: PlayerIndex, iid: Iid, times: i32) 
         };
         s.players[p].hand.make_mut()[hi].boosts += 1;
         fire_hand(s, p, hi, On::Spellboost);
+    }
+}
+
+// ---- 伏せた手札のスペルブースト等の見込み（相手の AI の決定化。docs/ai-notes/13-2026-11-13.md「伏せた相手の手札のスペルブーストを決定化で見込む」） ----
+
+/// 手札で働く能力（スペルブーストされたとき・手札にある間に味方が場を離れたとき）を持つか
+pub fn has_hand_trigger(c: CardIdx, on: On) -> bool {
+    abilities_of(c)
+        .abilities
+        .iter()
+        .any(|a| a.trigger.on() == on)
+}
+
+/// 能力を解決する写しの局面（解決中の効果・誘発待ち・選択待ちを空にする）
+fn hand_scratch(s: &GameState) -> GameState {
+    let mut t = s.clone();
+    t.stack.clear();
+    t.queue.clear();
+    t.pending = None;
+    t
+}
+
+/// 手札のカード iid に、手札で働くきっかけ on を 1 回起こして解決する
+fn hand_step(t: &mut GameState, p: PlayerIndex, iid: Iid, on: On) {
+    if on == On::Spellboost {
+        fire_spellboost(t, p, iid, 1);
+    } else if let Some(hi) = t.players[p].hand.iter().position(|c| c.iid == iid) {
+        fire_hand(t, p, hi, on);
+    }
+    run(t);
+}
+
+/// hand_feature_seq の結果
+pub type FeatureSeq = std::rc::Rc<Vec<HandEv>>;
+
+/// hand_feature_seq で作る回数の上限（これより多い回数はこの回数と同じとみなす）
+pub const HAND_SEQ_LEN: usize = 30;
+
+/// 作り直したカード c が、手札でスペルブースト（on が Spellboost）または味方が場を離れた（AllyLeaveInHand）のを
+/// j 回受けた後に、出したとき相手に見える中身（HandEv::Out。j = 0..=HAND_SEQ_LEN）。
+/// 手札で働く能力は自分自身だけを変える（コスト・X・攻撃力・変身）ので、カードごとに 1 度だけ作って覚える
+pub fn hand_feature_seq(template: &GameState, c: CardIdx, on: On) -> std::rc::Rc<Vec<HandEv>> {
+    thread_local! {
+        static MEMO: std::cell::RefCell<std::collections::HashMap<(CardIdx, bool), FeatureSeq>> =
+            Default::default();
+    }
+    let key = (c, on == On::Spellboost);
+    if let Some(v) = MEMO.with(|m| m.borrow().get(&key).cloned()) {
+        return v;
+    }
+    let mut t = hand_scratch(template);
+    let p = 0;
+    let h = t.new_hand_card(c, None);
+    let iid = h.iid;
+    t.players[p].hand.make_mut().push(h);
+    let mut seq = Vec::with_capacity(HAND_SEQ_LEN + 1);
+    for j in 0..=HAND_SEQ_LEN {
+        if j > 0 {
+            hand_step(&mut t, p, iid, on);
+        }
+        let Some(cur) = t.players[p].hand.iter().find(|x| x.iid == iid) else {
+            break;
+        };
+        seq.push(HandEv::out_of(cur, card_shows_x(cur.card)));
+    }
+    let v = std::rc::Rc::new(seq);
+    MEMO.with(|m| m.borrow_mut().insert(key, v.clone()));
+    v
+}
+
+/// 伏せた手札のカード（iid, スペルブーストの回数, 味方が場を離れた回数）に、その回数だけきっかけを起こし直す（決定化で配り直したカードに）。
+/// コスト・X・攻撃力・変身はエンジンの能力の解決で出す。解決は写しの局面で行い、手札のカードだけ戻す
+pub fn reapply_in_hand(s: &mut GameState, p: PlayerIndex, items: &[(Iid, u16, u16)]) {
+    let card_of = |s: &GameState, iid: Iid| {
+        s.players[p]
+            .hand
+            .iter()
+            .find(|c| c.iid == iid)
+            .map(|c| c.card)
+    };
+    let needs_engine = items.iter().any(|&(iid, b, a)| {
+        card_of(s, iid).is_some_and(|c| {
+            (b > 0 && has_hand_trigger(c, On::Spellboost))
+                || (a > 0 && has_hand_trigger(c, On::AllyLeaveInHand))
+        })
+    });
+    if !needs_engine {
+        let hand = s.players[p].hand.make_mut();
+        for &(iid, b, _) in items {
+            if let Some(h) = hand.iter_mut().find(|c| c.iid == iid) {
+                h.boosts += b as i32;
+            }
+        }
+        return;
+    }
+    let mut t = hand_scratch(s);
+    for &(iid, b, a) in items {
+        let Some(c) = card_of(&t, iid) else { continue };
+        if has_hand_trigger(c, On::AllyLeaveInHand) {
+            for _ in 0..a {
+                hand_step(&mut t, p, iid, On::AllyLeaveInHand);
+            }
+        }
+        if has_hand_trigger(c, On::Spellboost) {
+            for _ in 0..b {
+                hand_step(&mut t, p, iid, On::Spellboost);
+            }
+        } else if let Some(h) = t.players[p]
+            .hand
+            .make_mut()
+            .iter_mut()
+            .find(|h| h.iid == iid)
+        {
+            h.boosts += b as i32;
+        }
+    }
+    let hand = s.players[p].hand.make_mut();
+    for &(iid, _, _) in items {
+        if let (Some(h), Some(n)) = (
+            hand.iter_mut().find(|c| c.iid == iid),
+            t.players[p].hand.iter().find(|c| c.iid == iid),
+        ) {
+            *h = n.clone();
+        }
     }
 }
 
@@ -858,8 +1010,15 @@ fn hide_hand_choice(s: &mut GameState, p: PlayerIndex, candidates: &[Iid]) {
     if !s.players[p].hand.iter().any(marked) {
         return;
     }
-    for h in s.players[p].hand.make_mut().iter_mut() {
+    let pl = &mut s.players[p];
+    for h in pl.hand.make_mut().iter_mut() {
         if candidates.contains(&h.iid) {
+            if h.revealed {
+                // 公開されていたカードが伏せた枠になった（手札の記録）
+                pl.hand_log.push(HandEv::InWith {
+                    boosts: sat_u16(h.boosts),
+                });
+            }
             h.revealed = false;
             h.drawn_by = None;
         }
@@ -1186,6 +1345,9 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 frame.ctx.set_var(var, hand_cost(&s.players[q].hand[i]));
                 let h = s.players[q].hand.make_mut().remove(i);
                 s.players[q].graveyard += 1;
+                if !h.revealed {
+                    s.players[q].hand_log.push(HandEv::OutUnknown);
+                }
                 let on_discarded = own_abilities(h.card, On::Discarded);
                 // 捨てたカードは相手には見えない。公開されていたカードと、【捨てられたとき】が働くカードは分かる
                 if !h.revealed && on_discarded.is_empty() {
@@ -1284,7 +1446,9 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             }
         }
         Effect::Spellboost { target, times } => {
-            for id in targets!(target) {
+            let ids = targets!(target);
+            log_spellboost(s, &ids, *times);
+            for id in ids {
                 if let Some((q, _)) = s.find_hand(id) {
                     fire_spellboost(s, q, id, *times);
                 }
