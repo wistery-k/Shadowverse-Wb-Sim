@@ -41,7 +41,10 @@ export const SPECIAL_CARDS: readonly Card[] = AZVALDT_SPECIALS.filter((sp) => sp
     ? { ...base, name: `${src.name}（アクセラレート）`, type: "spell" }
     : { ...base, name: `結晶：${src.name}`, type: "amulet", ...(sp.countdown !== undefined ? { countdown: sp.countdown } : {}) };
 });
-/** 信仰（エンジンではリーダーエリアに置くクレストの一種として持ち、信仰値を数える） */
+/**
+ * 信仰。ルールではクレストではない（docs/rules.md 12章）が、エンジンではリーダーエリアの表の一種として持ち、信仰値（`faith`）を数える。
+ * クレストを消す効果（`banishCrests`。アルビオンバハムート）は、信仰値を持つものを消さない
+ */
 export const FAITH_CRESTS: readonly Crest[] = AZVALDT_SPECIALS.filter((sp) => sp.kind === "faith").map((sp) => ({
   id: sp.id,
   name: `信仰：${sourceOf(sp).name}`,

@@ -149,6 +149,21 @@ describe("信仰", () => {
     expect(t.players[me].crests.map((c) => [c.crestId, c.faith])).toEqual([[faithId, 3]]);
     expect(t.players[opp].crests).toEqual([]);
   });
+
+  it("マリガンの後に置かれた信仰（信仰値 0）も、アルビオンバハムートでは消えない", () => {
+    let s = createGame({ decks: [[...Array<string>(39).fill(FILLER), id("旧き天書・リアントース")], Array<string>(40).fill(FILLER)], seed: 1 });
+    s = applyAction(s, { type: "mulligan", player: s.first, swap: [] });
+    s = applyAction(s, { type: "mulligan", player: (1 - s.first) as PlayerIndex, swap: [] });
+    const faithId = specialId("旧き天書・リアントース", "faith");
+    const p = 0 as PlayerIndex;
+    expect(s.players[p].crests.map((c) => [c.crestId, c.faith])).toEqual([[faithId, 0]]);
+    while (s.active !== p) s = endTurn(s);
+    s.players[p].pp = s.players[p].maxPp = 10;
+    // ふつうのクレストも 1 つ持たせ、消滅が働いたことを見る
+    s.players[p].crests.push({ iid: s.nextIid++, crestId: "10744112", countdown: null, order: s.nextOrder++, usedOncePerTurn: {} });
+    const t = mode(play(s, toHand(s, p, "アルビオンバハムート")), 2);
+    expect(t.players[p].crests.map((c) => [c.crestId, c.faith])).toEqual([[faithId, 0]]);
+  });
 });
 
 describe("ランプD", () => {
