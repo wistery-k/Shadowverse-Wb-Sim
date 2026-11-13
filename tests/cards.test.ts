@@ -113,10 +113,15 @@ describe("前期のローテーションのカードプール（data/pools/azval
   it("ベーシックと第4〜9弾の515種と、参照されるトークン56種で、全カードのタイプが判明している", () => {
     const count = (set: Card["set"]) => cards.filter((c) => c.set === set).length;
     expect(count("basic")).toBe(56);
-    expect(count("six_dragons") + count("flower_revelry") + count("apocalypse_pact")).toBe(76 * 3);
-    expect(count("godslayer_anathema") + count("chronicle_of_destiny") + count("azvaldt_revenant")).toBe(77 + 78 + 76);
+    expect(count("six_dragons")).toBe(76);
+    expect(count("flower_revelry")).toBe(76);
+    expect(count("apocalypse_pact")).toBe(76);
+    expect(count("godslayer_anathema")).toBe(77);
+    expect(count("chronicle_of_destiny")).toBe(78);
+    expect(count("azvaldt_revenant")).toBe(76);
     expect(count("token")).toBe(56);
     expect(count("legend_dawn")).toBe(0);
+    expect(cards).toHaveLength(571);
     expect(cards.filter((c) => c.tribes === null)).toEqual([]);
   });
 
