@@ -8,6 +8,7 @@
 - 朝の決めた時刻（既定 07:00、東京）までに次の区切りが終わらない見込みなら、区切りの切れ目で止まる。手で止めるのは `stop`
 - 回す本体は、セッションから切り離して立てる（`setsid`）。Remote Control のセッションが終わっても続く
 - 本体は `scripts/night-main.ts`。テストは `tests/night.test.ts`（svwb の代わりに台帳の行だけを書く偽物で、区切り・再開・止め方・まとめを確かめる）
+- 自己対戦から学習・判定までの学び直しの流れも 1 つのキューに並べられる（下の「学び直しの流れ」）
 
 ## 1 晩の流れ
 
@@ -55,6 +56,7 @@ npm run night -- list
 ## ジョブのファイル
 
 1 行 1 ジョブで、svwb のコマンドと同じ形（`compare`・`yardstick`・`profile`・`misses`・`survey`。行の頭の `svwb` は書いても書かなくてもよい）。
+学び直しの流れ（自己対戦・学習・後処理）のジョブ（`td selfplay`・`beam-gap`・`td`・`potential`・`pick`）は下の「学び直しの流れ」。
 `#` から行の終わりまでは書き添え。上から順に回す。例:
 
 ```sh
@@ -65,7 +67,8 @@ compare 5600 '{"valueNet":"data/models/x.json"}' '{}' 200000 --label 補正x
 profile --games 49
 ```
 
-- **compare**: `compare <試合数> '<A>' '<B>' [最初の試合番号] [B のデッキ] [--no-mirror] [--decks …] --label 名前`（`npm run compare` と同じ）
+- **compare**: `compare <試合数> '<A>' '<B>' [最初の試合番号] [B のデッキ] [--no-mirror] [--decks …] [--with <デッキ名> | --without <デッキ名>] --label 名前`（`npm run compare` と同じ。
+  `--with` はそのデッキの絡む組だけ、`--without` は絡まない組だけ。試合番号はその組の k 番目の番号）
 - **yardstick**: `yardstick [--ref classic|strong] [--opts '<設定>'] [--games 1000] [--start 0] --label 名前`
 - **profile**（速さ）: `profile [--opts '<設定>'] [--games 49] [--start 0] [--rhino]`。結果は回のフォルダの `speed-<番号>.md`・`.json`（`svwb profile` の報告）
 - **misses**（見落とし問題集、`docs/misses.md`）: `misses [run] [--opts '<設定>'] [--trials 24] [--seed 1] --label 名前`。分けずに 1 区切りで回す。
@@ -78,7 +81,30 @@ profile --games 49
 - 試合番号（シード）の範囲は、前の回と重ならないように選ぶ（同じ試合を 2 回数えない。`npm run ledger -- runs --grep <名前>` で前の範囲を見る）
 - キューでは使えない引数: `--no-ledger`（結果は台帳から集める）・`--replays`（区切りごとにファイルが替わる）・`yardstick --record`
   （物差しの表に足すのは、終わった後に足し合わせた数字で）・`profile --json/--report/--baseline/--record`（キューが回のフォルダに書く）
-- `--est <秒>`: 1 試合の見込みの秒（回すマシン・スレッド数で）。キューだけが読む。読み方を大きく変える設定（深い読み等）で、台帳にまだ回が無いときに
+- `--est <秒>`: 1 試合の見込みの秒（回すマシン・スレッド数で）。キューだけが読む。読み方を大きく変える設定（深い読み等）で、台帳にまだ回が無いときに。
+  `td`・`potential` は全体の秒
+
+### 学び直しの流れ（2026-11-13）
+
+自己対戦から学習・後処理・判定の compare までを 1 つのキューに並べる（例は `night/relearn-b.txt`、小さく試すのは `night/relearn-b-small.txt`）。
+ファイルは回のフォルダに作り、ジョブの行では `@/` と書く（`@/s-3.jsonl.gz` 等。設定の JSON の中にも書ける）。`{1..20}` は `1,2,…,20` のカンマ区切りに開く
+（`--data @/s-{1..20}.jsonl.gz`）。
+
+- **td selfplay**: `td selfplay --games N [--start S] --chunk C --out @/s-{k}.jsonl.gz --est <1 試合の秒> [ほかの引数]`。C 試合ずつ（大きさはそろえる）の区切りで、
+  `{k}` に区切りの番号（1 から）を入れたファイルに書く。`.gz` なら書き終えた後にキューが gzip する。区切りの大きさは時間でなく `--chunk` で決める（後のジョブがファイルの名前で読むので）
+- **beam-gap**（見込みの学びのデータ）: `beam-gap --games N --from S --chunk C --inputs @/pot-{k}.jsonl [--out @/pot-{k}-rows.jsonl] --est … [ほかの引数]`。区切り方は td selfplay と同じ
+- **td**・**potential**（TypeScript の学習。`npm run td`・`npm run potential` と同じ引数）: `td train … --out @/n.json --est <全体の秒>`。1 つのジョブが 1 区切りで、
+  `--out` のファイルを作る。途中では止められない（止める時刻に 15 分を足しても終わらなければ止め、次は最初から）ので、`--est` を多めに書く。
+  `start` のときにスクリプトをビルドして回のフォルダの `bin/td/`・`bin/potential/` に置き、それを回す（夜の間にチェックアウトが替わっても同じコード）
+- **pick**: `pick --compare <前の compare の台帳の名前> --pass <ファイル> --fail <ファイル> --out <ファイル>`。その compare の済んだ区切りをまとめ、
+  A の勝率 − 50% − 2 SE が 0 より大きければ `--pass`、そうでなければ `--fail` のファイルを `--out` に写す（回す前に決めた線で、後のジョブの設定を選ぶ）。
+  結果は回のフォルダの `pick-<番号>.json` と、`status`・`finish` の表
+- 作るファイル（td selfplay・beam-gap は区切りのファイル、td・potential・pick は `--out`）は、途中は `.tmp` に書き、済んでから名前を替える。
+  ファイルがあれば、印が無くても済んだものとする（手でファイルを置けば、そのジョブを飛ばせる）
+- `@/` のファイルは前のジョブが作るものだけを読める（ジョブのファイルを読むときに確かめる）。回すときに前のジョブが作るはずのファイルが無ければ
+  （失敗した・まだ済んでいない）、そのジョブを回さずに失敗にする。`resume` で、失敗したジョブから続きを回す
+- `start` の確かめでは、`@/` のモデルを今の既定（`valueNet` は `data/value-net.json`、`potentialNet` は `data/potential-net.json`）にして設定を読み、
+  td selfplay・beam-gap は 0 試合で回す。td・potential・pick の引数は確かめない（小さく試してから PC に回す）
 
 ## 見積もりと区切り
 
@@ -106,6 +132,8 @@ profile --games 49
 | 台帳の行を書いた直後に電源が切れた（印が無い） | `resume` で、台帳に同じ引数の行があれば回さずに印を作る（survey は、出力に区切りの試合が全部あれば） |
 | survey の区切りが途中で止まった | 書いた試合（`--batch` 試合ごとに書く）は残る。`resume` で回し直すと、出力に既にある試合を飛ばして続きから |
 | 区切りが失敗した（svwb が 0 以外で終わった） | そのジョブの残りを飛ばし、次のジョブへ。`status` の「メモ」に出る。`resume` でやり直す |
+| 作るファイルができた直後に電源が切れた（印が無い） | `resume` で、作るファイルがあれば回さずに印を作る（学び直しの流れのジョブ） |
+| 前のジョブが作るファイルが無い | そのジョブを回さずに失敗にする（「入力がありません」）。前のジョブを `resume` でやり直せば、続けて回る |
 
 - 回すのは `start` のときに回のフォルダに写した svwb（`bin/svwb`）。夜の間にほかのセッションが同じ `/workspace` で組み立て直しても、
   `resume` が次の夜でも、同じコードで回る。台帳の行のコミットとブランチも `start` のときのもの（`SVWB_COMMIT`・`SVWB_BRANCH`）
@@ -135,7 +163,8 @@ profile --games 49
 | `speed-<番号>.md`・`.json` | profile の報告 |
 | `survey-<番号>.jsonl`・`.md`・`-states/` | survey の局面ごとの結果（全部の区切りが足す）・`finish` が出す報告・問題集に足す候補の局面 |
 | `ledger-jobs.jsonl`・`summary.md`・`merged.json` | `finish` がまとめた行・まとめの表・台帳に足した区切り |
-| `bin/svwb` | 回す svwb の写し（`pack-run` には入らない） |
+| `bin/svwb`・`bin/td/`・`bin/potential/` | 回す svwb の写しと、td・potential のビルド結果（`pack-run` には入らない） |
+| `@/` のファイル（`s-<k>.jsonl.gz`・`*.json` 等）・`pick-<番号>.json` | 学び直しの流れのジョブが作ったファイルと、pick の結果 |
 
 ## 台帳の行のコミット（決めたこと、2026-11-10）
 
@@ -167,7 +196,7 @@ profile --games 49
 
 ## 長い回（自己対戦・学習）を区切れるか（2026-11-10 に調べた）
 
-今のキューに入れられるのは compare・yardstick・profile・misses・survey だけ。自己対戦と学習は、今までどおり `cloud/jobs/relearn.sh` 等を回すと決めた夜に流す。
+2026-11-13 に、上の「学び直しの流れ」のジョブとしてキューに入れた（自己対戦は 3000 試合ずつのファイル、学習は 1 つのジョブ）。以下はその前に調べたこと。
 
 - **`td selfplay`**: コマンドの中には再開の仕組みが無い（`--out` を最初から書き直し、終わった順に書く）。ただし試合は番号（`--start` から）とモデルで決まるので、
   番号の範囲で分けて別のファイルに書けば、1 回で回したのと同じ試合の集まりになる（6 試合を 1 回と 3＋3 で回し、行を並べ替えると一致した）。

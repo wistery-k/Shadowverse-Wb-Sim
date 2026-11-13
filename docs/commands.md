@@ -126,12 +126,14 @@ npm run diverge -- --a <記録のディレクトリ A> --b <記録のディレ�
 
 ```sh
 npm run compare -- [試合数 28] ['<A の設定>' '{}'] ['<B の設定>' '{}'] [最初の試合番号 0] [B のデッキ] [--no-mirror] [--decks <7 つのデッキ>] [--replays 記録.jsonl]
-                   [--label 名前] [--no-ledger]
+                   [--with <デッキ> | --without <デッキ>] [--label 名前] [--no-ledger]
 ```
 
 引数は名前なしで、この順に書く。1 試合番号ごとに席とデッキを入れ替えて 2 試合打つので、試合数 105 なら 210 試合。
 A の勝率と、A のデッキごとの勝率を出す。5 番目にデッキ名を書くと、B がそのデッキの試合だけ行う。設定の JSON は下の「探索 AI の設定」。
 `--replays` で、試合ごとのデッキ・シード・行動の列を JSON Lines で書く（下の「リプレイ検索」で読む。打つ手は変わらない）。
+`--with <デッキ>` はそのデッキの絡む組（49 組のうち 13 組）だけ、`--without <デッキ>` は絡まない 36 組だけを打つ（試合番号 k は、その組の k 番目の番号。
+見ていないデッキの落ち方と、学び足しがほかのデッキどうしを壊していないかを測る用。docs/STATE.md の案 B の問い 3）。
 回すたびに、結果を実験の台帳 `docs/ledger.jsonl` に 1 行足す（下の「ledger」）。`--label` で名前を付け、`--no-ledger` で書かない（名前付きの引数は、どこに書いてもよい）。
 
 例: `npm run compare -- 105 '{}' '{"lethal":false}'`
@@ -309,6 +311,7 @@ npm run night -- status | stop [--now] | resume --yes | finish --commit | list
 
 PC で対戦を回す夜のキュー。ジョブのファイルは 1 行 1 ジョブで、svwb の `compare`・`yardstick`・`profile`・`misses`・`survey` と同じ形（`--label` が要る）。
 5〜10 分の区切りごとに結果を回のフォルダ（`~/svwb-data/night/<名前>/`）に残し、電源が切れても続きから回る。朝の `finish` がジョブごとに 1 行にまとめて台帳に足す。
+自己対戦から学習・判定までの学び直しの流れ（`td selfplay`・`beam-gap`・`td`・`potential`・`pick` のジョブ）も並べられる（`night/relearn-b.txt`）。
 物差し 2 つと速さと見落とし問題集の定例は `night/routine.txt`。流れ・引数・止まり方・台帳のコミットのしかたは [night.md](night.md)（`npm run night -- help` にも引数の一覧）。
 
 ## profile

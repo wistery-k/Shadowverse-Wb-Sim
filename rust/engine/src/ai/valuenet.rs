@@ -9,9 +9,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 /// カード・クレストごとの入力の種類。モデルはこの並びの部分列を持つ（足す前のモデルも読める）。
-/// 後ろの 4 つは場のフォロワーの攻撃力・体力（カードごとの合計を 5 で割る）。カードの枚数だけでは、
-/// バフを受けたナイトと素のナイトを区別できない（docs/ai-notes.md「補正の入力に攻撃力・体力を足す」）
-pub const ZONES: [&str; 14] = [
+/// 10〜13 は場のフォロワーの攻撃力・体力（カードごとの合計を 5 で割る）。カードの枚数だけでは、
+/// バフを受けたナイトと素のナイトを区別できない（docs/ai-notes.md「補正の入力に攻撃力・体力を足す」）。
+/// 最後の 2 つ（2026-11-13）は山札の中身: 自分の山札に残っているカードの枚数（myDeckCards）と、相手のまだ見えていないカード
+/// （伏せた手札・山札・どれか分からない捨てたカード）の枚数（oppUnseen）。どちらも決定化で並べ直しても変わらない（ai/determinize.rs は
+/// 自分の山札は順番だけを、相手は伏せた手札・山札・どれか分からない捨てたカードを合わせた中で配り直す）。docs/value-net.md「入力」
+pub const ZONES: [&str; 16] = [
     "myHand",
     "myHandBoost",
     "myBoard",
@@ -26,7 +29,12 @@ pub const ZONES: [&str; 14] = [
     "myBoardDef",
     "oppBoardAtk",
     "oppBoardDef",
+    "myDeckCards",
+    "oppUnseen",
 ];
+/// 山札の中身の入力（ZONES の添字）
+const ZONE_MY_DECK: usize = 14;
+const ZONE_OPP_UNSEEN: usize = 15;
 /// 数値の入力（ZONES と同じく、モデルはこの並びの部分列を持つ）。
 /// "after" より後ろは場のフォロワーの合計とキーワードを持つ数（同上）。
 /// 最後の "imagined" は、探索が相手のターンを読んだ後の想像の局面か（ValuePhase::Imagined。docs/ai-notes.md「読みの中の相手のずれを学習で直す」）
@@ -132,6 +140,8 @@ pub struct ValueNet {
     vocab_card: Vec<Option<usize>>,
     vocab_crest: Vec<Option<usize>>,
     vocab_len: usize,
+    /// モデルの入力の並び（vocab・zones・scalars。自己対戦の書き出しの先頭の行に書く）
+    layout: (Vec<String>, Vec<String>, Vec<String>),
     /// ZONES・SCALARS の各項目の、モデルの入力での添字（モデルに無い項目は None）
     zone_slot: [Option<usize>; ZONES.len()],
     scalar_slot: [Option<usize>; SCALARS.len()],
@@ -149,6 +159,9 @@ pub struct ValueNet {
     pub base_weights: serde_json::Map<String, serde_json::Value>,
     /// 補正の最初の層の入力のうち、局面から作る入力（encode）の数。場のカードのネットワークの出力はこの後ろに入る
     n_base: usize,
+    /// 最初の層の行が全部 0 の入力（推論で足さない。足しても値は同じ。npm run td -- extend で広げた行は 0 なので、
+    /// 広げただけのモデルは広げる前と同じ値を、ほぼ同じ速さで出す）
+    zero_row: Vec<bool>,
     board: Option<BoardNet>,
 }
 
@@ -341,7 +354,12 @@ impl ValueNet {
                 vocab_card[c as usize] = Some(k);
             }
         }
+        let hn = raw.hidden;
+        let zero_row = (0..n_base)
+            .map(|i| raw.w1[i * hn..i * hn + hn].iter().all(|&x| x == 0.0))
+            .collect();
         Ok(ValueNet {
+            layout: (raw.vocab.clone(), raw.zones.clone(), raw.scalars.clone()),
             vocab_card,
             vocab_crest,
             vocab_len: raw.vocab.len(),
@@ -358,8 +376,33 @@ impl ValueNet {
             c: raw.c,
             base_weights: raw.base_weights,
             n_base,
+            zero_row,
             board,
         })
+    }
+
+    /// 入力の並び（自己対戦の書き出しの先頭の行 {"tdLayout": …} の中身。学習側がこれを見て、モデルの並びに読み替える）
+    pub fn layout_json(&self) -> String {
+        let list = |xs: &[String]| {
+            xs.iter()
+                .map(|x| serde_json::Value::String(x.clone()).to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        format!(
+            "{{\"vocab\":[{}],\"zones\":[{}],\"scalars\":[{}]}}",
+            list(&self.layout.0),
+            list(&self.layout.1),
+            list(&self.layout.2)
+        )
+    }
+
+    /// カード・クレストごとの入力 name（ZONES の 1 つ）を持つか
+    pub fn has_zone(&self, name: &str) -> bool {
+        ZONES
+            .iter()
+            .position(|x| *x == name)
+            .is_some_and(|j| self.zone_slot[j].is_some())
     }
 
     /// ファイル（npm run td が書き出すモデル）から読む
@@ -411,6 +454,9 @@ impl ValueNet {
             h.clear();
             h.extend_from_slice(&self.b1);
             for &(i, x) in &acc.0 {
+                if self.zero_row[i] {
+                    continue;
+                }
                 let row = &self.w1[i * hn..i * hn + hn];
                 for (hj, &r) in h.iter_mut().zip(row) {
                     *hj += x * r;
@@ -513,6 +559,11 @@ impl Acc {
             None => self.0.push((i, v)),
         }
     }
+    /// ほかに足さない添字（山札の中身の入力。カードごとにまとめてから 1 回だけ入れる）
+    #[inline]
+    fn push(&mut self, i: usize, v: f64) {
+        self.0.push((i, v));
+    }
     #[inline]
     fn set(&mut self, i: usize, v: f64) {
         match self.0.iter_mut().find(|(k, _)| *k == i) {
@@ -584,6 +635,22 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
             }
         }
     }
+    // 山札の中身（自分の山札に残っているカード・相手のまだ見えていないカード）。カードごとの枚数を、vocab の添字の順に入れる
+    // （山札の順番によらず同じ並びにするので、決定化した局面の補正はもとの局面と同じ値になる）
+    if let Some(z) = net.zone_slot[ZONE_MY_DECK] {
+        let cards = me.deck.iter().map(|r| r.card);
+        push_counts(net, acc, z * v, cards);
+    }
+    if let Some(z) = net.zone_slot[ZONE_OPP_UNSEEN] {
+        let cards = opp
+            .hand
+            .iter()
+            .filter(|h| !h.revealed)
+            .map(|h| h.card)
+            .chain(opp.deck.iter().map(|r| r.card))
+            .chain(opp.hidden_discards.iter().copied());
+        push_counts(net, acc, z * v, cards);
+    }
     let base = net.n_zones * v;
     let b = |x: bool| if x { 1.0 } else { 0.0 };
     let (m, o) = (&sums[0], &sums[1]);
@@ -632,7 +699,38 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
     }
 }
 
+/// cards のカードごとの枚数を、vocab の添字の小さい順に acc に入れる（添字は base + vocab の添字。vocab に無いカードは入れない）
+fn push_counts(
+    net: &ValueNet,
+    acc: &mut Acc,
+    base: usize,
+    cards: impl Iterator<Item = crate::data::CardIdx>,
+) {
+    COUNTS.with(|c| {
+        let (counts, touched) = &mut *c.borrow_mut();
+        if counts.len() < net.vocab_len {
+            counts.resize(net.vocab_len, 0);
+        }
+        touched.clear();
+        for card in cards {
+            if let Some(k) = net.vocab_card[card as usize] {
+                if counts[k] == 0 {
+                    touched.push(k);
+                }
+                counts[k] += 1;
+            }
+        }
+        touched.sort_unstable();
+        for &k in touched.iter() {
+            acc.push(base + k, counts[k] as f64);
+            counts[k] = 0;
+        }
+    });
+}
+
 thread_local! {
+    /// push_counts の作業場所（vocab の添字ごとの枚数と、0 でない添字）
+    static COUNTS: RefCell<(Vec<u32>, Vec<usize>)> = const { RefCell::new((Vec::new(), Vec::new())) };
     static BUF: RefCell<(Acc, Vec<f64>, Vec<f64>)> = const { RefCell::new((Acc(Vec::new()), Vec::new(), Vec::new())) };
     static BOARD_BUF: RefCell<BoardBuf> = RefCell::new(BoardBuf::default());
 }

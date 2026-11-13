@@ -57,6 +57,11 @@
 //     モデルが見ている価値（その局面の勝つ確率の予測の差）を比べる（docs/ai-notes.md「介入データを TD 学習に混ぜる」）。
 //     --opp なら、カードの持ち主の相手がそのデッキの試合だけで数える（そのデッキとの対戦でのカードの価値。
 //     docs/ai-notes.md「ロイヤルに勝ち越せるデッキを探す」）。--min 未満の対しかないカードは表に出さない
+//   自己対戦のファイルは .gz でもよい。1 行目が {"tdLayout": …}（td selfplay が書く入力の並び）なら、"x" を学ぶモデルの並びに読み替える
+//   （モデルに無い入力は捨てる。並びの行が無いファイルは、学ぶモデル（--dropInputs なら外す前のモデル）の並びとみなす）。docs/value-net.md「自己対戦のデータ」
+//   train ... --dropInputs myDeckCards,oppUnseen: 出発点のモデルからその入力（zones・scalars の名前）を外して学ぶ（入力を足したモデルで作った自己対戦から、足す前の補正を学ぶ）
+//   train・prune ... --excludeDecks <デッキ名,...>: どちらかの席がそのデッキの試合を学ばない・数えない。--onlyDecks <デッキ名,...>: そのデッキの試合だけ
+//     （見ていないデッキでの落ち方と、学び足しを測る用。デッキ名はデフォルトデッキの名前）
 //   npm run td -- prune --model m4.json --data d0.jsonl,d1.jsonl,... --out data/value-net.json [--seat both]
 //     学習データに一度も現れなかった入力（デフォルトデッキに無いカードなど）の重みを 0 にする。学ばれずに初期値の乱数のまま残っているので、
 //     そのカードを使う自作デッキで補正がでたらめに動かないようにする（ファイルも小さくなる）。
@@ -92,7 +97,9 @@
 //
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { gunzipSync } from "node:zlib";
 import { ALL_CARDS, ALL_CRESTS } from "../src/cards";
+import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { attributeMatrix, attributeNames, attributeRow, choleskyFactor, choleskySolve, normalEquations, ridgePenalty, ridgeSolve, rowCanOccur, sparseRows } from "./cardAttrs";
 import { nextRandom, type PlayerIndex } from "../src/engine";
 import { DEFAULT_WEIGHTS } from "../src/ai/data";
@@ -421,9 +428,89 @@ interface CmpRecord {
   };
 }
 
-/** JSON Lines の 1 行（試合か打ち比べ） */
-const parseLine = (line: string): GameRecord | CmpRecord => JSON.parse(line) as GameRecord | CmpRecord;
 const isCmp = (r: GameRecord | CmpRecord): r is CmpRecord => "cmp" in r;
+
+/** 入力の並び（モデルの vocab・zones・scalars。自己対戦の "x" の添字の意味） */
+export interface InputLayout {
+  vocab: readonly string[];
+  zones: readonly string[];
+  scalars: readonly string[];
+}
+
+/**
+ * データの並び from の入力の添字 → 並び to の添字（to に無い入力は -1）。同じ並びなら null（読み替えない）。
+ * 添字は「ゾーンの番号 × vocab の数 ＋ vocab の番号」、その後ろに数値の入力（valueNet.ts の inputSize と同じ）
+ */
+export function layoutMap(from: InputLayout, to: InputLayout): Int32Array | null {
+  const same = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+  if (same(from.vocab, to.vocab) && same(from.zones, to.zones) && same(from.scalars, to.scalars)) return null;
+  const Vf = from.vocab.length, Vt = to.vocab.length;
+  const vocabTo = new Map(to.vocab.map((id, k): [string, number] => [id, k]));
+  const map = new Int32Array(from.zones.length * Vf + from.scalars.length).fill(-1);
+  from.zones.forEach((z, zf) => {
+    const zt = to.zones.indexOf(z);
+    if (zt < 0) return;
+    from.vocab.forEach((id, k) => {
+      const kt = vocabTo.get(id);
+      if (kt !== undefined) map[zf * Vf + k] = zt * Vt + kt;
+    });
+  });
+  from.scalars.forEach((sc, j) => {
+    const jt = to.scalars.indexOf(sc);
+    if (jt >= 0) map[from.zones.length * Vf + j] = to.zones.length * Vt + jt;
+  });
+  return map;
+}
+
+/** 自己対戦のファイルの行（.gz なら展開して読む）。1 つの大きな文字列にしないよう、行ごとに切り出す */
+function* dataLines(file: string): Generator<string> {
+  const raw = readFileSync(file);
+  const buf = file.endsWith(".gz") ? gunzipSync(raw) : raw;
+  let start = 0;
+  while (start < buf.length) {
+    let end = buf.indexOf(10, start);
+    if (end < 0) end = buf.length;
+    if (end > start) yield buf.toString("utf8", start, end);
+    start = end + 1;
+  }
+}
+
+/** 局面の入力（"x"・"v"）を map で読み替える（-1 の入力は捨てる） */
+function remapSample(x: Sample, map: Int32Array): void {
+  const xs: number[] = [], vs: number[] = [];
+  for (let j = 0; j < x.x.length; j++) {
+    const i = map[x.x[j]!] ?? -1;
+    if (i < 0) continue;
+    xs.push(i);
+    vs.push(x.v[j]!);
+  }
+  x.x = xs;
+  x.v = vs;
+}
+
+/**
+ * 自己対戦のファイルの行（試合と打ち比べ）を順に読む。svwb td selfplay は先頭の行に入力の並び（{"tdLayout": {vocab, zones, scalars}}）を書くので、
+ * "x"・"v" をモデルの並び to に読み替える（to に無い入力は捨てる。入力を足したモデルで作った自己対戦から、足す前の並びのモデルも学べる）。
+ * 並びの行の無いファイル（2026-11-13 より前の自己対戦）は、並び fallback（省略すると to）で書いたものとみなす。to が null なら読み替えない
+ */
+export function* dataRecords(file: string, to: InputLayout | null, fallback: InputLayout | null = to): Generator<GameRecord | CmpRecord> {
+  let map: Int32Array | null | undefined;
+  for (const line of dataLines(file)) {
+    if (!line.trim()) continue;
+    const o = JSON.parse(line) as GameRecord | CmpRecord | { tdLayout: InputLayout };
+    if ("tdLayout" in o) {
+      if (map !== undefined) throw new Error(`${file}: 入力の並びの行が途中にあります`);
+      map = to ? layoutMap(o.tdLayout, to) : null;
+      continue;
+    }
+    if (map === undefined) map = to && fallback ? layoutMap(fallback, to) : null;
+    if (map) {
+      if (isCmp(o)) for (const c of o.cmp.cands) remapSample(c.sample, map);
+      else for (const seq of o.samples) for (const x of seq) remapSample(x, map);
+    }
+    yield o;
+  }
+}
 
 // ---- train ----
 
@@ -576,6 +663,10 @@ interface LoadOptions {
   useSeat?: SeatFilter;
   /** 探索の値の、ターン末の局面の勝つ確率 qe の割合（train の --searchMix。既定 0.5 は探索の rescoreMix と同じ） */
   searchMix?: number;
+  /** 入力をこの並び（学ぶモデルの並び）に読み替える（dataRecords）。無ければ読み替えない */
+  layout?: InputLayout;
+  /** 並びの行の無いファイルの並び（省略すると layout） */
+  fallback?: InputLayout;
 }
 
 /** 試合 r の席 p の局面を読むか（--seat） */
@@ -608,9 +699,7 @@ export function loadData(files: string[], holdout: number, ivWeight = 1, keep?: 
   for (const file of files) {
     // もとの試合の各プレイヤーの局面の、試合の中の位置 → 添字（介入の対を作る）。介入の試合はもとの試合のすぐ後の行にある
     const posOf = new Map<number, [number[], number[]]>();
-    for (const line of readFileSync(file, "utf8").split("\n")) {
-      if (!line.trim()) continue;
-      const r = parseLine(line);
+    for (const r of dataRecords(file, opts.layout ?? null, opts.fallback ?? opts.layout ?? null)) {
       if (isCmp(r)) continue;
       if (r.iv && ivWeight === 0) continue;
       if (r.iv && isResZone(r.iv.zone ?? "hand") && opts.ivRes === false) continue;
@@ -713,13 +802,11 @@ interface CmpData {
   board?: BoardRows;
 }
 
-function loadGroups(files: string[], holdout: number, board?: CompiledBoard): CmpData {
+function loadGroups(files: string[], holdout: number, board: CompiledBoard | undefined, layout: InputLayout, fallback: InputLayout = layout): CmpData {
   const off: number[] = [0], idx: number[] = [], val: number[] = [], s: number[] = [], win: number[] = [], search: number[] = [], goff: number[] = [0], hold: number[] = [];
   const cards = board ? new BoardGrow(board) : null;
   for (const file of files) {
-    for (const line of readFileSync(file, "utf8").split("\n")) {
-      if (!line.trim()) continue;
-      const r = parseLine(line);
+    for (const r of dataRecords(file, layout, fallback)) {
       if (!isCmp(r)) continue;
       for (const c of r.cmp.cands) {
         for (let j = 0; j < c.sample.x.length; j++) {
@@ -986,7 +1073,12 @@ function ivSummary(d: Dataset, v: Float64Array, holdoutOnly: boolean): string | 
 }
 
 function train(args: Args): number {
-  const model = loadValueNet(need(args, "model"));
+  const model0 = loadValueNet(need(args, "model"));
+  // --dropInputs: 出発点のモデルからその入力（zones・scalars の名前）を外して学ぶ。入力を足したモデルで作った自己対戦から、
+  // 足す前の並びの補正（入力なし）も学ぶ用（自己対戦の先頭の並びの行で読み替える）
+  const dropText = args.get("dropInputs");
+  const model = dropText === undefined ? model0 : dropInputs(model0, dropText.split(","));
+  if (dropText !== undefined) console.log(`入力 ${dropText} を外して学ぶ（入力 ${inputSize(model0)} → ${inputSize(model)}）`);
   const files = need(args, "data").split(",");
   const out = need(args, "out");
   const lambda = numArg(args, "lambda", 0.7);
@@ -1035,10 +1127,16 @@ function train(args: Args): number {
     : undefined;
   const compiled0 = compileValueNet(model);
   // --exclude: そのカードが入力にある試合を学ばない（知らないカードを作る確かめ用。docs/ai-notes.md「カードの重みを属性とカードごとの残りに分ける」）
-  const skipGame = excludeGames(model, args.get("exclude"));
+  // --excludeDecks・--onlyDecks: そのデッキの試合を学ばない・そのデッキの試合だけを学ぶ（見ていないデッキの落ち方と学び足しを測る用）
+  const skipGame = orSkip(excludeGames(model, args.get("exclude")), deckFilter(args));
   // --seat learner: td selfplay --frozen の学ぶ側の局面だけで学ぶ（狙い撃ちの相手を学ばせる）
   const useSeat = seatFilter(args);
-  const d = withBase(loadData(files, holdout, ivWeight, keep, compiled0.board, { imaginedWeight, ivRes, searchMix, ...(skipGame ? { skipGame } : {}), ...(useSeat ? { useSeat } : {}) }), baseWeights);
+  const layout = { layout: model, fallback: model0 };
+  const d = withBase(
+    loadData(files, holdout, ivWeight, keep, compiled0.board, { imaginedWeight, ivRes, searchMix, ...layout, ...(skipGame ? { skipGame } : {}), ...(useSeat ? { useSeat } : {}) }),
+    baseWeights,
+  );
+  if (d.s.length === 0) throw new Error("学ぶ局面がありません（--data・--onlyDecks・--excludeDecks を見る）");
   if (baseArg !== undefined) console.log(`出発点の評価: ${baseArg}（S は ${({ s: '"s"', sd: '"sd"', zero: "0" } as const)[sSourceOf(baseWeights)]}）`);
   const n = d.s.length;
   const nImagined = d.anchor.reduce((x, a) => x + (a >= 0 ? 1 : 0), 0);
@@ -1046,7 +1144,7 @@ function train(args: Args): number {
     `${files.join(", ")}: 局面 ${n}（確かめ用 ${d.holdout.reduce((x, y) => x + y, 0)}、ランダムに打った ${d.explored.reduce((x, y) => x + y, 0)}、想像の局面 ${nImagined}、介入の対 ${d.pairs.length}（うち資源 ${d.pairs.filter((q) => isResZone(q.zone)).length}））、読み込み ${((Date.now() - t0) / 1000).toFixed(1)}s`,
   );
 
-  const cmp = cmpWeight > 0 ? loadGroups(files, holdout, compiled0.board) : null;
+  const cmp = cmpWeight > 0 ? loadGroups(files, holdout, compiled0.board, model, model0) : null;
   if (cmp) console.log(`打ち比べ ${cmp.goff.length - 1} 局面・${cmp.s.length} 並び（確かめ用 ${cmp.holdout.reduce((x, y) => x + y, 0)} 局面）`);
   const H = model.hidden;
   const sizes = layerSizes(model);
@@ -1488,9 +1586,7 @@ function check(args: Args): number {
     }
   };
   for (const file of need(args, "data").split(",")) {
-    for (const line of readFileSync(file, "utf8").split("\n")) {
-      if (!line.trim()) continue;
-      const r = parseLine(line);
+    for (const r of dataRecords(file, model)) {
       if (isCmp(r)) r.cmp.cands.forEach((c) => one(c.sample));
       else r.samples.forEach((seq) => seq.forEach(one));
     }
@@ -1517,9 +1613,7 @@ function probe(args: Args): number {
   type ProbeInput = SparseInput & { b?: [BoardCard[], BoardCard[]] };
   const byDeck = new Map<string, ProbeInput[]>();
   for (const file of need(args, "data").split(",")) {
-    for (const line of readFileSync(file, "utf8").split("\n")) {
-      if (!line.trim()) continue;
-      const r = parseLine(line);
+    for (const r of dataRecords(file, model)) {
       if (isCmp(r)) continue;
       r.samples.forEach((seq, p) => {
         const list = byDeck.get(r.decks[p]!) ?? [];
@@ -1618,16 +1712,14 @@ function prune(args: Args): number {
   const files = need(args, "data").split(",");
   const out = need(args, "out");
   const used = new Set<number>();
-  // --exclude: train --exclude で学ばなかった試合は数えない
-  const skipGame = excludeGames(model, args.get("exclude"));
+  // --exclude・--excludeDecks・--onlyDecks: train で学ばなかった試合は数えない
+  const skipGame = orSkip(excludeGames(model, args.get("exclude")), deckFilter(args));
   // --seat: train --seat で学ばなかった席の局面は数えない
   const useSeat = seatFilter(args);
   // 場のカードのネットワーク: 場に現れたカードと付与された能力
   const onBoard = new Set<string>(), grants = new Set<string>();
   for (const file of files) {
-    for (const line of readFileSync(file, "utf8").split("\n")) {
-      if (!line.trim()) continue;
-      const r = parseLine(line);
+    for (const r of dataRecords(file, model)) {
       if (isCmp(r) || skipGame?.(r)) continue;
       for (const [p, seq] of r.samples.entries()) {
         if (useSeat && !useSeat(r, p as PlayerIndex)) continue;
@@ -1701,6 +1793,53 @@ function excludeGames(model: ValueNetModel, list: string | undefined): ((r: Game
   return (r) => r.samples.some((seq) => seq.some((x) => x.x.some((i) => rows.has(i))));
 }
 
+/** どちらかが真なら飛ばす述語（両方無ければ undefined） */
+function orSkip(a: ((r: GameRecord) => boolean) | undefined, b: ((r: GameRecord) => boolean) | undefined): ((r: GameRecord) => boolean) | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return (r) => a(r) || b(r);
+}
+
+/**
+ * --excludeDecks <デッキ名,...>: どちらかの席がそのデッキの試合を除く。--onlyDecks <デッキ名,...>: どちらかの席がそのデッキの試合だけを読む。
+ * デッキの名前は自己対戦の "decks"（デフォルトデッキの名前）。見ていないデッキを渡したときの落ち方と、学び足しでの戻りを測る用（docs/STATE.md の案 E）
+ */
+function deckFilter(args: Args): ((r: GameRecord) => boolean) | undefined {
+  const list = (k: string): Set<string> | null => {
+    const v = args.get(k);
+    if (v === undefined) return null;
+    const names = v.split(",").map((x) => x.trim()).filter((x) => x);
+    const known = new Set(DEFAULT_DECKS.map((d) => d.name));
+    const bad = names.filter((x) => !known.has(x));
+    if (names.length === 0 || bad.length > 0) throw new Error(`--${k} はデフォルトデッキの名前をカンマで並べます: ${bad.join(", ") || v}`);
+    return new Set(names);
+  };
+  const ex = list("excludeDecks"), only = list("onlyDecks");
+  if (ex && only) throw new Error("--excludeDecks と --onlyDecks は一緒に使えません");
+  if (ex) return (r) => r.decks.some((d) => ex.has(d));
+  if (only) return (r) => !r.decks.some((d) => only.has(d));
+  return undefined;
+}
+
+/** モデルから入力（zones・scalars の名前）を外したもの（w1 の行を除く。属性の分 attr は外す。場のカードのネットワークの出力の行は残す） */
+export function dropInputs(model: ValueNetModel, names: readonly string[]): ValueNetModel {
+  const drop = new Set(names.map((x) => x.trim()).filter((x) => x));
+  for (const x of drop) if (!model.zones.includes(x) && !model.scalars.includes(x)) throw new Error(`--dropInputs: このモデルの入力にありません: ${x}`);
+  const V = model.vocab.length, H = model.hidden, Z = model.zones.length;
+  const w1: number[] = [];
+  const copy = (row: number, n: number) => {
+    for (let k = row * H; k < (row + n) * H; k++) w1.push(model.w1[k]!);
+  };
+  model.zones.forEach((z, k) => {
+    if (!drop.has(z)) copy(k * V, V);
+  });
+  model.scalars.forEach((sc, j) => {
+    if (!drop.has(sc)) copy(Z * V + j, 1);
+  });
+  for (let k = baseInputSize(model) * H; k < model.w1.length; k++) w1.push(model.w1[k]!);
+  return { ...withoutAttr(model), zones: model.zones.filter((z) => !drop.has(z)), scalars: model.scalars.filter((sc) => !drop.has(sc)), w1 };
+}
+
 /**
  * npm run td -- eval --model a.json[,b.json,...] --data d.jsonl[,...] [--cards 名前,...]
  * モデルごとに、局面（ランダムに打った局面と介入の試合を除く）の勝敗の交差エントロピーと AUC を出す（ターン末とターンの最初・想像の局面）。
@@ -1715,7 +1854,7 @@ function evalModels(args: Args): number {
     throw new Error("eval のモデルは入力の並び（vocab・zones・scalars）が同じものだけ");
   }
   const useSeat = seatFilter(args);
-  const d = loadData(need(args, "data").split(","), 0, 0, undefined, undefined, useSeat ? { useSeat } : {});
+  const d = loadData(need(args, "data").split(","), 0, 0, undefined, undefined, { layout: first, ...(useSeat ? { useSeat } : {}) });
   const cards = args.get("cards");
   const rows = cards === undefined ? null : rowsOfCards(first, cards.split(",").map((x) => vocabIndexOf(first, x.trim())));
   const hasCard = new Uint8Array(d.s.length);
@@ -1843,12 +1982,10 @@ function fillFromAttr(model: ValueNetModel, w1: number[] | Float64Array, fill: (
 }
 
 /** 学習データ（試合の行）の各入力が現れた局面の数 */
-function inputCounts(files: string[], n: number): Float64Array {
+function inputCounts(files: string[], n: number, layout: InputLayout): Float64Array {
   const counts = new Float64Array(n);
   for (const file of files) {
-    for (const line of readFileSync(file, "utf8").split("\n")) {
-      if (!line.trim()) continue;
-      const r = parseLine(line);
+    for (const r of dataRecords(file, layout)) {
       if (isCmp(r)) continue;
       for (const seq of r.samples) for (const x of seq) for (const i of x.x) if (i < n) counts[i]!++;
     }
@@ -1872,7 +2009,7 @@ function attr(args: Args): number {
   const basis = attrBasis(model, numArg(args, "minSupport", 3));
   const lambda = numArg(args, "ridge", 3), n0 = numArg(args, "n0", 0);
   const data = args.get("data");
-  const counts = data ? inputCounts(data.split(","), n) : null;
+  const counts = data ? inputCounts(data.split(","), n, model) : null;
   const w1 = Float64Array.from(model.w1);
   const learned = (r: number): boolean => (counts ? counts[r]! > 0 : !rowIsZero(w1, r, H));
   const a = fitAttr(model, basis, lambda, { fitRow: learned, ...(counts && n0 > 0 ? { weight: (r: number) => counts[r]! / (counts[r]! + n0) } : {}) });
@@ -1908,7 +2045,7 @@ function attrcheck(args: Args): number {
   const K = basis.K;
   const lambdas = (args.get("ridge") ?? "3").split(",").map(Number);
   const n0 = numArg(args, "n0", 0), minN = numArg(args, "min", 300), per = numArg(args, "per", 3000);
-  const d = withBase(loadData(need(args, "data").split(","), 0, 0, undefined, net.board), model.baseWeights);
+  const d = withBase(loadData(need(args, "data").split(","), 0, 0, undefined, net.board, { layout: model }), model.baseWeights);
   // 行が現れた局面の数と、カードごとの局面
   const counts = new Float64Array(ZV);
   const byCard: number[][] = Array.from({ length: V }, () => []);
@@ -2039,7 +2176,7 @@ function attrcheck(args: Args): number {
 function ivcheck(args: Args): number {
   const model = loadValueNet(need(args, "model"));
   const net = compileValueNet(model);
-  const loaded = withBase(loadData(need(args, "data").split(","), numArg(args, "holdout", 0), 1, undefined, net.board), model.baseWeights);
+  const loaded = withBase(loadData(need(args, "data").split(","), numArg(args, "holdout", 0), 1, undefined, net.board, { layout: model }), model.baseWeights);
   const v = predictAll(net, loaded);
   const holdoutOnly = numArg(args, "holdout", 0) > 0;
   const opp = args.get("opp");
