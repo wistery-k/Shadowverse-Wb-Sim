@@ -20,7 +20,7 @@ npm run misses -- add --id <問の名前> --pass '<合格の条件>' --title '�
                       (--turn T | --step N) [--player 0|1]
 npm run misses -- list
 npm run misses -- show <問の名前>…
-npm run misses -- check [--write-hand-logs]
+npm run misses -- check [--write-hand-logs] [--write-replays 問,…]
 npm run misses -- cover [--opts '<設定>'] [--seeds 8] [--m 128] [--extra 4] [--wide 64] [--only 問,…] [--show]
 npm run misses -- duel <問の名前> [--line '<名前>=<手の JSON の配列>']… [--m 512] [--base 1] [--no-stored] [--peek] [--show N [--dump <フォルダ>]]
 ```
@@ -87,6 +87,7 @@ AI は今までどおり、自分から見た決定化で考える（相手の�
   エンジンやカードの能力を直すと打ち直した局面が変わることがある（問の局面はそのまま使える。直した能力が局面に効くなら問を見直す）。
   `cargo test`（`rust/engine/src/runner/misses.rs` のテスト）でも、全部の問が読めて打ち直せることを確かめる
   `--write-hand-logs` は、打ち直した局面と手札の記録（`handLog`。[ai-notes/13](ai-notes/13-2026-11-13.md)「伏せた相手の手札のスペルブーストを決定化で見込む」）だけが違う問を、記録を入れた局面に書き直す（2026-11-13 に記録を足したときに使った）
+  `--write-replays 問,…` は、名前を挙げた問を、打ち直した局面に書き直す（エンジンやカードを直して問の局面が変わったとき。差を見て、合格の条件がそのままでよいかを確かめてから使う。2026-11-13 にスペルブーストの時機を直したとき、witch-cauldron-t22・witch-omega-heal に使った。手札のブーストの回数が 1 ずつ増えただけで、合格の条件は変えていない）
 
 ### cover: 打ち比べ調査で拾える種類のミスか
 

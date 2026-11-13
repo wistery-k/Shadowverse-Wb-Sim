@@ -259,6 +259,17 @@ pub fn resolve_turn_end(prev: &GameState) -> Option<GameState> {
     Some(s)
 }
 
+/// プレイしたスペルによるスペルブースト: 手札のカードすべてを 1 回ブーストする
+fn spell_boost_hand(s: &mut GameState, p: PlayerIndex) {
+    if s.players[p].hand.iter().any(|c| !c.revealed) {
+        s.players[p].hand_log.push(HandEv::Boost { times: 1 });
+    }
+    let all: Vec<Iid> = s.players[p].hand.iter().map(|c| c.iid).collect();
+    for o in all {
+        fire_spellboost(s, p, o, 1);
+    }
+}
+
 pub(crate) fn handle_internal(s: &mut GameState, controller: PlayerIndex, eff: FEff) {
     match eff {
         FEff::StartTurn => start_turn(s, controller),
@@ -275,6 +286,7 @@ pub(crate) fn handle_internal(s: &mut GameState, controller: PlayerIndex, eff: F
         }
         FEff::Combat { attacker, target } => combat(s, attacker, target),
         FEff::CombatEnd => combat_end(s),
+        FEff::SpellBoost => spell_boost_hand(s, controller),
         FEff::Dsl(_) => unreachable!(),
     }
 }
@@ -322,7 +334,8 @@ fn spell_has_targets(
     let t = scratch.get_or_insert_with(|| s.clone());
     let removed = t.players[p].hand.make_mut().remove(hi);
     let ctx = Ctx::new(p, removed.iid);
-    let ok = chooses().all(|(from, count)| choose_candidates(t, &ctx, from).0.len() >= count.max(1));
+    let ok =
+        chooses().all(|(from, count)| choose_candidates(t, &ctx, from).0.len() >= count.max(1));
     t.players[p].hand.make_mut().insert(hi, removed);
     ok
 }
@@ -924,14 +937,9 @@ fn apply_play(s: &mut GameState, iid: Iid) {
 
     if cd.ctype == CardType::Spell {
         s.players[p].graveyard += 1;
-        // 手札の他のカードはスペルブーストされる
-        if s.players[p].hand.iter().any(|c| !c.revealed) {
-            s.players[p].hand_log.push(HandEv::Boost { times: 1 });
-        }
-        let others: Vec<Iid> = s.players[p].hand.iter().map(|c| c.iid).collect();
-        for o in others {
-            fire_spellboost(s, p, o, 1);
-        }
+        // 手札のカードは、スペルの効果（と、その解決中に誘発した能力）の後にスペルブーストされる。
+        // スペルで引いたカードもブーストされる（公式 Q&A。docs/rules.md 11 章「スペルブーストのタイミング」）
+        push_internal(s, &[FEff::SpellBoost], Ctx::new(p, iid));
         push_own_abilities(s, h.card, On::Spell, &ctx);
         return;
     }

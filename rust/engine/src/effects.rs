@@ -1564,7 +1564,11 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             );
             // 同じクレストの 2 つ目は持たない（公式 Q&A。docs/rules.md「9. クレスト」）。
             // 今のクレストのカウントダウンも戻さない（未確認）
-            if !s.players[holder].crests.iter().any(|c| c.crest == *crest_id) {
+            if !s.players[holder]
+                .crests
+                .iter()
+                .any(|c| c.crest == *crest_id)
+            {
                 let iid = s.new_iid();
                 let order = s.next_order;
                 s.next_order += 1;

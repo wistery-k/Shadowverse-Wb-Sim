@@ -206,7 +206,9 @@ export type InternalEffect =
   | { op: "_cleanup" }
   | { op: "_startTurn" }
   | { op: "_startTurnDraw" }
-  | { op: "_finishMulligan" };
+  | { op: "_finishMulligan" }
+  /** プレイしたスペルによる手札のスペルブースト（スペルの効果の後） */
+  | { op: "_spellBoost" };
 
 export interface Frame {
   effects: (Effect | InternalEffect)[];
