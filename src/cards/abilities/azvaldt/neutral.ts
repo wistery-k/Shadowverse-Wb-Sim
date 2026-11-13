@@ -26,7 +26,7 @@ import {
 export const NEUTRAL: Record<string, CardAbilities> = {
   [id("大遊戯世界")]: {
     abilities: [
-      // 「場にそれ以外の元のコストXのカード」は両方の場で見る（Q&A。docs/rules.md 12章）。これ自身も数える（⚠️ 推定）
+      // 「場にそれ以外の元のコストXのカード」は両方の場で見る（Q&A。docs/rules.md 12章）。これ自身も数える（ユーザー確認済み。docs/rules.md 12章の 29）
       onAllyPlay({}, when(exists(boardCards({ costEq: PLAYED_COST, excludeEvent: true })), [countdown(-1)])),
       lastWords(draw(2)),
     ],
