@@ -45,7 +45,7 @@ use crate::ai::exact_lethal::reset_exact_lethal_cache;
 use crate::ai::search::ExtraEval;
 use crate::ai::valuenet::ValueNet;
 use crate::ai::{Agent, Rng};
-use crate::data::{data, CardIdx, ClassId};
+use crate::data::{data, CardIdx, ClassId, Pool};
 use crate::game::{acting_player, apply_action, create_game, legal_actions};
 use crate::sim::MatchRng;
 use crate::state::{card, GameState, Iid, Phase, PlayerIndex};
@@ -638,7 +638,7 @@ fn cut_order(d: &MetaDeck, cards: &[CardIdx]) -> Vec<(CardIdx, f64, f64)> {
     out
 }
 
-/// 足すカード Y ごとの案（変更）。Y はクラスとニュートラルのカード（pool があればそれだけ）で、3 枚未満のもの
+/// 足すカード Y ごとの案（変更）。Y はスターターのクラスとニュートラルのカード（pool があればそれだけ）で、3 枚未満のもの
 fn candidates(
     cards: &[CardIdx],
     cuts: &[(CardIdx, f64, f64)],
@@ -648,7 +648,8 @@ fn candidates(
     let mut out = Vec::new();
     for (i, c) in data().cards.iter().enumerate() {
         let y = i as CardIdx;
-        if c.token || (c.class != class && c.class != ClassId::Neutral) {
+        if c.token || !c.in_pool(Pool::Starter) || (c.class != class && c.class != ClassId::Neutral)
+        {
             continue;
         }
         if pool.is_some_and(|p| !p.contains(&y)) {

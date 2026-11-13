@@ -108,3 +108,23 @@ fn search_with_potential_chooses_a_legal_action() {
     let a = agent.choose_action(&s, &legal, &mut Rng::new(3));
     assert!(legal.contains(&a));
 }
+
+/// カードの表はスターターのカードを先頭に置き、前期のローテーションにしか無いカードを後ろに足す（docs/pools/azvaldt.md「段取り」3）。
+/// 語彙はスターターのカードだけで、表の先頭と同じ並び（今のモデルの入力の大きさと番号を変えない）
+#[test]
+fn default_vocab_is_the_starter_prefix() {
+    use crate::data::Pool;
+    let d = crate::data::data();
+    let vocab = default_vocab();
+    assert_eq!(vocab.len(), 241);
+    for (i, id) in vocab.iter().enumerate() {
+        assert_eq!(&d.cards[i].id, id);
+    }
+    assert!(d.cards[vocab.len()..]
+        .iter()
+        .all(|c| !c.in_pool(Pool::Starter)));
+    assert!(d
+        .cards
+        .iter()
+        .any(|c| c.in_pool(Pool::Azvaldt) && !c.in_pool(Pool::Starter)));
+}

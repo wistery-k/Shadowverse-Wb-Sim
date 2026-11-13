@@ -4,6 +4,9 @@
 import { describe, expect, it } from "vitest";
 import rawRotCards from "../data/pools/azvaldt/cards.json";
 import { AZVALDT, CLASS_IDS, CLASS_NAMES, deckProblems, type Card, type ClassId } from "../src/cards";
+import { agentOf } from "../src/ai/registry";
+import { invariantViolations } from "../src/engine";
+import { playMatch } from "../src/sim/match";
 
 const files = import.meta.glob<string>("../data/pools/azvaldt/decks/*/*.txt", {
   query: "?raw",
@@ -60,4 +63,22 @@ describe("前期のローテーションのプロのデッキ", () => {
     expect(deck.cls).not.toBeNull();
     expect(deckProblems(AZVALDT, deck.cls ?? "neutral", deck.cards)).toEqual([]);
   });
+});
+
+// エンジンの土台（docs/pools/azvaldt.md「段取り」3）: 前期のローテーションのカードがエンジンのカードの表にあり、試合が最後まで進むこと。
+// 前期のローテーションの能力はまだ定義していないので、カードは能力値とテキストから読むキーワードだけで動く
+describe("前期のローテーションのプロのデッキでランダム自己対戦", () => {
+  const decks = Object.values(files)
+    .sort()
+    .map((text) => parse(text).cards.map((c) => c.id));
+  const randomAgent = agentOf("random");
+
+  it("100 試合が不変条件を破らずに終わる", () => {
+    for (let seed = 1; seed <= 100; seed++) {
+      const pair: [string[], string[]] = [decks[seed % decks.length]!, decks[(seed * 37) % decks.length]!];
+      const result = playMatch([randomAgent, randomAgent], { decks: pair, seed, checkInvariants: true });
+      expect(invariantViolations(result.final)).toEqual([]);
+      expect([0, 1]).toContain(result.winner);
+    }
+  }, 60_000);
 });
