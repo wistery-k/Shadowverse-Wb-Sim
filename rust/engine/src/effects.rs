@@ -1295,11 +1295,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 .collect();
             if let Some(max) = costs.iter().map(|x| x.1).max() {
                 // 同名のフォロワーが何回も破壊されていれば、そのぶん選ばれやすい（公式の用語説明「リアニメイト」）
-                let best: Vec<CardIdx> = costs
-                    .iter()
-                    .filter(|x| x.1 == max)
-                    .map(|x| x.0)
-                    .collect();
+                let best: Vec<CardIdx> = costs.iter().filter(|x| x.1 == max).map(|x| x.0).collect();
                 let k = s.rng_int(best.len());
                 let chosen = best[k];
                 let c = s.new_board_card(chosen, None);
