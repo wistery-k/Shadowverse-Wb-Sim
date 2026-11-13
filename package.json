@@ -13,6 +13,7 @@
     "prebuild": "node scripts/build-wasm.mjs",
     "pretest": "node scripts/build-wasm.mjs",
     "cards": "node scripts/convert-cards.ts",
+    "decks": "node scripts/convert-decks.ts",
     "sim": "node scripts/vite-run.mjs scripts/simulate-main.ts",
     "game": "node scripts/vite-run.mjs scripts/game-main.ts",
     "think-at": "node scripts/vite-run.mjs scripts/think-at-main.ts",

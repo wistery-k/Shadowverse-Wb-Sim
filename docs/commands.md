@@ -24,6 +24,7 @@
 | `npm run build` / `preview` / `typecheck` / `test` | 本番ビルド / ビルド結果の確認 / 型チェック / テスト（`test` は Vitest の引数を渡せる。例: `-- src/engine`） | |
 | `npm run wasm` | エンジンの WASM を作る（引数なし） | `scripts/build-wasm.mjs` |
 | `npm run cards` | `data/raw/*.json` からスターターのカードデータ（`data/cards.json`・`data/crests.json`）を作る。`-- --pool azvaldt` で前期のローテーション（`data/raw/azvaldt/*.json` → `data/pools/azvaldt/`。元データはブランチ `wistery-k-patch-1` の `azvaldt*.json` を `git show origin/wistery-k-patch-1:<file> > data/raw/azvaldt/<file>` で取り出す） | `scripts/convert-cards.ts` |
+| `npm run decks` | 前期のローテーションのプロのデッキを `data/raw/decks/svlabo/`（シャドラボの記事が読み込むデータファイル）から `data/pools/azvaldt/decks/<大会>/` に書く（取り出し方は `docs/pools/azvaldt.md`「プロのデッキ」） | `scripts/convert-decks.ts` |
 | `npm run rust-data` | Rust に埋め込むデータを書き出す（`[出力先] [AI データの出力先] [--quiet]`） | `scripts/rust-data-main.ts` |
 | `npm run sim` | デフォルトデッキの総当たり（下） | `scripts/simulate-main.ts` |
 | `npm run sim-report` | `sim --json` の結果を Markdown の表にする（下） | `scripts/sim-report-main.ts` |
