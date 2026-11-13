@@ -24,6 +24,14 @@ td train --model @/net0.json --data @/s-{1..20}.jsonl.gz --out @/i.json --epochs
 td prune --model @/i.json --data @/s-{1..20}.jsonl.gz --out @/ip.json --est 600
 td attr --model @/ip.json --out @/ipa.json --keepA 0 --est 60
 
+# 物差しの測り直し（ルールの直し PR #241 で物差し 5・強い相手の物差し 4 に上がった。案 B のファイルを読まないので、ここで落ちても止まっても B とは別）。
+# 定例（night/routine.txt）の物差し 2 つと速さ、物差しと同じ設定の確かめの行。見落とし問題集は #241 のスレッドがクラウド環境で測り済み（台帳の名前 ルールの直し-公式QA）なので省く。
+# 入力ありの学習の後に置いたのは、23:00 に始めた夜の 1 晩目を学習で使い切り、2 晩目の頭に回すため（早く始めた夜は 1 晩目の終わりに回る）
+yardstick --ref classic --opts '{}' --games 4000 --start 0 --label 定例-弱い相手
+yardstick --ref strong --opts '{}' --games 4000 --start 0 --label 定例-強い相手
+profile --games 49
+yardstick --ref classic --opts '{"valueNet":false,"opponentSearch":null,"samples":3,"planCandidates":3,"oppHandSamples":1,"oppHandCommon":false}' --games 1000 --start 0 --label 物差しと同じ設定（確かめ）
+
 # 問い 1: 足した入力は効くか（入力あり 対 入力なし、鏡の compare 4 万試合。見込み 0〜+1。A の勝率 − 50% − 2 SE > 0 なら「効く」）
 compare 20000 '{"valueNet":"@/ipa.json"}' '{"valueNet":"@/npa.json"}' 0 --label B-入力 --est 0.115
 # 線を越えたら入力あり、越えなければ入力なしを、問い 2 の補正にする
