@@ -706,7 +706,7 @@ impl<'a> World<'a> {
         let c = &self.c;
         let any_evolve = c.e_avail || c.se_avail;
         match (u.mine, u.zone, on) {
-            (_, _, On::TurnStart | On::TurnEnd) => 0,
+            (_, _, On::TurnStart | On::TurnEnd | On::TurnEndInHand) => 0,
             (true, Zone::Hand, On::Fanfare | On::Spell) => u.playable as i32,
             (true, Zone::Hand, On::Spellboost) => c.sb,
             (true, Zone::Hand, On::AllyLeaveInHand) => c.hand_units,
@@ -738,6 +738,8 @@ impl<'a> World<'a> {
             (true, _, On::AllyAct) => c.acts,
             (true, _, On::AllyFuse) => c.fuses,
             (false, _, On::Act | On::AllyAct | On::AllyFuse) => 0,
+            (true, _, On::AllyPlay) => c.plays,
+            (false, _, On::AllyPlay) => 0,
             (true, _, On::AllyDestroyed) => c.my_fols,
             (false, _, On::AllyDestroyed) => c.opp_fols,
             // 回数を見積もれないので、何かを数える能力なら見積もらない（呼び出し側で扱う）
@@ -851,6 +853,10 @@ impl<'a> World<'a> {
                 .iter()
                 .fold(Ti::default(), |a, x| a.union(self.ti(x, fr))),
             Target::MaxAttack { of } => self.ti(of, fr).single(1),
+            Target::LowestHpLeaders => Ti {
+                enemy_leader: true,
+                ..Ti::default()
+            },
         }
     }
 
@@ -866,6 +872,7 @@ impl<'a> World<'a> {
             },
             Target::Union { of } => of.iter().fold(0, |a, x| add(a, self.count_bound(x, fr))),
             Target::MaxAttack { of } => self.count_bound(of, fr),
+            Target::LowestHpLeaders => 2,
         }
     }
 
@@ -950,12 +957,13 @@ impl<'a> World<'a> {
                         acc.unk("SetDefense");
                     }
                 }
-                Effect::SetLeaderMaxHp { side, .. } => {
+                Effect::SetLeaderMaxHp { side, .. } | Effect::AddLeaderMaxHp { side, .. } => {
                     if rel(fr.mine, *side).1 {
                         acc.unk("SetLeaderMaxHp");
                     }
                 }
                 Effect::Destroy { .. }
+                | Effect::AddToDeck { .. }
                 | Effect::Banish { .. }
                 | Effect::Heal { .. }
                 | Effect::Discard { .. }
@@ -981,8 +989,13 @@ impl<'a> World<'a> {
                         acc.reshuffle = true;
                     }
                 }
-                Effect::Draw { count, filter } => {
-                    if fr.mine {
+                Effect::Draw {
+                    count,
+                    filter,
+                    side,
+                } => {
+                    // 引くのが自分か（「相手は自身のデッキから引く」なら持ち主の相手）
+                    if fr.mine != (*side == Some(Side::Opponent)) {
                         match self.vb(s, p, count, fr) {
                             Some(n) => acc.draws = add(acc.draws, mul(m, n.max(0))),
                             None => acc.unk("Draw"),

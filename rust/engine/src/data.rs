@@ -335,6 +335,12 @@ pub struct CardFilter {
     pub spellboost: bool,
     #[serde(default)]
     pub earth_sigil: bool,
+    /// 「それ以外」: 能力を誘発させたカードを除く
+    #[serde(default)]
+    pub exclude_event: bool,
+    /// 「選んでいない」: スロットのカードを除く
+    #[serde(default, deserialize_with = "de_opt_slot")]
+    pub exclude_slot: Option<SlotId>,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -367,6 +373,8 @@ pub enum Target {
     MaxAttack {
         of: Box<Target>,
     },
+    /// 体力が最小のリーダー（同じならどちらも）
+    LowestHpLeaders,
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -410,6 +418,8 @@ pub enum ValueObj {
         stat: Stat,
         filter: Option<CardFilter>,
     },
+    /// 【自分がカードをプレイしたとき】で、プレイしたカードの元のコスト
+    PlayedCost,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -442,6 +452,16 @@ pub enum Condition {
     MaxPp {
         at_least: i32,
     },
+    /// 対象が 1 つ以上ある
+    Exists {
+        of: Target,
+    },
+    /// 自分のリーダーの体力が value 以下
+    LeaderHpAtMost {
+        value: i32,
+    },
+    /// 自分のリーダーの体力が相手のリーダーの体力より大きい
+    LeaderHpAboveOpponent,
     Not {
         cond: Box<Condition>,
     },
@@ -527,6 +547,8 @@ pub enum Effect {
     Draw {
         count: Value,
         filter: Option<CardFilter>,
+        /// Opponent なら相手が自身のデッキから引く
+        side: Option<Side>,
     },
     DrawAll {
         filter: CardFilter,
@@ -561,6 +583,12 @@ pub enum Effect {
     SummonDestroyedAmulet,
     ReturnToDeck {
         target: Target,
+    },
+    /// カードを生成して自分のデッキのランダムな位置に加える
+    AddToDeck {
+        #[serde(deserialize_with = "de_card")]
+        card_id: CardIdx,
+        count: Value,
     },
     Discard {
         target: Target,
@@ -645,6 +673,11 @@ pub enum Effect {
         side: Side,
         value: i32,
     },
+    /// リーダーの体力の最大値を増減する（体力は最大値まで下がる）
+    AddLeaderMaxHp {
+        side: Side,
+        amount: i32,
+    },
     If {
         cond: Condition,
         then: Vec<Effect>,
@@ -685,6 +718,7 @@ impl Effect {
             Effect::SummonFromDeck { .. } => "SummonFromDeck",
             Effect::SummonDestroyedAmulet => "SummonDestroyedAmulet",
             Effect::ReturnToDeck { .. } => "ReturnToDeck",
+            Effect::AddToDeck { .. } => "AddToDeck",
             Effect::Discard { .. } => "Discard",
             Effect::Transform { .. } => "Transform",
             Effect::Buff { .. } => "Buff",
@@ -706,6 +740,7 @@ impl Effect {
             Effect::Crest { .. } => "Crest",
             Effect::ApocalypseDeck => "ApocalypseDeck",
             Effect::SetLeaderMaxHp { .. } => "SetLeaderMaxHp",
+            Effect::AddLeaderMaxHp { .. } => "AddLeaderMaxHp",
             Effect::If { .. } => "If",
             Effect::Repeat { .. } => "Repeat",
             Effect::SetVar { .. } => "SetVar",
@@ -721,6 +756,8 @@ pub enum Whose {
     Opponent,
 }
 
+/// 誘発。AllyPlay は自分が他のカードをプレイしたとき（filter はプレイしたカードの条件。コストは元のコスト）、
+/// TurnEndInHand は手札にある間の自分のターン終了時
 #[derive(Deserialize, Clone, Debug, PartialEq)]
 #[serde(
     tag = "on",
@@ -750,6 +787,8 @@ pub enum Trigger {
     Discarded,
     AllyDestroyed { filter: Option<CardFilter> },
     LeaderHealed,
+    AllyPlay { filter: Option<CardFilter> },
+    TurnEndInHand,
 }
 
 /// 誘発の種類（Trigger の on だけ）
@@ -776,6 +815,8 @@ pub enum On {
     Discarded,
     AllyDestroyed,
     LeaderHealed,
+    AllyPlay,
+    TurnEndInHand,
 }
 
 impl Trigger {
@@ -802,6 +843,8 @@ impl Trigger {
             Trigger::Discarded => On::Discarded,
             Trigger::AllyDestroyed { .. } => On::AllyDestroyed,
             Trigger::LeaderHealed => On::LeaderHealed,
+            Trigger::AllyPlay { .. } => On::AllyPlay,
+            Trigger::TurnEndInHand => On::TurnEndInHand,
         }
     }
 }
@@ -829,6 +872,9 @@ pub struct CardAbilities {
     pub only_selectable: bool,
     pub initial_x: Option<i32>,
     pub fusion: Option<CardFilter>,
+    /// 【守護】を無視して攻撃できる
+    #[serde(default)]
+    pub ignore_ward: bool,
     #[allow(dead_code)]
     pub unimplemented: Option<String>,
 }
@@ -904,6 +950,8 @@ pub struct Data {
     pub earth_sigil_token: CardIdx,
     pub var_fused_cost: VarId,
     pub var_fused_kinds: VarId,
+    /// 【自分がカードをプレイしたとき】の、プレイしたカードの元のコスト
+    pub var_played_cost: VarId,
 }
 
 impl Data {
@@ -1000,6 +1048,8 @@ pub fn load(json: &str) -> Data {
         );
         crest_abilities[n] = Some(a);
     }
+    // スターターの能力の後に名前を付ける（スターターの変数の番号を変えないため）
+    let var_played_cost = var_id_now("playedCost");
     let apocalypse_deck = raw
         .apocalypse_deck
         .iter()
@@ -1033,6 +1083,7 @@ pub fn load(json: &str) -> Data {
         earth_sigil_token,
         var_fused_cost,
         var_fused_kinds,
+        var_played_cost,
     }
 }
 

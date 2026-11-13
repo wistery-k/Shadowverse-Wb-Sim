@@ -19,6 +19,7 @@ mod keys;
 mod lethal;
 mod match_rng;
 mod mulligan;
+mod pool;
 mod potential;
 mod rescore_race;
 mod rhino;

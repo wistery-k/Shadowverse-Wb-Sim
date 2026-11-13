@@ -222,6 +222,11 @@ fn has_turn_end_trigger(s: &GameState) -> bool {
             .iter()
             .any(|c| crest_abilities_of(c.crest).iter().any(matches))
             || pl.board.iter().any(|c| c.abilities().any(matches))
+            || (p == s.active
+                && pl
+                    .hand
+                    .iter()
+                    .any(|h| has_hand_trigger(h.card, On::TurnEndInHand)))
     })
 }
 
@@ -399,7 +404,8 @@ fn for_each_attack_target(s: &GameState, attacker: &OnBoard, mut f: impl FnMut(A
             .iter()
             .filter(|c| c.is_follower && !c.has_keyword(AMBUSH) && !c.has_keyword(INTIMIDATE))
     };
-    let has_ward = attackable().any(|c| c.has_keyword(WARD));
+    let has_ward =
+        !abilities_of(attacker.card).ignore_ward && attackable().any(|c| c.has_keyword(WARD));
     if can_attack_followers(s, attacker) {
         for c in attackable() {
             if !has_ward || c.has_keyword(WARD) {
@@ -940,11 +946,15 @@ fn apply_play(s: &mut GameState, iid: Iid) {
         // 手札のカードは、スペルの効果（と、その解決中に誘発した能力）の後にスペルブーストされる。
         // スペルで引いたカードもブーストされる（公式 Q&A。docs/rules.md 11 章「スペルブーストのタイミング」）
         push_internal(s, &[FEff::SpellBoost], Ctx::new(p, iid));
+        // 【自分がカードをプレイしたとき】は誘発待ちに入り、スペルの効果の後に解決する（docs/rules.md 12章 質問 30）
+        fire_ally_play(s, p, iid, h.card);
         push_own_abilities(s, h.card, On::Spell, &ctx);
         return;
     }
     let b = s.new_board_card(h.card, Some(&h));
     let fanfare = board_abilities_on(&b, On::Fanfare);
+    // 【自分がカードをプレイしたとき】は場に出たときより先に誘発する（処理順は未確認。docs/rules.md 12章）
+    fire_ally_play(s, p, iid, h.card);
     enter_board(s, p, b);
     push_abilities(s, &fanfare, &ctx);
 }

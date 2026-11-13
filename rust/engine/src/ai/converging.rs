@@ -24,6 +24,8 @@ fn harmless_own(on: On) -> bool {
             | On::AllyAct
             | On::AllyFuse
             | On::AllyLeaveInHand
+            | On::AllyPlay
+            | On::TurnEndInHand
             | On::LastWords
     )
 }
