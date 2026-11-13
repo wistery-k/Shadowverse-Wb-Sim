@@ -860,12 +860,41 @@ fn apply_mulligan(s: &mut GameState, p: PlayerIndex, swap: &[Iid]) {
     }
 }
 
+/// 手札から出したカード h と見分けのつかない印を、残った手札から消す（相手にはどの枠から出したか分からない。docs/rules.md「手札から出したカードの位置」）。
+/// 同じ名前の公開されたカードと、h が合う条件付きドローの条件が対象。h 自身が同じ印を持っていたなら、
+/// 相手から見ても印の付いた枠が 1 つ減っただけなので残す（2026-11-13。docs/ai-notes/13-2026-11-13.md「手札で変身したカードを公開しない修正を入れて物差しの版を上げる」）
+fn hide_marks_like(s: &mut GameState, p: PlayerIndex, h: &HandCard) {
+    let revealed_like = |r: &HandCard| r.revealed && !h.revealed && r.card == h.card;
+    let hint_like = |r: &HandCard| {
+        r.drawn_by.as_ref().is_some_and(|hint| {
+            hint_matches(h.card, hint) && !h.drawn_by.as_ref().is_some_and(|x| same_hint(x, hint))
+        })
+    };
+    if !s.players[p]
+        .hand
+        .iter()
+        .any(|r| revealed_like(r) || hint_like(r))
+    {
+        return;
+    }
+    let hand = s.players[p].hand.make_mut();
+    for r in hand.iter_mut() {
+        if revealed_like(r) {
+            r.revealed = false;
+        }
+        if hint_like(r) {
+            r.drawn_by = None;
+        }
+    }
+}
+
 fn apply_play(s: &mut GameState, iid: Iid) {
     let p = s.active;
     let Some(hi) = s.players[p].hand.iter().position(|c| c.iid == iid) else {
         return;
     };
     let h = s.players[p].hand.make_mut().remove(hi);
+    hide_marks_like(s, p, &h);
     let cd = card(h.card);
     let pl = &mut s.players[p];
     let cost = play_cost(cd, pl.pp, Some(&h));
@@ -1115,6 +1144,8 @@ fn apply_fuse(s: &mut GameState, host_iid: Iid, materials: &[Iid]) {
     }
     let host = &mut hand[hi];
     host.fused_this_turn = true;
+    // 融合したことと融合する側のカード名は相手に公開される（素材が何だったかは公開されない。docs/rules.md「融合で相手に分かること」）
+    host.revealed = true;
     let (host_card, n_kinds) = (host.card, host.fused_kinds.len() as i32);
     hand.retain(|c| !materials.contains(&c.iid));
     let d = data();

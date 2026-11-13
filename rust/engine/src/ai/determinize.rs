@@ -10,42 +10,6 @@ fn is_public(h: &HandCard) -> bool {
     h.revealed
 }
 
-fn matches_hint(c: CardIdx, hint: &DrawHint) -> bool {
-    let cd = card(c);
-    let f = hint.filter;
-    if let Some(t) = f.ctype {
-        if cd.ctype != t {
-            return false;
-        }
-    }
-    if let Some(t) = f.tribe {
-        if !cd.tribes.contains(&t) {
-            return false;
-        }
-    }
-    if let Some(cl) = f.class {
-        if cd.class != cl {
-            return false;
-        }
-    }
-    if let Some(ids) = &f.ids {
-        if !ids.contains(&c) {
-            return false;
-        }
-    }
-    if let Some(m) = f.cost_max {
-        if cd.cost > m {
-            return false;
-        }
-    }
-    if let Some(e) = hint.cost_eq {
-        if cd.cost != e {
-            return false;
-        }
-    }
-    true
-}
-
 /// viewer から見えない情報（相手の手札・山札の中身と、相手がどのカードを捨てたか、山札の順番、乱数の状態）を並べ直した局面。
 /// peek_opp_hand なら相手の手札は実際のまま（実験用）
 pub fn determinize(
@@ -103,7 +67,7 @@ fn redeal_hidden(s: &mut GameState, viewer: PlayerIndex, rng: &mut Rng, peek_opp
     for &i in &hidden {
         let h = &opp.hand[i];
         let Some(hint) = &h.drawn_by else { continue };
-        if let Some(idx) = pool.iter().position(|&c| matches_hint(c, hint)) {
+        if let Some(idx) = pool.iter().position(|&c| hint_matches(c, hint)) {
             assigned.push((h.iid, pool.remove(idx)));
         }
     }

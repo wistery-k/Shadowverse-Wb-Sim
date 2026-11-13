@@ -1527,7 +1527,12 @@ fn transform(s: &mut GameState, id: Iid, cid: CardIdx) {
         return;
     }
     if let Some((q, i)) = s.find_hand(id) {
-        let h = revealed_hand_card(s, cid, Some(id));
+        // 手札での変身は相手に公開されない（docs/rules.md「手札で変身したカード」）。変身の前に相手に分かっていた印はそのまま残す
+        let old = &s.players[q].hand[i];
+        let (revealed, drawn_by) = (old.revealed, old.drawn_by);
+        let mut h = s.new_hand_card(cid, Some(id));
+        h.revealed = revealed;
+        h.drawn_by = drawn_by;
         s.players[q].hand.make_mut()[i] = h;
     }
 }
