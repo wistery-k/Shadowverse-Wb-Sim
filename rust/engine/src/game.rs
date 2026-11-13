@@ -4,6 +4,7 @@
 use crate::data::*;
 use crate::effects::*;
 use crate::state::*;
+use crate::state_json::card_shows_x;
 
 fn new_player(deck: Vec<CardRef>) -> PlayerState {
     PlayerState {
@@ -24,6 +25,7 @@ fn new_player(deck: Vec<CardRef>) -> PlayerState {
         graveyard_followers: Shared::default(),
         destroyed_amulets: Shared::default(),
         hidden_discards: Shared::default(),
+        hand_log: HandLog::default(),
         destroyed_this_turn: Shared::default(),
         combo: 0,
         evolved_this_turn: false,
@@ -877,10 +879,14 @@ fn hide_marks_like(s: &mut GameState, p: PlayerIndex, h: &HandCard) {
     {
         return;
     }
-    let hand = s.players[p].hand.make_mut();
-    for r in hand.iter_mut() {
+    let pl = &mut s.players[p];
+    for r in pl.hand.make_mut().iter_mut() {
         if revealed_like(r) {
             r.revealed = false;
+            // 公開されていたカードが伏せた枠になった（手札の記録）
+            pl.hand_log.push(HandEv::InWith {
+                boosts: sat_u16(r.boosts),
+            });
         }
         if hint_like(r) {
             r.drawn_by = None;
@@ -895,6 +901,11 @@ fn apply_play(s: &mut GameState, iid: Iid) {
     };
     let h = s.players[p].hand.make_mut().remove(hi);
     hide_marks_like(s, p, &h);
+    if !h.revealed {
+        s.players[p]
+            .hand_log
+            .push(HandEv::out_of(&h, card_shows_x(h.card)));
+    }
     let cd = card(h.card);
     let pl = &mut s.players[p];
     let cost = play_cost(cd, pl.pp, Some(&h));
@@ -914,6 +925,9 @@ fn apply_play(s: &mut GameState, iid: Iid) {
     if cd.ctype == CardType::Spell {
         s.players[p].graveyard += 1;
         // 手札の他のカードはスペルブーストされる
+        if s.players[p].hand.iter().any(|c| !c.revealed) {
+            s.players[p].hand_log.push(HandEv::Boost { times: 1 });
+        }
         let others: Vec<Iid> = s.players[p].hand.iter().map(|c| c.iid).collect();
         for o in others {
             fire_spellboost(s, p, o, 1);
@@ -1128,6 +1142,15 @@ fn apply_fuse(s: &mut GameState, host_iid: Iid, materials: &[Iid]) {
     let Some(hi) = s.players[p].hand.iter().position(|c| c.iid == host_iid) else {
         return;
     };
+    // 伏せた素材と、伏せていた融合する側のカードは、伏せた枠から出る（手札の記録。融合する側は公開になる）
+    let hidden_out = s.players[p]
+        .hand
+        .iter()
+        .filter(|c| !c.revealed && (c.iid == host_iid || materials.contains(&c.iid)))
+        .count();
+    for _ in 0..hidden_out {
+        s.players[p].hand_log.push(HandEv::OutUnknown);
+    }
     let hand = s.players[p].hand.make_mut();
     // 素材（手札の順）のコストを足し、種類を融合先に記録してから、手札から除く
     let mut fused_cost = 0;

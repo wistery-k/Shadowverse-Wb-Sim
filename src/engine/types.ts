@@ -157,6 +157,11 @@ export interface PlayerState {
    * AI の determinization で、相手の伏せた手札・山札と合わせて並べ直すために使う
    */
   hiddenDiscards?: string[];
+  /**
+   * 手札の伏せた枠に起きた、相手にも分かる出来事の記録（引いた・出した・スペルブースト等。ルールには影響しない）。
+   * 相手の AI の決定化が、伏せた手札のスペルブーストの回数を見込むのに使う。形は rust/engine/src/state_json.rs の hand_log_text
+   */
+  handLog?: string;
   /** このターン中に破壊された自分のフォロワー */
   destroyedThisTurn: DestroyedRecord[];
   /** コンボ（このターンにプレイしたカードの枚数と、効果による加算） */

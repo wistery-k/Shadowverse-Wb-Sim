@@ -201,6 +201,157 @@ pub struct DestroyedRecord {
     pub defense: i32,
 }
 
+/// 手札の伏せた枠に起きた、相手にも分かる出来事（`PlayerState::hand_log`）。ルールには効かない。
+/// 相手の AI の決定化が、伏せた手札のスペルブーストの回数等を見込むのに使う（docs/ai-notes/13-2026-11-13.md「伏せた相手の手札のスペルブーストを決定化で見込む」）。
+/// 相手には手札の何枚目を出したか分からない（docs/rules.md「手札から出したカードの位置」）ので、記録はどの枠かを持たない。記録に非公開の情報は入れない
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum HandEv {
+    /// 伏せたカードが手札に入った。山札の一番上から引いたなら、引く前の山札の枚数（それ以外は 0）
+    In { deck: u16 },
+    /// 公開されていたカードが伏せた枠になった（そのときのスペルブーストの回数）
+    InWith { boosts: u16 },
+    /// 伏せたカード card を手札から出した。出したときに相手に見えた中身（コスト・X・攻撃力と体力の変化。
+    /// X は能力で使うカードだけ（`X_HIDDEN` は見えない））
+    Out {
+        card: CardIdx,
+        cost: i16,
+        x: i16,
+        atk: i16,
+        def: i16,
+    },
+    /// 伏せたカードが手札から出た（捨てた・融合の素材・公開された等。中身から回数は分からない）
+    OutUnknown,
+    /// 伏せたカードが山札に戻った（手札で付いた状態を持ったまま）
+    ToDeck,
+    /// 公開されていたカードが、スペルブーストの回数 boosts を持ったまま山札に戻った
+    ToDeckWith { boosts: u16 },
+    /// 手札のカードすべてがスペルブーストされた
+    Boost { times: u16 },
+    /// 伏せたカードのうち 1 枚（どれかは相手に分からない）がスペルブーストされた
+    BoostOne { times: u16 },
+    /// 味方のフォロワーが場を離れた（手札にある間に働く能力のきっかけ）
+    AllyLeft { times: u16 },
+}
+
+/// HandEv::Out の X が見えない・無いとき
+pub const X_HIDDEN: i16 = i16::MIN;
+
+fn sat16(v: i32) -> i16 {
+    v.clamp(i16::MIN as i32 + 1, i16::MAX as i32) as i16
+}
+
+pub fn sat_u16(v: i32) -> u16 {
+    v.clamp(0, u16::MAX as i32) as u16
+}
+
+impl HandEv {
+    /// 伏せたカード h を手札から出したときの記録。show_x は X が相手に見えるか（能力で X を使うカード）
+    pub fn out_of(h: &HandCard, show_x: bool) -> HandEv {
+        HandEv::Out {
+            card: h.card,
+            cost: sat16(hand_cost(h)),
+            x: match h.x {
+                Some(x) if show_x => sat16(x),
+                _ => X_HIDDEN,
+            },
+            atk: sat16(h.attack_mod),
+            def: sat16(h.defense_mod),
+        }
+    }
+}
+
+struct LogNode {
+    ev: HandEv,
+    prev: Option<Rc<LogNode>>,
+}
+
+/// 手札の記録（HandEv の並び）。局面の複製で中身を写さないよう、新しいものを先頭にした共有のリストで持つ
+#[derive(Clone, Default)]
+pub struct HandLog {
+    head: Option<Rc<LogNode>>,
+    len: u32,
+}
+
+impl HandLog {
+    /// 1 つ足す（続く Boost・AllyLeft は 1 つにまとめる）
+    pub fn push(&mut self, e: HandEv) {
+        if let Some(h) = &self.head {
+            let merged = match (h.ev, e) {
+                (HandEv::Boost { times: a }, HandEv::Boost { times: b }) => Some(HandEv::Boost {
+                    times: a.saturating_add(b),
+                }),
+                (HandEv::AllyLeft { times: a }, HandEv::AllyLeft { times: b }) => {
+                    Some(HandEv::AllyLeft {
+                        times: a.saturating_add(b),
+                    })
+                }
+                _ => None,
+            };
+            if let Some(ev) = merged {
+                let prev = h.prev.clone();
+                self.head = Some(Rc::new(LogNode { ev, prev }));
+                return;
+            }
+        }
+        let prev = self.head.take();
+        self.head = Some(Rc::new(LogNode { ev: e, prev }));
+        self.len += 1;
+    }
+
+    pub fn len(&self) -> usize {
+        self.len as usize
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// 古いものから順の並び
+    pub fn to_vec(&self) -> Vec<HandEv> {
+        let mut v = Vec::with_capacity(self.len as usize);
+        let mut cur = self.head.as_deref();
+        while let Some(n) = cur {
+            v.push(n.ev);
+            cur = n.prev.as_deref();
+        }
+        v.reverse();
+        v
+    }
+
+    pub fn from_events(evs: &[HandEv]) -> HandLog {
+        let mut l = HandLog::default();
+        for &e in evs {
+            l.push(e);
+        }
+        l
+    }
+}
+
+impl Drop for HandLog {
+    /// 長いリストを再帰せずに捨てる
+    fn drop(&mut self) {
+        let mut cur = self.head.take();
+        while let Some(rc) = cur {
+            match Rc::try_unwrap(rc) {
+                Ok(mut n) => cur = n.prev.take(),
+                Err(_) => break,
+            }
+        }
+    }
+}
+
+impl PartialEq for HandLog {
+    fn eq(&self, other: &HandLog) -> bool {
+        self.len == other.len && self.to_vec() == other.to_vec()
+    }
+}
+
+impl fmt::Debug for HandLog {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.to_vec()).finish()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct PlayerState {
     pub leader_hp: i32,
@@ -224,6 +375,8 @@ pub struct PlayerState {
     /// 手札から捨てたカードのうち、相手にはどのカードか分からないもの。ルールには影響しない。
     /// 相手の AI の determinization で、伏せた手札・山札と合わせて並べ直す
     pub hidden_discards: Shared<CardIdx>,
+    /// 手札の伏せた枠に起きた、相手にも分かる出来事の記録（`HandEv`）。ルールには影響しない。相手の AI の決定化だけが使う
+    pub hand_log: HandLog,
     pub destroyed_this_turn: Shared<DestroyedRecord>,
     pub combo: i32,
     pub evolved_this_turn: bool,
@@ -676,6 +829,14 @@ impl GameState {
 
     /// 手札のカードを p の山札の末尾に戻す（並べ替えは呼ぶ側）。手札で付いた状態は維持する（公開・条件付きドローの印は情報なので消す）
     pub fn return_to_deck(&mut self, p: PlayerIndex, mut h: HandCard) {
+        let ev = if h.revealed {
+            HandEv::ToDeckWith {
+                boosts: sat_u16(h.boosts),
+            }
+        } else {
+            HandEv::ToDeck
+        };
+        self.players[p].hand_log.push(ev);
         self.players[p].deck.make_mut().push(CardRef {
             iid: h.iid,
             card: h.card,
@@ -758,10 +919,20 @@ impl GameState {
 
     /// 手札に加える。上限なら墓場へ。加えたら true
     pub fn add_hand_card(&mut self, p: PlayerIndex, c: HandCard) -> bool {
+        self.add_hand_card_from(p, c, 0)
+    }
+
+    /// add_hand_card と同じ。伏せたカードなら手札の記録に足す（deck は山札の一番上から引いたときの、引く前の山札の枚数。それ以外は 0）
+    fn add_hand_card_from(&mut self, p: PlayerIndex, c: HandCard, deck: usize) -> bool {
         let pl = &mut self.players[p];
         if pl.hand.len() >= HAND_LIMIT {
             pl.graveyard += 1;
             return false;
+        }
+        if !c.revealed {
+            pl.hand_log.push(HandEv::In {
+                deck: deck.min(u16::MAX as usize) as u16,
+            });
         }
         pl.hand.make_mut().push(c);
         true
@@ -779,6 +950,12 @@ impl GameState {
         let mut i = 0;
         while i < n && self.phase != Phase::Ended {
             i += 1;
+            // 山札の一番上から引くなら、引く前の山札の枚数（手札の記録。山札に戻ったカードを引いた割合を見込むのに使う）
+            let top = if filter.is_none() {
+                self.players[p].deck.len()
+            } else {
+                0
+            };
             let r = match filter {
                 Some(f) => {
                     let idx = self.players[p].deck.iter().position(|r| f(self, r));
@@ -802,7 +979,7 @@ impl GameState {
             if hint.is_some() {
                 c.drawn_by = hint;
             }
-            if self.add_hand_card(p, c) {
+            if self.add_hand_card_from(p, c, top) {
                 drawn.push(r.iid);
             }
         }

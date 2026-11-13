@@ -10,7 +10,7 @@ use super::converging::{
     converging_attacks, dominated_attack, settle_converging_trade_steps,
     settle_converging_trades_with,
 };
-use super::determinize::{determinize, determinize_apart};
+use super::determinize::{determinize, determinize_apart_with, determinize_with};
 use super::eval::{evaluate_with, EvalWeights};
 use super::exact_lethal::{search_exact_lethal, sure_lethal_options};
 use super::fusion::{excessive_fusion, last_words_to_hand};
@@ -246,6 +246,10 @@ pub struct SearchOptions {
     /// 同じ引き直しの種なら相手の手札が同じになる（oppHandCommon をどの手でも成り立たせる。docs/ai-notes.md「錬金釜を置くと点数が下がる理由」）
     pub read_own_deck_apart: bool,
     pub peek_opp_hand: bool,
+    /// 読み直し（相手のターンの読み）の決定化で、配り直した相手の伏せた手札に、手札の記録（公開の出来事）から見込んだスペルブースト等の回数をかけ直す
+    /// （determinize_with。docs/ai-notes/13-2026-11-13.md「伏せた相手の手札のスペルブーストを決定化で見込む」）。
+    /// 自分のターンのビームの決定化は前のまま（相手の手札は読み直しで配り直すので、効くのは読み直しの中）
+    pub opp_hand_boosts: bool,
     /// 上位の手を読み直した点数に、ターン末の点数をこの割合で混ぜる（0 なら読み直した点数だけ。既定 0.5、2026-10-22）
     pub rescore_mix: f64,
     /// 見込みのない終局面の読みを途中で打ち切る（RescoreRace。None なら全部読む。既定は DEFAULT_RESCORE_RACE、2026-10-30）
@@ -334,6 +338,7 @@ impl Default for SearchOptions {
             // 2026-11-02 から（6400 試合で 50.6% ± 0.40。docs/ai-notes.md「錬金釜を置くと点数が下がる理由」）
             read_own_deck_apart: true,
             peek_opp_hand: false,
+            opp_hand_boosts: false,
             rescore_mix: 0.5,
             rescore_race: Some(DEFAULT_RESCORE_RACE),
             draw_split: Some(DEFAULT_DRAW_SPLIT),
@@ -1460,9 +1465,9 @@ fn read_determinize(
     opts: &SearchOptions,
 ) -> GameState {
     if opts.read_own_deck_apart {
-        determinize_apart(base, p, rng, opts.peek_opp_hand)
+        determinize_apart_with(base, p, rng, opts.peek_opp_hand, opts.opp_hand_boosts)
     } else {
-        determinize(base, p, rng, opts.peek_opp_hand)
+        determinize_with(base, p, rng, opts.peek_opp_hand, opts.opp_hand_boosts)
     }
 }
 

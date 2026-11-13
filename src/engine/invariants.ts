@@ -27,6 +27,16 @@ export function invariantViolations(state: GameState): string[] {
     for (const c of pl.deck) {
       if (c.kept && (c.kept.iid !== c.iid || c.kept.cardId !== c.cardId)) v.push(`${where}: 山札のカード ${c.iid} の手札での状態が別のカードのもの`);
     }
+    // 手札の記録の伏せた枠の数（入った − 出た）は、伏せた手札の枚数と同じ（記録の無い局面は見ない）
+    if (pl.handLog !== undefined) {
+      let slots = 0;
+      for (const t of pl.handLog.split(" ")) {
+        if (t.startsWith("i") || t.startsWith("w")) slots++;
+        else if (t.startsWith("o") || t === "u" || t === "d") slots--;
+      }
+      const hidden = pl.hand.filter((h) => !h.revealed).length;
+      if (slots !== hidden) v.push(`${where}: 手札の記録の伏せた枠が${slots}、伏せた手札が${hidden}枚`);
+    }
     for (const c of [...pl.deck, ...pl.hand, ...pl.board]) {
       if (iids.has(c.iid)) v.push(`${where}: iid ${c.iid} が重複`);
       iids.add(c.iid);
