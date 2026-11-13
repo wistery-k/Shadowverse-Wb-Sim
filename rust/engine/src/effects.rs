@@ -1549,17 +1549,21 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 data().crest_abilities[*crest_id as usize].is_some(),
                 "クレストの能力が未定義"
             );
-            let iid = s.new_iid();
-            let order = s.next_order;
-            s.next_order += 1;
-            let countdown = data().crests[*crest_id as usize].countdown;
-            s.players[holder].crests.make_mut().push(CrestInstance {
-                iid,
-                crest: *crest_id,
-                countdown,
-                order,
-                used_once: Vec::new(),
-            });
+            // 同じクレストの 2 つ目は持たない（公式 Q&A。docs/rules.md「9. クレスト」）。
+            // 今のクレストのカウントダウンも戻さない（未確認）
+            if !s.players[holder].crests.iter().any(|c| c.crest == *crest_id) {
+                let iid = s.new_iid();
+                let order = s.next_order;
+                s.next_order += 1;
+                let countdown = data().crests[*crest_id as usize].countdown;
+                s.players[holder].crests.make_mut().push(CrestInstance {
+                    iid,
+                    crest: *crest_id,
+                    countdown,
+                    order,
+                    used_once: Vec::new(),
+                });
+            }
         }
         Effect::ApocalypseDeck => {
             let mut deck = Vec::new();
