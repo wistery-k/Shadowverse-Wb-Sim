@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import rawCards from "../data/cards.json";
 import rawCrests from "../data/crests.json";
+import rawRotCards from "../data/pools/azvaldt/cards.json";
+import rawRotCrests from "../data/pools/azvaldt/crests.json";
+import rawRotSpecials from "../data/pools/azvaldt/specials.json";
 import {
   CardValidationError,
   STARTER,
   deckProblems,
   validateCards,
   validateCrests,
+  validateSpecials,
   type Card,
 } from "../src/cards";
 
@@ -95,6 +99,49 @@ describe("スターターのカードプール", () => {
     expect(cards.filter((c) => c.set === "basic")).toHaveLength(56);
     expect(cards.filter((c) => c.set === "legend_dawn")).toHaveLength(142);
     expect(cards.filter((c) => c.tribes === null)).toEqual([]);
+  });
+});
+
+describe("前期のローテーションのカードプール（data/pools/azvaldt/）", () => {
+  const cards = validateCards(rawRotCards);
+
+  it("カード・クレスト・特殊効果が検証を通る", () => {
+    expect(() => validateCrests(rawRotCrests, cards)).not.toThrow();
+    expect(() => validateSpecials(rawRotSpecials, cards)).not.toThrow();
+  });
+
+  it("ベーシックと第4〜9弾の515種と、参照されるトークン56種で、全カードのタイプが判明している", () => {
+    const count = (set: Card["set"]) => cards.filter((c) => c.set === set).length;
+    expect(count("basic")).toBe(56);
+    expect(count("six_dragons") + count("flower_revelry") + count("apocalypse_pact")).toBe(76 * 3);
+    expect(count("godslayer_anathema") + count("chronicle_of_destiny") + count("azvaldt_revenant")).toBe(77 + 78 + 76);
+    expect(count("token")).toBe(56);
+    expect(count("legend_dawn")).toBe(0);
+    expect(cards.filter((c) => c.tribes === null)).toEqual([]);
+  });
+
+  it("スターターと同じIDのカード（ベーシックと一部のトークン）は能力・コスト・能力値が同じ", () => {
+    const starter = new Map(validateCards(rawCards).map((c) => [c.id, c]));
+    const shared = cards.filter((c) => starter.has(c.id));
+    expect(shared).toHaveLength(81);
+    for (const c of shared) {
+      const { related: _a, ...rot } = c;
+      const { related: _b, ...old } = starter.get(c.id) as Card;
+      expect(rot).toEqual(old);
+    }
+  });
+});
+
+describe("validateSpecials", () => {
+  it("カードの specials と、特殊効果の sources が対応していることを検査する", () => {
+    const special = { id: "test-special", kind: "accelerate", sources: ["test-spell"], cost: 1, text: "テスト" };
+    const cards = validateCards([{ ...spell, specials: ["test-special"] }]);
+    expect(() => validateSpecials([special], cards)).not.toThrow();
+    expect(() => validateSpecials([], cards)).toThrow(/test-special/);
+    expect(() => validateSpecials([{ ...special, sources: ["none"] }], cards)).toThrow(/none/);
+    expect(() => validateSpecials([{ ...special, kind: "other" }], cards)).toThrow(/kind/);
+    const plain = validateCards([spell]);
+    expect(() => validateSpecials([special], plain)).toThrow(/specials/);
   });
 });
 

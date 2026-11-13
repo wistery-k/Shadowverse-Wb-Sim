@@ -6,8 +6,10 @@ import {
   CARD_TYPES,
   CLASS_IDS,
   RARITIES,
+  SPECIAL_KINDS,
   type Card,
   type Crest,
+  type SpecialEffect,
 } from "./types";
 
 export class CardValidationError extends Error {
@@ -55,6 +57,9 @@ function checkCard(raw: unknown, where: string, problems: string[]): void {
 
   if (raw.crest !== undefined && (typeof raw.crest !== "string" || raw.crest === "")) {
     p("crest は空でない文字列か省略が必要です");
+  }
+  if (raw.specials !== undefined && (!isStringArray(raw.specials) || raw.specials.length === 0)) {
+    p("specials は空でない文字列の配列か省略が必要です");
   }
 
   const isFollower = raw.type === "follower";
@@ -133,4 +138,50 @@ export function validateCrests(data: unknown, cards: readonly Card[]): Crest[] {
 
   if (problems.length > 0) throw new CardValidationError(problems);
   return data as Crest[];
+}
+
+/** プールの specials.json（結晶・アクセラレート・信仰）を検証する。cards は検証済みのカード。 */
+export function validateSpecials(data: unknown, cards: readonly Card[]): SpecialEffect[] {
+  const problems: string[] = [];
+  if (!Array.isArray(data)) throw new CardValidationError(["特殊効果: ルートは配列が必要です"]);
+
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  const ids = new Set<string>();
+  data.forEach((raw, i) => {
+    const where = isObj(raw) && typeof raw.id === "string" ? `特殊効果[${i}] ${raw.id}` : `特殊効果[${i}]`;
+    const p = (msg: string) => problems.push(`${where}: ${msg}`);
+    if (!isObj(raw)) {
+      p("オブジェクトではありません");
+      return;
+    }
+    for (const key of ["id", "text"]) {
+      if (typeof raw[key] !== "string" || raw[key] === "") p(`${key} は空でない文字列が必要です`);
+    }
+    if (!isOneOf(SPECIAL_KINDS, raw.kind)) p(`kind が不正です: ${String(raw.kind)}`);
+    if (!isNonNegInt(raw.cost)) p("cost は0以上の整数が必要です");
+    if (!isStringArray(raw.sources) || raw.sources.length === 0) {
+      p("sources は空でない文字列の配列が必要です");
+    } else {
+      for (const src of raw.sources) {
+        const card = byId.get(src);
+        if (!card) p(`source のカード ${src} が存在しません`);
+        else if (typeof raw.id === "string" && !card.specials?.includes(raw.id)) p(`${src} の specials にこれがありません`);
+      }
+    }
+    if (raw.countdown !== undefined && (!isNonNegInt(raw.countdown) || raw.countdown === 0)) {
+      p("countdown は1以上の整数が必要です");
+    }
+    if (typeof raw.id === "string") {
+      if (ids.has(raw.id)) p("id が重複しています");
+      ids.add(raw.id);
+    }
+  });
+  for (const card of cards) {
+    for (const id of card.specials ?? []) {
+      if (!ids.has(id)) problems.push(`${card.id}: specials の ${id} が存在しません`);
+    }
+  }
+
+  if (problems.length > 0) throw new CardValidationError(problems);
+  return data as SpecialEffect[];
 }

@@ -5,7 +5,7 @@ import { validateCards, validateCrests } from "./validate";
 
 export * from "./types";
 export * from "./format";
-export { validateCards, validateCrests, CardValidationError } from "./validate";
+export { validateCards, validateCrests, validateSpecials, CardValidationError } from "./validate";
 
 /** 検証済みの全カード（トークン含む） */
 export const ALL_CARDS: readonly Card[] = validateCards(rawCards);
