@@ -38,13 +38,13 @@ use std::time::Instant;
 pub const VERSION: u32 = 5;
 
 /// 相手どうしの決まった試合（`fingerprint`）の手順のハッシュ
-pub const FINGERPRINT: &str = "d7bd567f";
+pub const FINGERPRINT: &str = "0f818a8c";
 
 /// 強い相手の物差しの版
 pub const STRONG_VERSION: u32 = 4;
 
 /// 強い相手どうしの決まった試合の手順のハッシュ
-pub const STRONG_FINGERPRINT: &str = "9188e074";
+pub const STRONG_FINGERPRINT: &str = "66a09e01";
 
 /// 相手の評価関数の重み（2026-10-16 の SEARCH_WEIGHTS を書き写したもの。2026-10-22 の SEARCH_WEIGHTS も同じなので、強い相手もこれを使う）
 const REFERENCE_WEIGHTS: &str = r#"{"myHp":0.7,"oppHp":1,"attack":1,"defense":0.8,"followerBase":1,"tempAttack":0.3,"keywords":1,"amulet":1.5,"sigil":0.5,"sigilAmulet":1.5,"countdownDecay":0.8,"jeanneSync":0,"oppBoard":1.1,"myHand":0.6,"oppHand":0.3,"ep":1.5,"sep":5,"extraPp":1,"maxPp":8,"crest":3,"graveyard":0.05,"lethalRange":10,"lethalAttack":0.3,"fusionSet":3.6,"kuonReserve":8,"evoReserve":3,"sevoReserve":6,"kerberosReserve":0,"lastWords":1,"lastWordsSummon":0.5,"handStorm":0,"boostCard":1,"boost":0.2,"boostCap":5,"hold":{"90072110":0.6,"90072120":0.6,"90073110":1.2,"90073120":1.7999999999999998,"90073130":1.7999999999999998,"90074110":4.8},"doomed":0.3,"ppLeft":0,"extraPpExpiring":0,"passive":0}"#;
