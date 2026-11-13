@@ -156,7 +156,8 @@ pub fn resolve_target(s: &GameState, ctx: &Ctx, t: &Target) -> Vec<Iid> {
 fn resolve_into(s: &GameState, ctx: &Ctx, t: &Target, out: &mut Vec<Iid>) {
     match t {
         Target::This => {
-            if exists_entity(s, ctx.source) {
+            // 手札から山札に戻ったカードも、処理待ちの手札で働く能力（【スペルブースト時】等）の「これ」になる（hand_state_mut）
+            if exists_entity(s, ctx.source) || kept_card(s, ctx.source).is_some() {
                 out.push(ctx.source)
             }
         }
@@ -231,8 +232,10 @@ fn resolve_into(s: &GameState, ctx: &Ctx, t: &Target, out: &mut Vec<Iid>) {
     }
 }
 
-/// 相手のカードを能力で選ぶ場合の制限（潜伏・オーラ、「相手は能力でこれしか選べない」）
-fn selectable(s: &GameState, chooser: PlayerIndex, ids: Vec<Iid>) -> Vec<Iid> {
+/// 相手のカードを能力で選ぶ場合の制限（潜伏・オーラ、「相手は能力でこれしか選べない」）。
+/// (選べるカード, そのうち「相手は能力でこれしか選べない」相手のカード) を返す。後者があれば、それを選び終えるまで
+/// ほかは選べない（1 枚ずつ選ぶので、ロイドを選んだ後はほかも選べる。公式 Q&A。docs/rules.md 11 章）
+fn selectable(s: &GameState, chooser: PlayerIndex, ids: Vec<Iid>) -> (Vec<Iid>, Vec<Iid>) {
     let opp = opponent(chooser);
     let is_opp = |id: Iid| {
         if is_leader(id) {
@@ -246,33 +249,40 @@ fn selectable(s: &GameState, chooser: PlayerIndex, ids: Vec<Iid>) -> Vec<Iid> {
             .map(|c| c.has_keyword(AMBUSH) || c.has_keyword(AURA))
             .unwrap_or(false)
     };
-    let only: Vec<Iid> = ids
+    let all: Vec<Iid> = ids
+        .into_iter()
+        .filter(|&id| !is_opp(id) || !blocked(id))
+        .collect();
+    let only: Vec<Iid> = all
         .iter()
         .copied()
         .filter(|&id| {
             is_opp(id)
-                && !blocked(id)
                 && s.board_card(id)
                     .map(|c| abilities_of(c.card).only_selectable)
                     .unwrap_or(false)
         })
         .collect();
-    ids.into_iter()
-        .filter(|&id| {
-            if !is_opp(id) {
-                return true;
-            }
-            if blocked(id) {
-                return false;
-            }
-            only.is_empty() || only.contains(&id)
-        })
-        .collect()
+    (all, only)
 }
 
-/// 「選ぶ」の候補
-pub fn choose_candidates(s: &GameState, ctx: &Ctx, from: &Target) -> Vec<Iid> {
+/// 「選ぶ」の候補: (選べるカード, 先に選ばなければならないカード)。docs/rules.md 11 章「2枚以上を選ぶときのロイド」
+pub fn choose_candidates(s: &GameState, ctx: &Ctx, from: &Target) -> (Vec<Iid>, Vec<Iid>) {
     selectable(s, ctx.controller, resolve_target(s, ctx, from))
+}
+
+/// count 枚を選ぶとき、(先に選んだことにするカード, 残りを選ぶ候補)。「これしか選べない」カードが count 枚以上あれば、
+/// その中から選ぶ。count 枚より少なければ、それを全部選んだうえで、残りをほかの候補から選ぶ
+/// 自分の側と相手の側をまたいで選ぶ能力で、自分の側のカードも候補から外れるかは未確認（スターターには無い。docs/rules.md 11 章「2枚以上を選ぶときのロイド」）
+pub fn choose_split(all: Vec<Iid>, only: Vec<Iid>, count: usize) -> (Vec<Iid>, Vec<Iid>) {
+    if only.is_empty() {
+        (Vec::new(), all)
+    } else if only.len() >= count {
+        (Vec::new(), only)
+    } else {
+        let rest = all.into_iter().filter(|x| !only.contains(x)).collect();
+        (only, rest)
+    }
 }
 
 // ---- 値と条件 ----
@@ -285,12 +295,32 @@ fn source_x(s: &GameState, ctx: &Ctx) -> i32 {
             }
         }
     }
-    if let Some(h) = s.hand_card(ctx.source) {
+    if let Some(h) = s.hand_card(ctx.source).or_else(|| kept_card(s, ctx.source)) {
         if let Some(x) = h.x {
             return x;
         }
     }
     ctx.source_x.unwrap_or(0)
+}
+
+/// 手札から山札に戻ったカード iid の、山札で持っている手札での状態
+fn kept_card(s: &GameState, iid: Iid) -> Option<&HandCard> {
+    s.players
+        .iter()
+        .find_map(|pl| pl.deck_kept.iter().find(|h| h.iid == iid))
+}
+
+/// 手札のカード iid の状態。手札から山札に戻ったカードなら、山札で持っている手札での状態。
+/// 処理待ちの【スペルブースト時】等は、カードが山札に戻っても働く（オーバーディメンションで戻して引き直さなかったカード。
+/// 公式の問い合わせの答え。docs/rules.md 11 章「スペルブーストのタイミング」）。
+/// 場から山札に戻ったカードは手札での状態を持たないので、場の能力の効果は届かない
+fn hand_state_mut(s: &mut GameState, iid: Iid) -> Option<&mut HandCard> {
+    if let Some((q, i)) = s.find_hand(iid) {
+        return Some(&mut s.players[q].hand.make_mut()[i]);
+    }
+    s.players
+        .iter_mut()
+        .find_map(|pl| pl.deck_kept.iter_mut().find(|h| h.iid == iid))
 }
 
 pub fn eval_value(s: &GameState, ctx: &Ctx, v: &Value) -> i32 {
@@ -760,13 +790,11 @@ pub fn damage_entity(s: &mut GameState, id: Iid, amount: i32) {
     }
 }
 
+/// リーダーを回復する。回復した量が 0 でも「回復したとき」は働く（公式 Q&A。docs/rules.md 11 章）
 pub fn heal_leader(s: &mut GameState, p: PlayerIndex, amount: i32) {
     let pl = &mut s.players[p];
     let healed = pl.leader_max_hp.min(pl.leader_hp + amount) - pl.leader_hp;
-    if healed <= 0 {
-        return;
-    }
-    pl.leader_hp += healed;
+    pl.leader_hp += healed.max(0);
     fire_side(s, p, |_, t, _| {
         if matches!(t, Trigger::LeaderHealed) {
             Some(None)
@@ -1150,7 +1178,9 @@ pub fn answer_choose(s: &mut GameState, targets: Vec<Iid>) {
         hide_hand_choice(s, player, &candidates);
     }
     let frame = s.stack.last_mut().expect("選択待ちではありません");
-    frame.ctx.set_slot(slot, targets);
+    let mut chosen = frame.ctx.slot(slot).to_vec();
+    chosen.extend(targets);
+    frame.ctx.set_slot(slot, chosen);
     frame.pc += 1;
 }
 
@@ -1310,17 +1340,22 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
     }
     match eff {
         Effect::Choose { slot, from, count } => {
-            let candidates = choose_candidates(s, &frame.ctx, from);
-            if candidates.len() <= *count as usize {
-                frame.ctx.set_slot(*slot, candidates);
+            let (all, only) = choose_candidates(s, &frame.ctx, from);
+            let (mut chosen, candidates) = choose_split(all, only, *count as usize);
+            let need = *count as usize - chosen.len();
+            if candidates.len() <= need {
+                chosen.extend(candidates);
+                frame.ctx.set_slot(*slot, chosen);
                 frame.pc += 1;
                 return true;
             }
+            // 先に選んだことにするカードを入れておき、選んだカードを answer_choose で足す
+            frame.ctx.set_slot(*slot, chosen);
             s.pending = Some(Pending::Choose {
                 player: p,
                 slot: *slot,
                 candidates,
-                count: *count as usize,
+                count: need,
             });
             return false;
         }
@@ -1370,9 +1405,12 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             }
         }
         Effect::Distribute { target, amount } => {
-            // 古いフォロワーから順に、その体力と同じ値を割り当てる。ダメージは同時に与える
+            // 古いフォロワーから順に、その体力と同じ値を割り当てる。ダメージは同時に与える。
+            // 余りは、対象にリーダーがいればリーダーに、いなければ最後のフォロワーに与える（公式の用語説明「ダメージを割りふる」）
             let mut rest = val!(amount);
-            let mut fs: Vec<(i32, Iid, i32)> = targets!(target)
+            let ids = targets!(target);
+            let leader = ids.iter().copied().find(|&id| is_leader(id));
+            let mut fs: Vec<(i32, Iid, i32)> = ids
                 .into_iter()
                 .filter_map(|id| s.follower(id).map(|f| (f.order, f.iid, f.defense)))
                 .collect();
@@ -1386,8 +1424,17 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 plan.push((iid, n));
                 rest -= n;
             }
+            if rest > 0 && leader.is_none() {
+                if let Some(last) = plan.last_mut() {
+                    last.1 += rest;
+                    rest = 0;
+                }
+            }
             for (iid, n) in plan {
                 damage_follower(s, iid, n);
+            }
+            if let (Some(l), true) = (leader, rest > 0) {
+                damage_entity(s, l, rest);
             }
         }
         Effect::Destroy { target, count_var } => {
@@ -1538,12 +1585,8 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 .filter(|x| x.1 <= *cost)
                 .collect();
             if let Some(max) = costs.iter().map(|x| x.1).max() {
-                let mut best: Vec<CardIdx> = Vec::new();
-                for &(id, c) in &costs {
-                    if c == max && !best.contains(&id) {
-                        best.push(id);
-                    }
-                }
+                // 同名のフォロワーが何回も破壊されていれば、そのぶん選ばれやすい（公式の用語説明「リアニメイト」）
+                let best: Vec<CardIdx> = costs.iter().filter(|x| x.1 == max).map(|x| x.0).collect();
                 let k = s.rng_int(best.len());
                 let chosen = best[k];
                 let c = s.new_board_card(chosen, None);
@@ -1551,23 +1594,38 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             }
         }
         Effect::SummonFromDeck { filter, kinds } => {
-            let mut ks: Vec<CardIdx> = Vec::new();
-            for r in &s.players[p].deck {
-                if !ks.contains(&r.card) && deck_card_matches(s, &frame.ctx, p, r, filter) {
-                    ks.push(r.card);
+            // 条件に合うデッキのカードから 1 枚ずつランダムに選ぶので、同名のカードが多いほど選ばれやすい。
+            // 2 種類目からは、それまでに選んだカードと同名のものを除いて選ぶ（ユーザーの実機の確認 2026-11-13。
+            // docs/rules.md 11 章「ランダムに選ぶときの重み」）。選んだ写しをそのまま出す（手札でコストが変わったものを含む）
+            let mut picked: Vec<Iid> = Vec::new();
+            let mut names: Vec<CardIdx> = Vec::new();
+            for _ in 0..(*kinds).max(0) {
+                let cands: Vec<Iid> = s.players[p]
+                    .deck
+                    .iter()
+                    .filter(|r| {
+                        !names.contains(&r.card) && deck_card_matches(s, &frame.ctx, p, r, filter)
+                    })
+                    .map(|r| r.iid)
+                    .collect();
+                if cands.is_empty() {
+                    break;
                 }
+                let iid = cands[s.rng_int(cands.len())];
+                let card_id = s.players[p]
+                    .deck
+                    .iter()
+                    .find(|r| r.iid == iid)
+                    .unwrap()
+                    .card;
+                picked.push(iid);
+                names.push(card_id);
             }
-            s.shuffle(&mut ks);
-            for &cid in ks.iter().take((*kinds).max(0) as usize) {
+            for iid in picked {
                 if !s.can_add_to_board(p) {
                     break;
                 }
-                // 同じカードが複数あれば、条件に合うもの（手札でコストが変わったものを含む）を出す
-                let idx = s.players[p]
-                    .deck
-                    .iter()
-                    .position(|r| r.card == cid && deck_card_matches(s, &frame.ctx, p, r, filter))
-                    .unwrap();
+                let idx = s.players[p].deck.iter().position(|r| r.iid == iid).unwrap();
                 let r = s.players[p].deck.make_mut().remove(idx);
                 // 場に出したカードには手札で付いた状態を使わない（山札から出すのはアミュレットだけで、場では状態が効かない）
                 s.take_kept(p, r.iid);
@@ -1579,12 +1637,13 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
         Effect::SummonDestroyedAmulet => {
             let da = &s.players[p].destroyed_amulets;
             if let Some(max) = da.iter().map(|&id| card(id).cost).max() {
-                let mut best: Vec<CardIdx> = Vec::new();
-                for &id in da {
-                    if card(id).cost == max && !best.contains(&id) {
-                        best.push(id);
-                    }
-                }
+                // 同名のアミュレットが何回も破壊されていれば、そのぶん選ばれやすい
+                // （ユーザーの実機の確認 2026-11-13。docs/rules.md 11 章「ランダムに選ぶときの重み」）
+                let best: Vec<CardIdx> = da
+                    .iter()
+                    .copied()
+                    .filter(|&id| card(id).cost == max)
+                    .collect();
                 let k = s.rng_int(best.len());
                 let c = s.new_board_card(best[k], None);
                 enter_board(s, p, c);
@@ -1697,8 +1756,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                     f.max_defense += d;
                     continue;
                 }
-                if let Some((q, i)) = s.find_hand(id) {
-                    let h = &mut s.players[q].hand.make_mut()[i];
+                if let Some(h) = hand_state_mut(s, id) {
                     h.attack_mod += a;
                     h.defense_mod += d;
                 }
@@ -1770,8 +1828,8 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
         }
         Effect::CostChange { target, amount } => {
             for id in targets!(target) {
-                if let Some((q, i)) = s.find_hand(id) {
-                    s.players[q].hand.make_mut()[i].cost_mod += amount;
+                if let Some(h) = hand_state_mut(s, id) {
+                    h.cost_mod += amount;
                 }
             }
         }
@@ -1785,12 +1843,11 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
         }
         Effect::AddX { target, amount } => {
             for id in targets!(target) {
-                if let Some((q, i)) = s.find_hand(id) {
-                    let h = &mut s.players[q].hand.make_mut()[i];
-                    h.x = Some(h.x.unwrap_or(0) + amount);
-                } else if let Some((q, i)) = s.find_follower(id) {
+                if let Some((q, i)) = s.find_follower(id) {
                     let f = &mut s.players[q].board.make_mut()[i];
                     f.x = Some(f.x.unwrap_or(0) + amount);
+                } else if let Some(h) = hand_state_mut(s, id) {
+                    h.x = Some(h.x.unwrap_or(0) + amount);
                 }
             }
         }
@@ -1828,7 +1885,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             pl.max_pp = MAX_PP.min(pl.max_pp + amount);
         }
         Effect::GainEp { amount } => {
-            // 回復は試合の始めの EP まで（PP の回復と同じ扱い。docs/rules.md 12章）
+            // 回復は試合の始めの EP まで（PP の回復と同じ扱い。ユーザーの答え。docs/rules.md 12章の 35）
             let pl = &mut s.players[p];
             pl.ep = pl.ep.max(EP.min(pl.ep + amount));
         }
@@ -1876,19 +1933,24 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 data().crest_abilities[*crest_id as usize].is_some(),
                 "クレストの能力が未定義"
             );
-            let iid = s.new_iid();
-            let order = s.next_order;
-            s.next_order += 1;
-            let countdown = data().crests[*crest_id as usize].countdown;
-            s.players[holder].crests.make_mut().push(CrestInstance {
-                iid,
-                crest: *crest_id,
-                countdown,
-                order,
-                used_once: Vec::new(),
-                faith: None,
-                stacks: 0,
-            });
+            // 同じクレストの 2 つ目は持たない（公式 Q&A）。今のクレストのカウントダウンも戻さない。
+            // リーダーエリアは 5 つまでで、5 つあるときは持たない（docs/rules.md「9. クレスト」）
+            let crests = &s.players[holder].crests;
+            if crests.len() < MAX_LEADER_AREA && !crests.iter().any(|c| c.crest == *crest_id) {
+                let iid = s.new_iid();
+                let order = s.next_order;
+                s.next_order += 1;
+                let countdown = data().crests[*crest_id as usize].countdown;
+                s.players[holder].crests.make_mut().push(CrestInstance {
+                    iid,
+                    crest: *crest_id,
+                    countdown,
+                    order,
+                    used_once: Vec::new(),
+                    faith: None,
+                    stacks: 0,
+                });
+            }
         }
         Effect::ApocalypseDeck => {
             let mut deck = Vec::new();
@@ -2101,6 +2163,18 @@ fn transform(s: &mut GameState, id: Iid, cid: CardIdx) {
         h.revealed = revealed;
         h.drawn_by = drawn_by;
         s.players[q].hand.make_mut()[i] = h;
+        return;
+    }
+    // 手札から山札に戻ったカード（処理待ちの【スペルブースト時】で変身する宿題やるですぅ！）。手札での状態は消える
+    for q in 0..2 {
+        let pl = &mut s.players[q];
+        if let Some(k) = pl.deck_kept.iter().position(|h| h.iid == id) {
+            pl.deck_kept.remove(k);
+            if let Some(r) = pl.deck.make_mut().iter_mut().find(|r| r.iid == id) {
+                r.card = cid;
+            }
+            return;
+        }
     }
 }
 

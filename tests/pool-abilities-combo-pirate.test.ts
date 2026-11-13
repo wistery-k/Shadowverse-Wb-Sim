@@ -255,6 +255,18 @@ describe("コンボE", () => {
     expect(follower(t, b)?.evolve).toBe("none");
   });
 
+  it("ユエル＆ソシエのクレスト: プレイしたフォロワーが【ファンファーレ】でもう進化していても、そのターンの 1 回を使う（docs/rules.md 12章の 36）", () => {
+    const { s, me } = setup();
+    s.players[me].crests.push({ iid: s.nextIid++, crestId: "10414122", countdown: 4, order: s.nextOrder++, usedOncePerTurn: {} });
+    s.players[me].combo = 2;
+    const treant = toHand(s, me, "温厚なるトレント");
+    const b = toHand(s, me, "発芽の組員");
+    let t = play(s, treant);
+    expect(follower(t, treant)?.evolve).toBe("evolved");
+    t = play(t, b);
+    expect(follower(t, b)?.evolve).toBe("none");
+  });
+
   it("優雅なる虫風花: 自分の【コンボ】の枚数を引く（これを含む）", () => {
     const { s, me } = setup();
     s.players[me].combo = 2;

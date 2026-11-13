@@ -48,6 +48,7 @@ export const CRESTS: Record<string, CardAbilities> = {
   },
   [crestIdOf("氷界の鹿王")]: { abilities: [onTurnEnd(when(combo(3), [addToHand("森の神秘")]))] },
   [crestIdOf("調和の舞手・ユエル＆ソシエ")]: {
+    // プレイしたフォロワーがもう進化していても、そのターンの 1 回を使う（ユーザーの答え。docs/rules.md 12章の 36）
     abilities: [oncePerOwnTurn(onAllyPlay({ type: "follower" }, evolveIt(EVENT)))],
   },
   [crestIdOf("麗金花・ウンケイ")]: { abilities: [onTurnEnd(addToHand("輝く金貨"))] },

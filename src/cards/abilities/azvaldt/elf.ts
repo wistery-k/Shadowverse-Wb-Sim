@@ -52,7 +52,7 @@ const mirokuMode: Effect = mode([addToHand("フェアリー", 2)], [gainPp(2)], 
 
 export const ELF: Record<string, CardAbilities> = {
   [id("旧き天槍・ササニド")]: {
-    // 「信仰値を-10して、」の後の 2 つの文はどちらも信仰値を払ったときだけ働く扱い（暫定。docs/rules.md 12章の質問 34）
+    // 「信仰値を-10して、」の後の 2 つの文はどちらも信仰値を払ったときだけ働く（ユーザーの答え。docs/rules.md 12章の 34）
     abilities: [fanfare(spendFaith("旧き天槍・ササニド", 10, addToHand("天槍の深淵"), grantFaith("旧き天槍・ササニド")))],
   },
   [id("グルーミーガール・モエル")]: { abilities: [fanfare(...returnOneToDeck, draw(1))] },
