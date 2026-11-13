@@ -47,7 +47,7 @@ fn walk_effects(list: &'static [Effect], v: Option<&'static Json>, ix: &mut DslI
         ix.effect_json.insert(addr(e), ev);
         ix.effect_by_key.entry(ev.canonical()).or_insert(e);
         match e {
-            Effect::Mode { options } => {
+            Effect::Mode { options, .. } | Effect::InOrder { options } => {
                 let Some(Json::Arr(ovs)) = ev.get("options") else {
                     panic!("mode の options がありません")
                 };
@@ -59,9 +59,9 @@ fn walk_effects(list: &'static [Effect], v: Option<&'static Json>, ix: &mut DslI
                 abilities: Some(abs),
                 ..
             } => walk_abilities(abs, ev.get("abilities"), ix),
-            Effect::EarthRite { then, .. } | Effect::Necromancy { then, .. } => {
-                walk_effects(then, ev.get("then"), ix)
-            }
+            Effect::EarthRite { then, .. }
+            | Effect::Necromancy { then, .. }
+            | Effect::SpendFaith { then, .. } => walk_effects(then, ev.get("then"), ix),
             Effect::If {
                 then, otherwise, ..
             } => {
@@ -318,6 +318,9 @@ fn hint_json(h: &DrawHint) -> Json {
     if let Some(m) = f.cost_max {
         o.push(("costMax", num(m)));
     }
+    if let Some(m) = f.cost_min {
+        o.push(("costMin", num(m)));
+    }
     if let Some(e) = h.cost_eq {
         o.push(("costEq", num(e)));
     }
@@ -423,13 +426,18 @@ fn player_json(p: &PlayerState) -> Json {
                 p.crests
                     .iter()
                     .map(|c| {
-                        obj(vec![
+                        let mut o = vec![
                             ("iid", num(c.iid)),
                             ("crestId", s(&data().crests[c.crest as usize].id)),
                             ("countdown", opt_num(c.countdown)),
                             ("order", num(c.order)),
                             ("usedOncePerTurn", once(&c.used_once)),
-                        ])
+                        ];
+                        // 信仰の信仰値（クレストは省く）
+                        if let Some(f) = c.faith {
+                            o.push(("faith", num(f)));
+                        }
+                        obj(o)
                     })
                     .collect(),
             ),
@@ -475,6 +483,10 @@ fn player_json(p: &PlayerState) -> Json {
         ("leaderOncePerTurn", Json::Obj(Vec::new())),
         ("mulliganDone", Json::Bool(p.mulligan_done)),
     ]);
+    // リーダーの「受ける1以上のダメージを0にする。」（無ければ省く）
+    if let Some(t) = p.leader_damage_zero_until {
+        o.push(("leaderDamageZeroUntil", num(t)));
+    }
     obj(o)
 }
 
@@ -838,6 +850,9 @@ fn hint_of(v: &Json) -> R<Option<DrawHint>> {
     if v.get("costMax").is_some() {
         f.cost_max = Some(int(v, "costMax")?);
     }
+    if v.get("costMin").is_some() {
+        f.cost_min = Some(int(v, "costMin")?);
+    }
     let cost_eq = if v.get("costEq").is_some() {
         Some(int(v, "costEq")?)
     } else {
@@ -971,6 +986,10 @@ fn player_of(v: &Json) -> R<PlayerState> {
                     countdown: opt_int(c, "countdown")?,
                     order: int(c, "order")?,
                     used_once: once_of(c, "usedOncePerTurn")?,
+                    faith: match c.get("faith") {
+                        None | Some(Json::Null) => None,
+                        Some(_) => Some(int(c, "faith")?),
+                    },
                 })
             })
             .collect::<R<_>>()?,
@@ -1001,6 +1020,10 @@ fn player_of(v: &Json) -> R<PlayerState> {
         ep_evolved_this_turn: opt_card(v, "epEvolvedThisTurn")?,
         sep_evolved_this_turn: opt_card(v, "sepEvolvedThisTurn")?,
         mulligan_done: boolean(v, "mulliganDone")?,
+        leader_damage_zero_until: match v.get("leaderDamageZeroUntil") {
+            None | Some(Json::Null) => None,
+            Some(_) => Some(int(v, "leaderDamageZeroUntil")?),
+        },
     })
 }
 

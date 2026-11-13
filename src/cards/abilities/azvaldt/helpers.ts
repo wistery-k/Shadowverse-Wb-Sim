@@ -4,9 +4,11 @@
 
 import rawRotCards from "../../../../data/pools/azvaldt/cards.json";
 import rawRotCrests from "../../../../data/pools/azvaldt/crests.json";
+import rawRotSpecials from "../../../../data/pools/azvaldt/specials.json";
 import type { Ability, CardFilter, Condition, Effect, Target, Value } from "../../../engine/dsl";
 
 export {
+  AWAKENED,
   BOTH_LEADERS,
   ENHANCED,
   EVENT,
@@ -16,13 +18,17 @@ export {
   THIS_ATTACK,
   THIS_X,
   allFollowers,
+  act,
+  allyAmulets,
   allyCards,
   allyFollowers,
+  banish,
   buff,
   choose,
   costChange,
   count,
   damage,
+  destroy,
   discard,
   distribute,
   draw,
@@ -35,14 +41,23 @@ export {
   lastWords,
   mode,
   necromancy,
+  onAllyAct,
   onAllyEnter,
   onAttack,
+  onDiscarded,
+  onEnter,
   onEvolve,
+  onLeaderHealed,
   onSpellboost,
   onSuperEvolve,
+  onSuperEvolveInstead,
+  onTurnEnd,
+  onTurnStart,
   oppFollowers,
   otherAllyFollowers,
   random,
+  repeat,
+  returnToDeck,
   slot,
   spell,
   spellboost,
@@ -53,6 +68,7 @@ export {
 
 const ID_BY_NAME = new Map((rawRotCards as { id: string; name: string }[]).map((c) => [c.name, c.id]));
 const CREST_ID_BY_NAME = new Map((rawRotCrests as { id: string; name: string }[]).map((c) => [c.name, c.id]));
+const SPECIALS = rawRotSpecials as { id: string; kind: string; sources: string[] }[];
 
 /** カード名から前期のローテーションのカードIDを引く */
 export function id(name: string): string {
@@ -66,6 +82,14 @@ export function crestIdOf(name: string): string {
   const v = CREST_ID_BY_NAME.get(`クレスト：${name}`);
   if (!v) throw new Error(`前期のローテーションにクレストがありません: ${name}`);
   return v;
+}
+
+/** カード名の、アクセラレート・結晶・信仰の ID（能力はこの ID に書く。docs/rules.md「12」） */
+export function specialId(name: string, kind: "accelerate" | "crystallize" | "faith"): string {
+  const src = id(name);
+  const sp = SPECIALS.find((x) => x.kind === kind && x.sources.includes(src));
+  if (!sp) throw new Error(`${name} に ${kind} がありません`);
+  return sp.id;
 }
 
 // ---- 名前で書く効果（前期のローテーションのカードから引く） ----
@@ -109,3 +133,47 @@ export const onTurnEndInHand = (...effects: Effect[]): Ability => ({ trigger: { 
 export const exists = (of: Target): Condition => ({ kind: "exists", of });
 export const leaderHpAtMost = (value: number): Condition => ({ kind: "leaderHpAtMost", value });
 export const LEADER_HP_ABOVE_OPPONENT: Condition = { kind: "leaderHpAboveOpponent" };
+
+// ---- ランプD・アミュレットB で足した仕組み ----
+
+/** 自分のPP最大値を amount 増やす */
+export const addMaxPp = (amount: number): Effect => ({ op: "addMaxPp", amount });
+/** 自分のリーダーの体力の最大値を value にする */
+export const setLeaderMaxHp = (value: number): Effect => ({ op: "setLeaderMaxHp", side: "self", value });
+/** 相手のターン終了まで、自分のリーダーは「受ける1以上のダメージを0にする。」を持つ */
+export const LEADER_DAMAGE_ZERO: Effect = { op: "leaderDamageZero", until: "opponentTurnEnd" };
+/** 【モード】。cond を満たすなら、1 つを選ぶのではなくすべて */
+export const modeAllIf = (cond: Condition, ...options: Effect[][]): Effect => ({ op: "mode", options, allIf: cond });
+/** 「下記の能力から順に1つの能力が働く」（最後の次は最初） */
+export const inOrder = (...options: Effect[][]): Effect => ({ op: "inOrder", options });
+/** このバトル中に破壊された自分のアミュレット（filter）からランダム count 枚（distinct なら count 種類）と同名のカードを場に出す */
+export const summonDestroyedAmulets = (filter: CardFilter, count: number, distinct: boolean): Effect => ({
+  op: "summonDestroyedAmulets",
+  filter,
+  count,
+  distinct,
+});
+/** クレストすべてを消滅（信仰は消えない） */
+export const banishCrests = (side: "self" | "opponent" | "both"): Effect => ({ op: "banishCrests", side });
+/** カード name の信仰の信仰値を amount 増やす */
+export const addFaith = (name: string, amount: number): Effect => ({ op: "addFaith", crestId: specialId(name, "faith"), amount });
+/** カード name の信仰の信仰値を amount 減らして then を行う（足りなければ働かない） */
+export const spendFaith = (name: string, amount: number, ...then: Effect[]): Effect => ({
+  op: "spendFaith",
+  crestId: specialId(name, "faith"),
+  amount,
+  then,
+});
+/** 自分のアミュレットが破壊されたとき */
+export const onAllyAmuletDestroyed = (...effects: Effect[]): Ability => ({ trigger: { on: "allyAmuletDestroyed" }, effects });
+
+export const THIS_EVOLVED: Condition = { kind: "thisEvolved" };
+export const countAtLeast = (of: Target, value: number): Condition => ({ kind: "countAtLeast", of, value });
+/** 場のカード（両方の場、能力の持ち主を除く） */
+export const otherBoardCards = (filter?: CardFilter): Target => boardCards({ excludeSelf: true, ...filter });
+/** 「自分のアミュレットを選んだなら」: スロット name に自分のアミュレットがあるか（破壊する前に見る） */
+export const choseAllyAmulet = (name = "t"): Condition => ({
+  kind: "exists",
+  of: { kind: "board", side: "self", filter: { type: "amulet", inSlot: name } },
+});
+

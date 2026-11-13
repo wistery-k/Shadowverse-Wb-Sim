@@ -588,12 +588,13 @@ fn effects_may_hit_own_leader(effs: &[crate::data::Effect], depth: u32) -> bool 
                 Effect::SummonCopy { .. }
                 | Effect::Reanimate { .. }
                 | Effect::SummonFromDeck { .. }
-                | Effect::SummonDestroyedAmulet => true,
+                | Effect::SummonDestroyedAmulet
+                | Effect::SummonDestroyedAmulets { .. } => true,
                 Effect::Grant { abilities, .. } => abilities
                     .iter()
                     .flatten()
                     .any(|a| walk(&a.effects, &mut slots.clone(), depth)),
-                Effect::Mode { options } => {
+                Effect::Mode { options, .. } | Effect::InOrder { options } => {
                     options.iter().any(|o| walk(o, &mut slots.clone(), depth))
                 }
                 Effect::If {
@@ -605,9 +606,9 @@ fn effects_may_hit_own_leader(effs: &[crate::data::Effect], depth: u32) -> bool 
                             .is_some_and(|o| walk(o, &mut slots.clone(), depth))
                 }
                 Effect::Repeat { effects, .. } => walk(effects, slots, depth),
-                Effect::EarthRite { then, .. } | Effect::Necromancy { then, .. } => {
-                    walk(then, slots, depth)
-                }
+                Effect::EarthRite { then, .. }
+                | Effect::Necromancy { then, .. }
+                | Effect::SpendFaith { then, .. } => walk(then, slots, depth),
                 _ => false,
             };
             if risky {
