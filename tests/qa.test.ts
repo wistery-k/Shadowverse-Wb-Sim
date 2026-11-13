@@ -1,5 +1,6 @@
 // 公式 Q&A（公式データの各カードの `questions`。docs/rules.md の冒頭「公式Q&A」）を、今のエンジンで局面を作って確かめる。
-// 1 件ごとに、どのカードの Q&A かをテストの名前に書く
+// 1 件ごとに、どのカードの Q&A かをテストの名前に書く。
+// 公式の用語説明（2026-11-13 にユーザーが共有）で分かった決まりも、終わりの「公式の用語説明」で確かめる
 import { describe, expect, it } from "vitest";
 import { ALL_CARDS, ALL_CRESTS } from "../src/cards";
 import {
@@ -929,5 +930,25 @@ describe("公式Q&A: 回復したとき", () => {
     s.players[opp].pp = 10;
     s = applyAction(s, { type: "play", iid: toHand(s, opp, "森の神秘") }); // 0 回復
     expect(s.players[opp].leaderHp).toBe(hp - 1);
+  });
+});
+
+describe("公式の用語説明", () => {
+  it("リアニメイト: 同名のフォロワーが何回も破壊されていれば、そのぶん選ばれやすい（ファイター 3 回・白狐 1 回なら 3:1）", () => {
+    const fighter = id("不屈のファイター");
+    const fox = id("清純なる白狐");
+    const trials = 200;
+    let n = 0;
+    for (let seed = 1; seed <= trials; seed++) {
+      let { s, me } = setup(seed);
+      s.players[me].graveyardFollowers = [fighter, fighter, fighter, fox];
+      s = applyAction(s, { type: "play", iid: toHand(s, me, "ジャグリングゴースト") });
+      const got = [...onBoard(s, me, "不屈のファイター"), ...onBoard(s, me, "清純なる白狐")];
+      expect(got).toHaveLength(1);
+      if (got[0]!.cardId === fighter) n++;
+    }
+    // 名前ごとに等しく選ぶなら 1/2、回数どおりなら 3/4
+    expect(n / trials).toBeGreaterThan(0.65);
+    expect(n / trials).toBeLessThan(0.85);
   });
 });
