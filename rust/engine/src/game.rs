@@ -322,7 +322,7 @@ fn spell_has_targets(
     let t = scratch.get_or_insert_with(|| s.clone());
     let removed = t.players[p].hand.make_mut().remove(hi);
     let ctx = Ctx::new(p, removed.iid);
-    let ok = chooses().all(|(from, count)| choose_candidates(t, &ctx, from).len() >= count.max(1));
+    let ok = chooses().all(|(from, count)| choose_candidates(t, &ctx, from).0.len() >= count.max(1));
     t.players[p].hand.make_mut().insert(hi, removed);
     ok
 }

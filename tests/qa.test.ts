@@ -851,8 +851,7 @@ describe("公式Q&A: ダメージの割りふり", () => {
 });
 
 describe("公式Q&A: 選ぶ対象の制限", () => {
-  // 公式Q&Aと食い違う（E）: 今のエンジンは、選べる候補がロイドだけになり、ロイドだけを破壊する
-  it.fails("ロイド: 相手の場にプロシードハート・オーキスとロイドがいるとき、箱庭の断罪者・シルヴィアの【超進化時】は1枚目でロイド、2枚目でオーキスを選んで破壊する", () => {
+  it("ロイド: 相手の場にプロシードハート・オーキスとロイドがいるとき、箱庭の断罪者・シルヴィアの【超進化時】は1枚目でロイド、2枚目でオーキスを選んで破壊する", () => {
     let { s, me, opp } = setup();
     s = passTurns(s, 6);
     const sv = toBoard(s, me, "箱庭の断罪者・シルヴィア");
@@ -866,6 +865,21 @@ describe("公式Q&A: 選ぶ対象の制限", () => {
     }
     expect(follower(s, lloyd.iid)).toBeUndefined();
     expect(follower(s, orchis.iid)).toBeUndefined();
+  });
+
+  it("ロイド: ロイドのほかに2枚いるときは、ロイドを選んだうえで、2枚目をほかの2枚から選ぶ", () => {
+    let { s, me, opp } = setup();
+    s = passTurns(s, 6);
+    const sv = toBoard(s, me, "箱庭の断罪者・シルヴィア");
+    const a = toBoard(s, opp, "キャラバンマンモス");
+    const lloyd = toBoard(s, opp, "ロイド");
+    const b = toBoard(s, opp, "激震のゴリアテ");
+    s = applyAction(s, { type: "superEvolve", iid: sv.iid });
+    expect(s.pending).toMatchObject({ kind: "choose", candidates: [a.iid, b.iid], count: 1 });
+    s = applyAction(s, { type: "choose", targets: [b.iid] });
+    expect(follower(s, lloyd.iid)).toBeUndefined();
+    expect(follower(s, b.iid)).toBeUndefined();
+    expect(follower(s, a.iid)).toBeDefined();
   });
 });
 

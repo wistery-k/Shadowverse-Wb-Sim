@@ -177,8 +177,10 @@ fn resolve_into(s: &GameState, ctx: &Ctx, t: &Target, out: &mut Vec<Iid>) {
     }
 }
 
-/// 相手のカードを能力で選ぶ場合の制限（潜伏・オーラ、「相手は能力でこれしか選べない」）
-fn selectable(s: &GameState, chooser: PlayerIndex, ids: Vec<Iid>) -> Vec<Iid> {
+/// 相手のカードを能力で選ぶ場合の制限（潜伏・オーラ、「相手は能力でこれしか選べない」）。
+/// (選べるカード, そのうち「相手は能力でこれしか選べない」相手のカード) を返す。後者があれば、それを選び終えるまで
+/// ほかは選べない（1 枚ずつ選ぶので、ロイドを選んだ後はほかも選べる。公式 Q&A。docs/rules.md 11 章）
+fn selectable(s: &GameState, chooser: PlayerIndex, ids: Vec<Iid>) -> (Vec<Iid>, Vec<Iid>) {
     let opp = opponent(chooser);
     let is_opp = |id: Iid| {
         if is_leader(id) {
@@ -192,33 +194,39 @@ fn selectable(s: &GameState, chooser: PlayerIndex, ids: Vec<Iid>) -> Vec<Iid> {
             .map(|c| c.has_keyword(AMBUSH) || c.has_keyword(AURA))
             .unwrap_or(false)
     };
-    let only: Vec<Iid> = ids
+    let all: Vec<Iid> = ids
+        .into_iter()
+        .filter(|&id| !is_opp(id) || !blocked(id))
+        .collect();
+    let only: Vec<Iid> = all
         .iter()
         .copied()
         .filter(|&id| {
             is_opp(id)
-                && !blocked(id)
                 && s.board_card(id)
                     .map(|c| abilities_of(c.card).only_selectable)
                     .unwrap_or(false)
         })
         .collect();
-    ids.into_iter()
-        .filter(|&id| {
-            if !is_opp(id) {
-                return true;
-            }
-            if blocked(id) {
-                return false;
-            }
-            only.is_empty() || only.contains(&id)
-        })
-        .collect()
+    (all, only)
 }
 
-/// 「選ぶ」の候補
-pub fn choose_candidates(s: &GameState, ctx: &Ctx, from: &Target) -> Vec<Iid> {
+/// 「選ぶ」の候補: (選べるカード, 先に選ばなければならないカード)。docs/rules.md 11 章「2枚以上を選ぶときのロイド」
+pub fn choose_candidates(s: &GameState, ctx: &Ctx, from: &Target) -> (Vec<Iid>, Vec<Iid>) {
     selectable(s, ctx.controller, resolve_target(s, ctx, from))
+}
+
+/// count 枚を選ぶとき、(先に選んだことにするカード, 残りを選ぶ候補)。「これしか選べない」カードが count 枚以上あれば、
+/// その中から選ぶ。count 枚より少なければ、それを全部選んだうえで、残りをほかの候補から選ぶ
+pub fn choose_split(all: Vec<Iid>, only: Vec<Iid>, count: usize) -> (Vec<Iid>, Vec<Iid>) {
+    if only.is_empty() {
+        (Vec::new(), all)
+    } else if only.len() >= count {
+        (Vec::new(), only)
+    } else {
+        let rest = all.into_iter().filter(|x| !only.contains(x)).collect();
+        (only, rest)
+    }
 }
 
 // ---- 値と条件 ----
@@ -981,7 +989,9 @@ pub fn answer_choose(s: &mut GameState, targets: Vec<Iid>) {
         hide_hand_choice(s, player, &candidates);
     }
     let frame = s.stack.last_mut().expect("選択待ちではありません");
-    frame.ctx.set_slot(slot, targets);
+    let mut chosen = frame.ctx.slot(slot).to_vec();
+    chosen.extend(targets);
+    frame.ctx.set_slot(slot, chosen);
     frame.pc += 1;
 }
 
@@ -1086,17 +1096,22 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
     }
     match eff {
         Effect::Choose { slot, from, count } => {
-            let candidates = choose_candidates(s, &frame.ctx, from);
-            if candidates.len() <= *count as usize {
-                frame.ctx.set_slot(*slot, candidates);
+            let (all, only) = choose_candidates(s, &frame.ctx, from);
+            let (mut chosen, candidates) = choose_split(all, only, *count as usize);
+            let need = *count as usize - chosen.len();
+            if candidates.len() <= need {
+                chosen.extend(candidates);
+                frame.ctx.set_slot(*slot, chosen);
                 frame.pc += 1;
                 return true;
             }
+            // 先に選んだことにするカードを入れておき、選んだカードを answer_choose で足す
+            frame.ctx.set_slot(*slot, chosen);
             s.pending = Some(Pending::Choose {
                 player: p,
                 slot: *slot,
                 candidates,
-                count: *count as usize,
+                count: need,
             });
             return false;
         }
