@@ -119,7 +119,8 @@ pub fn resolve_target(s: &GameState, ctx: &Ctx, t: &Target) -> Vec<Iid> {
 fn resolve_into(s: &GameState, ctx: &Ctx, t: &Target, out: &mut Vec<Iid>) {
     match t {
         Target::This => {
-            if exists_entity(s, ctx.source) {
+            // 手札から山札に戻ったカードも、処理待ちの手札で働く能力（【スペルブースト時】等）の「これ」になる（hand_state_mut）
+            if exists_entity(s, ctx.source) || kept_card(s, ctx.source).is_some() {
                 out.push(ctx.source)
             }
         }
@@ -257,12 +258,32 @@ fn source_x(s: &GameState, ctx: &Ctx) -> i32 {
             }
         }
     }
-    if let Some(h) = s.hand_card(ctx.source) {
+    if let Some(h) = s.hand_card(ctx.source).or_else(|| kept_card(s, ctx.source)) {
         if let Some(x) = h.x {
             return x;
         }
     }
     ctx.source_x.unwrap_or(0)
+}
+
+/// 手札から山札に戻ったカード iid の、山札で持っている手札での状態
+fn kept_card(s: &GameState, iid: Iid) -> Option<&HandCard> {
+    s.players
+        .iter()
+        .find_map(|pl| pl.deck_kept.iter().find(|h| h.iid == iid))
+}
+
+/// 手札のカード iid の状態。手札から山札に戻ったカードなら、山札で持っている手札での状態。
+/// 処理待ちの【スペルブースト時】等は、カードが山札に戻っても働く（オーバーディメンションで戻して引き直さなかったカード。
+/// 公式の問い合わせの答え。docs/rules.md 11 章「スペルブーストのタイミング」）。
+/// 場から山札に戻ったカードは手札での状態を持たないので、場の能力の効果は届かない
+fn hand_state_mut(s: &mut GameState, iid: Iid) -> Option<&mut HandCard> {
+    if let Some((q, i)) = s.find_hand(iid) {
+        return Some(&mut s.players[q].hand.make_mut()[i]);
+    }
+    s.players
+        .iter_mut()
+        .find_map(|pl| pl.deck_kept.iter_mut().find(|h| h.iid == iid))
 }
 
 pub fn eval_value(s: &GameState, ctx: &Ctx, v: &Value) -> i32 {
@@ -1493,8 +1514,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                     f.max_defense += d;
                     continue;
                 }
-                if let Some((q, i)) = s.find_hand(id) {
-                    let h = &mut s.players[q].hand.make_mut()[i];
+                if let Some(h) = hand_state_mut(s, id) {
                     h.attack_mod += a;
                     h.defense_mod += d;
                 }
@@ -1566,19 +1586,18 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
         }
         Effect::CostChange { target, amount } => {
             for id in targets!(target) {
-                if let Some((q, i)) = s.find_hand(id) {
-                    s.players[q].hand.make_mut()[i].cost_mod += amount;
+                if let Some(h) = hand_state_mut(s, id) {
+                    h.cost_mod += amount;
                 }
             }
         }
         Effect::AddX { target, amount } => {
             for id in targets!(target) {
-                if let Some((q, i)) = s.find_hand(id) {
-                    let h = &mut s.players[q].hand.make_mut()[i];
-                    h.x = Some(h.x.unwrap_or(0) + amount);
-                } else if let Some((q, i)) = s.find_follower(id) {
+                if let Some((q, i)) = s.find_follower(id) {
                     let f = &mut s.players[q].board.make_mut()[i];
                     f.x = Some(f.x.unwrap_or(0) + amount);
+                } else if let Some(h) = hand_state_mut(s, id) {
+                    h.x = Some(h.x.unwrap_or(0) + amount);
                 }
             }
         }
@@ -1818,6 +1837,18 @@ fn transform(s: &mut GameState, id: Iid, cid: CardIdx) {
         h.revealed = revealed;
         h.drawn_by = drawn_by;
         s.players[q].hand.make_mut()[i] = h;
+        return;
+    }
+    // 手札から山札に戻ったカード（処理待ちの【スペルブースト時】で変身する宿題やるですぅ！）。手札での状態は消える
+    for q in 0..2 {
+        let pl = &mut s.players[q];
+        if let Some(k) = pl.deck_kept.iter().position(|h| h.iid == id) {
+            pl.deck_kept.remove(k);
+            if let Some(r) = pl.deck.make_mut().iter_mut().find(|r| r.iid == id) {
+                r.card = cid;
+            }
+            return;
+        }
     }
 }
 

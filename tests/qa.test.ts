@@ -494,6 +494,32 @@ describe("公式Q&A: オーバーディメンション", () => {
     expect(handOf(t, me, "ブレイズデストロイヤー")[0]).toMatchObject({ boosts: 5, costMod: -5 });
   });
 
+  it("戻したコスト6の鬼呼びの術を引き直さなければ、山札でコスト5になる（公式の問い合わせの答えの例2）", () => {
+    const { s, me } = setup();
+    const k = toHand(s, me, "鬼呼びの術");
+    Object.assign(handCard(s, me, k)!, { boosts: 1, costMod: -1 });
+    const o = toHand(s, me, "オーバーディメンション");
+    handCard(s, me, o)!.costMod = -18;
+    const t = applyAction(s, { type: "play", iid: o });
+    const inHand = handCard(t, me, k);
+    const inDeck = t.players[me].deck.find((c) => c.iid === k);
+    // 引き直したら 1+1+5 回でコスト0、引き直さなければ 1+1 回でコスト5
+    if (inHand) expect(inHand).toMatchObject({ boosts: 7, costMod: -7 });
+    else expect(inDeck?.kept).toMatchObject({ boosts: 2, costMod: -2 });
+  });
+
+  it("Xが4の宿題やるですぅ！は、山札に戻しても処理待ちの【スペルブースト時】でXが5になって変身する", () => {
+    const { s, me } = setup();
+    const k = toHand(s, me, "宿題やるですぅ！");
+    Object.assign(handCard(s, me, k)!, { boosts: 4, x: 4 });
+    const o = toHand(s, me, "オーバーディメンション");
+    handCard(s, me, o)!.costMod = -18;
+    const t = applyAction(s, { type: "play", iid: o });
+    // 引き直したなら手札で、引き直さなければ山札で変身している
+    const where = handCard(t, me, k)?.cardId ?? t.players[me].deck.find((c) => c.iid === k)?.cardId;
+    expect(where).toBe(id("成長したですぅ！"));
+  });
+
   it("Xが4のストームブラストを戻して引き直すと、その後のスペルブーストでXは10", () => {
     const { s, me, o } = od((s, me) => {
       const b = toHand(s, me, "ストームブラスト");
