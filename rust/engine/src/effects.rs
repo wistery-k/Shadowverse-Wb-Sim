@@ -1134,9 +1134,12 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             }
         }
         Effect::Distribute { target, amount } => {
-            // 古いフォロワーから順に、その体力と同じ値を割り当てる。ダメージは同時に与える
+            // 古いフォロワーから順に、その体力と同じ値を割り当てる。ダメージは同時に与える。
+            // 余りは、対象にリーダーがいればリーダーに、いなければ最後のフォロワーに与える（公式の用語説明「ダメージを割りふる」）
             let mut rest = val!(amount);
-            let mut fs: Vec<(i32, Iid, i32)> = targets!(target)
+            let ids = targets!(target);
+            let leader = ids.iter().copied().find(|&id| is_leader(id));
+            let mut fs: Vec<(i32, Iid, i32)> = ids
                 .into_iter()
                 .filter_map(|id| s.follower(id).map(|f| (f.order, f.iid, f.defense)))
                 .collect();
@@ -1150,8 +1153,17 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 plan.push((iid, n));
                 rest -= n;
             }
+            if rest > 0 && leader.is_none() {
+                if let Some(last) = plan.last_mut() {
+                    last.1 += rest;
+                    rest = 0;
+                }
+            }
             for (iid, n) in plan {
                 damage_follower(s, iid, n);
+            }
+            if let (Some(l), true) = (leader, rest > 0) {
+                damage_entity(s, l, rest);
             }
         }
         Effect::Destroy { target, count_var } => {
