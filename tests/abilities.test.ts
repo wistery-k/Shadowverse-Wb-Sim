@@ -539,6 +539,66 @@ describe("相手から見て分かる手札の情報（AI の determinization �
     expect(hand(s, me, hinted)).toMatchObject({ revealed: false, drawnBy: null });
   });
 
+  it("手札から出したカードと見分けのつかない印は、相手には残ったか分からないので消す", () => {
+    let { s, me } = setup();
+    const known = toHand(s, me, "フェアリー");
+    hand(s, me, known)!.revealed = true;
+    const hinted = toHand(s, me, "キャラバンマンモス");
+    hand(s, me, hinted)!.drawnBy = { type: "follower" };
+    const other = toHand(s, me, "フェアリー");
+    s = applyAction(s, { type: "play", iid: other });
+    expect(hand(s, me, known)).toMatchObject({ revealed: false });
+    expect(hand(s, me, hinted)).toMatchObject({ drawnBy: null });
+  });
+
+  it("出したカードが同じ印を持っていたなら、残った手札の印はそのまま（公開されたカードどうし・同じ条件どうし）", () => {
+    let { s, me } = setup();
+    const a = toHand(s, me, "フェアリー");
+    const b = toHand(s, me, "フェアリー");
+    hand(s, me, a)!.revealed = true;
+    hand(s, me, b)!.revealed = true;
+    s = applyAction(s, { type: "play", iid: a });
+    expect(hand(s, me, b)).toMatchObject({ revealed: true });
+
+    const h1 = toHand(s, me, "キャラバンマンモス");
+    const h2 = toHand(s, me, "キャラバンマンモス");
+    hand(s, me, h1)!.drawnBy = { type: "follower" };
+    hand(s, me, h2)!.drawnBy = { type: "follower" };
+    s = applyAction(s, { type: "play", iid: h1 });
+    expect(hand(s, me, h2)).toMatchObject({ drawnBy: { type: "follower" } });
+  });
+
+  it("手札で変身したカードは相手に公開されない（宿題やるですぅ！ → 成長したですぅ！）", () => {
+    let { s, me } = setup();
+    const homework = toHand(s, me, "宿題やるですぅ！");
+    hand(s, me, homework)!.x = 4;
+    s = applyAction(s, { type: "play", iid: toHand(s, me, "知恵の輝き") });
+    expect(hand(s, me, homework)).toMatchObject({ cardId: id("成長したですぅ！"), revealed: false, drawnBy: null });
+  });
+
+  it("手札で変身しても、変身の前に相手に分かっていた印は残る（豊麗なるローズクイーン）", () => {
+    let { s, me } = setup();
+    const known = toHand(s, me, "フェアリー");
+    hand(s, me, known)!.revealed = true;
+    const hinted = toHand(s, me, "アドベンチャーエルフ・メイ");
+    // 出すローズクイーン（コスト 9）が合わない条件にする（合う条件は、出したカードと見分けがつかないので消える）
+    hand(s, me, hinted)!.drawnBy = { type: "follower", costMax: 2 };
+    const plain = toHand(s, me, "アドベンチャーエルフ・メイ");
+    s = applyAction(s, { type: "play", iid: toHand(s, me, "豊麗なるローズクイーン") });
+    const rose = id("薔薇の閃撃");
+    expect(hand(s, me, known)).toMatchObject({ cardId: rose, revealed: true });
+    expect(hand(s, me, hinted)).toMatchObject({ cardId: rose, revealed: false, drawnBy: { type: "follower", costMax: 2 } });
+    expect(hand(s, me, plain)).toMatchObject({ cardId: rose, revealed: false, drawnBy: null });
+  });
+
+  it("融合する側のカードと融合による変身先は相手に公開される（素材は公開されない）", () => {
+    let { s, me } = setup();
+    const future = toHand(s, me, "フューチャー・コア");
+    const past = toHand(s, me, "パスト・コア");
+    s = applyAction(s, { type: "fuse", host: future, materials: [past] });
+    expect(hand(s, me, future)).toMatchObject({ cardId: id("アタックアーティファクト"), revealed: true });
+  });
+
   it("手札以外から選んだときは、手札の印は残る（ベビーカーバンクル）", () => {
     let { s, me } = setup();
     const fairy = toHand(s, me, "フェアリー");

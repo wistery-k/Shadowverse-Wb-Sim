@@ -507,6 +507,55 @@ pub fn hand_state_changed(h: &HandCard) -> bool {
         || h.fused_this_turn
 }
 
+/// 条件付きのドローの条件 hint に、カード c が合うか（コストは元のコストで見る）
+pub fn hint_matches(c: CardIdx, hint: &DrawHint) -> bool {
+    let cd = card(c);
+    let f = hint.filter;
+    if let Some(t) = f.ctype {
+        if cd.ctype != t {
+            return false;
+        }
+    }
+    if let Some(t) = f.tribe {
+        if !cd.tribes.contains(&t) {
+            return false;
+        }
+    }
+    if let Some(cl) = f.class {
+        if cd.class != cl {
+            return false;
+        }
+    }
+    if let Some(ids) = &f.ids {
+        if !ids.contains(&c) {
+            return false;
+        }
+    }
+    if let Some(m) = f.cost_max {
+        if cd.cost > m {
+            return false;
+        }
+    }
+    if let Some(e) = hint.cost_eq {
+        if cd.cost != e {
+            return false;
+        }
+    }
+    true
+}
+
+/// 条件付きのドローの条件が同じか（hint_matches が見る項目で比べる。状態の JSON から読んだ条件は能力のデータとは別の所を指す）
+pub fn same_hint(a: &DrawHint, b: &DrawHint) -> bool {
+    let (f, g) = (a.filter, b.filter);
+    a.cost_eq == b.cost_eq
+        && (std::ptr::eq(f, g)
+            || (f.ctype == g.ctype
+                && f.tribe == g.tribe
+                && f.class == g.class
+                && f.ids == g.ids
+                && f.cost_max == g.cost_max))
+}
+
 pub fn hand_cost(h: &HandCard) -> i32 {
     (card(h.card).cost + h.cost_mod).max(0)
 }

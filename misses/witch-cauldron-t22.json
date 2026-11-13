@@ -172,7 +172,7 @@
             "fusedKinds": [],
             "fusedThisTurn": false,
             "revealed": false,
-            "drawnBy": {"type":"follower","class":"royal"}
+            "drawnBy": null
           },
           {
             "iid": 22,
