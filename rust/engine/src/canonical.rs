@@ -42,8 +42,10 @@ fn hand_canon(h: &HandCard) -> String {
         None => "-".to_string(),
         Some(hint) => {
             let f = hint.filter;
+            // コストの下限は、ある条件だけ後ろに足す（無い条件の文字列は前と同じ）
+            let min = f.cost_min.map(|x| format!("/min{x}")).unwrap_or_default();
             format!(
-                "{}/{}/{}/{}/{}/{}",
+                "{}/{}/{}/{}/{}/{}{min}",
                 f.ctype.map(|t| t.name()).unwrap_or(""),
                 f.tribe
                     .map(|t| d.tribe_names[t as usize].as_str())
@@ -132,6 +134,11 @@ fn player_canon(p: &PlayerState) -> String {
         b(p.mulligan_done).into(),
     ]
     .join(",");
+    // リーダーの「受ける1以上のダメージを0にする。」（ある局面だけ足す）
+    let head = match p.leader_damage_zero_until {
+        Some(t) => format!("{head},zero{t}"),
+        None => head,
+    };
     let mut out = [
         head,
         format!(
@@ -152,12 +159,14 @@ fn player_canon(p: &PlayerState) -> String {
             join(
                 &p.crests,
                 |c| format!(
-                    "{}:{}:{}:{}:{}",
+                    "{}:{}:{}:{}:{}{}",
                     c.iid,
                     data().crests[c.crest as usize].id,
                     opt(c.countdown),
                     c.order,
-                    once(&c.used_once)
+                    once(&c.used_once),
+                    // 信仰の信仰値（クレストには付けない）
+                    c.faith.map(|f| format!(":faith{f}")).unwrap_or_default()
                 ),
                 ","
             )

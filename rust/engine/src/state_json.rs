@@ -47,7 +47,7 @@ fn walk_effects(list: &'static [Effect], v: Option<&'static Json>, ix: &mut DslI
         ix.effect_json.insert(addr(e), ev);
         ix.effect_by_key.entry(ev.canonical()).or_insert(e);
         match e {
-            Effect::Mode { options } => {
+            Effect::Mode { options, .. } | Effect::InOrder { options } => {
                 let Some(Json::Arr(ovs)) = ev.get("options") else {
                     panic!("mode の options がありません")
                 };
@@ -59,9 +59,9 @@ fn walk_effects(list: &'static [Effect], v: Option<&'static Json>, ix: &mut DslI
                 abilities: Some(abs),
                 ..
             } => walk_abilities(abs, ev.get("abilities"), ix),
-            Effect::EarthRite { then, .. } | Effect::Necromancy { then, .. } => {
-                walk_effects(then, ev.get("then"), ix)
-            }
+            Effect::EarthRite { then, .. }
+            | Effect::Necromancy { then, .. }
+            | Effect::SpendFaith { then, .. } => walk_effects(then, ev.get("then"), ix),
             Effect::If {
                 then, otherwise, ..
             } => {
@@ -89,17 +89,22 @@ fn dsl_index() -> &'static DslIndex {
             effect_by_key: HashMap::new(),
             ability_by_key: HashMap::new(),
         };
-        if let Some(Json::Obj(items)) = raw.get("cardAbilities") {
-            for (id, v) in items {
-                let c = d.card_idx(id) as usize;
-                walk_abilities(&d.abilities[c].abilities, v.get("abilities"), &mut ix);
+        // 前期のローテーションの能力（pool*）はスターターの後に見る（同じ形の効果はスターターのものを先に覚える）
+        for key in ["cardAbilities", "poolCardAbilities"] {
+            if let Some(Json::Obj(items)) = raw.get(key) {
+                for (id, v) in items {
+                    let c = d.card_idx(id) as usize;
+                    walk_abilities(&d.abilities[c].abilities, v.get("abilities"), &mut ix);
+                }
             }
         }
-        if let Some(Json::Obj(items)) = raw.get("crestAbilities") {
-            for (id, v) in items {
-                let n = d.crests.iter().position(|c| &c.id == id).expect("クレスト");
-                if let Some(ca) = &d.crest_abilities[n] {
-                    walk_abilities(&ca.abilities, v.get("abilities"), &mut ix);
+        for key in ["crestAbilities", "poolCrestAbilities"] {
+            if let Some(Json::Obj(items)) = raw.get(key) {
+                for (id, v) in items {
+                    let n = d.crests.iter().position(|c| &c.id == id).expect("クレスト");
+                    if let Some(ca) = &d.crest_abilities[n] {
+                        walk_abilities(&ca.abilities, v.get("abilities"), &mut ix);
+                    }
                 }
             }
         }
@@ -313,6 +318,9 @@ fn hint_json(h: &DrawHint) -> Json {
     if let Some(m) = f.cost_max {
         o.push(("costMax", num(m)));
     }
+    if let Some(m) = f.cost_min {
+        o.push(("costMin", num(m)));
+    }
     if let Some(e) = h.cost_eq {
         o.push(("costEq", num(e)));
     }
@@ -418,13 +426,18 @@ fn player_json(p: &PlayerState) -> Json {
                 p.crests
                     .iter()
                     .map(|c| {
-                        obj(vec![
+                        let mut o = vec![
                             ("iid", num(c.iid)),
                             ("crestId", s(&data().crests[c.crest as usize].id)),
                             ("countdown", opt_num(c.countdown)),
                             ("order", num(c.order)),
                             ("usedOncePerTurn", once(&c.used_once)),
-                        ])
+                        ];
+                        // 信仰の信仰値（クレストは省く）
+                        if let Some(f) = c.faith {
+                            o.push(("faith", num(f)));
+                        }
+                        obj(o)
                     })
                     .collect(),
             ),
@@ -470,6 +483,10 @@ fn player_json(p: &PlayerState) -> Json {
         ("leaderOncePerTurn", Json::Obj(Vec::new())),
         ("mulliganDone", Json::Bool(p.mulligan_done)),
     ]);
+    // リーダーの「受ける1以上のダメージを0にする。」（無ければ省く）
+    if let Some(t) = p.leader_damage_zero_until {
+        o.push(("leaderDamageZeroUntil", num(t)));
+    }
     obj(o)
 }
 
@@ -833,6 +850,9 @@ fn hint_of(v: &Json) -> R<Option<DrawHint>> {
     if v.get("costMax").is_some() {
         f.cost_max = Some(int(v, "costMax")?);
     }
+    if v.get("costMin").is_some() {
+        f.cost_min = Some(int(v, "costMin")?);
+    }
     let cost_eq = if v.get("costEq").is_some() {
         Some(int(v, "costEq")?)
     } else {
@@ -966,6 +986,10 @@ fn player_of(v: &Json) -> R<PlayerState> {
                     countdown: opt_int(c, "countdown")?,
                     order: int(c, "order")?,
                     used_once: once_of(c, "usedOncePerTurn")?,
+                    faith: match c.get("faith") {
+                        None | Some(Json::Null) => None,
+                        Some(_) => Some(int(c, "faith")?),
+                    },
                 })
             })
             .collect::<R<_>>()?,
@@ -996,6 +1020,10 @@ fn player_of(v: &Json) -> R<PlayerState> {
         ep_evolved_this_turn: opt_card(v, "epEvolvedThisTurn")?,
         sep_evolved_this_turn: opt_card(v, "sepEvolvedThisTurn")?,
         mulligan_done: boolean(v, "mulliganDone")?,
+        leader_damage_zero_until: match v.get("leaderDamageZeroUntil") {
+            None | Some(Json::Null) => None,
+            Some(_) => Some(int(v, "leaderDamageZeroUntil")?),
+        },
     })
 }
 
@@ -1186,28 +1214,66 @@ mod tests {
     #[test]
     fn round_trip() {
         let mut seen = [0usize; 6];
+        let mut check = |s: &GameState, g: u32| {
+            let j = state_to_json(s);
+            let back = state_from_json(&Json::parse(&j.stringify()).unwrap()).unwrap();
+            assert_eq!(state_canon(&back), state_canon(s), "試合 {g}");
+            assert_eq!(state_to_json(&back).canonical(), j.canonical(), "試合 {g}");
+            let any_board =
+                |f: &dyn Fn(&OnBoard) -> bool| s.players.iter().any(|p| p.board.iter().any(f));
+            let counts = [
+                !s.stack.is_empty(),
+                !s.queue.is_empty(),
+                any_board(&|b| !b.granted.is_empty()),
+                s.stack.iter().any(|f| !f.ctx.vars.is_empty()),
+                s.stack.iter().any(|f| !f.ctx.slots.is_empty()),
+                s.players
+                    .iter()
+                    .any(|p| p.hand.iter().any(|h| h.drawn_by.is_some())),
+            ];
+            for (n, c) in seen.iter_mut().zip(counts) {
+                *n += c as usize;
+            }
+        };
         for g in 0..400 {
-            play_random(g, g % 2 == 1, |_, s, _| {
-                let j = state_to_json(s);
-                let back = state_from_json(&Json::parse(&j.stringify()).unwrap()).unwrap();
-                assert_eq!(state_canon(&back), state_canon(s), "試合 {g}");
-                assert_eq!(state_to_json(&back).canonical(), j.canonical(), "試合 {g}");
-                let any_board =
-                    |f: &dyn Fn(&OnBoard) -> bool| s.players.iter().any(|p| p.board.iter().any(f));
-                let counts = [
-                    !s.stack.is_empty(),
-                    !s.queue.is_empty(),
-                    any_board(&|b| !b.granted.is_empty()),
-                    s.stack.iter().any(|f| !f.ctx.vars.is_empty()),
-                    s.stack.iter().any(|f| !f.ctx.slots.is_empty()),
-                    s.players
-                        .iter()
-                        .any(|p| p.hand.iter().any(|h| h.drawn_by.is_some())),
-                ];
-                for (n, c) in seen.iter_mut().zip(counts) {
-                    *n += c as usize;
-                }
-            });
+            play_random(g, g % 2 == 1, |_, s, _| check(s, g));
+        }
+        // 付与された能力（改境の再動の「相手のターン終了時、これを破壊。」）は、選ぶ 2 枚がそろわないとプレイできず
+        // ランダムな対戦ではまず出ないので、手で作った局面でも確かめる
+        {
+            use crate::game::{apply_action, create_game};
+            let by_name =
+                |n: &str| data().cards.iter().position(|c| c.name == n).unwrap() as CardIdx;
+            let deck = vec![by_name("キャラバンマンモス"); 40];
+            let mut s = create_game([&deck, &deck], 1);
+            for _ in 0..2 {
+                let p = crate::game::acting_player(&s);
+                s = apply_action(
+                    &s,
+                    &Action::Mulligan {
+                        player: p,
+                        swap: vec![],
+                    },
+                );
+            }
+            let p = s.active;
+            for n in [
+                "改境の再動",
+                "アタックアーティファクト",
+                "キャッスルアーティファクト",
+            ] {
+                let h = s.new_hand_card(by_name(n), None);
+                s.add_hand_card(p, h);
+            }
+            s.players[p].pp = 10;
+            let spell = s.players[p]
+                .hand
+                .iter()
+                .find(|h| h.card == by_name("改境の再動"))
+                .unwrap()
+                .iid;
+            let t = apply_action(&s, &Action::Play(spell));
+            check(&t, 400);
         }
         eprintln!("解決スタック・誘発待ち・付与された能力・変数・スロット・引いた条件のある局面: {seen:?}");
         // 選択待ちの局面で変数を持つ文脈はまだ現れない（変数は選択を挟まずに使い切る能力だけ）

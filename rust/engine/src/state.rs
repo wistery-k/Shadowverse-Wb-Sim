@@ -94,6 +94,8 @@ pub const INITIAL_HAND: usize = 4;
 pub const HAND_LIMIT: usize = 9;
 pub const BOARD_LIMIT: usize = 5;
 pub const MAX_PP: i32 = 10;
+/// リーダーエリアに置けるクレスト（と信仰）の数（docs/rules.md「9. クレスト」）
+pub const MAX_LEADER_AREA: usize = 5;
 pub const EP: i32 = 2;
 pub const SEP: i32 = 2;
 pub const EVOLVE_BONUS: i32 = 2;
@@ -192,6 +194,8 @@ pub struct CrestInstance {
     pub countdown: Option<i32>,
     pub order: i32,
     pub used_once: Vec<(u8, i32)>,
+    /// 信仰なら信仰値（クレストは None）
+    pub faith: Option<i32>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -383,6 +387,8 @@ pub struct PlayerState {
     pub ep_evolved_this_turn: Option<CardIdx>,
     pub sep_evolved_this_turn: Option<CardIdx>,
     pub mulligan_done: bool,
+    /// このターン番号の終わりまで、リーダーは「受ける1以上のダメージを0にする。」を持つ（世界の味方・ゾーイ）
+    pub leader_damage_zero_until: Option<i32>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -689,6 +695,11 @@ pub fn hint_matches(c: CardIdx, hint: &DrawHint) -> bool {
             return false;
         }
     }
+    if let Some(m) = f.cost_min {
+        if cd.cost < m {
+            return false;
+        }
+    }
     if let Some(e) = hint.cost_eq {
         if cd.cost != e {
             return false;
@@ -706,7 +717,8 @@ pub fn same_hint(a: &DrawHint, b: &DrawHint) -> bool {
                 && f.tribe == g.tribe
                 && f.class == g.class
                 && f.ids == g.ids
-                && f.cost_max == g.cost_max))
+                && f.cost_max == g.cost_max
+                && f.cost_min == g.cost_min))
 }
 
 pub fn hand_cost(h: &HandCard) -> i32 {

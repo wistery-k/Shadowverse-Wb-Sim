@@ -4,6 +4,8 @@ export const LEADER_HP = 20;
 export const INITIAL_HAND = 4;
 export const HAND_LIMIT = 9;
 export const BOARD_LIMIT = 5;
+/** リーダーエリアに置けるクレスト（と信仰）の数 */
+export const LEADER_AREA_LIMIT = 5;
 export const MAX_PP = 10;
 export const EP = 2;
 export const SEP = 2;

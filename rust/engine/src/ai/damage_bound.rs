@@ -297,7 +297,9 @@ fn self_reduction(c: CardIdx, sb: i32, leaves: i32) -> i32 {
                     target: Target::This,
                     amount,
                 } => (-*amount).max(0),
-                Effect::Mode { options } => options.iter().map(|o| walk(o)).sum(),
+                Effect::Mode { options, .. } | Effect::InOrder { options } => {
+                    options.iter().map(|o| walk(o)).sum()
+                }
                 Effect::If {
                     then, otherwise, ..
                 } => walk(then) + otherwise.as_ref().map_or(0, |o| walk(o)),
@@ -706,7 +708,7 @@ impl<'a> World<'a> {
         let c = &self.c;
         let any_evolve = c.e_avail || c.se_avail;
         match (u.mine, u.zone, on) {
-            (_, _, On::TurnStart | On::TurnEnd) => 0,
+            (_, _, On::TurnStart | On::TurnEnd | On::TurnEndInHand) => 0,
             (true, Zone::Hand, On::Fanfare | On::Spell) => u.playable as i32,
             (true, Zone::Hand, On::Spellboost) => c.sb,
             (true, Zone::Hand, On::AllyLeaveInHand) => c.hand_units,
@@ -738,10 +740,12 @@ impl<'a> World<'a> {
             (true, _, On::AllyAct) => c.acts,
             (true, _, On::AllyFuse) => c.fuses,
             (false, _, On::Act | On::AllyAct | On::AllyFuse) => 0,
+            (true, _, On::AllyPlay) => c.plays,
+            (false, _, On::AllyPlay) => 0,
             (true, _, On::AllyDestroyed) => c.my_fols,
             (false, _, On::AllyDestroyed) => c.opp_fols,
             // 回数を見積もれないので、何かを数える能力なら見積もらない（呼び出し側で扱う）
-            (_, _, On::LeaderHealed) => -1,
+            (_, _, On::LeaderHealed | On::AllyAmuletDestroyed) => -1,
         }
     }
 
@@ -851,6 +855,10 @@ impl<'a> World<'a> {
                 .iter()
                 .fold(Ti::default(), |a, x| a.union(self.ti(x, fr))),
             Target::MaxAttack { of } => self.ti(of, fr).single(1),
+            Target::LowestHpLeaders => Ti {
+                enemy_leader: true,
+                ..Ti::default()
+            },
         }
     }
 
@@ -866,6 +874,7 @@ impl<'a> World<'a> {
             },
             Target::Union { of } => of.iter().fold(0, |a, x| add(a, self.count_bound(x, fr))),
             Target::MaxAttack { of } => self.count_bound(of, fr),
+            Target::LowestHpLeaders => 2,
         }
     }
 
@@ -928,7 +937,8 @@ impl<'a> World<'a> {
                 Effect::Choose { slot, from, count } | Effect::Random { slot, from, count } => {
                     fr.slots.push((*slot, SlotInfo::From(from, *count)));
                 }
-                Effect::Mode { options } => {
+                // すべてが働く【モード】・順に働く能力も、どれもが働くとして数える
+                Effect::Mode { options, .. } | Effect::InOrder { options } => {
                     for o in options {
                         self.walk(s, p, o, m, fr, acc);
                     }
@@ -950,12 +960,16 @@ impl<'a> World<'a> {
                         acc.unk("SetDefense");
                     }
                 }
-                Effect::SetLeaderMaxHp { side, .. } => {
+                Effect::SetLeaderMaxHp { side, .. } | Effect::AddLeaderMaxHp { side, .. } => {
                     if rel(fr.mine, *side).1 {
                         acc.unk("SetLeaderMaxHp");
                     }
                 }
                 Effect::Destroy { .. }
+                | Effect::BanishCrests { .. }
+                | Effect::AddFaith { .. }
+                | Effect::LeaderDamageZero { .. }
+                | Effect::AddToDeck { .. }
                 | Effect::Banish { .. }
                 | Effect::Heal { .. }
                 | Effect::Discard { .. }
@@ -981,8 +995,13 @@ impl<'a> World<'a> {
                         acc.reshuffle = true;
                     }
                 }
-                Effect::Draw { count, filter } => {
-                    if fr.mine {
+                Effect::Draw {
+                    count,
+                    filter,
+                    side,
+                } => {
+                    // 引くのが自分か（「相手は自身のデッキから引く」なら持ち主の相手）
+                    if fr.mine != (*side == Some(Side::Opponent)) {
                         match self.vb(s, p, count, fr) {
                             Some(n) => acc.draws = add(acc.draws, mul(m, n.max(0))),
                             None => acc.unk("Draw"),
@@ -1085,7 +1104,7 @@ impl<'a> World<'a> {
                         acc.opp_summons = add(acc.opp_summons, mul(m, *kinds));
                     }
                 }
-                Effect::SummonDestroyedAmulet => {
+                Effect::SummonDestroyedAmulet | Effect::SummonDestroyedAmulets { .. } => {
                     if fr.mine {
                         let mut seen: Vec<CardIdx> = Vec::new();
                         let pool = s.players[p].destroyed_amulets.iter().chain(&self.my_cards);
@@ -1243,7 +1262,9 @@ impl<'a> World<'a> {
                         acc.pp_gain = add(acc.pp_gain, mul(m, (*amount).max(0)));
                     }
                 }
-                Effect::EarthRite { then, .. } | Effect::Necromancy { then, .. } => {
+                Effect::EarthRite { then, .. }
+                | Effect::Necromancy { then, .. }
+                | Effect::SpendFaith { then, .. } => {
                     self.walk(s, p, then, m, fr, acc);
                 }
                 Effect::Crest { crest_id, side } => {
@@ -1351,6 +1372,13 @@ pub fn damage_bound_or_reason(s: &GameState, p: PlayerIndex, draws: bool) -> Res
     let _p = crate::prof::scope(crate::prof::Sec::DamageBound);
     if s.phase != Phase::Main || s.active != p {
         return Err(("not main", None));
+    }
+    // 相手のリーダーが「受ける1以上のダメージを0にする。」を持っていれば、このターンはダメージを与えられない
+    if s.players[opponent(p)]
+        .leader_damage_zero_until
+        .is_some_and(|u| s.turn <= u)
+    {
+        return Ok(0);
     }
     let mut acc = Acc::default();
     for _ in 0..MAX_ROUNDS {

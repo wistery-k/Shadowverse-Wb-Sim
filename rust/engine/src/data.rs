@@ -335,6 +335,27 @@ pub struct CardFilter {
     pub spellboost: bool,
     #[serde(default)]
     pub earth_sigil: bool,
+    /// 「それ以外」: 能力を誘発させたカードを除く
+    #[serde(default)]
+    pub exclude_event: bool,
+    /// 「選んでいない」: スロットのカードを除く
+    #[serde(default, deserialize_with = "de_opt_slot")]
+    pub exclude_slot: Option<SlotId>,
+    /// スロットのカードだけ（「〜を選んだなら」）
+    #[serde(default, deserialize_with = "de_opt_slot")]
+    pub in_slot: Option<SlotId>,
+    pub cost_min: Option<i32>,
+    /// このタイプでない
+    #[serde(default, deserialize_with = "de_tribe")]
+    pub not_tribe: Option<TribeId>,
+    /// 進化後（超進化後を含む）
+    #[serde(default)]
+    pub evolved: bool,
+    #[serde(default)]
+    pub super_evolved: bool,
+    /// 【ラストワード】を持つ（カードの元の能力で見る）
+    #[serde(default)]
+    pub last_words: bool,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -367,6 +388,8 @@ pub enum Target {
     MaxAttack {
         of: Box<Target>,
     },
+    /// 体力が最小のリーダー（同じならどちらも）
+    LowestHpLeaders,
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -410,6 +433,8 @@ pub enum ValueObj {
         stat: Stat,
         filter: Option<CardFilter>,
     },
+    /// 【自分がカードをプレイしたとき】で、プレイしたカードの元のコスト
+    PlayedCost,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -441,6 +466,23 @@ pub enum Condition {
     },
     MaxPp {
         at_least: i32,
+    },
+    /// 対象が 1 つ以上ある
+    Exists {
+        of: Target,
+    },
+    /// 自分のリーダーの体力が value 以下
+    LeaderHpAtMost {
+        value: i32,
+    },
+    /// 自分のリーダーの体力が相手のリーダーの体力より大きい
+    LeaderHpAboveOpponent,
+    /// これ（場のフォロワー）が進化後（超進化後を含む）
+    ThisEvolved,
+    /// 対象が value 個以上ある
+    CountAtLeast {
+        of: Target,
+        value: i32,
     },
     Not {
         cond: Box<Condition>,
@@ -494,7 +536,13 @@ pub enum Effect {
         from: Target,
         count: i32,
     },
+    /// all_if を満たすなら、1 つを選ぶのではなくすべて（上から順に）
     Mode {
+        options: Vec<Vec<Effect>>,
+        all_if: Option<Condition>,
+    },
+    /// 働くたびに options の 1 つ目から順に 1 つ（最後の次は 1 つ目）。回数はこれ（場のフォロワー）の X で数える
+    InOrder {
         options: Vec<Vec<Effect>>,
     },
     Damage {
@@ -527,6 +575,8 @@ pub enum Effect {
     Draw {
         count: Value,
         filter: Option<CardFilter>,
+        /// Opponent なら相手が自身のデッキから引く
+        side: Option<Side>,
     },
     DrawAll {
         filter: CardFilter,
@@ -559,8 +609,21 @@ pub enum Effect {
         kinds: i32,
     },
     SummonDestroyedAmulet,
+    /// 破壊された自分のアミュレット（filter に合うもの）からランダム count 枚（distinct なら count 種類）と同名のカードを場に出す。
+    /// 破壊された回数に比例した確率で選ぶ
+    SummonDestroyedAmulets {
+        filter: CardFilter,
+        count: i32,
+        distinct: bool,
+    },
     ReturnToDeck {
         target: Target,
+    },
+    /// カードを生成して自分のデッキのランダムな位置に加える
+    AddToDeck {
+        #[serde(deserialize_with = "de_card")]
+        card_id: CardIdx,
+        count: Value,
     },
     Discard {
         target: Target,
@@ -641,9 +704,36 @@ pub enum Effect {
         side: Side,
     },
     ApocalypseDeck,
+    /// クレストすべてを消滅（信仰は消えない）
+    BanishCrests {
+        side: Side,
+    },
+    /// 自分の信仰 crest_id の信仰値を amount 増やす
+    AddFaith {
+        #[serde(deserialize_with = "de_crest")]
+        crest_id: CrestIdx,
+        amount: i32,
+    },
+    /// 自分の信仰 crest_id の信仰値が amount 以上なら、amount 減らして then を行う
+    SpendFaith {
+        #[serde(deserialize_with = "de_crest")]
+        crest_id: CrestIdx,
+        amount: i32,
+        then: Vec<Effect>,
+    },
+    /// 相手のターン終了まで、自分のリーダーは「受ける1以上のダメージを0にする。」を持つ
+    LeaderDamageZero {
+        #[allow(dead_code)]
+        until: String,
+    },
     SetLeaderMaxHp {
         side: Side,
         value: i32,
+    },
+    /// リーダーの体力の最大値を増減する（体力は最大値まで下がる）
+    AddLeaderMaxHp {
+        side: Side,
+        amount: i32,
     },
     If {
         cond: Condition,
@@ -669,6 +759,7 @@ impl Effect {
             Effect::Choose { .. } => "Choose",
             Effect::Random { .. } => "Random",
             Effect::Mode { .. } => "Mode",
+            Effect::InOrder { .. } => "InOrder",
             Effect::Damage { .. } => "Damage",
             Effect::Distribute { .. } => "Distribute",
             Effect::Destroy { .. } => "Destroy",
@@ -684,7 +775,9 @@ impl Effect {
             Effect::Reanimate { .. } => "Reanimate",
             Effect::SummonFromDeck { .. } => "SummonFromDeck",
             Effect::SummonDestroyedAmulet => "SummonDestroyedAmulet",
+            Effect::SummonDestroyedAmulets { .. } => "SummonDestroyedAmulets",
             Effect::ReturnToDeck { .. } => "ReturnToDeck",
+            Effect::AddToDeck { .. } => "AddToDeck",
             Effect::Discard { .. } => "Discard",
             Effect::Transform { .. } => "Transform",
             Effect::Buff { .. } => "Buff",
@@ -705,7 +798,12 @@ impl Effect {
             Effect::Necromancy { .. } => "Necromancy",
             Effect::Crest { .. } => "Crest",
             Effect::ApocalypseDeck => "ApocalypseDeck",
+            Effect::BanishCrests { .. } => "BanishCrests",
+            Effect::AddFaith { .. } => "AddFaith",
+            Effect::SpendFaith { .. } => "SpendFaith",
+            Effect::LeaderDamageZero { .. } => "LeaderDamageZero",
             Effect::SetLeaderMaxHp { .. } => "SetLeaderMaxHp",
+            Effect::AddLeaderMaxHp { .. } => "AddLeaderMaxHp",
             Effect::If { .. } => "If",
             Effect::Repeat { .. } => "Repeat",
             Effect::SetVar { .. } => "SetVar",
@@ -721,6 +819,8 @@ pub enum Whose {
     Opponent,
 }
 
+/// 誘発。AllyPlay は自分が他のカードをプレイしたとき（filter はプレイしたカードの条件。コストは元のコスト）、
+/// TurnEndInHand は手札にある間の自分のターン終了時
 #[derive(Deserialize, Clone, Debug, PartialEq)]
 #[serde(
     tag = "on",
@@ -750,6 +850,9 @@ pub enum Trigger {
     Discarded,
     AllyDestroyed { filter: Option<CardFilter> },
     LeaderHealed,
+    AllyPlay { filter: Option<CardFilter> },
+    TurnEndInHand,
+    AllyAmuletDestroyed,
 }
 
 /// 誘発の種類（Trigger の on だけ）
@@ -776,6 +879,9 @@ pub enum On {
     Discarded,
     AllyDestroyed,
     LeaderHealed,
+    AllyPlay,
+    TurnEndInHand,
+    AllyAmuletDestroyed,
 }
 
 impl Trigger {
@@ -802,6 +908,9 @@ impl Trigger {
             Trigger::Discarded => On::Discarded,
             Trigger::AllyDestroyed { .. } => On::AllyDestroyed,
             Trigger::LeaderHealed => On::LeaderHealed,
+            Trigger::AllyPlay { .. } => On::AllyPlay,
+            Trigger::TurnEndInHand => On::TurnEndInHand,
+            Trigger::AllyAmuletDestroyed => On::AllyAmuletDestroyed,
         }
     }
 }
@@ -829,6 +938,9 @@ pub struct CardAbilities {
     pub only_selectable: bool,
     pub initial_x: Option<i32>,
     pub fusion: Option<CardFilter>,
+    /// 【守護】を無視して攻撃できる
+    #[serde(default)]
+    pub ignore_ward: bool,
     #[allow(dead_code)]
     pub unimplemented: Option<String>,
 }
@@ -867,6 +979,10 @@ pub struct Card {
     pub token: bool,
     /// 入っているカードプール（ベーシックと一部のトークンは両方）
     pub pools: Vec<Pool>,
+    /// アクセラレート・結晶でプレイしたときの姿（カードの表の番号。docs/rules.md「12」）
+    pub alt_play: Option<CardIdx>,
+    /// デッキに入れると置かれる信仰（クレストの表の番号）
+    pub faith: Option<CrestIdx>,
 }
 
 impl Card {
@@ -880,6 +996,8 @@ impl Card {
 pub struct CrestData {
     pub id: String,
     pub countdown: Option<i32>,
+    /// 信仰（クレストではないがリーダーエリアに置く。信仰値を持つ）
+    pub faith: bool,
 }
 
 pub struct Deck {
@@ -904,6 +1022,8 @@ pub struct Data {
     pub earth_sigil_token: CardIdx,
     pub var_fused_cost: VarId,
     pub var_fused_kinds: VarId,
+    /// 【自分がカードをプレイしたとき】の、プレイしたカードの元のコスト
+    pub var_played_cost: VarId,
 }
 
 impl Data {
@@ -1000,6 +1120,8 @@ pub fn load(json: &str) -> Data {
         );
         crest_abilities[n] = Some(a);
     }
+    // スターターの能力の後に名前を付ける（スターターの変数の番号を変えないため）
+    let var_played_cost = var_id_now("playedCost");
     let apocalypse_deck = raw
         .apocalypse_deck
         .iter()
@@ -1033,6 +1155,7 @@ pub fn load(json: &str) -> Data {
         earth_sigil_token,
         var_fused_cost,
         var_fused_kinds,
+        var_played_cost,
     }
 }
 

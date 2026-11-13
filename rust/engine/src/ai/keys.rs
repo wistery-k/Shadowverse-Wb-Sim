@@ -33,6 +33,7 @@ fn hint_eq(a: &Option<DrawHint>, b: &Option<DrawHint>) -> bool {
                 && f.class == g.class
                 && f.ids == g.ids
                 && f.cost_max == g.cost_max
+                && f.cost_min == g.cost_min
                 && x.cost_eq == y.cost_eq
         }
         _ => false,
@@ -91,7 +92,10 @@ pub fn board_eq(a: &OnBoard, b: &OnBoard) -> bool {
 }
 
 pub fn crest_eq_noid(a: &CrestInstance, b: &CrestInstance) -> bool {
-    a.crest == b.crest && a.countdown == b.countdown && map_eq(&a.used_once, &b.used_once)
+    a.crest == b.crest
+        && a.countdown == b.countdown
+        && a.faith == b.faith
+        && map_eq(&a.used_once, &b.used_once)
 }
 
 pub fn crest_eq(a: &CrestInstance, b: &CrestInstance) -> bool {
@@ -214,6 +218,7 @@ fn player_rest_eq(a: &PlayerState, b: &PlayerState) -> bool {
         && a.ep_evolved_this_turn == b.ep_evolved_this_turn
         && a.sep_evolved_this_turn == b.sep_evolved_this_turn
         && a.mulligan_done == b.mulligan_done
+        && a.leader_damage_zero_until == b.leader_damage_zero_until
 }
 
 fn player_eq(a: &PlayerState, b: &PlayerState) -> bool {

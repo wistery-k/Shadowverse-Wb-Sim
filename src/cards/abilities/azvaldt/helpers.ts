@@ -1,0 +1,179 @@
+// 前期のローテーションの能力定義のための補助関数。
+// スターターの ../helpers.ts のうち、カード名・クレスト名から ID を引くものを、前期のローテーションのカードから引くものに置き換える
+// （同じ名前のストームブラストが、スターターは 10131320、前期のローテーションは 10831310）。ほかはそのまま使う。
+
+import rawRotCards from "../../../../data/pools/azvaldt/cards.json";
+import rawRotCrests from "../../../../data/pools/azvaldt/crests.json";
+import rawRotSpecials from "../../../../data/pools/azvaldt/specials.json";
+import type { Ability, CardFilter, Condition, Effect, Target, Value } from "../../../engine/dsl";
+
+export {
+  AWAKENED,
+  BOTH_LEADERS,
+  ENHANCED,
+  EVENT,
+  OPP_LEADER,
+  SELF_LEADER,
+  THIS,
+  THIS_ATTACK,
+  THIS_X,
+  allFollowers,
+  act,
+  allyAmulets,
+  allyCards,
+  allyFollowers,
+  banish,
+  buff,
+  choose,
+  costChange,
+  count,
+  damage,
+  destroy,
+  discard,
+  distribute,
+  draw,
+  fanfare,
+  gainPp,
+  grant,
+  grantAttacks,
+  handCards,
+  heal,
+  lastWords,
+  mode,
+  necromancy,
+  onAllyAct,
+  onAllyEnter,
+  onAttack,
+  onDiscarded,
+  onEnter,
+  onEvolve,
+  onLeaderHealed,
+  onSpellboost,
+  onSuperEvolve,
+  onSuperEvolveInstead,
+  onTurnEnd,
+  onTurnStart,
+  oppFollowers,
+  otherAllyFollowers,
+  random,
+  repeat,
+  returnToDeck,
+  slot,
+  spell,
+  spellboost,
+  union,
+  v,
+  when,
+} from "../helpers";
+
+const ID_BY_NAME = new Map((rawRotCards as { id: string; name: string }[]).map((c) => [c.name, c.id]));
+const CREST_ID_BY_NAME = new Map((rawRotCrests as { id: string; name: string }[]).map((c) => [c.name, c.id]));
+const SPECIALS = rawRotSpecials as { id: string; kind: string; sources: string[] }[];
+
+/** カード名から前期のローテーションのカードIDを引く */
+export function id(name: string): string {
+  const v = ID_BY_NAME.get(name);
+  if (!v) throw new Error(`前期のローテーションにカードがありません: ${name}`);
+  return v;
+}
+
+/** 『クレスト：<name>』の ID を前期のローテーションのクレストから引く */
+export function crestIdOf(name: string): string {
+  const v = CREST_ID_BY_NAME.get(`クレスト：${name}`);
+  if (!v) throw new Error(`前期のローテーションにクレストがありません: ${name}`);
+  return v;
+}
+
+/** カード名の、アクセラレート・結晶・信仰の ID（能力はこの ID に書く。docs/rules.md「12」） */
+export function specialId(name: string, kind: "accelerate" | "crystallize" | "faith"): string {
+  const src = id(name);
+  const sp = SPECIALS.find((x) => x.kind === kind && x.sources.includes(src));
+  if (!sp) throw new Error(`${name} に ${kind} がありません`);
+  return sp.id;
+}
+
+// ---- 名前で書く効果（前期のローテーションのカードから引く） ----
+
+export const addToHand = (name: string, count: Value = 1): Effect => ({ op: "addToHand", cardId: id(name), count });
+export const summon = (name: string, count: Value = 1): Effect => ({ op: "summon", cardId: id(name), count });
+export const transform = (target: Target, name: string): Effect => ({ op: "transform", target, cardId: id(name) });
+export const crest = (name: string, side: "self" | "opponent" = "self"): Effect => ({ op: "crest", crestId: crestIdOf(name), side });
+/** 『name』count 枚を自分のデッキ（のランダムな位置）に加える */
+export const addToDeck = (name: string, count: Value = 1): Effect => ({ op: "addToDeck", cardId: id(name), count });
+
+// ---- 前期のローテーションで足した仕組み ----
+
+/** 相手は自身のデッキから count 枚を引く */
+export const opponentDraws = (count: Value): Effect => ({ op: "draw", count, side: "opponent" });
+/** リーダーの体力の最大値を amount だけ増減する */
+export const addLeaderMaxHp = (side: "self" | "opponent", amount: number): Effect => ({ op: "addLeaderMaxHp", side, amount });
+/** これのカウントを amount だけ増減する */
+export const countdown = (amount: number): Effect => ({ op: "countdown", target: { kind: "this" }, amount });
+
+/** 体力最小のリーダーすべて */
+export const LOWEST_HP_LEADERS: Target = { kind: "lowestHpLeaders" };
+/** 場のカード（両方の場） */
+export const boardCards = (filter?: CardFilter): Target => ({
+  kind: "board",
+  side: "both",
+  ...(filter ? { filter } : {}),
+});
+
+/** 【自分がカードをプレイしたとき】のプレイしたカードの元のコスト */
+export const PLAYED_COST: Value = { kind: "playedCost" };
+
+/** 自分が他のカードをプレイしたとき（filter はプレイしたカードの条件） */
+export const onAllyPlay = (filter: CardFilter, ...effects: Effect[]): Ability => ({
+  trigger: Object.keys(filter).length > 0 ? { on: "allyPlay", filter } : { on: "allyPlay" },
+  effects,
+});
+/** 手札で働く。自分のターン終了時 */
+export const onTurnEndInHand = (...effects: Effect[]): Ability => ({ trigger: { on: "turnEndInHand" }, effects });
+
+export const exists = (of: Target): Condition => ({ kind: "exists", of });
+export const leaderHpAtMost = (value: number): Condition => ({ kind: "leaderHpAtMost", value });
+export const LEADER_HP_ABOVE_OPPONENT: Condition = { kind: "leaderHpAboveOpponent" };
+
+// ---- ランプD・アミュレットB で足した仕組み ----
+
+/** 自分のPP最大値を amount 増やす */
+export const addMaxPp = (amount: number): Effect => ({ op: "addMaxPp", amount });
+/** 自分のリーダーの体力の最大値を value にする */
+export const setLeaderMaxHp = (value: number): Effect => ({ op: "setLeaderMaxHp", side: "self", value });
+/** 相手のターン終了まで、自分のリーダーは「受ける1以上のダメージを0にする。」を持つ */
+export const LEADER_DAMAGE_ZERO: Effect = { op: "leaderDamageZero", until: "opponentTurnEnd" };
+/** 【モード】。cond を満たすなら、1 つを選ぶのではなくすべて */
+export const modeAllIf = (cond: Condition, ...options: Effect[][]): Effect => ({ op: "mode", options, allIf: cond });
+/** 「下記の能力から順に1つの能力が働く」（最後の次は最初） */
+export const inOrder = (...options: Effect[][]): Effect => ({ op: "inOrder", options });
+/** このバトル中に破壊された自分のアミュレット（filter）からランダム count 枚（distinct なら count 種類）と同名のカードを場に出す */
+export const summonDestroyedAmulets = (filter: CardFilter, count: number, distinct: boolean): Effect => ({
+  op: "summonDestroyedAmulets",
+  filter,
+  count,
+  distinct,
+});
+/** クレストすべてを消滅（信仰は消えない） */
+export const banishCrests = (side: "self" | "opponent" | "both"): Effect => ({ op: "banishCrests", side });
+/** カード name の信仰の信仰値を amount 増やす */
+export const addFaith = (name: string, amount: number): Effect => ({ op: "addFaith", crestId: specialId(name, "faith"), amount });
+/** カード name の信仰の信仰値を amount 減らして then を行う（足りなければ働かない） */
+export const spendFaith = (name: string, amount: number, ...then: Effect[]): Effect => ({
+  op: "spendFaith",
+  crestId: specialId(name, "faith"),
+  amount,
+  then,
+});
+/** 自分のアミュレットが破壊されたとき */
+export const onAllyAmuletDestroyed = (...effects: Effect[]): Ability => ({ trigger: { on: "allyAmuletDestroyed" }, effects });
+
+export const THIS_EVOLVED: Condition = { kind: "thisEvolved" };
+export const countAtLeast = (of: Target, value: number): Condition => ({ kind: "countAtLeast", of, value });
+/** 場のカード（両方の場、能力の持ち主を除く） */
+export const otherBoardCards = (filter?: CardFilter): Target => boardCards({ excludeSelf: true, ...filter });
+/** 「自分のアミュレットを選んだなら」: スロット name に自分のアミュレットがあるか（破壊する前に見る） */
+export const choseAllyAmulet = (name = "t"): Condition => ({
+  kind: "exists",
+  of: { kind: "board", side: "self", filter: { type: "amulet", inSlot: name } },
+});
+
