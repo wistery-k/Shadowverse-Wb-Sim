@@ -1,10 +1,13 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--searchValue 0] [--sampling classic|default] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--replays r0.jsonl] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--searchValue 0] [--sampling classic|default] [--potential p.json|null] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--replays r0.jsonl] --out d0.jsonl
 //!
 //! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・既定の幅（今は 256）、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
 //! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
 //! --opp beam なら相手のターンを探索 AI の既定と同じビームサーチで読む（既定は貪欲法）。
+//! --potential <ファイル> なら、ビームの並べ替えに使う学習した見込みを、組み込みの既定（data/potential-net.json）の代わりにそのファイルにする
+//! （compare の設定の "potentialNet" と同じ。null なら見込みを使わない。--cmp の最後まで打つ側にも使う）。学び直しの 2 回目から、
+//! 前の回で学び直した見込みで打つ用（`night/pool-r1.txt`）。--sampling classic は見込みを使わない読み方なので、一緒には使えない。
 //! --iv k なら、各試合で 1 つの自分のターンの最初（どちらかのプレイヤーの 3〜8 ターン目）から、手札のカードを 1 枚抜いた局面を
 //! k 個（小数なら平均 k 個。抜くカードは別々）作り、そこから最後まで同じ --eps で打った試合も書き出す（"iv": {"p", "k", "card"} 付きの行。
 //! k はもとの試合のその局面の添字）。カードを抜くのは打ち方と関係ないので、学習した補正が手札のカードの価値を
@@ -80,6 +83,7 @@ use crate::ai::aidata::{ai_data, weights_with};
 use crate::ai::determinize::determinize;
 use crate::ai::eval::{evaluate_with, EvalWeights};
 use crate::ai::mulligan::default_deck_name_of;
+use crate::ai::potential::PotentialNet;
 use crate::ai::search::{MulliganMode, SearchAgent, SearchOptions};
 use crate::ai::valuenet::{ValueNet, ValuePhase};
 use crate::ai::Rng;
@@ -1084,7 +1088,19 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
             "--imagined には \"imagined\" の入力のあるモデルが要ります（npm run td -- extend --model {model_path} --out <新しいモデル> で足す。補正は同じ）"
         ));
     }
+    // --potential: 見込みのファイル（null なら使わない）。無ければ組み込みの既定のまま
+    let potential = match arg(args, "potential") {
+        None => None,
+        Some(_) if classic => {
+            return Err("--potential は --sampling default と一緒に使います（classic は見込みを使わない読み方）".into())
+        }
+        Some("null") => Some(None),
+        Some(path) => Some(Some(Arc::new(PotentialNet::load(path)?))),
+    };
     let mut m = model_options(net.clone(), opp_beam, classic)?;
+    if let Some(p) = &potential {
+        m.opts.potential = p.clone();
+    }
     m.board = board;
     m.imagined = imagined as usize;
     m.search_value = match arg(args, "searchValue").unwrap_or("0") {
@@ -1114,10 +1130,14 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
         m.frozen = Some(f);
     }
     let cmp = if cmp_k > 0.0 {
+        let mut roll = model_options(net.clone(), false, false)?;
+        if let Some(p) = &potential {
+            roll.opts.potential = p.clone();
+        }
         Some(Compare {
             k: cmp_k as usize,
             rollouts: rollouts as usize,
-            roll: model_options(net.clone(), false, false)?,
+            roll,
         })
     } else {
         None
@@ -1411,6 +1431,62 @@ mod tests {
             let plain: serde_json::Value = serde_json::from_str(&plain.line).expect("JSON");
             assert_eq!(plain, v);
         }
+    }
+
+    #[test]
+    fn potential_file_same_as_builtin_default() {
+        // --potential に組み込みの既定と同じファイル（data/potential-net.json）を渡しても、試合は同じ
+        // （夜のキュー night/pool-r1.txt の R1 の自己対戦は、今の既定の見込みを写したファイルを渡す）。null なら見込みを使わない。classic とは一緒に使えない
+        let root = format!("{}/../..", env!("CARGO_MANIFEST_DIR"));
+        let dir = std::env::temp_dir().join(format!("svwb-td-potential-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("フォルダ");
+        let model = format!("{root}/data/value-net.json");
+        let run = |extra: &[&str], name: &str| -> Result<Vec<String>, String> {
+            let out = dir.join(name).display().to_string();
+            let mut argv: Vec<String> = [
+                "--model", &model, "--games", "2", "--start", "3", "--opp", "beam", "--out", &out,
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+            argv.extend(extra.iter().map(|s| s.to_string()));
+            selfplay(&parse_args(&argv)?)?;
+            let text = std::fs::read_to_string(&out).map_err(|e| e.to_string())?;
+            let mut lines: Vec<String> = text.lines().map(String::from).collect();
+            lines.sort();
+            Ok(lines)
+        };
+        let file = format!("{root}/data/potential-net.json");
+        let plain = run(&["--sampling", "default"], "plain.jsonl").expect("既定");
+        let with = run(
+            &["--sampling", "default", "--potential", &file],
+            "with.jsonl",
+        )
+        .expect("ファイル");
+        // 入力の並びの行と 2 試合
+        assert_eq!(plain.len(), 3);
+        assert_eq!(plain, with);
+        // 見込みを使わない（null）と、ビームに残る並びが変わって試合が変わる（--potential が読みに届いている）
+        let none = run(
+            &["--sampling", "default", "--potential", "null"],
+            "none.jsonl",
+        )
+        .expect("null");
+        assert_eq!(none.len(), 3);
+        assert_ne!(plain, none);
+        let classic = run(&["--sampling", "classic", "--potential", &file], "c.jsonl");
+        assert!(classic.unwrap_err().contains("--sampling default"));
+        let missing = run(
+            &[
+                "--sampling",
+                "default",
+                "--potential",
+                "/nonexistent/p.json",
+            ],
+            "m.jsonl",
+        );
+        assert!(missing.is_err());
+        std::fs::remove_dir_all(&dir).expect("片付け");
     }
 
     #[test]
