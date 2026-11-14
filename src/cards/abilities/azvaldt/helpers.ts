@@ -241,6 +241,11 @@ export const banishCopy = (target: Target): Effect => ({ op: "banishCopy", targe
 export const spendPp = (amount: number, ...then: Effect[]): Effect => ({ op: "spendPp", amount, then });
 /** このバトル中に場に出た自分の『names』の枚数（場に出たこれ自身も数える） */
 export const enteredCount = (...names: string[]): Value => ({ kind: "enteredCount", ids: names.map(id) });
+/**
+ * 「これが場に出たとき」の能力の中で、このバトル中に場に出た『name』（これ自身のカード）の枚数を、これが場に出た時点で数える。
+ * 一緒に出たカードのうち、後から出たものは数えない（docs/rules.md 12章の 39）
+ */
+export const enteredCountAtEnter = (name: string): Value => ({ kind: "enteredCount", ids: [id(name)], atEnter: true });
 export const valueAtLeast = (value: Value, atLeast: number): Condition => ({ kind: "valueAtLeast", value, atLeast });
 /** 自分のターンなら */
 export const OWN_TURN: Condition = { kind: "ownTurn" };

@@ -135,6 +135,20 @@ describe("足した仕組み", () => {
     expect(t.players[me].enteredCounts).toEqual({ [id("没入の実験体")]: 2 });
   });
 
+  it("場に出た枚数（没入の実験体）: 一緒に出たときは、それぞれ場に出た時点の枚数で見る（質問 39）", () => {
+    // ユーザーが実際に見たもの: 場に出た実験体が 4 体の状態から心酔の研究者で 2 体出したら、1 体目が 2/2、2 体目が 5/5
+    const { s, me } = setup();
+    s.players[me].pp = 7;
+    s.players[me].enteredCounts = { [id("没入の実験体")]: 4 };
+    const t = play(s, toHand(s, me, "心酔の研究者"));
+    const subs = board(t, me).filter((c) => c.cardId === id("没入の実験体"));
+    expect(subs.map((c) => [follower(t, c.iid)?.attack, follower(t, c.iid)?.defense])).toEqual([
+      [2, 2],
+      [5, 5],
+    ]);
+    expect(t.players[me].enteredCounts).toEqual({ [id("没入の実験体")]: 6 });
+  });
+
   it("自分のフォロワーが攻撃するとき（クレスト：魔恋の慕情・シイム）: 天晶の魔手は戦闘の前に +1/+0 する", () => {
     const { s, me, opp } = setup();
     addCrest(s, me, "魔恋の慕情・シイム");

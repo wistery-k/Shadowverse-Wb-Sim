@@ -21,7 +21,7 @@ import {
   damage,
   discard,
   draw,
-  enteredCount,
+  enteredCountAtEnter,
   fanfare,
   gainPp,
   grant,
@@ -115,8 +115,8 @@ export const WITCH: Record<string, CardAbilities> = {
     abilities: [spell(choose(oppFollowers()), damage(slot(), 4), addSigils(1), when(OUGI, [damage(OPP_LEADER, 2)]))],
   },
   [id("没入の実験体")]: {
-    // 「他の『没入の実験体』の枚数が5以上」: これ自身を含めて 6 以上（条件は働くときに見る）
-    abilities: [onEnter(when(valueAtLeast(enteredCount("没入の実験体"), 6), [buff(THIS, 3, 3)]))],
+    // 「他の『没入の実験体』の枚数が5以上」: これ自身を含めて 6 以上。これが場に出た時点で数える（一緒に出たうち後のものは数えない。質問 39）
+    abilities: [onEnter(when(valueAtLeast(enteredCountAtEnter("没入の実験体"), 6), [buff(THIS, 3, 3)]))],
   },
   [id("人らしい愛")]: {
     abilities: [

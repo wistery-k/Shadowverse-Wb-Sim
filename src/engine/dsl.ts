@@ -84,8 +84,12 @@ export type Value =
   | { kind: "faithStacks" }
   /** これをプレイしたときに払ったコスト（「これのコストがNなら」） */
   | { kind: "paidCost" }
-  /** このバトル中に場に出た自分の ids のカードの枚数（場に出たこれ自身も数える） */
-  | { kind: "enteredCount"; ids: string[] };
+  /**
+   * このバトル中に場に出た自分の ids のカードの枚数（場に出たこれ自身も数える）。
+   * atEnter なら、これが場に出た時点の枚数（「これが場に出たとき」の能力の中で、ids をこれ自身のカードにして使う。
+   * 一緒に出たカードのうち後から出たものは数えない。docs/rules.md 12章の 39）
+   */
+  | { kind: "enteredCount"; ids: string[]; atEnter?: boolean };
 
 export type Condition =
   | { kind: "awakened" }

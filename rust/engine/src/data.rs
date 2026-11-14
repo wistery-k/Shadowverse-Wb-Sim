@@ -449,10 +449,14 @@ pub enum ValueObj {
     FaithStacks,
     /// これをプレイしたときに払ったコスト（Card::paid_cost のカードだけ）
     PaidCost,
-    /// このバトル中に場に出た自分の ids のカードの枚数（Card::count_entered のカードだけ数える）
+    /// このバトル中に場に出た自分の ids のカードの枚数（Card::count_entered のカードだけ数える）。
+    /// at_enter なら、これが場に出た時点の、これと同じカードの枚数（「これが場に出たとき」の能力の中で使う。
+    /// 一緒に出たカードのうち後から出たものは数えない。docs/rules.md 12章の 39）
     EnteredCount {
         #[serde(deserialize_with = "de_card_list")]
         ids: Vec<CardIdx>,
+        #[serde(default)]
+        at_enter: bool,
     },
 }
 
@@ -1188,6 +1192,8 @@ pub struct Data {
     pub var_paid_cost: VarId,
     /// これをプレイしたときの奥義ゲージ（Card::ougi のカードだけ）
     pub var_ougi: VarId,
+    /// 「これが場に出たとき」の能力の、これが場に出た時点のこれと同じカードの枚数（Card::count_entered のカードだけ）
+    pub var_entered_at_enter: VarId,
     /// 死者・タイプ（リアニメイトで場に出たフォロワーが持つ）
     pub tribe_undead: Option<TribeId>,
 }
@@ -1296,6 +1302,7 @@ pub fn load(json: &str) -> Data {
     let var_played_cost = var_id_now("playedCost");
     let var_paid_cost = var_id_now("paidCost");
     let var_ougi = var_id_now("ougi");
+    let var_entered_at_enter = var_id_now("enteredAtEnter");
     let apocalypse_deck = raw
         .apocalypse_deck
         .iter()
@@ -1336,6 +1343,7 @@ pub fn load(json: &str) -> Data {
         var_played_cost,
         var_paid_cost,
         var_ougi,
+        var_entered_at_enter,
         tribe_undead,
     }
 }

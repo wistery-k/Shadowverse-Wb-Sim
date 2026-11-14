@@ -390,7 +390,8 @@ pub fn eval_value(s: &GameState, ctx: &Ctx, v: &Value) -> i32 {
             .map(|c| c.stacks)
             .unwrap_or(0),
         ValueObj::PaidCost => ctx.var(data().var_paid_cost),
-        ValueObj::EnteredCount { ids } => pl
+        ValueObj::EnteredCount { at_enter: true, .. } => ctx.var(data().var_entered_at_enter),
+        ValueObj::EnteredCount { ids, .. } => pl
             .entered_counts
             .iter()
             .filter(|e| ids.contains(&e.0))
@@ -655,17 +656,30 @@ pub fn enter_board(s: &mut GameState, p: PlayerIndex, mut c: OnBoard) -> bool {
             *n += 1;
         }
     }
-    // 「このバトル中に場に出た自分の『…』の枚数」を見る能力があるカード
+    // 「このバトル中に場に出た自分の『…』の枚数」を見る能力があるカード。
+    // 「これが場に出たとき」の能力には、これが場に出た時点の枚数を持たせる（一緒に出たものは、後から出たものを数えない）
+    let mut entered_at_enter = None;
     if card(cid).count_entered {
         let counts = &mut s.players[p].entered_counts;
-        match counts.iter_mut().find(|e| e.0 == cid) {
-            Some(e) => e.1 += 1,
-            None => counts.push((cid, 1)),
-        }
+        let n = match counts.iter_mut().find(|e| e.0 == cid) {
+            Some(e) => {
+                e.1 += 1;
+                e.1
+            }
+            None => {
+                counts.push((cid, 1));
+                1
+            }
+        };
+        entered_at_enter = Some(n);
     }
     s.players[p].board.make_mut().push(c);
     for a in enter {
-        queue(s, a, Ctx::new(p, iid));
+        let mut ctx = Ctx::new(p, iid);
+        if let Some(n) = entered_at_enter {
+            ctx.set_var(data().var_entered_at_enter, n);
+        }
+        queue(s, a, ctx);
     }
     fire_side(s, p, On::AllyEnter, |s, t, src| match t {
         Trigger::AllyEnter { filter }
