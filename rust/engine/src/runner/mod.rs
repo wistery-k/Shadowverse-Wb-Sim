@@ -18,6 +18,7 @@ pub mod mulligan_data;
 pub mod options;
 pub mod parallel;
 pub mod profile;
+pub mod review;
 pub mod rhino_compare;
 pub mod survey;
 pub mod td;
