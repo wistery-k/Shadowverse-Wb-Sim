@@ -747,8 +747,10 @@ impl<'a> World<'a> {
             (false, _, On::AllyPlay) => 0,
             (true, _, On::AllyDestroyed) => c.my_fols,
             (false, _, On::AllyDestroyed) => c.opp_fols,
+            (true, _, On::AllyAttack) => c.attacks,
+            (false, _, On::AllyAttack) => 0,
             // 回数を見積もれないので、何かを数える能力なら見積もらない（呼び出し側で扱う）
-            (_, _, On::LeaderHealed | On::AllyAmuletDestroyed) => -1,
+            (_, _, On::LeaderHealed | On::AllyAmuletDestroyed | On::AllyDraw) => -1,
         }
     }
 
@@ -1054,6 +1056,7 @@ impl<'a> World<'a> {
                     card_id,
                     count,
                     slot,
+                    side,
                 } => {
                     let n = match self.vb(s, p, count, fr) {
                         Some(n) => n.max(0),
@@ -1062,13 +1065,15 @@ impl<'a> World<'a> {
                             return;
                         }
                     };
-                    if fr.mine {
+                    // 出す場が p の側か（能力の持ち主の相手の場に出すこともある）
+                    let to_mine = fr.mine != (*side == Some(Side::Opponent));
+                    if to_mine {
                         push(&mut acc.summons, *card_id, mul(m, n));
                     } else {
                         acc.opp_summons = add(acc.opp_summons, mul(m, n));
                     }
                     if let Some(sl) = slot {
-                        fr.slots.push((*sl, SlotInfo::Summoned(fr.mine, n)));
+                        fr.slots.push((*sl, SlotInfo::Summoned(to_mine, n)));
                     }
                 }
                 Effect::Reanimate { cost } => {
@@ -1292,6 +1297,23 @@ impl<'a> World<'a> {
                 }
                 Effect::EarthRite { then, .. } | Effect::Necromancy { then, .. } => {
                     self.walk(s, p, then, m, fr, acc);
+                }
+                // ランダムに 1 つ: どれもが働くとして数える
+                Effect::RandomOption { options } => {
+                    for o in options {
+                        self.walk(s, p, o, m, fr, acc);
+                    }
+                }
+                // PP を消費して働く: 働くとして数える（消費した PP で打てなくなる手は見込まない）
+                Effect::SpendPp { then, .. } => {
+                    self.walk(s, p, then, m, fr, acc);
+                }
+                Effect::LoseLastWords { .. } => {}
+                Effect::BanishCopy { .. } => {
+                    // 相手のフォロワーのコピーを自分の場に出す（【疾走】を持てばこのターンに攻撃できる）
+                    if fr.mine {
+                        acc.unk("BanishCopy");
+                    }
                 }
                 Effect::SpendFaith {
                     crest_id,

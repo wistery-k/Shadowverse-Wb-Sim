@@ -18,8 +18,9 @@ export {
   THIS,
   THIS_ATTACK,
   THIS_X,
-  allFollowers,
   act,
+  addSigils,
+  allFollowers,
   allyAmulets,
   allyCards,
   allyFollowers,
@@ -47,9 +48,12 @@ export {
   onAllyAct,
   onAllyEnter,
   onAttack,
+  onClash,
   onDiscarded,
   onEnter,
   onEvolve,
+  onEvolved,
+  onFused,
   onLeaderHealed,
   onSpellboost,
   onSuperEvolve,
@@ -218,3 +222,39 @@ export const FAITH_STACKS: Value = { kind: "faithStacks" };
 export const onAllyEvolved = (...effects: Effect[]): Ability => ({ trigger: { on: "allyEvolved" }, effects });
 /** 自分がカードを【エンハンス】でプレイしたとき */
 export const onAllyPlayEnhanced = (...effects: Effect[]): Ability => ({ trigger: { on: "allyPlay", enhanced: true }, effects });
+
+// ---- ミッドレンジNi・実験体W・クキシロB で足した仕組み ----
+
+/** 『name』count 枚を相手の場に出す */
+export const summonToOpponent = (name: string, count: Value = 1): Effect => ({ op: "summon", cardId: id(name), count, side: "opponent" });
+/** 【リアニメイト_N】 */
+export const reanimate = (cost: number): Effect => ({ op: "reanimate", cost });
+/** 「自分のデッキのコスト…のフォロワーからランダム N 種類を自分の場に出す」 */
+export const summonFromDeck = (filter: CardFilter, kinds: number): Effect => ({ op: "summonFromDeck", filter, kinds });
+/** options からランダムに 1 つ（「『A』『B』からランダム1枚」） */
+export const randomOption = (...options: Effect[][]): Effect => ({ op: "randomOption", options });
+/** 【ラストワード】を失う */
+export const loseLastWords = (target: Target): Effect => ({ op: "loseLastWords", target });
+/** 「それを消滅して、コピー1枚を自分の場に出す」 */
+export const banishCopy = (target: Target): Effect => ({ op: "banishCopy", target });
+/** 自分の PP を amount 消費して then を行う（足りなければ消費せず、働かない） */
+export const spendPp = (amount: number, ...then: Effect[]): Effect => ({ op: "spendPp", amount, then });
+/** このバトル中に場に出た自分の『names』の枚数（場に出たこれ自身も数える） */
+export const enteredCount = (...names: string[]): Value => ({ kind: "enteredCount", ids: names.map(id) });
+/**
+ * 「これが場に出たとき」の能力の中で、このバトル中に場に出た『name』（これ自身のカード）の枚数を、これが場に出た時点で数える。
+ * 一緒に出たカードのうち、後から出たものは数えない（docs/rules.md 12章の 39）
+ */
+export const enteredCountAtEnter = (name: string): Value => ({ kind: "enteredCount", ids: [id(name)], atEnter: true });
+export const valueAtLeast = (value: Value, atLeast: number): Condition => ({ kind: "valueAtLeast", value, atLeast });
+/** 自分のターンなら */
+export const OWN_TURN: Condition = { kind: "ownTurn" };
+/** これに【融合】していたなら */
+export const THIS_FUSED: Condition = { kind: "thisFused" };
+/** 自分がカードを引いたとき（filter は引いたカードの条件） */
+export const onAllyDraw = (filter: CardFilter, ...effects: Effect[]): Ability => ({
+  trigger: Object.keys(filter).length > 0 ? { on: "allyDraw", filter } : { on: "allyDraw" },
+  effects,
+});
+/** 自分のフォロワーが攻撃するとき（filter は攻撃するフォロワーの条件） */
+export const onAllyAttack = (filter: CardFilter, ...effects: Effect[]): Ability => ({ trigger: { on: "allyAttack", filter }, effects });

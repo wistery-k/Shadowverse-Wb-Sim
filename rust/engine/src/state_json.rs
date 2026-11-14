@@ -395,6 +395,16 @@ fn board_json(c: &OnBoard) -> Json {
             ("actedThisTurn", Json::Bool(c.acted_this_turn)),
         ]);
     }
+    // 印（付いているものだけ書く）
+    for (f, name) in [
+        (BOARD_LOST_LAST_WORDS, "lostLastWords"),
+        (BOARD_UNDEAD, "undead"),
+        (BOARD_FUSED, "fused"),
+    ] {
+        if c.has_flag(f) {
+            o.push((name, Json::Bool(true)));
+        }
+    }
     obj(o)
 }
 
@@ -499,6 +509,18 @@ fn player_json(p: &PlayerState) -> Json {
     // 【連携】で数える、場に出た自分のフォロワーの枚数（数えないときは省く）
     if let Some(n) = p.followers_entered {
         o.push(("followersEntered", num(n)));
+    }
+    // 場に出た自分のカードの枚数（数えるカードが出たときだけ書く）
+    if !p.entered_counts.is_empty() {
+        o.push((
+            "enteredCounts",
+            Json::Obj(
+                p.entered_counts
+                    .iter()
+                    .map(|&(c, n)| (card(c).id.clone(), num(n)))
+                    .collect(),
+            ),
+        ));
     }
     obj(o)
 }
@@ -925,7 +947,17 @@ fn board_of(v: &Json) -> R<OnBoard> {
         countdown: None,
         sigils: None,
         acted_this_turn: false,
+        flags: 0,
     };
+    for (f, name) in [
+        (BOARD_LOST_LAST_WORDS, "lostLastWords"),
+        (BOARD_UNDEAD, "undead"),
+        (BOARD_FUSED, "fused"),
+    ] {
+        if matches!(v.get(name), Some(Json::Bool(true))) {
+            b.flags |= f;
+        }
+    }
     match string(v, "kind")? {
         "follower" => {
             b.is_follower = true;
@@ -1048,6 +1080,19 @@ fn player_of(v: &Json) -> R<PlayerState> {
         followers_entered: match v.get("followersEntered") {
             None | Some(Json::Null) => None,
             Some(_) => Some(int(v, "followersEntered")?),
+        },
+        entered_counts: match v.get("enteredCounts") {
+            None | Some(Json::Null) => Vec::new(),
+            Some(Json::Obj(items)) => items
+                .iter()
+                .map(|(id, x)| {
+                    Ok((
+                        card_of(id)?,
+                        i32::try_from(int_of("enteredCounts", x)?).map_err(|e| e.to_string())?,
+                    ))
+                })
+                .collect::<R<Vec<_>>>()?,
+            Some(_) => return Err("\"enteredCounts\" はオブジェクト".into()),
         },
     })
 }

@@ -4,6 +4,7 @@ import type { CardAbilities, Effect } from "../../../engine/dsl";
 import {
   ENHANCED,
   OPP_LEADER,
+  OWN_TURN,
   THIS,
   act,
   addToHand,
@@ -16,12 +17,14 @@ import {
   choose,
   choseAllyAmulet,
   countAtLeast,
+  crest,
   damage,
   destroy,
   draw,
   exists,
   fanfare,
   gainPp,
+  grant,
   handCards,
   heal,
   id,
@@ -31,6 +34,7 @@ import {
   modeAllIf,
   onAllyAct,
   onAllyAmuletDestroyed,
+  onAllyDraw,
   onEnter,
   onEvolve,
   onSuperEvolve,
@@ -140,5 +144,40 @@ export const BISHOP: Record<string, CardAbilities> = {
   // トークン
   [id("天書の深淵")]: {
     abilities: [spell(choose(boardCards()), destroyChosen(damage(OPP_LEADER, 2)), addToHand("天書の深淵"))],
+  },
+
+  // ---- クキシロB ----
+  [id("結びの使徒")]: {
+    abilities: [
+      fanfare(when(ENHANCED, [draw(1), grant(THIS, ["bane"])])),
+      onAllyDraw({}, when(OWN_TURN, [grant(THIS, ["rush"])])),
+    ],
+  },
+  [id("英雄幻視・トルー")]: { abilities: [onAllyAct(grant(THIS, ["drain"]))] },
+  [id("霧巻花の激憤")]: { abilities: [spell(random(handCards(), 1, "r"), returnToDeck(slot("r")), draw(3))] },
+  [id("堅固なる霧巻花")]: {
+    abilities: [
+      fanfare(choose(oppFollowers()), damage(slot(), 5)),
+      act(0, destroy(THIS), random(handCards(), 2, "r"), returnToDeck(slot("r")), draw(2)),
+    ],
+  },
+  [id("窮鼠の斎女")]: {
+    abilities: [
+      fanfare(draw(1)),
+      onAllyDraw({}, when(OWN_TURN, [damage(oppFollowers(), 1)])),
+      onEvolve(draw(1)),
+    ],
+  },
+  [id("希望の光彩・リテュエル")]: {
+    abilities: [
+      fanfare(mode([damage(oppFollowers(), 3)], [damage(OPP_LEADER, 3)], [heal(3)]), damage(THIS, 3)),
+      onEvolve(crest("希望の光彩・リテュエル")),
+    ],
+  },
+  [specialId("ミラクルアルミラージ", "crystallize")]: {
+    abilities: [lastWords(summon("ミラクルアルミラージ")), act(1, countdown(-1))],
+  },
+  [id("霧巻花・クキシロ")]: {
+    abilities: [fanfare(crest("霧巻花・クキシロ"), random(handCards(), 2, "r"), returnToDeck(slot("r")), draw(2))],
   },
 };

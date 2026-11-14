@@ -34,6 +34,7 @@ fn new_player(deck: Vec<CardRef>) -> PlayerState {
         mulligan_done: false,
         leader_damage_zero_until: None,
         followers_entered: None,
+        entered_counts: Vec::new(),
     }
 }
 
@@ -277,7 +278,8 @@ pub(crate) fn handle_internal(s: &mut GameState, controller: PlayerIndex, eff: F
         FEff::StartTurn => start_turn(s, controller),
         FEff::StartTurnDraw => {
             let a = s.active;
-            s.draw_cards(a, 1, None, None);
+            let drawn = s.draw_cards(a, 1, None, None);
+            fire_ally_draw(s, a, &drawn);
         }
         FEff::EndTurn => fire_turn_end(s),
         FEff::Cleanup => end_turn_cleanup(s),
@@ -1047,6 +1049,13 @@ fn apply_attack(s: &mut GameState, attacker_iid: Iid, target: AttackTarget) {
     let mut triggered: Vec<(&'static Ability, Ctx)> = Vec::new();
     for ab in attack_abilities {
         triggered.push((ab, attacker_ctx(event_id)));
+    }
+    // 【自分のフォロワーが攻撃するとき】（クレスト・場のカード）も戦闘の前に働く。【攻撃時】の後に置く（順は未確認）
+    let before = s.queue.len();
+    fire_ally_attack(s, p, attacker_iid);
+    while s.queue.len() > before {
+        let q = s.queue.remove(before).unwrap();
+        triggered.push((q.ability, q.ctx));
     }
     if let Some(t) = target {
         for ab in clash_abilities {

@@ -2,19 +2,26 @@
 
 import type { CardAbilities } from "../../../engine/dsl";
 import {
+  ENHANCED,
   EVENT,
+  OPP_LEADER,
+  OUGI,
   THIS,
+  THIS_FUSED,
   THIS_X,
+  addSigils,
   addToDeck,
   addToHand,
   allFollowers,
   allyFollowers,
+  buff,
   choose,
   costChange,
   crest,
   damage,
   discard,
   draw,
+  enteredCountAtEnter,
   fanfare,
   gainPp,
   grant,
@@ -24,21 +31,28 @@ import {
   id,
   lastWords,
   onAllyEnter,
+  onEnter,
   onEvolve,
+  onFused,
   onSpellboost,
   onSuperEvolve,
-  opponentDraws,
   oppFollowers,
+  opponentDraws,
   random,
+  repeat,
   slot,
   spell,
   spellboost,
+  spendPp,
   summon,
   transform,
+  valueAtLeast,
   when,
 } from "./helpers";
 
 const addX = { op: "addX", target: THIS, amount: 1 } as const;
+/** 自分の場の『没入の実験体』 */
+const allySubjects = () => allyFollowers({ ids: [id("没入の実験体")] });
 const cheaper = onSpellboost(costChange(THIS, -1));
 
 export const WITCH: Record<string, CardAbilities> = {
@@ -94,4 +108,55 @@ export const WITCH: Record<string, CardAbilities> = {
   [id("マナリアの魔弾")]: { abilities: [spell(random(oppFollowers()), damage(slot(), 3))] },
   [id("ソニック・フォー")]: { abilities: [spell(damage(oppFollowers(), 5))] },
   [id("大いなる回帰")]: { abilities: [spell(choose(allyFollowers()), grantAttacks(slot(), 2))] },
+
+  // ---- 実験体W ----
+  [id("過剰反応")]: { abilities: [spell(addToHand("真理の召喚", 3))] },
+  [id("アルケミック・フレア")]: {
+    abilities: [spell(choose(oppFollowers()), damage(slot(), 4), addSigils(1), when(OUGI, [damage(OPP_LEADER, 2)]))],
+  },
+  [id("没入の実験体")]: {
+    // 「他の『没入の実験体』の枚数が5以上」: これ自身を含めて 6 以上。これが場に出た時点で数える（一緒に出たうち後のものは数えない。質問 39）
+    abilities: [onEnter(when(valueAtLeast(enteredCountAtEnter("没入の実験体"), 6), [buff(THIS, 3, 3)]))],
+  },
+  [id("人らしい愛")]: {
+    abilities: [
+      spell(
+        summon("没入の実験体", 1, "a"),
+        buff(slot("a"), 1, 0),
+        addToHand("没入の実験体", 1, "b"),
+        buff(slot("b"), 1, 0),
+      ),
+    ],
+  },
+  [id("心酔の研究者")]: {
+    abilities: [
+      fanfare(
+        when(ENHANCED, [summon("没入の実験体", 3, "c"), grant(slot("c"), ["ward"])], [summon("没入の実験体", 2)]),
+      ),
+      onEvolve(choose(allySubjects()), grant(slot(), ["bane"])),
+    ],
+  },
+  [id("恍惚の才媛")]: {
+    fusion: {},
+    abilities: [
+      fanfare(draw(2), summon("没入の実験体")),
+      onSuperEvolve(when(THIS_FUSED, [choose(allySubjects()), grant(slot(), ["drain"])])),
+    ],
+  },
+  [id("烏ノ涅")]: {
+    abilities: [spell(summon("没入の実験体"), repeat(2, random(oppFollowers()), damage(slot(), 7)))],
+  },
+  [id("万術の咎人・セフィー")]: {
+    fusion: {},
+    abilities: [
+      // PP が 2 未満でも融合できるが、PP は減らず、実験体も出ない（docs/rules.md 12章の 20）
+      onFused(spendPp(2, summon("没入の実験体"))),
+      fanfare(summon("没入の実験体", 2)),
+      onSuperEvolve(crest("万術の咎人・セフィー")),
+    ],
+  },
+  [id("魔恋の慕情・シイム")]: {
+    abilities: [fanfare(summon("天晶の魔手", 2)), onSuperEvolve(crest("魔恋の慕情・シイム"))],
+  },
+  [id("ルーン・リチュオル")]: { abilities: [spell(damage(oppFollowers(), 6), heal(3))] },
 };

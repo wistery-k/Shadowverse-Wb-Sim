@@ -43,13 +43,18 @@ pub fn card_matches(s: &GameState, ctx: &Ctx, iid: Iid, filter: Option<&CardFilt
             return false;
         }
     }
+    // リアニメイトで場に出たフォロワーは死者・タイプを持つ（docs/rules.md「リアニメイト_N」）
+    let has_tribe = |t: TribeId| {
+        cd.tribes.contains(&t)
+            || (Some(t) == data().tribe_undead && board.is_some_and(|b| b.has_flag(BOARD_UNDEAD)))
+    };
     if let Some(t) = f.tribe {
-        if !cd.tribes.contains(&t) {
+        if !has_tribe(t) {
             return false;
         }
     }
     if let Some(t) = f.not_tribe {
-        if cd.tribes.contains(&t) {
+        if has_tribe(t) {
             return false;
         }
     }
@@ -63,13 +68,25 @@ pub fn card_matches(s: &GameState, ctx: &Ctx, iid: Iid, filter: Option<&CardFilt
             return false;
         }
     }
-    if f.last_words && !has_last_words(cid) {
-        return false;
+    // 場のカードは今持つ【ラストワード】（失った・付いたものを含む）、ほかはカードの元の能力で見る
+    if f.last_words {
+        let has = match board {
+            Some(b) => b.abilities().any(|a| a.trigger.on() == On::LastWords),
+            None => has_last_words(cid),
+        };
+        if !has {
+            return false;
+        }
     }
     let cost = match hand {
         Some(h) => hand_cost(h),
         None => cd.cost,
     };
+    if let Some(v) = &f.cost_in {
+        if !v.contains(&cost) {
+            return false;
+        }
+    }
     if let Some(m) = f.cost_max {
         if cost > m {
             return false;
@@ -373,6 +390,13 @@ pub fn eval_value(s: &GameState, ctx: &Ctx, v: &Value) -> i32 {
             .map(|c| c.stacks)
             .unwrap_or(0),
         ValueObj::PaidCost => ctx.var(data().var_paid_cost),
+        ValueObj::EnteredCount { at_enter: true, .. } => ctx.var(data().var_entered_at_enter),
+        ValueObj::EnteredCount { ids, .. } => pl
+            .entered_counts
+            .iter()
+            .filter(|e| ids.contains(&e.0))
+            .map(|e| e.1)
+            .sum(),
     }
 }
 
@@ -406,6 +430,11 @@ pub fn eval_cond(s: &GameState, ctx: &Ctx, c: &Condition) -> bool {
         Condition::Ougi { level } => ctx.var(data().var_ougi) >= *level,
         Condition::Link { at_least } => pl.followers_entered.unwrap_or(0) >= *at_least,
         Condition::ValueEq { value, eq } => eval_value(s, ctx, value) == *eq,
+        Condition::ValueAtLeast { value, at_least } => eval_value(s, ctx, value) >= *at_least,
+        Condition::OwnTurn => s.active == ctx.controller,
+        Condition::ThisFused => s
+            .board_card(ctx.source)
+            .is_some_and(|b| b.has_flag(BOARD_FUSED)),
         Condition::Not { cond } => !eval_cond(s, ctx, cond),
     }
 }
@@ -477,8 +506,19 @@ type Matched = Option<Option<Iid>>;
 fn fire_side(
     s: &mut GameState,
     p: PlayerIndex,
+    on: On,
     mut matcher: impl FnMut(&GameState, &Trigger, Iid) -> Matched,
 ) {
+    // on の誘発の能力を持つクレスト・カードが無ければ何もしない（matcher は on の誘発にしか合わない）。
+    // 攻撃・ドローなどのたびに呼ぶので、能力の列を見る前に飛ばす
+    {
+        let pl = &s.players[p];
+        if !pl.crests.iter().any(|c| crest_has_on(c.crest, on))
+            && !pl.board.iter().any(|c| c.may_have_on(on))
+        {
+            return;
+        }
+    }
     let turn_id = s.players[p].turn_count;
     // 誘発の判定は状態を変えないので、クレストと場をそれぞれ並べ替えた順に見ていく
     let crest_perm = order_perm(s.players[p].crests.iter().map(|c| c.order));
@@ -489,6 +529,9 @@ fn fire_side(
             let c = &s.players[p].crests[ci];
             (c.iid, c.crest)
         };
+        if !crest_has_on(crest_idx, on) {
+            continue;
+        }
         for (i, ability) in crest_abilities_of(crest_idx).iter().enumerate() {
             let Some(event) = matcher(s, &ability.trigger, iid) else {
                 continue;
@@ -512,6 +555,9 @@ fn fire_side(
     for k in 0..n_board {
         let bi = board_perm.as_ref().map(|v| v[k]).unwrap_or(k);
         let c = &s.players[p].board[bi];
+        if !c.may_have_on(on) {
+            continue;
+        }
         let (iid, cid, is_follower) = (c.iid, c.card, c.is_follower);
         let own = &abilities_of(cid).abilities;
         let n_granted = c.granted.len();
@@ -547,7 +593,15 @@ fn fire_side(
 }
 
 /// 手札のカードの能力を誘発させる
+/// その誘発の能力が無いカードは、呼び出しも能力の列を見ることもせずに飛ばす（ターン終了・場を離れるたびに手札の全部を回るので）
+#[inline]
 fn fire_hand(s: &mut GameState, p: PlayerIndex, hi: usize, on: On) {
+    if abilities_of(s.players[p].hand[hi].card).has_on(on) {
+        fire_hand_abilities(s, p, hi, on);
+    }
+}
+
+fn fire_hand_abilities(s: &mut GameState, p: PlayerIndex, hi: usize, on: On) {
     let h = &s.players[p].hand[hi];
     let (iid, cid, x) = (h.iid, h.card, h.x);
     for ability in &abilities_of(cid).abilities {
@@ -561,8 +615,11 @@ fn fire_hand(s: &mut GameState, p: PlayerIndex, hi: usize, on: On) {
 
 /// カード自身の能力のうち、指定の誘発のもの
 pub fn own_abilities(cid: CardIdx, on: On) -> Vec<&'static Ability> {
-    abilities_of(cid)
-        .abilities
+    let ab = abilities_of(cid);
+    if !ab.has_on(on) {
+        return Vec::new();
+    }
+    ab.abilities
         .iter()
         .filter(|a| a.trigger.on() == on)
         .collect()
@@ -599,11 +656,32 @@ pub fn enter_board(s: &mut GameState, p: PlayerIndex, mut c: OnBoard) -> bool {
             *n += 1;
         }
     }
+    // 「このバトル中に場に出た自分の『…』の枚数」を見る能力があるカード。
+    // 「これが場に出たとき」の能力には、これが場に出た時点の枚数を持たせる（一緒に出たものは、後から出たものを数えない）
+    let mut entered_at_enter = None;
+    if card(cid).count_entered {
+        let counts = &mut s.players[p].entered_counts;
+        let n = match counts.iter_mut().find(|e| e.0 == cid) {
+            Some(e) => {
+                e.1 += 1;
+                e.1
+            }
+            None => {
+                counts.push((cid, 1));
+                1
+            }
+        };
+        entered_at_enter = Some(n);
+    }
     s.players[p].board.make_mut().push(c);
     for a in enter {
-        queue(s, a, Ctx::new(p, iid));
+        let mut ctx = Ctx::new(p, iid);
+        if let Some(n) = entered_at_enter {
+            ctx.set_var(data().var_entered_at_enter, n);
+        }
+        queue(s, a, ctx);
     }
-    fire_side(s, p, |s, t, src| match t {
+    fire_side(s, p, On::AllyEnter, |s, t, src| match t {
         Trigger::AllyEnter { filter }
             if src != iid && card_matches(s, &Ctx::new(p, src), iid, filter.as_ref()) =>
         {
@@ -641,7 +719,7 @@ pub fn leave_board(s: &mut GameState, iid: Iid, mut reason: LeaveReason) {
     let is_follower = s.board_card(iid).unwrap().is_follower;
     // 破壊されたときの誘発は、離れる前の状態で条件を判定する
     if reason == LeaveReason::Destroy && is_follower {
-        fire_side(s, p, |s, t, src| match t {
+        fire_side(s, p, On::AllyDestroyed, |s, t, src| match t {
             Trigger::AllyDestroyed { filter }
                 if src != iid && card_matches(s, &Ctx::new(p, src), iid, filter.as_ref()) =>
             {
@@ -651,7 +729,7 @@ pub fn leave_board(s: &mut GameState, iid: Iid, mut reason: LeaveReason) {
         });
     }
     if reason == LeaveReason::Destroy && !is_follower {
-        fire_side(s, p, |_, t, src| match t {
+        fire_side(s, p, On::AllyAmuletDestroyed, |_, t, src| match t {
             Trigger::AllyAmuletDestroyed if src != iid => Some(Some(iid)),
             _ => None,
         });
@@ -795,7 +873,7 @@ pub fn heal_leader(s: &mut GameState, p: PlayerIndex, amount: i32) {
     let pl = &mut s.players[p];
     let healed = pl.leader_max_hp.min(pl.leader_hp + amount) - pl.leader_hp;
     pl.leader_hp += healed.max(0);
-    fire_side(s, p, |_, t, _| {
+    fire_side(s, p, On::LeaderHealed, |_, t, _| {
         if matches!(t, Trigger::LeaderHealed) {
             Some(None)
         } else {
@@ -840,7 +918,7 @@ pub fn evolve_follower(s: &mut GameState, p: PlayerIndex, iid: Iid, kind: Evolve
         }
     }
     // 自分のフォロワーが進化したとき
-    fire_side(s, p, |_, t, _| {
+    fire_side(s, p, On::AllyEvolved, |_, t, _| {
         if matches!(t, Trigger::AllyEvolved) {
             Some(Some(iid))
         } else {
@@ -853,7 +931,7 @@ pub fn evolve_follower(s: &mut GameState, p: PlayerIndex, iid: Iid, kind: Evolve
 
 pub fn fire_turn_start(s: &mut GameState) {
     let p = s.active;
-    fire_side(s, p, |_, t, _| {
+    fire_side(s, p, On::TurnStart, |_, t, _| {
         if matches!(t, Trigger::TurnStart) {
             Some(None)
         } else {
@@ -864,7 +942,7 @@ pub fn fire_turn_start(s: &mut GameState) {
 
 pub fn fire_turn_end(s: &mut GameState) {
     let [me, opp] = s.turn_order();
-    fire_side(s, me, |_, t, _| {
+    fire_side(s, me, On::TurnEnd, |_, t, _| {
         if matches!(t, Trigger::TurnEnd { whose: Whose::Me }) {
             Some(None)
         } else {
@@ -875,7 +953,7 @@ pub fn fire_turn_end(s: &mut GameState) {
     for hi in 0..s.players[me].hand.len() {
         fire_hand(s, me, hi, On::TurnEndInHand);
     }
-    fire_side(s, opp, |_, t, _| {
+    fire_side(s, opp, On::TurnEnd, |_, t, _| {
         if matches!(
             t,
             Trigger::TurnEnd {
@@ -905,6 +983,7 @@ fn played_card_matches(
         && f.ids.as_ref().is_none_or(|ids| ids.contains(&cid))
         && f.cost_max.is_none_or(|m| cd.cost <= m)
         && f.cost_min.is_none_or(|m| cd.cost >= m)
+        && f.cost_in.as_ref().is_none_or(|v| v.contains(&cd.cost))
         && (!f.last_words || has_last_words(cid))
         && f.cost_eq
             .as_ref()
@@ -915,7 +994,7 @@ fn played_card_matches(
 /// 文脈の event はプレイしたカード、変数 playedCost はその元のコスト
 pub fn fire_ally_play(s: &mut GameState, p: PlayerIndex, iid: Iid, cid: CardIdx, enhanced: bool) {
     let before = s.queue.len();
-    fire_side(s, p, |s, t, src| match t {
+    fire_side(s, p, On::AllyPlay, |s, t, src| match t {
         Trigger::AllyPlay {
             filter,
             enhanced: need,
@@ -933,8 +1012,35 @@ pub fn fire_ally_play(s: &mut GameState, p: PlayerIndex, iid: Iid, cid: CardIdx,
     }
 }
 
+/// p がカードを引いたときの誘発（【自分がカードを引いたとき】）。手札に入ったカード 1 枚ごとに働く（docs/rules.md 12章の 16）。
+/// 文脈の event は引いたカード
+pub fn fire_ally_draw(s: &mut GameState, p: PlayerIndex, drawn: &[Iid]) {
+    for &iid in drawn {
+        fire_side(s, p, On::AllyDraw, |s, t, src| match t {
+            Trigger::AllyDraw { filter }
+                if card_matches(s, &Ctx::new(p, src), iid, filter.as_ref()) =>
+            {
+                Some(Some(iid))
+            }
+            _ => None,
+        });
+    }
+}
+
+/// p のフォロワー attacker が攻撃するときの誘発（【自分のフォロワーが攻撃するとき】）を誘発待ちに入れる。文脈の event は攻撃するフォロワー
+pub fn fire_ally_attack(s: &mut GameState, p: PlayerIndex, attacker: Iid) {
+    fire_side(s, p, On::AllyAttack, |s, t, src| match t {
+        Trigger::AllyAttack { filter }
+            if card_matches(s, &Ctx::new(p, src), attacker, filter.as_ref()) =>
+        {
+            Some(Some(attacker))
+        }
+        _ => None,
+    });
+}
+
 pub fn fire_ally_act(s: &mut GameState, p: PlayerIndex) {
-    fire_side(s, p, |_, t, _| {
+    fire_side(s, p, On::AllyAct, |_, t, _| {
         if matches!(t, Trigger::AllyAct) {
             Some(None)
         } else {
@@ -944,7 +1050,7 @@ pub fn fire_ally_act(s: &mut GameState, p: PlayerIndex) {
 }
 
 pub fn fire_ally_fuse(s: &mut GameState, p: PlayerIndex) {
-    fire_side(s, p, |_, t, _| {
+    fire_side(s, p, On::AllyFuse, |_, t, _| {
         if matches!(t, Trigger::AllyFuse) {
             Some(None)
         } else {
@@ -992,10 +1098,7 @@ pub fn fire_spellboost(s: &mut GameState, p: PlayerIndex, iid: Iid, times: i32) 
 
 /// 手札で働く能力（スペルブーストされたとき・手札にある間に味方が場を離れたとき）を持つか
 pub fn has_hand_trigger(c: CardIdx, on: On) -> bool {
-    abilities_of(c)
-        .abilities
-        .iter()
-        .any(|a| a.trigger.on() == on)
+    abilities_of(c).has_on(on)
 }
 
 /// 能力を解決する写しの局面（解決中の効果・誘発待ち・選択待ちを空にする）
@@ -1489,17 +1592,16 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             } else {
                 p
             };
-            match filter {
+            let drawn = match filter {
                 Some(f) => {
                     let hint = draw_hint(s, &frame.ctx, f);
                     let ctx = &frame.ctx;
                     let pred = |st: &GameState, r: &CardRef| deck_card_matches(st, ctx, p, r, f);
-                    s.draw_cards(p, n, Some(&pred), Some(hint));
+                    s.draw_cards(p, n, Some(&pred), Some(hint))
                 }
-                None => {
-                    s.draw_cards(p, n, None, None);
-                }
-            }
+                None => s.draw_cards(p, n, None, None),
+            };
+            fire_ally_draw(s, p, &drawn);
         }
         Effect::DrawAll { filter, slot } => {
             let n = {
@@ -1516,6 +1618,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 let pred = |st: &GameState, r: &CardRef| deck_card_matches(st, ctx, p, r, filter);
                 s.draw_cards(p, n, Some(&pred), Some(hint))
             };
+            fire_ally_draw(s, p, &drawn);
             if let Some(sl) = slot {
                 frame.ctx.set_slot(*sl, drawn);
             }
@@ -1543,13 +1646,19 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             card_id,
             count,
             slot,
+            side,
         } => {
+            let to = if *side == Some(Side::Opponent) {
+                opponent(p)
+            } else {
+                p
+            };
             let mut ids = Vec::new();
             let mut i = 0;
             while i < val!(count) {
                 let c = s.new_board_card(*card_id, None);
                 let iid = c.iid;
-                if !enter_board(s, p, c) {
+                if !enter_board(s, to, c) {
                     break;
                 }
                 ids.push(iid);
@@ -1589,7 +1698,9 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 let best: Vec<CardIdx> = costs.iter().filter(|x| x.1 == max).map(|x| x.0).collect();
                 let k = s.rng_int(best.len());
                 let chosen = best[k];
-                let c = s.new_board_card(chosen, None);
+                // リアニメイトで場に出たフォロワーは死者・タイプを持つ（docs/rules.md「リアニメイト_N」）
+                let mut c = s.new_board_card(chosen, None);
+                c.flags |= BOARD_UNDEAD;
                 enter_board(s, p, c);
             }
         }
@@ -2024,6 +2135,49 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 }
             }
         }
+        Effect::RandomOption { options } => {
+            if !options.is_empty() {
+                let k = s.rng_int(options.len());
+                splice(frame, &options[k], 1);
+                return true;
+            }
+        }
+        Effect::LoseLastWords { target } => {
+            for id in targets!(target) {
+                if let Some((q, i)) = s.find_board(id) {
+                    let b = &mut s.players[q].board.make_mut()[i];
+                    b.flags |= BOARD_LOST_LAST_WORDS;
+                    b.granted.retain(|a| a.trigger.on() != On::LastWords);
+                }
+            }
+        }
+        Effect::BanishCopy { target } => {
+            for id in targets!(target) {
+                let Some(orig) = s.board_card(id).cloned() else {
+                    continue;
+                };
+                leave_board(s, id, LeaveReason::Banish);
+                // コピーは受けたダメージ・かかっている効果を引き継ぐ。このターンに攻撃・アクトしたかは引き継がない
+                // （docs/rules.md「コピー」）。新しく場に出たカードとして扱う
+                let mut c = orig;
+                c.iid = s.new_iid();
+                c.order = s.next_order;
+                s.next_order += 1;
+                c.attacks_this_turn = 0;
+                c.acted_this_turn = false;
+                c.entered_turn = s.turn;
+                c.used_once.clear();
+                enter_board(s, p, c);
+            }
+        }
+        Effect::SpendPp { amount, then } => {
+            // PP が足りなければ消費せず、働かない（docs/rules.md 12章の 20）
+            if s.players[p].pp >= *amount {
+                s.players[p].pp -= amount;
+                splice(frame, then, 1);
+                return true;
+            }
+        }
         Effect::LeaderDamageZero { .. } => {
             // 相手のターン（次のターン）の終わりまで
             s.players[p].leader_damage_zero_until = Some(s.turn + 1);
@@ -2125,6 +2279,11 @@ fn deck_card_matches(
         }
     }
     let cost = s.deck_cost(p, r);
+    if let Some(v) = &f.cost_in {
+        if !v.contains(&cost) {
+            return false;
+        }
+    }
     if let Some(m) = f.cost_max {
         if cost > m {
             return false;

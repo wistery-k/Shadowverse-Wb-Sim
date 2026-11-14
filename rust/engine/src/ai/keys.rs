@@ -69,6 +69,7 @@ pub fn board_eq_noid(a: &OnBoard, b: &OnBoard) -> bool {
         || a.temp_keywords != b.temp_keywords
         || !abilities_eq(&a.granted, &b.granted)
         || !map_eq(&a.used_once, &b.used_once)
+        || a.flags != b.flags
     {
         return false;
     }
@@ -222,6 +223,7 @@ fn player_rest_eq(a: &PlayerState, b: &PlayerState) -> bool {
         && a.mulligan_done == b.mulligan_done
         && a.leader_damage_zero_until == b.leader_damage_zero_until
         && a.followers_entered == b.followers_entered
+        && a.entered_counts == b.entered_counts
 }
 
 fn player_eq(a: &PlayerState, b: &PlayerState) -> bool {

@@ -195,6 +195,10 @@ fn de_cards<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<CardIdx>>, D::
     .transpose()
 }
 
+fn de_card_list<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<CardIdx>, D::Error> {
+    Ok(de_cards(d)?.unwrap_or_default())
+}
+
 fn de_crest<'de, D: Deserializer<'de>>(d: D) -> Result<CrestIdx, D::Error> {
     let s = String::deserialize(d)?;
     INTERN
@@ -353,9 +357,11 @@ pub struct CardFilter {
     pub evolved: bool,
     #[serde(default)]
     pub super_evolved: bool,
-    /// 【ラストワード】を持つ（カードの元の能力で見る）
+    /// 【ラストワード】を持つ（場のカードは今持つ能力、ほかはカードの元の能力で見る）
     #[serde(default)]
     pub last_words: bool,
+    /// コストがこのどれか（手札のカードは手札のコスト）
+    pub cost_in: Option<Vec<i32>>,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -443,6 +449,15 @@ pub enum ValueObj {
     FaithStacks,
     /// これをプレイしたときに払ったコスト（Card::paid_cost のカードだけ）
     PaidCost,
+    /// このバトル中に場に出た自分の ids のカードの枚数（Card::count_entered のカードだけ数える）。
+    /// at_enter なら、これが場に出た時点の、これと同じカードの枚数（「これが場に出たとき」の能力の中で使う。
+    /// 一緒に出たカードのうち後から出たものは数えない。docs/rules.md 12章の 39）
+    EnteredCount {
+        #[serde(deserialize_with = "de_card_list")]
+        ids: Vec<CardIdx>,
+        #[serde(default)]
+        at_enter: bool,
+    },
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -505,6 +520,15 @@ pub enum Condition {
         value: Value,
         eq: i32,
     },
+    /// value が at_least 以上
+    ValueAtLeast {
+        value: Value,
+        at_least: i32,
+    },
+    /// 自分のターン（能力の持ち主が手番のプレイヤー）
+    OwnTurn,
+    /// これ（場のフォロワー）に手札で【融合】していた（Card::this_fused のカードだけ覚える）
+    ThisFused,
     Not {
         cond: Box<Condition>,
     },
@@ -617,6 +641,8 @@ pub enum Effect {
         count: Value,
         #[serde(default, deserialize_with = "de_opt_slot")]
         slot: Option<SlotId>,
+        /// Opponent なら相手の場に出す
+        side: Option<Side>,
     },
     SummonCopy {
         #[serde(deserialize_with = "de_slot")]
@@ -764,6 +790,23 @@ pub enum Effect {
         attack: i32,
         defense: i32,
     },
+    /// options からランダムに 1 つ
+    RandomOption {
+        options: Vec<Vec<Effect>>,
+    },
+    /// 【ラストワード】を失う
+    LoseLastWords {
+        target: Target,
+    },
+    /// 場のカードを消滅して、そのコピー（受けたダメージ・かかっている効果を引き継ぐ）を自分の場に出す
+    BanishCopy {
+        target: Target,
+    },
+    /// 自分の PP が amount 以上なら、amount 消費して then を行う
+    SpendPp {
+        amount: i32,
+        then: Vec<Effect>,
+    },
     /// 相手のターン終了まで、自分のリーダーは「受ける1以上のダメージを0にする。」を持つ
     LeaderDamageZero {
         #[allow(dead_code)]
@@ -848,6 +891,10 @@ impl Effect {
             Effect::SpendFaith { .. } => "SpendFaith",
             Effect::GrantFaith { .. } => "GrantFaith",
             Effect::BuffDeck { .. } => "BuffDeck",
+            Effect::RandomOption { .. } => "RandomOption",
+            Effect::LoseLastWords { .. } => "LoseLastWords",
+            Effect::BanishCopy { .. } => "BanishCopy",
+            Effect::SpendPp { .. } => "SpendPp",
             Effect::LeaderDamageZero { .. } => "LeaderDamageZero",
             Effect::SetLeaderMaxHp { .. } => "SetLeaderMaxHp",
             Effect::AddLeaderMaxHp { .. } => "AddLeaderMaxHp",
@@ -914,6 +961,14 @@ pub enum Trigger {
     TurnEndInHand,
     AllyAmuletDestroyed,
     AllyEvolved,
+    /// 自分がカードを引いたとき（filter は引いたカードの条件）
+    AllyDraw {
+        filter: Option<CardFilter>,
+    },
+    /// 自分のフォロワーが攻撃するとき（filter は攻撃するフォロワーの条件）
+    AllyAttack {
+        filter: Option<CardFilter>,
+    },
 }
 
 /// 誘発の種類（Trigger の on だけ）
@@ -944,6 +999,16 @@ pub enum On {
     TurnEndInHand,
     AllyAmuletDestroyed,
     AllyEvolved,
+    AllyDraw,
+    AllyAttack,
+}
+
+impl On {
+    /// CardAbilities::on_mask の中のビット
+    #[inline]
+    pub fn bit(self) -> u64 {
+        1 << (self as u32)
+    }
 }
 
 impl Trigger {
@@ -974,6 +1039,8 @@ impl Trigger {
             Trigger::TurnEndInHand => On::TurnEndInHand,
             Trigger::AllyAmuletDestroyed => On::AllyAmuletDestroyed,
             Trigger::AllyEvolved => On::AllyEvolved,
+            Trigger::AllyDraw { .. } => On::AllyDraw,
+            Trigger::AllyAttack { .. } => On::AllyAttack,
         }
     }
 }
@@ -1006,6 +1073,25 @@ pub struct CardAbilities {
     pub ignore_ward: bool,
     #[allow(dead_code)]
     pub unimplemented: Option<String>,
+    /// 能力の誘発の種類の集まり（On の番号のビット。読み込んだ後に set_on_mask で作る）。
+    /// 手札・場のカードを回るとき、その誘発の能力が無いカードを能力の列を見ずに飛ばすため
+    #[serde(skip)]
+    pub on_mask: u64,
+}
+
+impl CardAbilities {
+    /// on の誘発の能力を持つか
+    #[inline]
+    pub fn has_on(&self, on: On) -> bool {
+        self.on_mask & on.bit() != 0
+    }
+
+    fn set_on_mask(&mut self) {
+        self.on_mask = self
+            .abilities
+            .iter()
+            .fold(0, |m, a| m | a.trigger.on().bit());
+    }
 }
 
 // ---- カード ----
@@ -1055,6 +1141,12 @@ pub struct Card {
     /// 能力が「これのコストがNなら」を見る（プレイしたときに払ったコストを覚える）
     #[serde(default)]
     pub paid_cost: bool,
+    /// 能力が「これに【融合】していたなら」を見る（場に出たときに、手札で融合していたかを覚える）
+    #[serde(default)]
+    pub this_fused: bool,
+    /// どれかの能力が「このバトル中に場に出たこのカードの枚数」を見る（場に出るたびに数える）
+    #[serde(default)]
+    pub count_entered: bool,
 }
 
 impl Card {
@@ -1100,6 +1192,10 @@ pub struct Data {
     pub var_paid_cost: VarId,
     /// これをプレイしたときの奥義ゲージ（Card::ougi のカードだけ）
     pub var_ougi: VarId,
+    /// 「これが場に出たとき」の能力の、これが場に出た時点のこれと同じカードの枚数（Card::count_entered のカードだけ）
+    pub var_entered_at_enter: VarId,
+    /// 死者・タイプ（リアニメイトで場に出たフォロワーが持つ）
+    pub tribe_undead: Option<TribeId>,
 }
 
 impl Data {
@@ -1196,10 +1292,17 @@ pub fn load(json: &str) -> Data {
         );
         crest_abilities[n] = Some(a);
     }
+    for a in abilities
+        .iter_mut()
+        .chain(crest_abilities.iter_mut().flatten())
+    {
+        a.set_on_mask();
+    }
     // スターターの能力の後に名前を付ける（スターターの変数の番号を変えないため）
     let var_played_cost = var_id_now("playedCost");
     let var_paid_cost = var_id_now("paidCost");
     let var_ougi = var_id_now("ougi");
+    let var_entered_at_enter = var_id_now("enteredAtEnter");
     let apocalypse_deck = raw
         .apocalypse_deck
         .iter()
@@ -1219,6 +1322,10 @@ pub fn load(json: &str) -> Data {
         (i.tribes.clone(), i.slots.clone(), i.vars.clone())
     });
     let earth_sigil_token = card_by_id["90031210"];
+    let tribe_undead = tribe_names
+        .iter()
+        .position(|t| t == "死者")
+        .map(|i| i as TribeId);
     Data {
         cards,
         abilities,
@@ -1236,6 +1343,8 @@ pub fn load(json: &str) -> Data {
         var_played_cost,
         var_paid_cost,
         var_ougi,
+        var_entered_at_enter,
+        tribe_undead,
     }
 }
 

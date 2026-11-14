@@ -41,8 +41,10 @@ export interface CardFilter {
   evolved?: boolean;
   /** 超進化後 */
   superEvolved?: boolean;
-  /** 【ラストワード】を持つ（カードの元の能力で見る） */
+  /** 【ラストワード】を持つ（場のカードは今持つ能力、ほかはカードの元の能力で見る） */
   lastWords?: boolean;
+  /** コストがこのどれか（手札のカードは手札のコスト） */
+  costIn?: number[];
 }
 
 /** 対象の集合。解決すると実体ID（iid、リーダーは負の値）の配列になる。 */
@@ -81,7 +83,13 @@ export type Value =
   /** この信仰に「自分の信仰は「…」を持つ」で付いた能力の数（信仰の能力の中で使う） */
   | { kind: "faithStacks" }
   /** これをプレイしたときに払ったコスト（「これのコストがNなら」） */
-  | { kind: "paidCost" };
+  | { kind: "paidCost" }
+  /**
+   * このバトル中に場に出た自分の ids のカードの枚数（場に出たこれ自身も数える）。
+   * atEnter なら、これが場に出た時点の枚数（「これが場に出たとき」の能力の中で、ids をこれ自身のカードにして使う。
+   * 一緒に出たカードのうち後から出たものは数えない。docs/rules.md 12章の 39）
+   */
+  | { kind: "enteredCount"; ids: string[]; atEnter?: boolean };
 
 export type Condition =
   | { kind: "awakened" }
@@ -110,6 +118,12 @@ export type Condition =
   | { kind: "link"; atLeast: number }
   /** value が eq と等しい */
   | { kind: "valueEq"; value: Value; eq: number }
+  /** value が atLeast 以上 */
+  | { kind: "valueAtLeast"; value: Value; atLeast: number }
+  /** 自分のターン（「自分のターンなら」） */
+  | { kind: "ownTurn" }
+  /** これ（場のフォロワー）に手札で【融合】していた（「これに【融合】していたなら」） */
+  | { kind: "thisFused" }
   | { kind: "not"; cond: Condition };
 
 export type Duration = "permanent" | "endOfTurn";
@@ -136,7 +150,8 @@ export type Effect =
   | { op: "drawAll"; filter: CardFilter; slot?: string }
   /** slot に加えたカードを入れる（「それは…」） */
   | { op: "addToHand"; cardId: string; count: Value; slot?: string }
-  | { op: "summon"; cardId: string; count: Value; slot?: string }
+  /** side が "opponent" なら相手の場に出す */
+  | { op: "summon"; cardId: string; count: Value; slot?: string; side?: "opponent" }
   /** スロットのカードと同名のカードを場に出す（コピー） */
   | { op: "summonCopy"; from: string; slot?: string }
   | { op: "reanimate"; cost: number }
@@ -188,6 +203,14 @@ export type Effect =
   | { op: "grantFaith"; crestId: string }
   /** 自分のデッキの filter に合うカードすべては +attack/+defense する */
   | { op: "buffDeck"; filter: CardFilter; attack: number; defense: number }
+  /** options からランダムに 1 つ（「『A』『B』からランダム1枚」） */
+  | { op: "randomOption"; options: Effect[][] }
+  /** 【ラストワード】を失う */
+  | { op: "loseLastWords"; target: Target }
+  /** 場のカードを消滅して、そのコピー（受けたダメージ・かかっている効果を引き継ぐ）を自分の場に出す */
+  | { op: "banishCopy"; target: Target }
+  /** 自分の PP が amount 以上なら、amount 消費して then を行う（足りなければ消費せず、働かない） */
+  | { op: "spendPp"; amount: number; then: Effect[] }
   /** 相手のターン終了まで、自分のリーダーは「受ける1以上のダメージを0にする。」を持つ */
   | { op: "leaderDamageZero"; until: "opponentTurnEnd" }
   | { op: "apocalypseDeck" }
@@ -241,7 +264,11 @@ export type Trigger =
   /** 自分のフォロワーが進化したとき（超進化・効果による進化を含む。docs/rules.md 12章の 15） */
   | { on: "allyEvolved" }
   /** 手札にある間、自分のターン終了時（「手札で働く。自分のターン終了時」） */
-  | { on: "turnEndInHand" };
+  | { on: "turnEndInHand" }
+  /** 自分がカードを引いたとき（filter は引いたカードの条件。手札に入ったカード 1 枚ごと） */
+  | { on: "allyDraw"; filter?: CardFilter }
+  /** 自分のフォロワーが攻撃するとき（filter は攻撃するフォロワーの条件） */
+  | { on: "allyAttack"; filter?: CardFilter };
 
 export interface Ability {
   trigger: Trigger;
