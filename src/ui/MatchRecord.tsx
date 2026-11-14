@@ -25,7 +25,6 @@ import {
 } from "../engine";
 import { PRO_EVENTS, PRO_DECKS, findProDeck } from "../record/decks";
 import {
-  deckRemaining,
   evaluate,
   exportRecord,
   newRecord,
@@ -335,6 +334,16 @@ function RecordView({ live, setLive, setError, onNew }: { live: Live; setLive: (
     }
   }, [state]);
   const info = inputInfo(state, legal, picks);
+  // 引いたカードを選んでいる間は、仮に打った局面（ターン終了時の効果などの後）を見せる。まだ決めていない引いたカードは伏せる
+  const preview = resolving?.ev.kind === "draw" ? resolving.ev : null;
+  const shown = preview?.preview ?? state;
+  const shownInfo = preview ? inputInfo(preview.preview, [], NO_PICKS) : info;
+  const undecided = useMemo(() => {
+    if (!preview) return null;
+    const iids = new Set(preview.undecided);
+    const asking = preview.preview.players[preview.player].hand.find((h) => iids.has(h.iid))?.iid ?? null;
+    return { iids, asking };
+  }, [preview]);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30_000);
@@ -435,7 +444,7 @@ function RecordView({ live, setLive, setError, onNew }: { live: Live; setLive: (
         {([opponent(bottom), bottom] as const).map((p, k) => (
           <SeatPanel
             key={p}
-            state={state}
+            state={shown}
             p={p}
             top={k === 0}
             names={names}
@@ -443,10 +452,11 @@ function RecordView({ live, setLive, setError, onNew }: { live: Live; setLive: (
             onDetail={setDetail}
             input={mode === "play" && !locked && needHand === undefined ? { act } : null}
             editing={mode === "edit" && !locked ? { apply: applyEdit } : null}
-            info={info}
+            info={shownInfo}
             setPicks={setPicks}
             editTarget={editTarget}
             setEditTarget={setEditTarget}
+            undecided={undecided}
           />
         ))}
         <section class="controls record-controls">
@@ -530,6 +540,11 @@ interface SeatProps {
   setPicks: (p: Picks) => void;
   editTarget: EditTarget;
   setEditTarget: (t: EditTarget) => void;
+  /**
+   * 引いたカードを選んでいる間、仮に打った局面の手札で、まだ決めていない引いたカード（中身を伏せる）。
+   * asking はいま選んでいるカード（その席の、まだ決めていない最初の 1 枚）
+   */
+  undecided: { iids: ReadonlySet<number>; asking: number | null } | null;
 }
 
 /** 選んでいるもの（手の入力: 主体のカードと、対象・素材・マリガンで返すカード） */
@@ -579,7 +594,7 @@ function inputInfo(state: GameState, legal: readonly Action[], picks: Picks) {
 }
 type InputInfo = ReturnType<typeof inputInfo>;
 
-function SeatPanel({ state, p, top, names, cls, onDetail, input, editing, info, setPicks, editTarget, setEditTarget }: SeatProps) {
+function SeatPanel({ state, p, top, names, cls, onDetail, input, editing, info, setPicks, editTarget, setEditTarget, undecided }: SeatProps) {
   const pl = state.players[p];
   const attackable = info.actor === p && state.active === p ? attackStatuses(state) : new Map();
   const leader = leaderId(p);
@@ -652,7 +667,12 @@ function SeatPanel({ state, p, top, names, cls, onDetail, input, editing, info, 
   const head = <PlayerInfo label={`${names[p]}${state.first === p ? "（先攻）" : "（後攻）"}${info.actor === p && state.phase !== "ended" ? " ← 手番" : ""}`} state={state} p={p} cls={cls} />;
   const hand = (
     <div class="hand">
-      {pl.hand.map((h) => (
+      {pl.hand.map((h) =>
+        undecided?.iids.has(h.iid) ? (
+          <span key={h.iid} class={`slot-empty record-undecided ${undecided.asking === h.iid ? "asking" : ""}`}>
+            {undecided.asking === h.iid ? "引いたカード（いま選ぶ）" : "引いたカード（このあと選ぶ）"}
+          </span>
+        ) : (
         <CardView
           key={h.iid}
           cardId={h.cardId}
@@ -665,7 +685,8 @@ function SeatPanel({ state, p, top, names, cls, onDetail, input, editing, info, 
           ready={!!input && p === info.actor && info.ready.has(h.iid)}
           onClick={() => click(h.iid, h.cardId)}
         />
-      ))}
+        ),
+      )}
       <EmptySlots count={pl.hand.length} />
     </div>
   );
@@ -793,29 +814,66 @@ function ActionButtons({ state, names, act, info, setPicks }: { state: GameState
 // ---- 初期手札 ----
 
 /** カード ID → 枚数を、コストの低い順（同じなら ID の順）に並べる */
-function sortedCounts(m: ReadonlyMap<string, number>): [string, number][] {
-  return [...m.entries()].sort(([a], [b]) => cardOf(a).cost - cardOf(b).cost || a.localeCompare(b));
+const TYPE_ORDER: Record<string, number> = { follower: 0, spell: 1, amulet: 2 };
+
+/** カードの種類の短い説明（フォロワーは攻撃力/体力） */
+function typeLabel(id: string): string {
+  const c = cardOf(id);
+  if (c.type === "follower") return `${c.attack}/${c.defense}`;
+  return c.type === "spell" ? "スペル" : "アミュレット";
+}
+
+/** コストごとの行に分けたカードの一覧（行の中はフォロワー・スペル・アミュレットの順） */
+function byCost(m: ReadonlyMap<string, number>): [number, [string, number][]][] {
+  const rows = new Map<number, [string, number][]>();
+  for (const [id, n] of m) {
+    const cost = cardOf(id).cost;
+    rows.set(cost, [...(rows.get(cost) ?? []), [id, n]]);
+  }
+  const order = (id: string) => TYPE_ORDER[cardOf(id).type] ?? 3;
+  return [...rows.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([cost, cards]) => [cost, cards.sort(([a], [b]) => order(a) - order(b) || a.localeCompare(b))]);
 }
 
 function CardButtons({ counts, onPick }: { counts: ReadonlyMap<string, number>; onPick: (cardId: string) => void }) {
   return (
     <div class="record-cards">
-      {sortedCounts(counts).map(([id, n]) => {
-        const c = cardOf(id);
-        return (
-          <button type="button" key={id} class={`record-card class-${c.class}`} title={c.text} onClick={() => onPick(id)}>
-            <span class="cost">{c.cost}</span>
-            <span class="record-card-name">{c.name}</span>
-            <span class="muted">×{n}</span>
-          </button>
-        );
-      })}
+      {byCost(counts).map(([cost, cards]) => (
+        <div class="record-cost-row" key={cost}>
+          <span class="record-cost-label" title={`コスト ${cost}`}>
+            {cost}
+          </span>
+          <div class="record-cost-cards">
+            {cards.map(([id, n]) => {
+              const c = cardOf(id);
+              return (
+                <button type="button" key={id} class={`record-card class-${c.class}`} title={c.text} onClick={() => onPick(id)}>
+                  <span class="record-card-name">{c.name}</span>
+                  <span class="muted record-card-type">{typeLabel(id)}</span>
+                  <span class="record-card-count">×{n}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
 
+/** 選ぶところが出たら、画面に入るように動かす（盤面の下にあって、見落としやすいので） */
+function useScrollIntoView<T extends HTMLElement>(dep: unknown) {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [dep]);
+  return ref;
+}
+
 function HandPicker({ state, p, name, onDone }: { state: GameState; p: PlayerIndex; name: string; onDone: (cards: string[]) => void }) {
   const [chosen, setChosen] = useState<string[]>([]);
+  const ref = useScrollIntoView<HTMLDivElement>(p);
   const all = useMemo(() => {
     const m = new Map<string, number>();
     for (const c of [...state.players[p].hand, ...state.players[p].deck]) m.set(c.cardId, (m.get(c.cardId) ?? 0) + 1);
@@ -828,7 +886,7 @@ function HandPicker({ state, p, name, onDone }: { state: GameState; p: PlayerInd
     else rest.set(id, n - 1);
   }
   return (
-    <div class="banner column record-picker">
+    <div class="banner column record-picker" ref={ref}>
       <div>
         <strong>{name}の初期手札</strong>を {INITIAL_HAND} 枚選んでください（{chosen.length}/{INITIAL_HAND}）
       </div>
@@ -867,6 +925,7 @@ function ResolvePanel({
   setBusy: (s: string) => void;
 }) {
   const { step, ev } = resolving;
+  const ref = useScrollIntoView<HTMLDivElement>(ev);
   const title = describeAction(state, step.action, names);
   const chosenText = ([0, 1] as const)
     .filter((p) => step.draws[p].length > 0)
@@ -893,13 +952,14 @@ function ResolvePanel({
   if (ev.kind === "draw") {
     const p = ev.player;
     return (
-      <div class="banner column record-picker">
+      <div class="banner column record-picker" ref={ref}>
         {head}
         <div>
           <strong>{names[p]}が引いたカード</strong>を選んでください（まだ決めていない引いたカード: {ev.known} 枚）
         </div>
+        <div class="muted">盤面は、この手を打った後（ターン終了時の効果などの後）の見込みです。青い枠の「引いたカード（いま選ぶ）」が、いま選んでいるカードです。</div>
         <CardButtons
-          counts={deckRemaining(state, p, step.draws[p])}
+          counts={ev.pool}
           onPick={(id) => {
             const draws: Draws = [[...step.draws[0]], [...step.draws[1]]];
             draws[p].push(id);
@@ -919,11 +979,12 @@ function ResolvePanel({
   }
   if (ev.kind === "random") {
     return (
-      <div class="banner column record-picker">
+      <div class="banner column record-picker" ref={ref}>
         {head}
         <div>
-          <strong>ランダムな結果</strong>を選んでください（乱数を変えて {ev.samples} 回打った結果。多い順。薄い字はどの結果でも同じところ）
+          この手には<strong>運で決まるところ</strong>（対象・出るカードなど）があります。<strong>動画で起きた結果</strong>を選んでください
         </div>
+        <div class="muted">太字が結果ごとの違い、薄い字はどの結果でも同じところです（乱数を変えて {ev.samples} 回打った結果。多い順）</div>
         <ol class="record-outcomes">
           {ev.outcomes.map((o: Outcome, i) => {
             const { parts, hidden } = outcomeParts(o);
@@ -969,7 +1030,7 @@ function ResolvePanel({
   }
   if (ev.kind === "mismatch") {
     return (
-      <div class="banner column record-picker">
+      <div class="banner column record-picker" ref={ref}>
         {head}
         <div class="problems">
           {names[ev.player]}が{ev.cardId ? `「${cardOf(ev.cardId).name}」を` : ""}引く結果が見つかりません（その手では引けないカードか、山札を切り直す手で {RANDOM_SAMPLES} 回より多く探しても出ないカード）。
@@ -987,7 +1048,7 @@ function ResolvePanel({
   }
   if (ev.kind === "error") {
     return (
-      <div class="banner column record-picker">
+      <div class="banner column record-picker" ref={ref}>
         {head}
         <div class="problems">{ev.message}</div>
         <div class="row-buttons">{cancel}</div>

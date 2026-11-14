@@ -9,7 +9,6 @@ import { findProDeck, PRO_DECKS, PRO_EVENTS, proDeck } from "../src/record/decks
 import { POOL_CARD_BY_NAME } from "../src/record/pool";
 import {
   applyStep,
-  deckRemaining,
   drawnCards,
   evaluate,
   exportRecord,
@@ -25,7 +24,7 @@ import {
   type PendingStep,
   type RecordStep,
 } from "../src/record/record";
-import { setup, toBoard, toHand } from "./poolScenario";
+import { FILLER, setup, toBoard, toHand } from "./poolScenario";
 
 const NAMES: [string, string] = ["先攻", "後攻"];
 const id = (name: string) => POOL_CARD_BY_NAME.get(name)!.id;
@@ -46,7 +45,7 @@ function resolve(state: GameState, action: Action, pickDraw?: (p: PlayerIndex, r
       step = { ...step, rng: o.rng, outcomeKey: o.key };
       continue;
     }
-    const remaining = deckRemaining(state, ev.player, step.draws[ev.player]);
+    const remaining = ev.pool;
     const card = pickDraw ? pickDraw(ev.player, remaining, step.draws[ev.player]) : [...remaining.keys()].sort((a, b) => cardOf(a).cost - cardOf(b).cost || a.localeCompare(b))[0]!;
     const draws: Draws = [[...step.draws[0]], [...step.draws[1]]];
     draws[ev.player].push(card);
@@ -213,6 +212,32 @@ describe("試合の記録: ランダムな結果", () => {
     const drawn = drawnCards(runStep(s, action, step.kind === "action" ? (step.draws ?? [[], []]) : [[], []], step.kind === "action" ? step.rng : undefined).arranged, next, me);
     expect(drawn.map((c) => c.cardId).sort()).toEqual([...want].sort());
     expect(opponent(me)).not.toBe(me);
+  });
+
+  it("手札を山札に戻してから引く手（陽光の耳飾り）は、戻したカードを引き直しても、ランダムな結果でなく引いたカードとして聞く", () => {
+    const { s, me } = setup(7);
+    const back = toHand(s, me, "探偵のルーペ");
+    toHand(s, me, "不屈のファイター");
+    const ear = toHand(s, me, "陽光の耳飾り");
+    const played = applyAction(s, { type: "play", iid: ear });
+    expect(played.pending?.kind).toBe("choose");
+    const action: Action = { type: "choose", targets: [back] };
+    const r = evaluate(played, { action, draws: [[], []] }, NAMES);
+    expect(r.ev.kind).toBe("draw");
+    if (r.ev.kind !== "draw") return;
+    // 引けたカードには、山札に戻した（山札に 1 枚も無かった）カードも入る。仮に打った局面の手札に、まだ決めていない引いたカードがある
+    expect(r.ev.pool.get(id("探偵のルーペ"))).toBe(1);
+    const { undecided, preview } = r.ev;
+    expect(undecided.length).toBe(1);
+    expect(preview.players[me].hand.some((h) => h.iid === undecided[0])).toBe(true);
+    // 戻したカードを引き直したことにしても、ほかのカードを引いたことにしても打てて、たどると同じ局面
+    for (const pick of [id("探偵のルーペ"), FILLER]) {
+      const { step, next } = resolve(played, action, () => pick);
+      const hand = next.players[me].hand.map((h) => h.cardId);
+      expect(hand).toContain(pick);
+      expect(hand.filter((c) => c === id("探偵のルーペ")).length).toBe(pick === FILLER ? 0 : 1);
+      expect(JSON.stringify(applyStep(played, step))).toBe(JSON.stringify(next));
+    }
   });
 
   it("引けないカードを選ぶと mismatch", () => {

@@ -165,14 +165,16 @@ export function setInitialHand(state: GameState, p: PlayerIndex, cards: readonly
 
 // ---- 手を打つ（引いたカード・乱数を決めて） ----
 
-/** 山札の上に ids のカードを順に並べた山札（残りは元の順）。足りないカードがあればそのカード ID */
-function arrangeDeck(deck: readonly DeckCard[], ids: readonly string[]): DeckCard[] | string {
+/**
+ * 山札の上に ids のカードを順に並べた山札（残りは元の順）。山札に無いカードは飛ばす
+ * （手札から山札に戻してから引くカードは、この手の中で山札に入る。引けたかは打った後に確かめる）
+ */
+function arrangeDeck(deck: readonly DeckCard[], ids: readonly string[]): DeckCard[] {
   const rest = [...deck];
   const top: DeckCard[] = [];
   for (const id of ids) {
     const i = rest.findIndex((c) => c.cardId === id);
-    if (i < 0) return id;
-    top.push(rest.splice(i, 1)[0]!);
+    if (i >= 0) top.push(rest.splice(i, 1)[0]!);
   }
   return [...top, ...rest];
 }
@@ -182,9 +184,7 @@ export function arrange(state: GameState, draws: Draws, rng?: number): GameState
   const players = state.players.map((pl, p) => {
     const ids = draws[p as PlayerIndex];
     if (ids.length === 0) return pl;
-    const deck = arrangeDeck(pl.deck, ids);
-    if (typeof deck === "string") throw new RecordError(`${cardOf(deck).name}は山札に残っていません`);
-    return { ...pl, deck };
+    return { ...pl, deck: arrangeDeck(pl.deck, ids) };
   }) as GameState["players"];
   return { ...state, players, ...(rng !== undefined ? { rng: rng >>> 0 } : {}) };
 }
@@ -199,15 +199,40 @@ export function runStep(state: GameState, action: Action, draws: Draws, rng?: nu
   }
 }
 
-/** 打つ前の山札から、手札に引いたカード（引いた順）。手札が上限で墓場に行ったものも含む */
+/** 手札の記録（handLog）のうち、re に合う出来事の数（「入った」「山札に戻った」は前の出来事とまとまらないので、数の差がこの手の分） */
+const logCount = (log: string | undefined, re: RegExp): number => (log ? log.split(" ").filter((t) => re.test(t)).length : 0);
+
+/**
+ * 手札から山札に戻して、同じ手の中で引き直したカード（耳飾りのように、戻して切り直してから引く手）。
+ * 山札の一番上から引いた数（手札の記録の i<山札の枚数>）が、打つ前の山札から手札に来たカードより多ければ、その分は戻したカードを引いた。
+ * 引いたカードは手札の末尾に足されるので、打つ前から手札にあったカードのうち末尾のもの
+ */
+function redrawnCards(arranged: GameState, next: GameState, p: PlayerIndex, fromDeck: number): DeckCard[] {
+  const before = arranged.players[p];
+  const after = next.players[p];
+  const topDraws = logCount(after.handLog, /^i[1-9]/) - logCount(before.handLog, /^i[1-9]/);
+  const returned = logCount(after.handLog, /^[dD]/) - logCount(before.handLog, /^[dD]/);
+  const n = Math.min(topDraws - fromDeck, returned);
+  if (n <= 0) return [];
+  const had = new Set(before.hand.map((h) => h.iid));
+  return after.hand
+    .filter((h) => had.has(h.iid))
+    .slice(-n)
+    .map((h) => ({ iid: h.iid, cardId: h.cardId }));
+}
+
+/**
+ * この手で引いたカード（引いた順）: 打つ前の山札から手札に来たもの、手札が上限で墓場に行ったもの、
+ * 手札から山札に戻して引き直したもの
+ */
 export function drawnCards(arranged: GameState, next: GameState, p: PlayerIndex): DeckCard[] {
   const before = arranged.players[p].deck;
   const beforeIids = new Set(before.map((c) => c.iid));
   const after = next.players[p];
   const left = new Set(after.deck.map((c) => c.iid));
   const departed = before.filter((c) => !left.has(c.iid));
-  if (departed.length === 0) return [];
   const handIndex = new Map(after.hand.map((h, i) => [h.iid, i]));
+  if (departed.length === 0) return redrawnCards(arranged, next, p, 0);
   const elsewhere = new Set<number>();
   for (const pl of next.players) {
     for (const c of pl.board) elsewhere.add(c.iid);
@@ -219,7 +244,7 @@ export function drawnCards(arranged: GameState, next: GameState, p: PlayerIndex)
   const replaced = after.deck.filter((c) => !beforeIids.has(c.iid)).length >= 10;
   const gone = departed.filter((c) => !elsewhere.has(c.iid));
   const burned = replaced ? [] : gone.slice(0, Math.max(0, after.graveyard - arranged.players[p].graveyard));
-  return [...toHand, ...burned];
+  return [...toHand, ...redrawnCards(arranged, next, p, toHand.length), ...burned];
 }
 
 /** 引いたカードのうち、決めた引いたカード（ids）で説明できないもの（引いた順）。ids のうち引かれなかったものがあれば、そのカード ID も */
@@ -498,8 +523,12 @@ export type Evaluation =
   | { kind: "mismatch"; player: PlayerIndex; cardId: string }
   /** ランダムな結果を選ぶ */
   | { kind: "random"; outcomes: Outcome[]; samples: number }
-  /** 引いたカードを決める（player の山札から。known はまだ決めていない引いたカードの枚数） */
-  | { kind: "draw"; player: PlayerIndex; known: number }
+  /**
+   * 引いたカードを決める（player の山札から。known はまだ決めていない引いたカードの枚数）。
+   * preview は仮に打った局面（画面に見せる。undecided はその手札のうち、まだ決めていない引いたカード）、
+   * pool は引けたカード（仮に打った後の山札と、まだ決めていない引いたカード。手札から山札に戻したカードも入る）
+   */
+  | { kind: "draw"; player: PlayerIndex; known: number; preview: GameState; undecided: number[]; pool: Map<string, number> }
   | { kind: "done"; next: GameState };
 
 /**
@@ -544,21 +573,14 @@ export function evaluate(state: GameState, step: PendingStep, names: readonly [s
   const acting = actingPlayer(state);
   for (const p of [acting, opponent(acting)]) {
     const extra = drawn[p]!.extra;
-    if (extra.length > 0) return { step, ev: { kind: "draw", player: p, known: extra.length } };
+    if (extra.length > 0) {
+      const pool = new Map<string, number>();
+      for (const c of [...run.next.players[p].deck, ...extra]) pool.set(c.cardId, (pool.get(c.cardId) ?? 0) + 1);
+      const undecided = drawn.flatMap((d) => d.extra.map((c) => c.iid));
+      return { step, ev: { kind: "draw", player: p, known: extra.length, preview: run.next, undecided, pool } };
+    }
   }
   return { step, ev: { kind: "done", next: run.next } };
-}
-
-/** 山札に残っているカード（カード ID → 枚数。決めた引いたカードの分を除く） */
-export function deckRemaining(state: GameState, p: PlayerIndex, taken: readonly string[] = []): Map<string, number> {
-  const m = new Map<string, number>();
-  for (const c of state.players[p].deck) m.set(c.cardId, (m.get(c.cardId) ?? 0) + 1);
-  for (const id of taken) {
-    const n = m.get(id) ?? 0;
-    if (n <= 1) m.delete(id);
-    else m.set(id, n - 1);
-  }
-  return m;
 }
 
 // ---- たどる ----
