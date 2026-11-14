@@ -7,6 +7,7 @@ import { gunzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseLedger, type MissesRow, type RunRow, type SurveyRow } from "../scripts/ledger-main";
 import {
+  checkArgv,
   chunkJob,
   combineRows,
   estimate,
@@ -49,7 +50,24 @@ describe("ジョブの行", () => {
     expect(c.spec).toEqual({ kind: "compare", a: '{"beamWidth":128}', b: "{}", vs: "リノセウスエルフ", noMirror: true, decks: null, with: null, without: null });
     const y = parseJob("svwb yardstick --ref strong --games 4000 --label 強", 2);
     expect(y).toMatchObject({ games: 4000, start: 0, spec: { kind: "yardstick", ref: "strong", opts: "{}" } });
-    expect(parseJob("profile", 3)).toMatchObject({ games: 49, label: "", spec: { kind: "profile", rhino: false } });
+    expect(parseJob("profile", 3)).toMatchObject({ games: 49, label: "", spec: { kind: "profile", rhino: false, decks: null } });
+    const pd = parseJob(`profile --opts '{"valueNet":"@/r.json"}' --games 84 --decks @data/pools/azvaldt/sets/all84.txt`, 3);
+    expect(pd.spec).toEqual({ kind: "profile", opts: '{"valueNet":"@/r.json"}', rhino: false, decks: "@data/pools/azvaldt/sets/all84.txt" });
+    expect(jobArgv(pd, 0, 84, "/r")).toEqual([
+      "profile",
+      "--opts",
+      '{"valueNet":"/r/r.json"}',
+      "--games",
+      "84",
+      "--start",
+      "0",
+      "--decks",
+      "@data/pools/azvaldt/sets/all84.txt",
+      "--json",
+      "/r/speed-3.json",
+      "--report",
+      "/r/speed-3.md",
+    ]);
     expect(parseJob("misses run --trials 12 --seed 3 --label 定例", 4)).toMatchObject({ games: 12, start: 0, label: "定例", spec: { kind: "misses", opts: "{}", seed: 3 } });
     expect(parseJob(`misses --opts '{"beamWidth":512}' --label x`, 4)).toMatchObject({ games: 24, spec: { kind: "misses", opts: '{"beamWidth":512}', seed: 1 } });
     expect(() => parseJob("misses --trials 12", 1)).toThrow(/--label/);
@@ -126,6 +144,41 @@ describe("ジョブの行", () => {
       '{"valueNet":"data/value-net.json","beamWidth":8,"v":{"w":{"potentialNet":"data/potential-net.json"}}}',
     );
     expect(() => standIn('{"model":"@/a.json"}')).toThrow(/valueNet/);
+    // 回す前の確かめ: 語彙を読むモデル（--vocab）も、--model と同じく今の既定のモデルにする。ほかの @/ は tmp の下の名前
+    const bgv = parseJob(
+      `beam-gap --games 40 --from 1000 --chunk 20 --decks @x.txt --vocab @/r.json --ref '{"valueNet":"@/r.json","potentialNet":null}' --sample 100 --inputs @/pot-{k}.jsonl --out @/pot-{k}-rows.jsonl --est 2`,
+      5,
+    );
+    expect(checkArgv(bgv, "/t")).toEqual([
+      "beam-gap",
+      "--games",
+      "0",
+      "--from",
+      "1000",
+      "--decks",
+      "@x.txt",
+      "--vocab",
+      "data/value-net.json",
+      "--ref",
+      '{"valueNet":"data/value-net.json","potentialNet":null}',
+      "--sample",
+      "100",
+      "--out",
+      "/t/pot-0-rows.jsonl",
+      "--inputs",
+      "/t/check-5.tmp",
+    ]);
+    expect(checkArgv(parseJob(`profile --opts '{"valueNet":"@/r.json"}' --decks @x.txt`, 2), "/t")).toEqual([
+      "compare",
+      "0",
+      '{"valueNet":"data/value-net.json"}',
+      "{}",
+      "0",
+      "--decks",
+      "@x.txt",
+      "--no-ledger",
+    ]);
+    expect(checkArgv(parseJob("td extend --model x.json --out @/a.json --est 1", 1), "/t")).toBeUndefined();
   });
 
   it("区切りは大きさをそろえ、試合番号をすき間なく覆う", () => {

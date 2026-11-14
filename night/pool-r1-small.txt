@@ -22,3 +22,6 @@ potential train --data @/pot-{1..2}.jsonl --valid 1036-1039 --out @/rpot.json --
 
 compare 50 '{"valueNet":"@/r.json","potentialNet":"@/rpot.json"}' '{"valueNet":"@/v0.json","potentialNet":"@/v0pot.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 小-新しいプール-R1 --est 0.8
 compare 50 '{"valueNet":"@/i.json"}' '{"valueNet":"@/r.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 小-新しいプール-R1-入力 --est 0.8
+# 線ではないが毎回見る数字: PP とプレイできるカードを残して終えたターンの割合・1 試合のターンの数（profile の報告 speed-<番号>.md）
+profile --opts '{"valueNet":"@/r.json","potentialNet":"@/rpot.json"}' --games 20 --decks @data/pools/azvaldt/sets/all84.txt --est 0.8
+profile --opts '{"valueNet":"@/v0.json","potentialNet":"@/v0pot.json"}' --games 20 --decks @data/pools/azvaldt/sets/all84.txt --est 0.8
