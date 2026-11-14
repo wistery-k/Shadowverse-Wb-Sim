@@ -852,6 +852,68 @@ describe("公式Q&A: 超進化のルールによる能力と決着", () => {
     expect(s.winner).toBe(me);
   });
 
+  // 【攻撃時】の能力で攻撃先を破壊したときも、ふっとばしはその能力の直後で、ラストワードより前（docs/rules.md「ふっとばしの判定」。
+  // 有志のページと同じ。2026-11-14 まではラストワードが先だった）
+  it("番犬の左腕・ココ: 超進化した猛毒姫・メドゥーサの【攻撃時】で破壊しても、相手の体力が1なら、ココのラストワードの回復より前に勝つ", () => {
+    let { s, me, opp } = setup();
+    s = passTurns(s, 6);
+    const m = toBoard(s, me, "猛毒姫・メドゥーサ");
+    s = applyAction(s, { type: "superEvolve", iid: m.iid });
+    const coco = toBoard(s, opp, "番犬の左腕・ココ");
+    s.players[opp].leaderHp = 1;
+    s = applyAction(s, { type: "attack", attacker: m.iid, target: coco.iid });
+    expect(s.phase).toBe("ended");
+    expect(s.winner).toBe(me);
+  });
+
+  it("番犬の右腕・ミミ: 両リーダーの体力が1のとき、超進化した猛毒姫・メドゥーサの【攻撃時】でミミを破壊したら、ミミのラストワードより前に自分が勝つ", () => {
+    let { s, me, opp } = setup();
+    s = passTurns(s, 6);
+    const m = toBoard(s, me, "猛毒姫・メドゥーサ");
+    s = applyAction(s, { type: "superEvolve", iid: m.iid });
+    const mimi = toBoard(s, opp, "番犬の右腕・ミミ");
+    s.players[me].leaderHp = 1;
+    s.players[opp].leaderHp = 1;
+    s = applyAction(s, { type: "attack", attacker: m.iid, target: mimi.iid });
+    expect(s.phase).toBe("ended");
+    expect(s.winner).toBe(me);
+  });
+
+  it("番犬の左腕・ココ: 超進化した猛毒姫・メドゥーサの【攻撃時】で破壊したとき、ふっとばしの 1 ダメージは 1 回だけで、その後にココのラストワードで回復する", () => {
+    let { s, me, opp } = setup();
+    s = passTurns(s, 6);
+    const m = toBoard(s, me, "猛毒姫・メドゥーサ");
+    s = applyAction(s, { type: "superEvolve", iid: m.iid });
+    const coco = toBoard(s, opp, "番犬の左腕・ココ");
+    s.players[opp].leaderHp = 10;
+    s = applyAction(s, { type: "attack", attacker: m.iid, target: coco.iid });
+    expect(s.phase).toBe("main");
+    expect(s.players[opp].leaderHp).toBe(10 - 1 + 2);
+    expect(s.attack).toBeNull();
+  });
+
+  // 処理待ちの能力は、解決を始めるときに元が場を離れていれば働かない（docs/rules.md 11章「能力の元が離れたとき」。2026-11-14 から）
+  it("煌翼のフェザーフォルク・リノ: 猛毒姫・メドゥーサの【攻撃時】で破壊されたリノの【交戦時】（相手のリーダーに 1 ダメージ）は働かない", () => {
+    let { s, me, opp } = setup();
+    s = passTurns(s, 6);
+    const m = toBoard(s, me, "猛毒姫・メドゥーサ");
+    const rino = toBoard(s, opp, "煌翼のフェザーフォルク・リノ");
+    const hp = s.players[me].leaderHp;
+    s = applyAction(s, { type: "attack", attacker: m.iid, target: rino.iid });
+    expect(follower(s, rino.iid)).toBeUndefined();
+    expect(s.players[me].leaderHp).toBe(hp);
+  });
+
+  it("煌翼のフェザーフォルク・リノ: 破壊されずに交戦すれば、リノの【交戦時】で相手のリーダーに 1 ダメージ", () => {
+    let { s, me, opp } = setup();
+    s = passTurns(s, 6);
+    const e = toBoard(s, me, "キャラバンマンモス");
+    const rino = toBoard(s, opp, "煌翼のフェザーフォルク・リノ");
+    const hp = s.players[me].leaderHp;
+    s = applyAction(s, { type: "attack", attacker: e.iid, target: rino.iid });
+    expect(s.players[me].leaderHp).toBe(hp - 1);
+  });
+
   it("蛇神の怒り: 両リーダーの体力が2のとき、相手のリーダーを選んだら自分が勝つ", () => {
     let { s, me, opp } = setup();
     s.players[me].leaderHp = 2;

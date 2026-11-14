@@ -99,17 +99,21 @@ pub fn create_game(decks: [&[CardIdx]; 2], seed: u32) -> GameState {
 
 // ---- ターン進行（内部処理） ----
 
+/// ターン開始時の処理を積む。[StartTurn, DirectSummon] は 1 つのフレームで、これが解決スタックにある間は
+/// 処理待ちの能力を解決しない（カウントダウンで破壊されたカードのラストワードや、「ターン開始時」の能力で誘発した能力は、
+/// 直接召喚の後に働く。effects.rs の `queue_held`。docs/rules.md 11章「ターン開始時の処理順」）。ドローはその後
 fn push_start_turn(s: &mut GameState, p: PlayerIndex) {
     push_internal(s, &[FEff::StartTurnDraw], Ctx::new(p, 0));
-    // 【直接召喚】を持つカードが山札に無ければ積まない（無いデッキの局面は今までと同じ）
+    // 【直接召喚】を持つカードが山札に無ければ積まない
     if s.players[p]
         .deck
         .iter()
         .any(|r| abilities_of(r.card).direct_summon.is_some())
     {
-        push_internal(s, &[FEff::DirectSummon], Ctx::new(p, 0));
+        push_internal(s, &[FEff::StartTurn, FEff::DirectSummon], Ctx::new(p, 0));
+    } else {
+        push_internal(s, &[FEff::StartTurn], Ctx::new(p, 0));
     }
-    push_internal(s, &[FEff::StartTurn], Ctx::new(p, 0));
 }
 
 fn push_end_turn(s: &mut GameState) {
@@ -147,27 +151,8 @@ fn start_turn(s: &mut GameState, p: PlayerIndex) {
         h.fused_this_turn = false;
     }
 
-    // カウントダウン（アミュレット・クレスト）
-    let mut amulets: Vec<(i32, Iid)> = s.players[p]
-        .board
-        .iter()
-        .map(|c| (c.order, c.iid))
-        .collect();
-    amulets.sort_by_key(|x| x.0);
-    for (_, iid) in amulets {
-        let Some(c) = s.board_card_mut(iid) else {
-            continue;
-        };
-        if c.is_follower {
-            continue;
-        }
-        if let Some(cd) = c.countdown {
-            c.countdown = Some(cd - 1);
-            if cd - 1 <= 0 {
-                leave_board(s, iid, LeaveReason::Destroy);
-            }
-        }
-    }
+    // カウントダウン: クレスト（古い順）→ アミュレット（古い順）。消えたクレストのラストワードが先に処理待ちに入る
+    // （ユーザーが実機で確かめた 2026-11-14。docs/rules.md 11章「ターン開始時の処理順」）
     let mut crests: Vec<(i32, Iid)> = s.players[p]
         .crests
         .iter()
@@ -191,11 +176,42 @@ fn start_turn(s: &mut GameState, p: PlayerIndex) {
                 s.queue.push_back(Queued {
                     ability: a,
                     ctx: Ctx::new(p, iid),
+                    sort_key: 0,
+                    needs_source: false,
                 });
             }
         }
     }
+    let mut amulets: Vec<(i32, Iid)> = s.players[p]
+        .board
+        .iter()
+        .map(|c| (c.order, c.iid))
+        .collect();
+    amulets.sort_by_key(|x| x.0);
+    for (_, iid) in amulets {
+        let Some(c) = s.board_card_mut(iid) else {
+            continue;
+        };
+        if c.is_follower {
+            continue;
+        }
+        if let Some(cd) = c.countdown {
+            c.countdown = Some(cd - 1);
+            if cd - 1 <= 0 {
+                leave_board(s, iid, LeaveReason::Destroy);
+            }
+        }
+    }
+    // 「ターン開始時」の能力（クレスト、場の古い順）は処理待ちに入れず、この順にそのまま解決する。
+    // 処理待ちの能力（上のラストワードと、これらで誘発した能力）は、この後の直接召喚の後に働く（公式 Q&A の天司長の後継・サンダルフォン）
+    let before = s.queue.len();
     fire_turn_start(s);
+    if s.queue.len() > before {
+        let started: Vec<Queued> = s.queue.drain(before..).collect();
+        for q in started.into_iter().rev() {
+            push_waiting(s, q);
+        }
+    }
 }
 
 /// ターン終了時に切れる一時的な効果を消す
@@ -328,16 +344,21 @@ pub(crate) fn handle_internal(s: &mut GameState, controller: PlayerIndex, eff: F
 
 // ---- 判定 ----
 
-/// プレイに必要なPP。エンハンスはPPが足りれば必ず適用される
+/// プレイに必要なPP。エンハンスはPPが足りれば必ず適用される。エンハンスはコストを増やす効果の影響を受けない
+/// （今のコストがエンハンスの値以上に増えていても、PP が足りればエンハンスの値を払う。docs/rules.md 8章「エンハンス_N」）
 pub fn play_cost(c: &Card, pp: i32, hand: Option<&HandCard>) -> i32 {
-    let cost = match hand {
+    if enhances(c, pp) {
+        return c.enhance.unwrap();
+    }
+    match hand {
         Some(h) => hand_cost(h),
         None => c.cost,
-    };
-    match c.enhance {
-        Some(e) if pp >= e && e > cost => e,
-        _ => cost,
     }
+}
+
+/// PP pp でプレイすると【エンハンス】になるか（エンハンスの値は元のコストより大きいものだけ）
+pub fn enhances(c: &Card, pp: i32) -> bool {
+    c.enhance.is_some_and(|e| pp >= e && e > c.cost)
 }
 
 /// 手札のカード h を PP pp でプレイするときの姿。普通のコストで払えるなら h のカード、払えずにアクセラレート・結晶のコスト以下なら
@@ -977,7 +998,7 @@ fn apply_play(s: &mut GameState, iid: Iid) {
     } else {
         cd.cost
     };
-    let enhanced = as_card == h.card && cd.enhance == Some(cost) && cost > hand_cost(&h);
+    let enhanced = as_card == h.card && enhances(cd, pl.pp);
     pl.pp -= cost;
     pl.combo += 1;
 
@@ -1017,10 +1038,31 @@ fn apply_play(s: &mut GameState, iid: Iid) {
     }
     let b = s.new_board_card(as_card, Some(&h));
     let fanfare = board_abilities_on(&b, On::Fanfare);
-    // 【自分がカードをプレイしたとき】は場に出たときより先に誘発待ちに入り、【ファンファーレ】の後に働く（docs/rules.md 12章の 30）
+    // 処理待ちの順: 【ファンファーレ】→ これ自身の「これが場に出たとき」→【自分がカードをプレイしたとき】→ ほかのカードの
+    // 「フォロワーが場に出たとき」（docs/rules.md 12章の 30。自身の「場に出たとき」が先なのは、ユーザーが実機で確かめた 2026-11-14）
+    let before = s.queue.len();
     fire_ally_play(s, p, iid, as_card, enhanced);
+    let played = s.queue.len() - before;
     enter_board(s, p, b);
+    put_own_enter_first(s, iid, before, played);
     push_abilities(s, &fanfare, &ctx);
+}
+
+/// 処理待ちの queue[from..from + played] にある「プレイしたとき」の能力の直後に入った、プレイしたカード iid 自身の
+/// 「これが場に出たとき」を、それらの前に移す
+fn put_own_enter_first(s: &mut GameState, iid: Iid, from: usize, played: usize) {
+    if played == 0 {
+        return;
+    }
+    let own = s
+        .queue
+        .iter()
+        .skip(from + played)
+        .take_while(|q| q.ctx.source == iid && q.ability.trigger.on() == On::Enter)
+        .count();
+    if own > 0 {
+        s.queue.make_contiguous()[from..from + played + own].rotate_left(played);
+    }
 }
 
 fn apply_attack(s: &mut GameState, attacker_iid: Iid, target: AttackTarget) {
@@ -1054,6 +1096,7 @@ fn apply_attack(s: &mut GameState, attacker_iid: Iid, target: AttackTarget) {
         defender: t,
         super_evolved: a_super,
         defender_destroyed: false,
+        blasted: false,
     });
     push_internal(
         s,
@@ -1101,8 +1144,9 @@ fn apply_attack(s: &mut GameState, attacker_iid: Iid, target: AttackTarget) {
         }
     }
     let _ = a_card;
+    // まとめて積み、順に解決する。解決を始めるときに元が離れていれば働かない（【攻撃時】で破壊された攻撃先の【交戦時】など）
     for (ab, ctx) in triggered.into_iter().rev() {
-        push_abilities(s, &[ab], &ctx);
+        push_ability_waiting(s, ab, &ctx);
     }
 }
 
@@ -1156,15 +1200,12 @@ fn combat(s: &mut GameState, attacker_iid: Iid, target: AttackTarget) {
     }
 }
 
-/// 戦闘の後処理。ぶっとばし: 超進化したフォロワーの攻撃中に攻撃先のフォロワーが破壊されたら、相手のリーダーに1ダメージ
+/// 戦闘の後処理。ぶっとばし: 超進化したフォロワーの攻撃中に攻撃先のフォロワーが破壊されたら、相手のリーダーに1ダメージ。
+/// 戦闘で破壊したときは、ここ（戦闘の直後で、それで誘発したラストワード等より前）で与える。
+/// 【攻撃時】等の能力で破壊したときは、その能力の解決が終わった直後に与えている（effects.rs の `blast_if_due`）
 fn combat_end(s: &mut GameState) {
-    let at = s.attack.take();
-    let Some(at) = at else { return };
-    if !at.super_evolved || !at.defender_destroyed {
-        return;
-    }
-    damage_leader(s, opponent(s.active), 1);
-    s.check_leaders();
+    blast_if_due(s);
+    s.attack = None;
 }
 
 fn apply_evolve(s: &mut GameState, iid: Iid, kind: EvolveKind) {
@@ -1271,4 +1312,60 @@ fn apply_fuse(s: &mut GameState, host_iid: Iid, materials: &[Iid]) {
     ctx.set_var(d.var_fused_kinds, n_kinds);
     fire_ally_fuse(s, p);
     push_own_abilities(s, host_card, On::Fused, &ctx);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// プレイしたカード自身の「これが場に出たとき」は、「自分がフォロワーをプレイしたとき」に反応する能力より先に処理待ちに入る
+    /// （ユーザーが実機で確かめた 2026-11-14。docs/rules.md 12章の 30）。今のプールでは結果が変わる組が無いので、処理待ちの並びを見る
+    #[test]
+    fn own_enter_is_queued_before_ally_play() {
+        let d = data();
+        let deck = d.decks[0].cards.clone();
+        let mut s = create_game([&deck, &deck], 1);
+        for _ in 0..2 {
+            let player = acting_player(&s);
+            s = apply_action(
+                &s,
+                &Action::Mulligan {
+                    player,
+                    swap: Vec::new(),
+                },
+            );
+        }
+        let p = s.active;
+        s.players[p].pp = 10;
+        // 崇奉の怯者（これが場に出たとき、自分のリーダーを2回復）と、クレスト：束刃の咎人・カットスロート
+        // （自分がフォロワーをプレイしたとき、自分のターンごとに1回、それは進化する）
+        let card_idx = d.card_idx("10661110");
+        let h = s.new_hand_card(card_idx, None);
+        let iid = h.iid;
+        s.players[p].hand.make_mut().push(h);
+        let crest = d
+            .crests
+            .iter()
+            .position(|c| c.id == "10974112")
+            .expect("クレスト：束刃の咎人・カットスロート") as CrestIdx;
+        let crest_iid = s.new_iid();
+        let order = s.next_order;
+        s.next_order += 1;
+        s.players[p].crests.make_mut().push(CrestInstance {
+            iid: crest_iid,
+            crest,
+            countdown: None,
+            order,
+            used_once: Vec::new(),
+            faith: None,
+            stacks: 0,
+        });
+        apply_play(&mut s, iid);
+        let sources: Vec<(Iid, On)> = s
+            .queue
+            .iter()
+            .map(|q| (q.ctx.source, q.ability.trigger.on()))
+            .collect();
+        assert_eq!(sources, vec![(iid, On::Enter), (crest_iid, On::AllyPlay)]);
+    }
 }
