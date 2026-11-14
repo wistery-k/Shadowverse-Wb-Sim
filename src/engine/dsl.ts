@@ -52,7 +52,8 @@ export type Target =
   | { kind: "this" }
   | { kind: "leader"; side: Side }
   | { kind: "board"; side: Side; filter?: CardFilter }
-  | { kind: "hand"; filter?: CardFilter }
+  /** side が "opponent" なら相手の手札（省略は自分） */
+  | { kind: "hand"; filter?: CardFilter; side?: "opponent" }
   | { kind: "slot"; slot: string }
   /** 能力を誘発させたカード（場に出たフォロワー、交戦相手など） */
   | { kind: "event" }
@@ -89,7 +90,11 @@ export type Value =
    * atEnter なら、これが場に出た時点の枚数（「これが場に出たとき」の能力の中で、ids をこれ自身のカードにして使う。
    * 一緒に出たカードのうち後から出たものは数えない。docs/rules.md 12章の 39）
    */
-  | { kind: "enteredCount"; ids: string[]; atEnter?: boolean };
+  | { kind: "enteredCount"; ids: string[]; atEnter?: boolean }
+  /** このバトル中に場に出た自分のカードのうち filter に合うものの種類（「このバトル中に場に出た…の種類」。これを見るカードをデッキに入れたプレイヤーだけ覚える） */
+  | { kind: "enteredKinds"; filter: CardFilter }
+  /** このバトル中に自分のフォロワーが進化した回数（超進化・効果での進化を含む。docs/rules.md 12章の 15） */
+  | { kind: "evolvedCount" };
 
 export type Condition =
   | { kind: "awakened" }
@@ -124,6 +129,8 @@ export type Condition =
   | { kind: "ownTurn" }
   /** これ（場のフォロワー）に手札で【融合】していた（「これに【融合】していたなら」） */
   | { kind: "thisFused" }
+  /** 自分のデッキ（今残っている山札）に重複するカードがない。山札が 0 枚なら重複はない（docs/rules.md 12章の 22） */
+  | { kind: "deckUnique" }
   | { kind: "not"; cond: Condition };
 
 export type Duration = "permanent" | "endOfTurn";
@@ -146,7 +153,8 @@ export type Effect =
   | { op: "setDefense"; target: Target; value: number }
   // カードの生成・移動
   /** side が "opponent" なら相手が自身のデッキから引く */
-  | { op: "draw"; count: Value; filter?: CardFilter; side?: "opponent" }
+  /** distinct なら count 種類（引いたカードと同じカードを除いてから次を引く） */
+  | { op: "draw"; count: Value; filter?: CardFilter; side?: "opponent"; distinct?: boolean }
   | { op: "drawAll"; filter: CardFilter; slot?: string }
   /** slot に加えたカードを入れる（「それは…」） */
   | { op: "addToHand"; cardId: string; count: Value; slot?: string }
@@ -177,7 +185,8 @@ export type Effect =
   | { op: "evolve"; target: Target; kind: "evolve" | "superEvolve" }
   // 手札
   | { op: "spellboost"; target: Target; times: number }
-  | { op: "costChange"; target: Target; amount: number }
+  /** duration が "endOfTurn" ならターン終了時に戻す */
+  | { op: "costChange"; target: Target; amount: number; duration?: Duration }
   /** 手札のカードのコストを cost にする */
   | { op: "setCost"; target: Target; cost: number }
   | { op: "addX"; target: Target; amount: number }
@@ -211,6 +220,14 @@ export type Effect =
   | { op: "banishCopy"; target: Target }
   /** 自分の PP が amount 以上なら、amount 消費して then を行う（足りなければ消費せず、働かない） */
   | { op: "spendPp"; amount: number; then: Effect[] }
+  /** このバトル中に破壊された自分のフォロワー（filter に合うもの）からランダム 1 枚と同名のカードを手札に加える */
+  | { op: "addDestroyedCopy"; filter?: CardFilter }
+  /** スロットのカードと同名のカードを 1 枚手札に加える（slot に加えたカードを入れる） */
+  | { op: "addCopyToHand"; from: string; slot?: string }
+  /** 手札のカードを、side のデッキのランダム 1 枚のコピーに変身させる */
+  | { op: "transformToDeckCopy"; target: Target; side: "self" | "opponent" }
+  /** options のうち、これ（場のカード・クレスト）でまだ働いていないものからランダムに 1 つ（全部働いた後は何もしない） */
+  | { op: "randomUnusedOption"; options: Effect[][] }
   /** 相手のターン終了まで、自分のリーダーは「受ける1以上のダメージを0にする。」を持つ */
   | { op: "leaderDamageZero"; until: "opponentTurnEnd" }
   | { op: "apocalypseDeck" }
@@ -268,7 +285,11 @@ export type Trigger =
   /** 自分がカードを引いたとき（filter は引いたカードの条件。手札に入ったカード 1 枚ごと） */
   | { on: "allyDraw"; filter?: CardFilter }
   /** 自分のフォロワーが攻撃するとき（filter は攻撃するフォロワーの条件） */
-  | { on: "allyAttack"; filter?: CardFilter };
+  | { on: "allyAttack"; filter?: CardFilter }
+  /** 相手のフォロワーが攻撃するとき（filter は攻撃するフォロワーの条件。leader ならリーダーを攻撃するときだけ） */
+  | { on: "enemyAttack"; filter?: CardFilter; leader?: boolean }
+  /** これが【直接召喚】されたとき */
+  | { on: "directSummoned" };
 
 export interface Ability {
   trigger: Trigger;
@@ -294,6 +315,10 @@ export interface CardAbilities {
   fusion?: CardFilter;
   /** 【守護】を無視して攻撃できる */
   ignoreWard?: boolean;
+  /** 「デッキで働く。自分のターン開始時、<条件>なら、これを【直接召喚】する。」の条件 */
+  directSummon?: Condition;
+  /** 「受ける atLeast 以上のダメージを to にする。」 */
+  damageCap?: { atLeast: number; to: number };
   /** テキスト上の能力のうち未実装のもの（説明） */
   unimplemented?: string;
 }

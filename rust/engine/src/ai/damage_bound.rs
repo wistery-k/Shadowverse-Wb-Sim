@@ -296,6 +296,7 @@ fn self_reduction(c: CardIdx, sb: i32, leaves: i32) -> i32 {
                 Effect::CostChange {
                     target: Target::This,
                     amount,
+                    ..
                 } => (-*amount).max(0),
                 Effect::Mode { options, .. } | Effect::InOrder { options } => {
                     options.iter().map(|o| walk(o)).sum()
@@ -749,6 +750,11 @@ impl<'a> World<'a> {
             (false, _, On::AllyDestroyed) => c.opp_fols,
             (true, _, On::AllyAttack) => c.attacks,
             (false, _, On::AllyAttack) => 0,
+            // 相手のフォロワーが攻撃するとき: 自分のターンに相手は攻撃しない。相手の能力は自分の攻撃の回数だけ
+            (true, _, On::EnemyAttack) => 0,
+            (false, _, On::EnemyAttack) => c.attacks,
+            // 直接召喚はターン開始時だけ
+            (_, _, On::DirectSummoned) => 0,
             // 回数を見積もれないので、何かを数える能力なら見積もらない（呼び出し側で扱う）
             (_, _, On::LeaderHealed | On::AllyAmuletDestroyed | On::AllyDraw) => -1,
         }
@@ -1024,6 +1030,7 @@ impl<'a> World<'a> {
                     count,
                     filter,
                     side,
+                    ..
                 } => {
                     // 引くのが自分か（「相手は自身のデッキから引く」なら持ち主の相手）
                     if fr.mine != (*side == Some(Side::Opponent)) {
@@ -1268,7 +1275,7 @@ impl<'a> World<'a> {
                         acc.sb_events = add(acc.sb_events, mul(m, (*times).max(0)));
                     }
                 }
-                Effect::CostChange { target, amount } => {
+                Effect::CostChange { target, amount, .. } => {
                     if fr.mine && *amount < 0 && !matches!(target, Target::This) {
                         acc.cost_down = true;
                     }
@@ -1299,7 +1306,7 @@ impl<'a> World<'a> {
                     self.walk(s, p, then, m, fr, acc);
                 }
                 // ランダムに 1 つ: どれもが働くとして数える
-                Effect::RandomOption { options } => {
+                Effect::RandomOption { options } | Effect::RandomUnusedOption { options } => {
                     for o in options {
                         self.walk(s, p, o, m, fr, acc);
                     }
@@ -1309,6 +1316,14 @@ impl<'a> World<'a> {
                     self.walk(s, p, then, m, fr, acc);
                 }
                 Effect::LoseLastWords { .. } => {}
+                // 手札に足すカード・手札のカードを変えた先は、どれかを決められない
+                Effect::AddDestroyedCopy { .. }
+                | Effect::AddCopyToHand { .. }
+                | Effect::TransformToDeckCopy { .. } => {
+                    if fr.mine {
+                        acc.unk("AddDestroyedCopy");
+                    }
+                }
                 Effect::BanishCopy { .. } => {
                     // 相手のフォロワーのコピーを自分の場に出す（【疾走】を持てばこのターンに攻撃できる）
                     if fr.mine {

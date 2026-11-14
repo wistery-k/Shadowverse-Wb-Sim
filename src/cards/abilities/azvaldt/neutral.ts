@@ -3,8 +3,21 @@
 import type { CardAbilities } from "../../../engine/dsl";
 import {
   ENHANCED,
+  EVOLVED_COUNT,
   OPP_LEADER,
   OUGI,
+  RELEASED_OUGI,
+  SUPER_EVOLVE_TURN,
+  THIS,
+  act,
+  addDestroyedCopy,
+  bounce,
+  crest,
+  onDirectSummoned,
+  onEvolve,
+  repeat,
+  transformToDeckCopy,
+  valueAtLeast,
   PLAYED_COST,
   allFollowers,
   allyFollowers,
@@ -104,4 +117,21 @@ export const NEUTRAL: Record<string, CardAbilities> = {
     ],
   },
   [id("享楽の上位市民")]: { abilities: [fanfare(choose(handCards()), discard(slot()), damage(oppFollowers(), 2))] },
+
+  // ハイランダーNm
+  [id("忘失の無垢・アイカ")]: { abilities: [fanfare(addDestroyedCopy()), onEvolve(addDestroyedCopy())] },
+  [id("天司長の後継・サンダルフォン")]: {
+    // 【直接召喚】で場に出ても【ファンファーレ】は働かない（docs/rules.md 12章「直接召喚」）
+    directSummon: valueAtLeast(EVOLVED_COUNT, 6),
+    abilities: [
+      onDirectSummoned(crest("天司長の後継・サンダルフォン"), bounce(THIS)),
+      fanfare(when(RELEASED_OUGI, [repeat(5, random(union(oppFollowers(), OPP_LEADER)), damage(slot(), 2))])),
+    ],
+  },
+  [id("侵略されし世界")]: { abilities: [act(0, choose(handCards()), transformToDeckCopy(slot(), "opponent"))] },
+  [id("愛すべき相棒・ビィ")]: { abilities: [fanfare(when(SUPER_EVOLVE_TURN, [evolveIt()]))] },
+  [id("空駆ける庇護者・カタリナ")]: {
+    damageCap: { atLeast: 4, to: 3 },
+    abilities: [fanfare(when(OUGI, [random(oppFollowers(), 2), damage(slot(), 5)]))],
+  },
 };

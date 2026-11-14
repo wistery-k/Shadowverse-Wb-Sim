@@ -120,7 +120,7 @@ impl Kw {
     }
 }
 
-fn kw_from_name(name: &str) -> Option<Kw> {
+pub fn kw_from_name(name: &str) -> Option<Kw> {
     KEYWORD_NAMES
         .iter()
         .position(|n| *n == name)
@@ -382,6 +382,8 @@ pub enum Target {
     },
     Hand {
         filter: Option<CardFilter>,
+        /// Opponent なら相手の手札（省略は自分）
+        side: Option<Side>,
     },
     Slot {
         #[serde(deserialize_with = "de_slot")]
@@ -458,6 +460,12 @@ pub enum ValueObj {
         #[serde(default)]
         at_enter: bool,
     },
+    /// このバトル中に場に出た自分のカードのうち filter に合うものの種類（PlayerState::entered_kinds。Card::count_kinds のカードをデッキに入れたときだけ覚える）
+    EnteredKinds {
+        filter: CardFilter,
+    },
+    /// このバトル中に自分のフォロワーが進化した回数（超進化・効果での進化を含む。PlayerState::evolved_count）
+    EvolvedCount,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -529,6 +537,8 @@ pub enum Condition {
     OwnTurn,
     /// これ（場のフォロワー）に手札で【融合】していた（Card::this_fused のカードだけ覚える）
     ThisFused,
+    /// 自分のデッキ（今残っている山札）に重複するカードがない。山札が 0 枚なら重複はない（docs/rules.md 12章の 22）
+    DeckUnique,
     Not {
         cond: Box<Condition>,
     },
@@ -622,6 +632,9 @@ pub enum Effect {
         filter: Option<CardFilter>,
         /// Opponent なら相手が自身のデッキから引く
         side: Option<Side>,
+        /// count 種類を引く（引いたカードと同じカードを除いてから次を引く）
+        #[serde(default)]
+        distinct: bool,
     },
     DrawAll {
         filter: CardFilter,
@@ -715,6 +728,8 @@ pub enum Effect {
     CostChange {
         target: Target,
         amount: i32,
+        /// EndOfTurn なら、ターン終了時に戻す（PlayerState::temp_costs）
+        duration: Option<Duration>,
     },
     /// 手札のカードのコストを cost にする
     SetCost {
@@ -801,6 +816,26 @@ pub enum Effect {
     /// 場のカードを消滅して、そのコピー（受けたダメージ・かかっている効果を引き継ぐ）を自分の場に出す
     BanishCopy {
         target: Target,
+    },
+    /// このバトル中に破壊された自分のフォロワー（filter に合うもの）からランダム 1 枚と同名のカードを、非公開で手札に加える
+    AddDestroyedCopy {
+        filter: Option<CardFilter>,
+    },
+    /// スロットのカードと同名のカードを 1 枚、非公開で手札に加える（slot に加えたカードを入れる）
+    AddCopyToHand {
+        #[serde(deserialize_with = "de_slot")]
+        from: SlotId,
+        #[serde(default, deserialize_with = "de_opt_slot")]
+        slot: Option<SlotId>,
+    },
+    /// 手札のカードを、side のデッキのランダム 1 枚のコピーに変身させる
+    TransformToDeckCopy {
+        target: Target,
+        side: Side,
+    },
+    /// options のうち、これ（場のカード・クレスト）でまだ働いていないものからランダムに 1 つ（全部働いた後は何もしない）
+    RandomUnusedOption {
+        options: Vec<Vec<Effect>>,
     },
     /// 自分の PP が amount 以上なら、amount 消費して then を行う
     SpendPp {
@@ -895,6 +930,10 @@ impl Effect {
             Effect::LoseLastWords { .. } => "LoseLastWords",
             Effect::BanishCopy { .. } => "BanishCopy",
             Effect::SpendPp { .. } => "SpendPp",
+            Effect::AddDestroyedCopy { .. } => "AddDestroyedCopy",
+            Effect::AddCopyToHand { .. } => "AddCopyToHand",
+            Effect::TransformToDeckCopy { .. } => "TransformToDeckCopy",
+            Effect::RandomUnusedOption { .. } => "RandomUnusedOption",
             Effect::LeaderDamageZero { .. } => "LeaderDamageZero",
             Effect::SetLeaderMaxHp { .. } => "SetLeaderMaxHp",
             Effect::AddLeaderMaxHp { .. } => "AddLeaderMaxHp",
@@ -969,6 +1008,14 @@ pub enum Trigger {
     AllyAttack {
         filter: Option<CardFilter>,
     },
+    /// 相手のフォロワーが攻撃するとき（filter は攻撃するフォロワーの条件。leader ならリーダーを攻撃するときだけ）
+    EnemyAttack {
+        filter: Option<CardFilter>,
+        #[serde(default)]
+        leader: bool,
+    },
+    /// これが【直接召喚】されたとき
+    DirectSummoned,
 }
 
 /// 誘発の種類（Trigger の on だけ）
@@ -1001,6 +1048,8 @@ pub enum On {
     AllyEvolved,
     AllyDraw,
     AllyAttack,
+    EnemyAttack,
+    DirectSummoned,
 }
 
 impl On {
@@ -1041,6 +1090,8 @@ impl Trigger {
             Trigger::AllyEvolved => On::AllyEvolved,
             Trigger::AllyDraw { .. } => On::AllyDraw,
             Trigger::AllyAttack { .. } => On::AllyAttack,
+            Trigger::EnemyAttack { .. } => On::EnemyAttack,
+            Trigger::DirectSummoned => On::DirectSummoned,
         }
     }
 }
@@ -1071,12 +1122,24 @@ pub struct CardAbilities {
     /// 【守護】を無視して攻撃できる
     #[serde(default)]
     pub ignore_ward: bool,
+    /// 「デッキで働く。自分のターン開始時、<条件>なら、これを【直接召喚】する。」の条件
+    pub direct_summon: Option<Condition>,
+    /// 「受ける at_least 以上のダメージを to にする。」
+    pub damage_cap: Option<DamageCap>,
     #[allow(dead_code)]
     pub unimplemented: Option<String>,
     /// 能力の誘発の種類の集まり（On の番号のビット。読み込んだ後に set_on_mask で作る）。
     /// 手札・場のカードを回るとき、その誘発の能力が無いカードを能力の列を見ずに飛ばすため
     #[serde(skip)]
     pub on_mask: u64,
+}
+
+/// 「受ける at_least 以上のダメージを to にする。」
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DamageCap {
+    pub at_least: i32,
+    pub to: i32,
 }
 
 impl CardAbilities {
@@ -1147,6 +1210,12 @@ pub struct Card {
     /// どれかの能力が「このバトル中に場に出たこのカードの枚数」を見る（場に出るたびに数える）
     #[serde(default)]
     pub count_entered: bool,
+    /// 能力が「このバトル中に自分のフォロワーが進化した回数」を見る（デッキに入れると数える）
+    #[serde(default)]
+    pub count_evolved: bool,
+    /// 能力が「このバトル中に場に出た自分の…の種類」を見る（デッキに入れると、場に出たカードの種類を覚える）
+    #[serde(default)]
+    pub count_kinds: bool,
 }
 
 impl Card {

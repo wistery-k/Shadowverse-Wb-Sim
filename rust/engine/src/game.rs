@@ -35,6 +35,9 @@ fn new_player(deck: Vec<CardRef>) -> PlayerState {
         leader_damage_zero_until: None,
         followers_entered: None,
         entered_counts: Vec::new(),
+        evolved_count: None,
+        entered_kinds: None,
+        temp_costs: None,
     }
 }
 
@@ -58,6 +61,13 @@ pub fn create_game(decks: [&[CardIdx]; 2], seed: u32) -> GameState {
     for (pl, deck) in [(&mut p0, decks[0]), (&mut p1, decks[1])] {
         if deck.iter().any(|&c| card(c).link) {
             pl.followers_entered = Some(0);
+        }
+        // 「このバトル中に自分のフォロワーが進化した回数」を見るカードをデッキに入れたプレイヤーだけ数える
+        if deck.iter().any(|&c| card(c).count_kinds) {
+            pl.entered_kinds = Some(Shared::default());
+        }
+        if deck.iter().any(|&c| card(c).count_evolved) {
+            pl.evolved_count = Some(0);
         }
     }
     let mut s = GameState {
@@ -91,6 +101,14 @@ pub fn create_game(decks: [&[CardIdx]; 2], seed: u32) -> GameState {
 
 fn push_start_turn(s: &mut GameState, p: PlayerIndex) {
     push_internal(s, &[FEff::StartTurnDraw], Ctx::new(p, 0));
+    // 【直接召喚】を持つカードが山札に無ければ積まない（無いデッキの局面は今までと同じ）
+    if s.players[p]
+        .deck
+        .iter()
+        .any(|r| abilities_of(r.card).direct_summon.is_some())
+    {
+        push_internal(s, &[FEff::DirectSummon], Ctx::new(p, 0));
+    }
     push_internal(s, &[FEff::StartTurn], Ctx::new(p, 0));
 }
 
@@ -184,6 +202,14 @@ fn start_turn(s: &mut GameState, p: PlayerIndex) {
 fn clear_turn_effects(s: &mut GameState) {
     let turn = s.turn;
     for p in 0..2 {
+        // ターン終了までのコストの増減を戻す（手札に残っているカードだけ）
+        if let Some(tc) = s.players[p].temp_costs.take() {
+            for &(iid, back) in tc.iter() {
+                if let Some(h) = hand_state_mut(s, iid) {
+                    h.cost_mod += back;
+                }
+            }
+        }
         // 消すものが無い場は書き換えない（ほかの局面と共有したままにする）
         let changes = |c: &OnBoard| {
             c.temp_keywords != Kw::EMPTY
@@ -208,12 +234,13 @@ fn clear_turn_effects(s: &mut GameState) {
 
 fn has_turn_effects(s: &GameState) -> bool {
     s.players.iter().any(|pl| {
-        pl.board.iter().any(|c| {
-            !c.temp_keywords.is_empty()
-                || (c.is_follower
-                    && (c.temp_attack != 0
-                        || matches!(c.cannot_attack_until, Some(u) if u <= s.turn)))
-        })
+        pl.temp_costs.is_some()
+            || pl.board.iter().any(|c| {
+                !c.temp_keywords.is_empty()
+                    || (c.is_follower
+                        && (c.temp_attack != 0
+                            || matches!(c.cannot_attack_until, Some(u) if u <= s.turn)))
+            })
     })
 }
 
@@ -281,6 +308,7 @@ pub(crate) fn handle_internal(s: &mut GameState, controller: PlayerIndex, eff: F
             let drawn = s.draw_cards(a, 1, None, None);
             fire_ally_draw(s, a, &drawn);
         }
+        FEff::DirectSummon => direct_summon(s, controller),
         FEff::EndTurn => fire_turn_end(s),
         FEff::Cleanup => end_turn_cleanup(s),
         FEff::FinishMulligan => {
@@ -1053,6 +1081,8 @@ fn apply_attack(s: &mut GameState, attacker_iid: Iid, target: AttackTarget) {
     // 【自分のフォロワーが攻撃するとき】（クレスト・場のカード）も戦闘の前に働く。【攻撃時】の後に置く（順は未確認）
     let before = s.queue.len();
     fire_ally_attack(s, p, attacker_iid);
+    // 【相手のフォロワーが攻撃するとき】（相手のクレストなど）。自分の側の後に置く（順は未確認）
+    fire_enemy_attack(s, p, attacker_iid, target.is_none());
     while s.queue.len() > before {
         let q = s.queue.remove(before).unwrap();
         triggered.push((q.ability, q.ctx));

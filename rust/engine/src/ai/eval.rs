@@ -144,6 +144,7 @@ fn countdown_payoff_of(c: CardIdx) -> Option<CountdownPayoff> {
                 count: Value::Num(n),
                 filter: None,
                 side: None,
+                ..
             } => p.draws += n,
             _ => return None,
         }

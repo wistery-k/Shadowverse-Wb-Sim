@@ -1,5 +1,5 @@
 //! 前期のローテーション（docs/pools/azvaldt.md）のプロのデッキのうち、能力を書いた型（スペルW・アグロNi・ランプD・アミュレットB・コンボE・海賊R・
-//! ミッドレンジNi・実験体W・クキシロB）を
+//! ミッドレンジNi・実験体W・クキシロB・ハイランダーNm）を
 //! 探索 AI で最後まで打つ
 
 use super::*;
@@ -92,4 +92,27 @@ fn search_finishes_pool_kukishiro_bishop_vs_midrange_nightmare() {
         "../../../../../data/pools/azvaldt/decks/ps26-27-08b/CR_ナイトメア.txt"
     ));
     finish_both(&bishop, &nightmare);
+}
+
+#[test]
+fn search_finishes_pool_highlander_nemesis_vs_spell_witch() {
+    let nemesis = pool_deck(include_str!(
+        "../../../../../data/pools/azvaldt/decks/ps26-27-08b/CR_ネメシス.txt"
+    ));
+    let witch = pool_deck(include_str!(
+        "../../../../../data/pools/azvaldt/decks/ps26-27-08b/CR_ウィッチ.txt"
+    ));
+    finish_both(&nemesis, &witch);
+}
+
+#[test]
+fn search_finishes_pool_highlander_nemesis_mirror() {
+    // 愚劣の兵器を入れたものと、ストーン・ブレイクを入れたもの
+    let a = pool_deck(include_str!(
+        "../../../../../data/pools/azvaldt/decks/ps26-27-08b/ZETA_ネメシス.txt"
+    ));
+    let b = pool_deck(include_str!(
+        "../../../../../data/pools/azvaldt/decks/ps26-27-09b/ZETA_ネメシス.txt"
+    ));
+    finish_both(&a, &b);
 }

@@ -25,6 +25,7 @@ export {
   allyCards,
   allyFollowers,
   banish,
+  bounce,
   buff,
   choose,
   combo,
@@ -258,3 +259,39 @@ export const onAllyDraw = (filter: CardFilter, ...effects: Effect[]): Ability =>
 });
 /** 自分のフォロワーが攻撃するとき（filter は攻撃するフォロワーの条件） */
 export const onAllyAttack = (filter: CardFilter, ...effects: Effect[]): Ability => ({ trigger: { on: "allyAttack", filter }, effects });
+
+// ---- ハイランダーNm で足した仕組み ----
+
+/** アーティファクト・フォロワー */
+export const ARTIFACT_FOLLOWER: CardFilter = { type: "follower", tribe: "アーティファクト" };
+/** 自分のデッキに重複するカードがないなら（山札が 0 枚なら重複はない。docs/rules.md 12章の 22） */
+export const DECK_UNIQUE: Condition = { kind: "deckUnique" };
+/** 超進化可能ターンなら */
+export const SUPER_EVOLVE_TURN: Condition = { kind: "superEvolveTurn" };
+/** このバトル中に場に出た自分のカードのうち filter に合うものの種類 */
+export const enteredKinds = (filter: CardFilter): Value => ({ kind: "enteredKinds", filter });
+/** このバトル中に自分のフォロワーが進化した回数（超進化・効果での進化を含む） */
+export const EVOLVED_COUNT: Value = { kind: "evolvedCount" };
+/** 自分のデッキから filter に合うカード count 種類を引く */
+export const drawKinds = (count: number, filter: CardFilter): Effect => ({ op: "draw", count, filter, distinct: true });
+/** ターン終了まで、手札のカードのコストを amount だけ増減する */
+export const costChangeUntilEnd = (target: Target, amount: number): Effect => ({ op: "costChange", target, amount, duration: "endOfTurn" });
+/** 相手の手札のカード */
+export const oppHandCards = (filter?: CardFilter): Target => ({ kind: "hand", side: "opponent", ...(filter ? { filter } : {}) });
+/** このバトル中に破壊された自分のフォロワー（filter に合うもの）からランダム 1 枚と同名のカード 1 枚を非公開で手札に加える */
+export const addDestroyedCopy = (filter?: CardFilter): Effect => (filter ? { op: "addDestroyedCopy", filter } : { op: "addDestroyedCopy" });
+/** スロット from のカードと同名のカード 1 枚を非公開で手札に加える（slot に加えたカードを入れる） */
+export const addCopyToHand = (from: string, slot?: string): Effect => (slot ? { op: "addCopyToHand", from, slot } : { op: "addCopyToHand", from });
+/** 手札のカードを、side のデッキのランダム 1 枚のコピーに変身させる */
+export const transformToDeckCopy = (target: Target, side: "self" | "opponent"): Effect => ({ op: "transformToDeckCopy", target, side });
+/** 「下記の能力から働いていないランダム1つの能力が働く」 */
+export const randomUnusedOption = (...options: Effect[][]): Effect => ({ op: "randomUnusedOption", options });
+/** スロットのカードと同名のカードを場に出す（コピー） */
+export const summonCopy = (from = "t"): Effect => ({ op: "summonCopy", from });
+/** 相手のフォロワーが攻撃するとき（filter は攻撃するフォロワーの条件。leader ならリーダーを攻撃するときだけ） */
+export const onEnemyAttack = (filter: CardFilter, leader: boolean, ...effects: Effect[]): Ability => ({
+  trigger: { on: "enemyAttack", filter, ...(leader ? { leader } : {}) },
+  effects,
+});
+/** これが【直接召喚】されたとき */
+export const onDirectSummoned = (...effects: Effect[]): Ability => ({ trigger: { on: "directSummoned" }, effects });

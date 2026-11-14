@@ -44,8 +44,12 @@ fn hand_canon(h: &HandCard) -> String {
             let f = hint.filter;
             // コストの下限は、ある条件だけ後ろに足す（無い条件の文字列は前と同じ）
             let min = f.cost_min.map(|x| format!("/min{x}")).unwrap_or_default();
+            let kw = f
+                .keyword
+                .map(|k| format!("/kw{}", k.names()[0]))
+                .unwrap_or_default();
             format!(
-                "{}/{}/{}/{}/{}/{}{min}",
+                "{}/{}/{}/{}/{}/{}{min}{kw}",
                 f.ctype.map(|t| t.name()).unwrap_or(""),
                 f.tribe
                     .map(|t| d.tribe_names[t as usize].as_str())
@@ -162,6 +166,24 @@ fn player_canon(p: &PlayerState) -> String {
             "{head},entered{}",
             join(&p.entered_counts, |e| format!("{}x{}", cid(e.0), e.1), "+")
         )
+    };
+    // 進化した回数（数えるときだけ足す）
+    let head = match p.evolved_count {
+        Some(n) => format!("{head},evo{n}"),
+        None => head,
+    };
+    // 場に出たカードの種類（覚えるときだけ足す）
+    let head = match &p.entered_kinds {
+        Some(v) => format!("{head},kinds{}", join(v, |c| cid(*c).to_string(), "+")),
+        None => head,
+    };
+    // ターン終了まで変えた手札のコスト（あるときだけ足す）
+    let head = match &p.temp_costs {
+        Some(tc) => format!(
+            "{head},tcost{}",
+            join(tc, |e| format!("{}x{}", e.0, e.1), "+")
+        ),
+        None => head,
     };
     let mut out = [
         head,
