@@ -121,6 +121,22 @@ export function startGame(decks: [readonly string[], readonly string[]], seed: n
   }
 }
 
+/**
+ * メモの URL から、共有した人をたどれる引数（YouTube の si=）を除く（記録はリポジトリに置いて公開するので）。
+ * 例: `https://www.youtube.com/live/X?si=abc&t=1657` → `https://www.youtube.com/live/X?t=1657`
+ */
+export function cleanMemo(memo: string): string {
+  return memo.replace(/https?:\/\/\S+/g, (url) => {
+    const q = url.indexOf("?");
+    if (q < 0) return url;
+    const params = url
+      .slice(q + 1)
+      .split("&")
+      .filter((kv) => kv !== "" && !/^si=/i.test(kv));
+    return params.length > 0 ? `${url.slice(0, q)}?${params.join("&")}` : url.slice(0, q);
+  });
+}
+
 /** 新しい記録（手順は空） */
 export function newRecord(o: { event: string; eventName: string; seats: [RecordSeat, RecordSeat]; memo: string; commit: string; dirty: boolean; seed: number; now: string }): MatchRecord {
   const decks = o.seats.map((seat) => {
@@ -132,7 +148,7 @@ export function newRecord(o: { event: string; eventName: string; seats: [RecordS
   return {
     format: RECORD_FORMAT,
     version: RECORD_VERSION,
-    meta: { event: o.event, eventName: o.eventName, seats: o.seats, memo: o.memo, commit: o.commit, dirty: o.dirty, createdAt: o.now, updatedAt: o.now },
+    meta: { event: o.event, eventName: o.eventName, seats: o.seats, memo: cleanMemo(o.memo), commit: o.commit, dirty: o.dirty, createdAt: o.now, updatedAt: o.now },
     decks,
     seed,
     steps: [],
@@ -673,7 +689,12 @@ export function resultOf(steps: readonly RecordStep[], last: GameState): RecordR
 export function exportRecord(record: MatchRecord, now: string): MatchRecord {
   const { states, error } = replay(record);
   if (error) throw new RecordError(`手順 ${error.step + 1} をたどれません: ${error.message}`);
-  return { ...record, meta: { ...record.meta, updatedAt: now }, turns: turnSnapshots(states), result: resultOf(record.steps, states[states.length - 1]!) };
+  return {
+    ...record,
+    meta: { ...record.meta, memo: cleanMemo(record.meta.memo), updatedAt: now },
+    turns: turnSnapshots(states),
+    result: resultOf(record.steps, states[states.length - 1]!),
+  };
 }
 
 /** 書き出した記録のファイルの名前（大会_先攻_vs_後攻_日時。環境によって日本語のファイル名で保存できないので、クラスは ID で） */
@@ -721,9 +742,24 @@ function checkStep(v: unknown, i: number): RecordStep {
   }
 }
 
+/** 書き出した記録の結果（無い・読めなければ null） */
+function checkResult(v: unknown): RecordResult | null {
+  if (!isObj(v) || !isSeatIndex(v.winner)) return null;
+  return v.reason === "leader" || v.reason === "deck" || v.reason === "retire" ? { winner: v.winner, reason: v.reason } : null;
+}
+
+/** 書き出した記録の各ターンの最初の局面（形だけ見る。局面の中身はエンジンに読ませるときに確かめる） */
+function checkTurns(v: unknown): TurnSnapshot[] {
+  if (!Array.isArray(v)) throw new RecordError("各ターンの最初の局面が読めません");
+  return v.map((t: unknown, i) => {
+    if (!isObj(t) || typeof t.turn !== "number" || typeof t.step !== "number" || !isObj(t.state)) throw new RecordError(`各ターンの最初の局面 ${i + 1} が読めません`);
+    return { turn: t.turn, step: t.step, state: t.state as unknown as GameState };
+  });
+}
+
 /**
  * 書き出した記録を読む。デッキはプロのデッキと同じものでなければ読まない（CLAUDE.md の試合の記録の条件）。
- * 手順の形だけを確かめる（たどれるかは replay で見る）
+ * 手順の形だけを確かめる（たどれるかは replay で見る）。各ターンの最初の局面と結果も、あれば読む
  */
 export function parseRecord(text: string): MatchRecord {
   let v: unknown;
@@ -766,7 +802,8 @@ export function parseRecord(text: string): MatchRecord {
     decks: [decks[0] as string[], decks[1] as string[]],
     seed: v.seed >>> 0,
     steps: v.steps.map(checkStep),
-    result: null,
+    ...(v.turns !== undefined ? { turns: checkTurns(v.turns) } : {}),
+    result: checkResult(v.result),
   };
 }
 

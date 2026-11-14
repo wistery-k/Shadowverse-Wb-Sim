@@ -1,6 +1,7 @@
 // 試合の記録（src/record/。開発サーバーだけの「試合の記録」の画面の中身）:
 // プロのデッキだけを選べること、引いたカード・ランダムな結果を決めて手を打てること、記録をたどると同じ局面になること。
 
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ALL_CARDS, CARDS_BY_ID } from "../src/cards";
 import { AZVALDT_CARDS } from "../src/cards/pools";
@@ -9,6 +10,7 @@ import { findProDeck, PRO_DECKS, PRO_EVENTS, proDeck } from "../src/record/decks
 import { POOL_CARD_BY_NAME } from "../src/record/pool";
 import {
   applyStep,
+  cleanMemo,
   drawnCards,
   evaluate,
   exportRecord,
@@ -251,4 +253,26 @@ describe("試合の記録: ランダムな結果", () => {
     expect(r.ev.kind === "error" || r.ev.kind === "mismatch").toBe(true);
     expect(opp).not.toBe(me);
   });
+});
+
+describe("試合の記録: リポジトリに置いた記録（records/pro/）", () => {
+  it("メモの URL から YouTube の si= を除く", () => {
+    expect(cleanMemo("https://www.youtube.com/live/abc?si=XyZ_1&t=1657")).toBe("https://www.youtube.com/live/abc?t=1657");
+    expect(cleanMemo("https://youtu.be/abc?si=XyZ 後半")).toBe("https://youtu.be/abc 後半");
+    expect(cleanMemo("1 試合目 https://www.youtube.com/watch?v=abc&si=q&t=30s")).toBe("1 試合目 https://www.youtube.com/watch?v=abc&t=30s");
+    expect(cleanMemo("動画の 28 分あたり")).toBe("動画の 28 分あたり");
+  });
+
+  // たどれるかは見ない（カードの能力を書き足すと、前に入れた記録がたどれなくなりうる。そのときは各ターンの最初の局面から検討する）
+  const dir = "records/pro";
+  const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
+  it("記録がある", () => expect(files.length).toBeGreaterThan(0));
+  for (const f of files) {
+    it(`${f}: 読めて、勝敗まで入っていて、各ターンの最初の局面がある`, () => {
+      const rec = parseRecord(readFileSync(`${dir}/${f}`, "utf8"));
+      expect(rec.result).not.toBeNull();
+      expect(rec.turns?.length ?? 0).toBeGreaterThan(0);
+      expect(rec.meta.memo).toBe(cleanMemo(rec.meta.memo));
+    });
+  }
 });

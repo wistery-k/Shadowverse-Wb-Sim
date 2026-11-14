@@ -102,7 +102,9 @@ function open(record: Rec, index: number): { live: Live | null; warning: string 
   if (states.length === 0) return { live: null, warning: `記録を開けませんでした: ${error?.message ?? ""}` };
   const warning = error ? `手順 ${error.step + 1} から先を、今のエンジンでたどれませんでした（${error.message}）。そこまでを開きました` : "";
   const steps = record.steps.slice(0, states.length - 1);
-  return { live: { record: { ...record, steps }, states, index: Math.max(0, Math.min(index, steps.length)) }, warning };
+  // 各ターンの最初の局面と結果は、書き出すときに作り直す（ブラウザには残さない）
+  const { turns: _turns, ...rest } = record;
+  return { live: { record: { ...rest, steps, result: null }, states, index: Math.max(0, Math.min(index, steps.length)) }, warning };
 }
 
 /** 席の名前（チームとクラス） */
