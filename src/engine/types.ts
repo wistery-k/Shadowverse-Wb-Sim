@@ -236,6 +236,8 @@ export interface Frame {
   effects: (Effect | InternalEffect)[];
   pc: number;
   ctx: EffectContext;
+  /** 処理待ちだった能力で、解決を始めるときに能力の元が場やリーダーエリアを離れていれば働かない（docs/rules.md 11章「能力の元が離れたとき」） */
+  needsSource?: boolean;
 }
 
 /** プレイヤーの選択待ち */
@@ -247,6 +249,8 @@ export type PendingChoice =
 export interface QueuedAbility {
   ability: Ability;
   ctx: EffectContext;
+  /** 誘発したときに能力の元が場かリーダーエリアにいた（ラストワード以外）。解決を始めるときに元が離れていれば働かない */
+  needsSource?: boolean;
 }
 
 export interface GameState {
@@ -280,6 +284,8 @@ export interface AttackInProgress {
   superEvolved: boolean;
   /** 攻撃中に攻撃先が破壊されたか */
   defenderDestroyed: boolean;
+  /** ふっとばしのダメージをもう与えたか（与えた後だけある。docs/rules.md「ふっとばしの判定」） */
+  blasted?: boolean;
 }
 
 export type AttackTarget = number | "leader";

@@ -481,6 +481,11 @@ fn keep_spare(s: &mut GameState) {
 }
 
 pub fn push_frame(s: &mut GameState, effects: Effects, ctx: Ctx) {
+    push_frame_with(s, effects, ctx, false);
+}
+
+/// needs_source なら、解決を始めるときに能力の元が場やリーダーエリアを離れていれば働かない（`run`）
+fn push_frame_with(s: &mut GameState, effects: Effects, ctx: Ctx, needs_source: bool) {
     if !effects.is_empty() {
         if s.stack.capacity() == 0 {
             SPARE.with(|b| std::mem::swap(&mut s.stack, &mut b.borrow_mut().0));
@@ -489,15 +494,112 @@ pub fn push_frame(s: &mut GameState, effects: Effects, ctx: Ctx) {
             effects,
             pc: 0,
             ctx,
+            needs_source,
         });
     }
+}
+
+/// 処理待ちだった能力を解決スタックに積む（元が離れていれば、解決を始めるときに働かずに終わる）
+pub fn push_waiting(s: &mut GameState, q: Queued) {
+    push_frame_with(s, Effects::Dsl(&q.ability.effects), q.ctx, q.needs_source);
+}
+
+/// 能力の元（場のフォロワー・アミュレット、クレスト）が今、場かリーダーエリアにいるか
+pub fn source_present(s: &GameState, iid: Iid) -> bool {
+    s.find_board(iid).is_some()
+        || s.players
+            .iter()
+            .any(|pl| pl.crests.iter().any(|c| c.iid == iid))
+}
+
+/// 誘発した能力が、解決するときに元が残っている必要があるか（docs/rules.md 11章「能力の元が離れたとき」）:
+/// ラストワードは元が離れていても働く。誘発したときに元が場にもリーダーエリアにもいなかったもの（スペル・手札の能力など）も働く
+pub fn needs_source(s: &GameState, ability: &Ability, source: Iid) -> bool {
+    !matches!(ability.trigger, Trigger::LastWords) && source_present(s, source)
 }
 
 fn queue(s: &mut GameState, ability: &'static Ability, ctx: Ctx) {
     if s.queue.capacity() == 0 {
         SPARE.with(|b| std::mem::swap(&mut s.queue, &mut b.borrow_mut().1));
     }
-    s.queue.push_back(Queued { ability, ctx });
+    let needs_source = needs_source(s, ability, ctx.source);
+    s.queue.push_back(Queued {
+        ability,
+        ctx,
+        sort_key: 0,
+        needs_source,
+    });
+}
+
+/// 破壊で処理待ちに入った能力の並べ替えの鍵（docs/rules.md 11章「ラストワードと「破壊されたとき」の並び」）:
+/// 手番のプレイヤーが先、同じプレイヤーはクレスト（古い順）→ 場（古い順）→ 手札（左から）。
+/// 能力の元が破壊されたカード（destroyed: その iid と場での古さ）なら、場にいたときの古さで並ぶ
+fn destroy_sort_key(s: &GameState, q: &Queued, destroyed: (Iid, i32)) -> u32 {
+    let p = q.ctx.controller;
+    let src = q.ctx.source;
+    let pl = &s.players[p];
+    let (zone, order) = if src == destroyed.0 {
+        (1, destroyed.1)
+    } else if let Some(c) = pl.crests.iter().find(|c| c.iid == src) {
+        (0, c.order)
+    } else if let Some(c) = pl.board.iter().find(|c| c.iid == src) {
+        (1, c.order)
+    } else if let Some(i) = pl.hand.iter().position(|h| h.iid == src) {
+        (2, i as i32)
+    } else {
+        (3, 0)
+    };
+    let seat = u32::from(p != s.active);
+    1 + ((seat << 30) | (zone << 28) | (order.clamp(0, (1 << 28) - 1) as u32))
+}
+
+/// 1 つの処理（効果 1 つか戦闘 1 回。from はその前の処理待ちの数）の中で、破壊で処理待ちに入った能力を、鍵の順に並べ直す。
+/// 破壊で入ったものどうしの位置の中だけで並べ替え、ほかの能力の位置は変えない（安定）
+pub fn order_destroyed(s: &mut GameState, from: usize) {
+    if s.queue.len() < from + 2 {
+        return;
+    }
+    let q = &mut s.queue.make_contiguous()[from..];
+    let mut marked = q.iter().filter(|x| x.sort_key != 0);
+    let Some(first) = marked.next() else { return };
+    let mut prev = first.sort_key;
+    let mut sorted = true;
+    for x in marked {
+        if x.sort_key < prev {
+            sorted = false;
+            break;
+        }
+        prev = x.sort_key;
+    }
+    if sorted {
+        return;
+    }
+    let slots: Vec<usize> = (0..q.len()).filter(|&i| q[i].sort_key != 0).collect();
+    let mut items: Vec<Queued> = slots.iter().map(|&i| q[i].clone()).collect();
+    items.sort_by_key(|x| x.sort_key);
+    for (i, item) in slots.into_iter().zip(items) {
+        q[i] = item;
+    }
+}
+
+/// ターン開始時の処理（[StartTurn, DirectSummon] のフレーム）が解決スタックにある間は、処理待ちの能力を解決しない
+/// （game.rs の `push_start_turn`。docs/rules.md 11章「ターン開始時の処理順」）
+fn queue_held(s: &GameState) -> bool {
+    s.stack
+        .iter()
+        .any(|f| !f.effects.is_empty() && matches!(f.effects.get(0), FEff::StartTurn))
+}
+
+/// ふっとばし: 超進化したフォロワーの攻撃中に攻撃先が破壊されていて、まだ与えていなければ、相手のリーダーに 1 ダメージ。
+/// 攻撃先を破壊した戦闘・能力の解決が終わった直後（それで誘発したラストワード等より前）に呼ぶ（docs/rules.md「ふっとばしの判定」）
+pub fn blast_if_due(s: &mut GameState) {
+    let Some(at) = s.attack.as_mut() else { return };
+    if !at.super_evolved || !at.defender_destroyed || at.blasted {
+        return;
+    }
+    at.blasted = true;
+    damage_leader(s, opponent(s.active), 1);
+    s.check_leaders();
 }
 
 /// 「自分のターンごとに1回」の確認と記録
@@ -738,7 +840,11 @@ pub fn leave_board(s: &mut GameState, iid: Iid, mut reason: LeaveReason) {
     if abilities_of(cid).banish_on_leave {
         reason = LeaveReason::Banish;
     }
-    let is_follower = s.board_card(iid).unwrap().is_follower;
+    let (is_follower, order) = {
+        let c = s.board_card(iid).unwrap();
+        (c.is_follower, c.order)
+    };
+    let queued_before = s.queue.len();
     // 破壊されたときの誘発は、離れる前の状態で条件を判定する
     if reason == LeaveReason::Destroy && is_follower {
         fire_side(s, p, On::AllyDestroyed, |s, t, src| match t {
@@ -798,6 +904,14 @@ pub fn leave_board(s: &mut GameState, iid: Iid, mut reason: LeaveReason) {
         }
         for hi in 0..s.players[p].hand.len() {
             fire_hand(s, p, hi, On::AllyLeaveInHand);
+        }
+    }
+    // 破壊で処理待ちに入った能力（ラストワード・「破壊されたとき」・手札の「場を離れたとき」）に鍵を付ける。
+    // 同じ処理で破壊されたものと一緒に、run の `order_destroyed` が古さの順に並べ直す
+    if reason == LeaveReason::Destroy && s.queue.len() > queued_before {
+        for k in queued_before..s.queue.len() {
+            let key = destroy_sort_key(s, &s.queue[k], (iid, order));
+            s.queue[k].sort_key = key;
         }
     }
 }
@@ -1121,10 +1235,15 @@ pub fn direct_summon(s: &mut GameState, p: PlayerIndex) {
         let b = s.new_board_card(c, None);
         let bid = b.iid;
         let enter_abilities = own_abilities(c, On::DirectSummoned);
+        let before = s.queue.len();
         if enter_board(s, p, b) {
+            let n = enter_abilities.len();
             for a in enter_abilities {
                 queue(s, a, Ctx::new(p, bid));
             }
+            // 「これが【直接召喚】されたとき」は、場に出たことに反応する能力より先（ユーザーが実機で確かめた 2026-11-14。
+            // docs/rules.md 12章「直接召喚」）
+            s.queue.make_contiguous()[before..].rotate_right(n);
         }
     }
 }
@@ -1331,6 +1450,18 @@ fn push_ability(s: &mut GameState, a: &'static Ability, ctx: &Ctx) {
         ..ctx.clone_shallow()
     };
     push_frame(s, Effects::Dsl(&a.effects), c);
+}
+
+/// push_abilities と同じに積むが、解決を始めるときに元が場やリーダーエリアを離れていれば働かない
+/// （同じ攻撃の【攻撃時】【交戦時】など、まとめて積んで順に解決を待つ能力。docs/rules.md 11章「能力の元が離れたとき」）
+pub fn push_ability_waiting(s: &mut GameState, a: &'static Ability, ctx: &Ctx) {
+    let c = Ctx {
+        slots: Vec::new(),
+        vars: ctx.vars.clone(),
+        ..ctx.clone_shallow()
+    };
+    let needs = needs_source(s, a, c.source);
+    push_frame_with(s, Effects::Dsl(&a.effects), c, needs);
 }
 
 impl Ctx {
@@ -1632,7 +1763,17 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
         }
         Effect::Destroy { target, count_var } => {
             let mut count = 0;
-            for id in targets!(target) {
+            let mut ids = targets!(target);
+            // 一度に破壊するカードは、選んだ順ではなく、手番のプレイヤーの場の古い順、次に相手の場の古い順に破壊する
+            // （体力 0 のカードをまとめて破壊する destroy_dead と同じ。docs/rules.md 11章「ラストワードと「破壊されたとき」の並び」）
+            if ids.len() > 1 {
+                let active = s.active;
+                ids.sort_by_key(|&id| match s.find_board(id) {
+                    Some((q, i)) => (u8::from(q != active), s.players[q].board[i].order),
+                    None => (2, 0),
+                });
+            }
+            for id in ids {
                 let Some(c) = s.board_card(id) else { continue };
                 if c.is_follower && immune_to_effect_destroy(s, id) {
                     continue;
@@ -2555,16 +2696,35 @@ fn transform(s: &mut GameState, id: Iid, cid: CardIdx) {
 /// 解決スタックと誘発待ちを、選択待ちか空になるまで実行する
 pub fn run(s: &mut GameState) {
     while s.phase != Phase::Ended && s.pending.is_none() {
+        let queued_before = s.queue.len();
         let Some(top) = s.stack.last_mut() else {
             let Some(q) = s.queue.pop_front() else { break };
-            push_frame(s, Effects::Dsl(&q.ability.effects), q.ctx);
+            push_waiting(s, q);
             continue;
         };
+        // 処理待ちだった能力は、解決を始めるときに元が場やリーダーエリアを離れていれば働かない（ラストワードを除く）
+        if top.pc == 0 && top.needs_source {
+            top.needs_source = false;
+            let source = top.ctx.source;
+            if !source_present(s, source) {
+                let top = s.stack.last_mut().unwrap();
+                top.pc = top.effects.len();
+            }
+            continue;
+        }
         if top.pc >= top.effects.len() {
             s.stack.pop();
-            // 能力の解決が1つ終わったら、誘発待ち（FIFO）から1つ取り出して解決する
-            if let Some(q) = s.queue.pop_front() {
-                push_frame(s, Effects::Dsl(&q.ability.effects), q.ctx);
+            // 攻撃先をこの能力で破壊していたら、ふっとばしはそれで誘発した能力より前
+            if s.attack.is_some() {
+                blast_if_due(s);
+                if s.phase == Phase::Ended {
+                    break;
+                }
+            }
+            // 能力の解決が1つ終わったら、誘発待ち（FIFO）から1つ取り出して解決する（ターン開始時の処理の間は待つ）
+            if !s.queue.is_empty() && !queue_held(s) {
+                let q = s.queue.pop_front().unwrap();
+                push_waiting(s, q);
             }
             continue;
         }
@@ -2584,6 +2744,7 @@ pub fn run(s: &mut GameState) {
             }
         }
         destroy_dead(s);
+        order_destroyed(s, queued_before);
         s.check_leaders();
     }
     if s.phase == Phase::Ended {

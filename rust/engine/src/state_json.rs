@@ -649,14 +649,18 @@ pub fn state_to_json(st: &GameState) -> Json {
                 st.stack
                     .iter()
                     .map(|f| {
-                        obj(vec![
+                        let mut fields = vec![
                             (
                                 "effects",
                                 Json::Arr(f.effects.iter().map(|e| feff_json(&e)).collect()),
                             ),
                             ("pc", num(f.pc as i32)),
                             ("ctx", ctx_json(&f.ctx)),
-                        ])
+                        ];
+                        if f.needs_source {
+                            fields.push(("needsSource", Json::Bool(true)));
+                        }
+                        obj(fields)
                     })
                     .collect(),
             ),
@@ -667,10 +671,14 @@ pub fn state_to_json(st: &GameState) -> Json {
                 st.queue
                     .iter()
                     .map(|q| {
-                        obj(vec![
+                        let mut fields = vec![
                             ("ability", ability_json(q.ability)),
                             ("ctx", ctx_json(&q.ctx)),
-                        ])
+                        ];
+                        if q.needs_source {
+                            fields.push(("needsSource", Json::Bool(true)));
+                        }
+                        obj(fields)
                     })
                     .collect(),
             ),
@@ -683,12 +691,17 @@ pub fn state_to_json(st: &GameState) -> Json {
             "attack",
             st.attack
                 .map(|a| {
-                    obj(vec![
+                    let mut fields = vec![
                         ("attacker", num(a.attacker)),
                         ("defender", num(a.defender)),
                         ("superEvolved", Json::Bool(a.super_evolved)),
                         ("defenderDestroyed", Json::Bool(a.defender_destroyed)),
-                    ])
+                    ];
+                    // ふっとばしを与えた後だけ書く（与える前の局面の JSON は前と同じ）
+                    if a.blasted {
+                        fields.push(("blasted", Json::Bool(true)));
+                    }
+                    obj(fields)
                 })
                 .unwrap_or(Json::Null),
         ),
@@ -754,6 +767,14 @@ fn opt_int(v: &Json, k: &str) -> R<Option<i32>> {
     match field(v, k)? {
         Json::Null => Ok(None),
         _ => int(v, k).map(Some),
+    }
+}
+
+/// 無ければ false の真偽値
+fn optional_bool(v: &Json, k: &str) -> R<bool> {
+    match v.get(k) {
+        None => Ok(false),
+        Some(_) => boolean(v, k),
     }
 }
 
@@ -1262,6 +1283,7 @@ pub fn state_from_json(v: &Json) -> R<GameState> {
                     ),
                     pc: uint(f, "pc")?,
                     ctx: ctx_of(field(f, "ctx")?)?,
+                    needs_source: optional_bool(f, "needsSource")?,
                 })
             })
             .collect::<R<_>>()?,
@@ -1271,6 +1293,8 @@ pub fn state_from_json(v: &Json) -> R<GameState> {
                 Ok(Queued {
                     ability: ability_from(field(q, "ability")?)?,
                     ctx: ctx_of(field(q, "ctx")?)?,
+                    sort_key: 0,
+                    needs_source: optional_bool(q, "needsSource")?,
                 })
             })
             .collect::<R<VecDeque<_>>>()?,
@@ -1297,6 +1321,7 @@ pub fn state_from_json(v: &Json) -> R<GameState> {
                 defender: int(a, "defender")?,
                 super_evolved: boolean(a, "superEvolved")?,
                 defender_destroyed: boolean(a, "defenderDestroyed")?,
+                blasted: optional_bool(a, "blasted")?,
             }),
         },
     })
