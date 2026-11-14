@@ -44,6 +44,7 @@
 | `npm run td` | TD 学習のモデルの作成・学習・分析（下） | `scripts/td-main.ts` |
 | `npm run potential` | ターン途中の見込みのネットワーク（`potentialNet`）と、木の探索の案 A' の下限と上限のネットワーク（`tree.lazy`）を学ぶ（下） | `scripts/potential-main.ts` |
 | `npm run pack-run` | PC で回した 1 回分の出力（自己対戦・モデル・ログ）を、共有フォルダに上げる `.tar.gz` にまとめる（下） | `scripts/pack-run-main.ts` |
+| `npm run review` | 試合の記録の検討: 勝敗まで入れたプロの試合の記録で、プロの手番ごとにプロの並びと今の AI の並びを打ち比べる（`docs/match-record.md`「検討（段階 4）」。開発のコマンドだけ） | `scripts/review-main.ts`・`rust/engine/src/runner/review.rs` |
 | `npm run ledger` | 実験の台帳（`docs/ledger.jsonl`）を表にする・採否の行を足す（下） | `scripts/ledger-main.ts` |
 | `npm run night` | 夜のキュー: ジョブを並べたファイルを 5〜10 分の区切りで回し、朝の時刻に止まり、続きから再開する（下） | `scripts/night-main.ts` |
 | `cloud/gcp.sh` | ジョブ（meta.sh 等）をクラウドの Spot VM で回す。使うたびにユーザーの承認が要る（下） | `cloud/gcp.sh`・`cloud/vm-startup.sh` |
@@ -373,6 +374,9 @@ npm run svwb -- deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 
 npm run svwb -- survey run --out 結果.jsonl --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8] [--decks <デッキ>,…|@<デッキの組>]
 npm run svwb -- survey report 結果.jsonl… [--label 名前] [--no-ledger] [--top 20] [--states <フォルダ>]
 npm run svwb -- survey recheck 結果.jsonl… --out 打ち直し.jsonl [--m 32] [--peek 1] [--batch 16]
+npm run svwb -- review run --record <記録.json> --points <局面.jsonl> --out <結果.jsonl> [--m 32] [--confirm 96] [--flag 10] [--opts '<JSON>'] [--all 0|1] [--seat 0|1] [--batch 4]
+npm run svwb -- review zero --out <結果.jsonl> --games a-b --decks <デッキ>,…|@<デッキの組> [--rate 0.3] [--m 32] [--confirm 96] [--flag 10] [--opts '<JSON>'] [--batch 2]
+npm run svwb -- review report <結果.jsonl> [--out <報告.md>]
 npm run svwb -- two-turn show [--only <局面>,…] [--sandbox <フォルダ>]
 npm run svwb -- two-turn run --out tt.jsonl [--only <局面>,…] [--m 64] [--reads 4] [--twos 2] [--nextBeam 256] [--seed 1] [--opts '<設定の JSON>']
 npm run svwb -- two-turn report tt.jsonl… [--only <局面>,…]
@@ -416,6 +420,9 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
   使うカードの組の違う並び（`--extra`）を、同じ乱数で `--m` 回ずつ最後まで打ち比べる（差の大きい局面は二段目で `--confirm` 回足す）。`report` は、半分の回で選び半分で測る
   選び直しの得（1 試合あたり、上位 4 つだけと全部）・二段目で測る得・替える決まりの表（一段目の差の幅・AI 自身の点の差・安くする決まり）・大きなミス・内訳・
   問題集に足す候補を出し、台帳に 1 行足す。夜のキューのジョブにできる（[night.md](night.md)）。`recheck` は、二段目に回した局面を相手の手札を実際のままで打ち直す（台帳には書かない）
+- `review`: 試合の記録の検討（[match-record.md](match-record.md)「検討（段階 4）」）。`run` は `npm run review` が記録から作った局面（`--points`）と記録（`--record`）を受け取り、
+  プロの手番ごとにプロの並びと今の AI の並びを同じ乱数で打ち比べる（勝敗の無い記録や、局面が記録の `turns` と合わないものは受け取らない。局面を手で書いて渡す口は無い）。
+  `zero` は道具の検査（AI どうしの試合の片方の手を記録の手として同じ手順にかけ、差が 0 になるかを見る）、`report` は Markdown の報告。台帳には書かない
 - `two-turn`: 2 ターン以上の計画が効きそうな、手で作った局面（`rust/engine/src/runner/two_turn.rs` の `SCENARIOS` に書いたものだけ。外から局面を入れる口はない）で、
   今の AI と計画の候補（最初の何手かを決める・カードを出さない 等を付けた AI）を打ち比べる。`show` は局面と候補、`run` は相手の手札・山札の決定化 `--m` 通りごとに全候補を打ち、
   AI の点数・読み直し・次の自分のターン末（幅 `--nextBeam`）・2 ターン読み・次のターンのリーサル・最後まで打った勝ち負けを 1 行ずつ追記する（済んだものは飛ばす）。

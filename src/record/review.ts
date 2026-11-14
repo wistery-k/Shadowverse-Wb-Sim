@@ -64,7 +64,7 @@ export function turnPoints(record: MatchRecord): TurnPoints[] {
         if (!r || r.winner !== record.result!.winner || r.reason !== record.result!.reason) trace = "試合の終わりが記録の勝敗と合いません";
       }
     }
-    out.push({ turn: t, trace, states: trace === null ? states : [{ step: snap.step, state: start }] });
+    out.push({ turn: t, trace, states: trace === null && states.length > 0 ? states : [{ step: snap.step, state: start }] });
   }
   return out;
 }

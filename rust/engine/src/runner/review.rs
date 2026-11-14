@@ -724,7 +724,7 @@ fn record_turns(
             states.push(state_of(&x["state"])?);
         }
         let trace = line["trace"].as_str().map(str::to_string);
-        if trace.is_none() && states.len() != end - s0 {
+        if trace.is_none() && states.len() != (end - s0).max(1) {
             return Err(format!(
                 "ターン {t} はたどれるのに、局面の数が手順の数と違います"
             ));
