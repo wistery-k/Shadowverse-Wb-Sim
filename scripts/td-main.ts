@@ -103,6 +103,7 @@
 //   （--seat frozen なら固定した相手の席だけ。狙い撃ちされた対局を今の AI の学習に混ぜる用。既定 both は両方の席）
 //
 
+import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { vocabRange, widenVocab } from "./vocab";
 import { gunzipSync } from "node:zlib";
@@ -186,6 +187,12 @@ function withBase<T extends { s: Float64Array; sd: Float64Array }>(d: T, baseWei
 export async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
   const args = parseArgs(rest);
+  if ((cmd === "train" || cmd === "prune") && args.has("impl")) {
+    const impl = args.get("impl");
+    if (impl === "rust") return runRust(cmd, rest);
+    if (impl !== "ts") throw new Error(`--impl は ts か rust: ${impl}`);
+    args.delete("impl");
+  }
   if (cmd === "init") return init(args);
   if (cmd === "extend") return extend(args);
   if (cmd === "vocab") return vocab(args);
@@ -201,6 +208,17 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === "attrcheck") return attrcheck(args);
   if (cmd === "eval") return evalModels(args);
   throw new Error("npm run td -- init|extend|vocab|widen|board|selfplay|train|check|probe|prune|ivcheck|attr|attrcheck|eval ...（scripts/td-main.ts の先頭の説明を参照）");
+}
+
+/**
+ * train・prune --impl rust: Rust 版（svwb td train・prune。rust/engine/src/runner/td_train.rs）を作って、--impl を除いた引数で回す。
+ * 学び直しの流れが使う引数だけを持ち、同じデータ・同じ引数でこのファイルの学習と同じモデル（バイトまで）を書く。知らない引数はエラー
+ */
+function runRust(cmd: string, rest: string[]): number {
+  const argv: string[] = [];
+  for (let i = 0; i < rest.length; i += 2) if (rest[i] !== "--impl") argv.push(rest[i]!, rest[i + 1]!);
+  const r = spawnSync(process.execPath, ["scripts/svwb.mjs", "td", cmd, ...argv], { stdio: "inherit" });
+  return r.status ?? 1;
 }
 
 type Args = Map<string, string>;

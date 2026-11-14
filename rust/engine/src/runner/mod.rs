@@ -21,6 +21,8 @@ pub mod profile;
 pub mod rhino_compare;
 pub mod survey;
 pub mod td;
+pub mod td_data;
+pub mod td_train;
 pub mod two_turn;
 pub mod yardstick;
 
