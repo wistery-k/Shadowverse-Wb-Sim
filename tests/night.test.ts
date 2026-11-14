@@ -180,6 +180,22 @@ describe("ジョブの行", () => {
       "@x.txt",
       "--no-ledger",
     ]);
+    const spp = parseJob("td selfplay --model @/v0.json --potential @/v0pot.json --games 10 --start 5 --chunk 5 --out @/s-{k}.jsonl.gz --est 1", 6);
+    expect(checkArgv(spp, "/t")).toEqual([
+      "td",
+      "selfplay",
+      "--games",
+      "0",
+      "--start",
+      "5",
+      "--model",
+      "data/value-net.json",
+      "--potential",
+      "data/potential-net.json",
+      "--out",
+      "/t/check-6.tmp",
+    ]);
+    expect(jobInputs(spp)).toEqual(["@/v0.json", "@/v0pot.json"]);
     expect(checkArgv(parseJob("td extend --model x.json --out @/a.json --est 1", 1), "/t")).toBeUndefined();
   });
 

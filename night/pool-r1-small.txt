@@ -7,7 +7,7 @@ td extend --model data/value-net.json --vocab @data/pools/azvaldt/sets/all84.txt
 td attr --model @/v0e.json --out @/v0.json --keepA 0 --est 20
 td extend --model data/potential-net.json --out @/v0pot.json --est 5
 
-td selfplay --model @/v0.json --decks @data/pools/azvaldt/sets/all84.txt --games 300 --start 7090000 --chunk 150 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --out @/s-{k}.jsonl.gz --est 1.8
+td selfplay --model @/v0.json --decks @data/pools/azvaldt/sets/all84.txt --games 300 --start 7090000 --chunk 150 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --potential @/v0pot.json --out @/s-{k}.jsonl.gz --est 1.8
 
 td train --impl rust --model @/v0.json --data @/s-{1..2}.jsonl.gz --out @/rt.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --dropInputs myDeckCards,oppUnseen --est 60
 td prune --impl rust --model @/rt.json --data @/s-{1..2}.jsonl.gz --out @/rp.json --est 20

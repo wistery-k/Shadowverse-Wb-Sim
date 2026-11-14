@@ -1495,15 +1495,16 @@ export function standIn(text: string): string {
 
 /** 回す前に設定の書き間違いを見つけるための svwb の引数（0 試合の compare は設定を読むだけ。0 回の misses は設定と問題集を読むだけ。
  * データを作るジョブは 0 試合で回す）。td・potential・pick・survey は確かめない（undefined）。
- * 前のジョブが作るファイル（@/）は、モデル（--model・--vocab と設定の JSON）なら今の既定のモデルに、ほかは tmp の下の名前にする */
+ * 前のジョブが作るファイル（@/）は、モデル（--model・--vocab・--potential と設定の JSON）なら今の既定のモデルに、ほかは tmp の下の名前にする */
 export function checkArgv(job: Job, tmp: string): string[] | undefined {
   const s = job.spec;
   // survey の設定は数だけで、ジョブの行を読むときに確かめた
   if (s.kind === "survey" || s.kind === "node" || s.kind === "pick") return undefined;
   if (s.kind === "data") {
-    const model = (prev: string | undefined): boolean => prev === "--model" || prev === "--vocab";
+    const standInFor = (prev: string | undefined): string | undefined =>
+      prev === "--model" || prev === "--vocab" ? STAND_INS.valueNet : prev === "--potential" ? STAND_INS.potentialNet : undefined;
     const sub = (a: string, prev: string | undefined): string =>
-      a.startsWith("{") ? standIn(a) : a.includes("@/") ? (model(prev) ? STAND_INS.valueNet! : join(tmp, basename(a.split("{k}").join("0")))) : a;
+      a.startsWith("{") ? standIn(a) : a.includes("@/") ? (standInFor(prev) ?? join(tmp, basename(a.split("{k}").join("0")))) : a;
     const rest = s.args.map((a, i) => sub(a, s.args[i - 1]));
     return [...s.cmd, "--games", "0", s.startFlag, String(job.start), ...rest, s.outFlag, join(tmp, `check-${job.index}.tmp`)];
   }

@@ -1,7 +1,8 @@
 # 段階 4 の本番: 新しいプール（プロのデッキ 84 個）で補正と見込みを学び直す 1 回目（R1）。計画は共有フォルダの notes/pool-stage4-main-plan.md と docs/STATE.md。
 # 回す前に決めた問い・線・試合数は計画のもの（S1: R1 対 v0 の 4000 試合、差 − 2 SE > 0 なら R1 を新しいプールの補正にする）。変えるなら回す前に審査とユーザーに。
 # 同じ並びを小さくしたもの（night/pool-r1-small.txt）を、2026-11-14 にクラウド環境で最後まで通した（docs/ai-notes/13-2026-11-13.md「段階 4 の本番のキュー」）。
-# PC（svwb-docker、28 スレッド）で 1 晩（見込み 7 時間ほど。night plan --machine svwb-docker で見る）。止まっても resume で続きから（作ったファイルのあるジョブは飛ばす）。
+# PC（svwb-docker、28 スレッド）で 1 晩（見込み 7 時間 32 分。night plan --machine svwb-docker で見る）。止まっても resume で続きから（作ったファイルのあるジョブは飛ばす）。
+# --until +7h だと、見込みの学び直しの途中から後（compare と profile を含む 35 分ほど）が次の晩に回る。+8h なら 1 晩で済む
 #
 # 入力（自分の山札に残るカード・相手のまだ見えていないカード）: 既定は「なし」（学習の行の --dropInputs myDeckCards,oppUnseen）。
 #   B の問い 1 が「効く」で、ユーザーが入力ありを採ったら、2. の td train の行から --dropInputs myDeckCards,oppUnseen を消す（ほかの行はそのまま。作るファイルの名前も同じ）。
@@ -10,11 +11,13 @@
 #   （小さい回の自己対戦を 64 倍まで重ねて測り、局面の数で延ばした。docs/ai-notes/13-2026-11-13.md「段階 4 の本番のキュー」）。
 #   Rust 版の照らし合わせ（B のデータで TypeScript 版と同じモデルになるか）が合わなかったら、2. の 2 行の --impl rust を消し、--est を TypeScript 版のもの（学習 3600、入力ありは 5400・間引き 900）にする。
 #   TypeScript 版のメモリの山は、同じ測りで入力なし 7.6GB・入力あり 12.5GB ほど。入力ありは PC のコンテナで使える 14GB に近いので、回す前に free -g で確かめる。
-# --est は PC の見込み。B の 1 晩目（自己対戦 0.343 秒/試合）と、クラウド環境でのスターター（night/relearn-b-small.txt）と新しいプール（pool-r1-small.txt）の比から。
+# --est は PC の見込み。自己対戦は B の 1 晩目の実測 0.343 秒/試合に、審査がクラウド環境で測った新しいプールとスターターの比 1.07 ± 0.11（席 1 のデッキを 12 個に散らした 504 試合）を掛け、1 割足した。
+#   ほかは B の --est と、クラウド環境でのスターター（night/relearn-b-small.txt）と新しいプール（pool-r1-small.txt）の比から（pool-r1-small.txt の自己対戦は相手のデッキが 4 個に偏るので、自己対戦の比には使わない）。
 # 朝: finish --commit で compare の行を台帳に足す。モデル（@/ の *.json）は pack-run で共有フォルダの data/models/pool-r1/ へ。
 #
 # R2 からの使い方（計画「1 回の流れ」。出発の補正が前の回のものになるだけ）: このファイルを写して、
-#   - 0. の 3 行を、前の回の補正と見込みを写す 2 行にする（前の回のフォルダは絶対パスで。PC のコンテナなら ~/svwb-data/night/pool-r1/ の下）:
+#   - 0. の 3 行を、前の回の補正と見込みを写す 2 行にする（前の回のフォルダは絶対パスで。PC のコンテナなら ~/svwb-data/night/pool-r1/ の下）。
+#     自己対戦は --potential @/v0pot.json で v0 の見込みを読むので、自己対戦の行は替えなくてよい（td selfplay の見込みは、渡さなければ組み込みの既定）:
 #       td extend --model <前の回のフォルダ>/r.json --out @/v0.json --est 10
 #       td extend --model <前の回のフォルダ>/rpot.json --out @/v0pot.json --est 10
 #   - 自己対戦の --start を重ならない番号に（R1 は g7000000〜7059999。R2 は 7100000 から等）
@@ -29,8 +32,9 @@ td attr --model @/v0e.json --out @/v0.json --keepA 0 --est 30
 # v0 の側の見込みは、今の既定のまま（写すだけ。R2 からは前の回の見込みにする）
 td extend --model data/potential-net.json --out @/v0pot.json --est 10
 
-# 1. 自己対戦 6 万試合（g7000000〜7059999）。3000 試合ずつ s-1〜s-20。B・relearn9 と同じ打ち方で、デッキだけ 84 個（全部の組を 8 回ほど回る）
-td selfplay --model @/v0.json --decks @data/pools/azvaldt/sets/all84.txt --games 60000 --start 7000000 --chunk 3000 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --out @/s-{k}.jsonl.gz --est 0.35
+# 1. 自己対戦 6 万試合（g7000000〜7059999）。3000 試合ずつ s-1〜s-20。B・relearn9 と同じ打ち方で、デッキだけ 84 個（全部の組を 8 回ほど回る）。
+#    見込みは v0 の側のもの（R1 は今の既定を写したもので、渡さないときと同じ試合）
+td selfplay --model @/v0.json --decks @data/pools/azvaldt/sets/all84.txt --games 60000 --start 7000000 --chunk 3000 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --potential @/v0pot.json --out @/s-{k}.jsonl.gz --est 0.40
 
 # 2. 学習（B と同じ学び方）、間引き、属性で埋める → r.json
 td train --impl rust --model @/v0.json --data @/s-{1..20}.jsonl.gz --out @/rt.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --dropInputs myDeckCards,oppUnseen --est 900
