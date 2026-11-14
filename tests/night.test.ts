@@ -101,6 +101,13 @@ describe("ジョブの行", () => {
     expect(jobInputs(tr)).toEqual(["@/net0.json", "@/s-1.jsonl.gz", "@/s-2.jsonl.gz", "@/s-3.jsonl.gz"]);
     expect(jobArgv(tr, 0, 1, "/r")).toEqual(["td", "train", "--model", "/r/net0.json", "--data", "/r/s-1.jsonl.gz,/r/s-2.jsonl.gz,/r/s-3.jsonl.gz", "--out", "/r/a.json.tmp", "--epochs", "3"]);
     expect(chunkJob(tr, 600, 60)).toHaveLength(1);
+    expect(tr.spec).toMatchObject({ impl: "ts" });
+    const trRust = parseJob("td prune --model @/a.json --data @/s-1.jsonl.gz --impl rust --out @/ap.json --est 60", 5);
+    expect(trRust.spec).toMatchObject({ kind: "node", tool: "td", impl: "rust", out: "@/ap.json" });
+    expect(jobArgv(trRust, 0, 1, "/r")).toEqual(["td", "prune", "--model", "/r/a.json", "--data", "/r/s-1.jsonl.gz", "--out", "/r/ap.json.tmp"]);
+    expect(() => parseJob("td attr --model @/a.json --out @/b.json --impl rust --est 1", 1)).toThrow(/td train・td prune だけ/);
+    expect(() => parseJob("potential train --out @/p.json --impl rust --est 1", 1)).toThrow(/td train・td prune だけ/);
+    expect(() => parseJob("td train --model a.json --out @/b.json --impl wasm --est 1", 1)).toThrow(/ts か rust/);
     const pk = parseJob("pick --compare q1 --pass @/a.json --fail @/b.json --out @/q.json", 5);
     expect(pk.spec).toEqual({ kind: "pick", from: "q1", pass: "@/a.json", fail: "@/b.json", out: "@/q.json" });
     expect(() => parseJob("td selfplay --games 10 --chunk 4 --out @/s.jsonl --est 1", 1)).toThrow(/\{k\}/);
@@ -278,6 +285,12 @@ else if (kind === "misses") {
     rate: 0.5, se: 0.01, perProblem: { a: [trials, trials], b: [0, trials] }, seconds: trials / 10,
     threads: Number(process.env.THREADS), machine: process.env.SVWB_MACHINE, cmd: shellLine(argv) };
   fs.appendFileSync(process.env.SVWB_LEDGER, JSON.stringify(row) + "\\n");
+  process.exit(0);
+}
+else if (kind === "td" && (argv[1] === "train" || argv[1] === "prune")) {
+  // Rust 版の学習（--impl rust）。--out に引数を書く
+  if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, shellLine(argv) + "\\n");
+  fs.writeFileSync(flag("--out"), JSON.stringify({ tool: "svwb", argv }));
   process.exit(0);
 }
 else if ((kind === "td" && argv[1] === "selfplay") || kind === "beam-gap") {
@@ -465,7 +478,7 @@ describe("区切って回す（偽物の svwb で）", () => {
       [
         "td extend --model data/value-net.json --out @/net0.json --est 1",
         "td selfplay --model @/net0.json --games 10 --start 100 --chunk 4 --eps 0.1 --out @/s-{k}.jsonl.gz --est 0.1",
-        "td train --model @/net0.json --data @/s-{1..3}.jsonl.gz --out @/a.json --est 1",
+        "td train --model @/net0.json --data @/s-{1..3}.jsonl.gz --out @/a.json --impl rust --est 1",
         "td train --model data/value-net.json --data @/s-{1..3}.jsonl.gz --out @/b.json --est 1",
         `compare 6 '{"valueNet":"@/a.json"}' '{"valueNet":"@/b.json"}' 0 --label q1 --est 0.1`,
         "pick --compare q1 --pass @/a.json --fail @/b.json --out @/q2.json",
@@ -494,6 +507,12 @@ describe("区切って回す（偽物の svwb で）", () => {
     expect(after.find((c) => c.startsWith("td train --model data/value-net.json"))).toBe(
       `td train --model data/value-net.json --data ${f("s-1.jsonl.gz")},${f("s-2.jsonl.gz")},${f("s-3.jsonl.gz")} --out ${f("b.json")}.tmp`,
     );
+    // --impl rust の学習は svwb td train で回す（--impl は渡さない）。--impl の無い行は TypeScript のまま
+    expect(JSON.parse(readFileSync(f("a.json"), "utf8"))).toEqual({
+      tool: "svwb",
+      argv: ["td", "train", "--model", f("net0.json"), "--data", `${f("s-1.jsonl.gz")},${f("s-2.jsonl.gz")},${f("s-3.jsonl.gz")}`, "--out", `${f("a.json")}.tmp`],
+    });
+    expect(JSON.parse(readFileSync(f("b.json"), "utf8"))).toMatchObject({ tool: "td" });
     // 自己対戦のファイルは gzip してある
     expect(gunzipSync(readFileSync(f("s-3.jsonl.gz"))).toString().trim().split("\n")).toEqual(['{"tdLayout":{}}', '{"g":108}', '{"g":109}']);
     expect(existsSync(f("s-3.jsonl.tmp"))).toBe(false);

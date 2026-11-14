@@ -1254,9 +1254,11 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let args = parse_args(argv.get(1..).unwrap_or(&[]))?;
     match argv.first().map(|s| s.as_str()) {
         Some("selfplay") => selfplay(&args),
-        _ => {
-            Err("svwb td selfplay ...（init・train・probe・prune は npm run td -- で行う）".into())
-        }
+        Some("train") => super::td_train::train(&args),
+        Some("prune") => super::td_train::prune(&args),
+        _ => Err(
+            "svwb td selfplay|train|prune ...（init・probe・attr 等と、train・prune の実験用の引数は npm run td -- で行う）".into(),
+        ),
     }
 }
 

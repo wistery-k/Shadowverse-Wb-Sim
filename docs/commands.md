@@ -368,6 +368,10 @@ npm run svwb -- mulligan-data --games 6000 [--start 0] [--seed 1] [--flip 0.5] -
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
                 [--sampling classic|default] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
                 [--sDefault 0] [--searchValue 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--replays r.jsonl]
+npm run svwb -- td train --model m0.json --data d0.jsonl[,d1.jsonl.gz] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001]
+                [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--imaginedWeight 1] [--ivRes 1] [--best 0] [--bestOn end,after]
+                [--base default|zero|search] [--excludeDecks <デッキ>,…|--onlyDecks <デッキ>,…] [--dropInputs <入力>,…]
+npm run svwb -- td prune --model m.json --data d0.jsonl[,…] --out mp.json [--excludeDecks …|--onlyDecks …]
 npm run svwb -- deep-gap play --out gap.jsonl [--games 100] [--start 0] [--deep '<設定の JSON>'] [--k 4] [--evalSeeds 48] [--turns 1-30]
 npm run svwb -- deep-gap rollout --in gap.jsonl[,…] --out roll.jsonl [--top 200] [--random 200] [--seed 1] [--m 48]
 npm run svwb -- deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 30] [--only <内訳の一部>] [--skipDecks <デッキ>,…] [--sort gap|rollout] [--listOnly 1]
@@ -407,6 +411,11 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
   `td train --searchTarget` がこれを読む（docs/ai-notes.md「補正の学習の目標に探索の値を使う」）
   `--replays r.jsonl` で、もとの試合（介入した試合・打ち比べは除く）ごとに、デッキ・シード・行動の列も別のファイルに書く
   （下の「リプレイ検索」で読む。打つ手は変わらない。`--out` の学習用の行には行動の列が無いので、それだけではリプレイにできない）
+- `td train`・`td prune`: 補正の学習と間引きの Rust 版（`rust/engine/src/runner/td_train.rs`。2026-11-14 から）。同じデータ・同じ引数で、TypeScript 版（下の「td」）と
+  同じモデルのファイル（バイトまで）を書く。学び直しの流れ（`night/relearn-b.txt`）が使う引数だけを持ち、実験用の引数（`--attr`・`--cmpWeight`・`--v1Only`・`--searchTarget`・
+  `--seat`・`--exclude` 等）・場のカードのネットワークを持つモデル・属性の分（`attr`）を持つモデルの間引きはエラーにする（それは TypeScript 版で）。
+  データを詰めた配列で持つのでメモリが少なく、ミニバッチの中の局面ごとの計算と、重みの行ごとの更新をスレッド（`THREADS`）に分ける（スレッドの数で結果は変わらない）。
+  `npm run td -- train … --impl rust`・夜のキューの行の `--impl rust` でも呼べる。時間とメモリは docs/ai-notes.md「補正の学習を Rust に移す」
 - `deep-gap`: 今の既定の AI どうしの自己対戦（`ai-play` と同じ試合）の、自分のターンの最初の局面ごとに、試合のターンと深い読み（`--deep`。既定は
   ビーム 2048（今の既定が幅 512 になる 2026-10-26 までは 512）・読み直す最初の手 8・最初の手ごとの終局面 3・相手の手札の引き直し 48・相手のターンのビーム 32。読む深さは今の既定と同じで、広く・多く読む）のターンを比べる。
   食い違った局面は、手番の側から見た決定化を `--k` 通り作って両方に打たせ、深い読みの点数（別の引き直し `--evalSeeds` 通り。引き直しごとに勝率にしてから平均する）で見た勝率の差と、
@@ -463,6 +472,8 @@ npm run td -- eval --model a.json,b.json --data d.jsonl [--cards <カード名,�
 ```
 
 自己対戦（`selfplay`）は Rust 版（`npm run svwb -- td selfplay`）で行う。各引数の意味は `scripts/td-main.ts` の先頭。
+`train`・`prune` に `--impl rust` を付けると、Rust 版（上の「svwb」の `td train`・`td prune`。同じモデルを書き、速くてメモリが少ない）を作って、`--impl` を除いた引数で回す。
+既定は TypeScript 版のまま（照らし合わせの元として残す）。
 `extend --vocab` は語彙（入力のカード・クレストの並び）をその範囲に広げる（`scripts/vocab.ts`。今の語彙の後ろに足し、足したカードの行は 0。場のカードのネットワークの最初の層も）。
 範囲は `starter`（スターターのカードとクレスト）・`pool`（エンジンのカードの表の全部）・`@<デッキの組>`（その組のデッキのカードと、そこから出うるトークン・
 アクセラレート・結晶の姿・信仰・クレスト）。見込みのモデル（`data/potential-net.json`）も語彙だけ同じように広げる。足した行を属性の分で埋めるなら、続けて

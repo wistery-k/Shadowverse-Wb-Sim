@@ -65,8 +65,9 @@ export type JobSpec =
   /** データを作る svwb（td selfplay・beam-gap）。chunk 試合ずつ、out（{k} に区切りの番号を入れる）に書く。out が .gz なら書いた後に gzip する。
    * args はそのほかの引数（そのまま渡す。{k} は区切りの番号にする） */
   | { kind: "data"; cmd: string[]; startFlag: "--start" | "--from"; outFlag: "--out" | "--inputs"; out: string; chunk: number; args: string[] }
-  /** TypeScript の学習（npm run td・npm run potential）。out を 1 つ作る。args は --out も含めた全部 */
-  | { kind: "node"; tool: "td" | "potential"; args: string[]; out: string }
+  /** TypeScript の学習（npm run td・npm run potential）。out を 1 つ作る。args は --out も含めた全部。
+   * impl が rust なら、td train・td prune を Rust 版（svwb td train・prune。rust/engine/src/runner/td_train.rs）で回す（行に --impl rust） */
+  | { kind: "node"; tool: "td" | "potential"; args: string[]; out: string; impl: "ts" | "rust" }
   /** 前の compare（台帳の名前 from）の A の勝率 − 50% が 2 SE を越えたら pass、越えなければ fail のファイルを out に写す */
   | { kind: "pick"; from: string; pass: string; fail: string; out: string };
 
@@ -323,14 +324,17 @@ export function parseJob(line: string, index: number): Job {
       }
       const tool = kind === "potential" ? "potential" : "td";
       const label = take("--label") ?? "";
+      const implText = take("--impl") ?? "ts";
+      if (implText !== "ts" && implText !== "rust") throw new Error(`--impl は ts か rust: ${implText}`);
       const sub = rest[0];
       if (sub === undefined || sub.startsWith("--")) throw new Error(`${tool} のコマンド（train 等）がありません`);
+      if (implText === "rust" && (tool !== "td" || (sub !== "train" && sub !== "prune"))) throw new Error("--impl rust は td train・td prune だけ");
       const i = rest.indexOf("--out");
       const out = i < 0 ? undefined : rest[i + 1];
       if (out === undefined) throw new Error("--out で作るファイルを書きます（そのファイルがあれば済んだものとする）");
       if (rest.indexOf("--out", i + 1) >= 0) throw new Error("--out が 2 回あります");
       if (est === null) throw new Error("--est で全体の見込みの秒（回すマシンで）を書きます");
-      return { index, line: text, label, games: 1, start: 0, est, spec: { kind: "node", tool, args: [...rest], out } };
+      return { index, line: text, label, games: 1, start: 0, est, spec: { kind: "node", tool, args: [...rest], out, impl: implText } };
     }
     case "pick": {
       const label = take("--label") ?? "";
@@ -545,7 +549,7 @@ export function jobTitle(job: Job): string {
   if (s.kind === "misses") return `misses（見落とし問題集）${s.opts === "{}" ? "" : ` ${s.opts}`}`;
   if (s.kind === "survey") return `survey（候補の打ち比べ）${surveyOpts(s) === "" ? "" : ` ${surveyOpts(s)}`}`;
   if (s.kind === "data") return `${s.cmd.join(" ")} → ${s.out}`;
-  if (s.kind === "node") return `${s.tool} ${s.args[0] ?? ""} → ${s.out}`;
+  if (s.kind === "node") return `${s.tool} ${s.args[0] ?? ""}${s.impl === "rust" ? "（Rust）" : ""} → ${s.out}`;
   if (s.kind === "pick") return `pick（${s.from} が線を越えたら ${s.pass}、越えなければ ${s.fail}）→ ${s.out}`;
   return `profile（速さ）${s.opts === "{}" ? "" : ` ${s.opts}`}${s.rhino ? " --rhino" : ""}`;
 }
@@ -1243,9 +1247,11 @@ function runChunk(plan: Plan, session: Session, dir: string, c: Chunk, ctl: Work
       return Promise.resolve({ code: null, seconds: (Date.now() - t0) / 1000, why: (e as Error).message });
     }
   }
-  // td・potential は、回のフォルダに写したビルド結果を回す（start が作る）
+  // td・potential は、回のフォルダに写したビルド結果を回す（start が作る）。--impl rust の td train・prune は svwb td train・prune
   const [cmd, args] =
-    s.kind === "node" ? [process.execPath, [join(dir, "bin", "run-bundle.mjs"), join(dir, "bin", s.tool, `${s.tool}-main.mjs`), ...argv.slice(1)]] : [plan.bin, argv];
+    s.kind === "node" && s.impl === "ts"
+      ? [process.execPath, [join(dir, "bin", "run-bundle.mjs"), join(dir, "bin", s.tool, `${s.tool}-main.mjs`), ...argv.slice(1)]]
+      : [plan.bin, argv];
   const out = openSync(`${logFile}.tmp`, "w");
   return new Promise((done) => {
     const child = spawn(cmd, args, {
@@ -1523,7 +1529,7 @@ function validate(bin: string, jobs: Job[]): void {
 /** td・potential のジョブがあれば、そのスクリプトをビルドして回のフォルダに置く（夜の間にチェックアウトが替わっても、start のときのコードで回す）。
  * nodeBin（試す用）があれば、ビルドせずにそこの <td|potential>/<td|potential>-main.mjs を写す */
 function prepareNodeTools(jobs: Job[], dir: string, nodeBin: string | undefined): void {
-  const tools = [...new Set(jobs.flatMap((j) => (j.spec.kind === "node" ? [j.spec.tool] : [])))];
+  const tools = [...new Set(jobs.flatMap((j) => (j.spec.kind === "node" && j.spec.impl === "ts" ? [j.spec.tool] : [])))];
   if (tools.length === 0) return;
   const bin = join(dir, "bin");
   mkdirSync(bin, { recursive: true });

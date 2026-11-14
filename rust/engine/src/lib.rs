@@ -15,6 +15,7 @@ pub mod fasthash;
 pub mod game;
 pub mod golden;
 pub mod invariants;
+pub mod jsmath;
 pub mod jsnum;
 pub mod json;
 pub mod prof;
