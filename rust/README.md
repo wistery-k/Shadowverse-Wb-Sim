@@ -78,6 +78,8 @@ npm run svwb -- deep-gap play --out gap.jsonl --games 100  # 自己対戦の局�
 npm run svwb -- survey run --out s.jsonl --games 0-99       # 自己対戦の局面で AI の候補を同じ乱数で最後まで打ち比べる（report でまとめて台帳に足す。recheck で相手の手札を実際のままで打ち直す。docs/survey.md）
 npm run svwb -- td selfplay --model m0.json --games 2000 --out d0.jsonl  # TD 学習の自己対戦（試合が終わった順に書く。--opp beam・--iv k・--sampling default は td.rs の先頭の説明）
 npm run svwb -- td selfplay --model l0.json --frozen '{}' --games 2000 --out x0.jsonl  # 片方の席を今の既定の AI に固定した自己対戦（狙い撃ちの相手を学ばせる。学習は td train --seat learner）
+npm run svwb -- td train --model m0.json --data d0.jsonl --out m1.json --epochs 3  # 補正の学習の Rust 版（TypeScript 版と同じモデル。学び直しの流れの引数だけ。td_train.rs の先頭）
+npm run svwb -- td prune --model m1.json --data d0.jsonl --out m2.json  # 間引きの Rust 版
 npm run yardstick -- --opts '{}' --games 1000 --label 名前 --record    # 固定した相手との勝率を docs/yardstick.md の表に足す（強さの物差し。--ref strong で強い相手）
 npm run misses -- run --label 名前                         # 見落とし問題集（misses/）を 24 回ずつ解かせた正解率（docs/misses.md）
 ```
@@ -90,7 +92,8 @@ npm run misses -- run --label 名前                         # 見落とし問�
   `"exhaustive"` 等）はエラーになる（既定の値なら受け付ける）。知らない項目もエラーにする
 - rhino-compare の `--agent` は rhino・rhino-lethal・search・search-classic。相手は `--opp`（既定は search-classic、`search` なら今の既定の探索 AI）
 - マリガンの設定 `"mulligan"` は model（既定）・weights・cost・sample（返し方 16 通りごとに引き直しを `"mulliganSamples"` 回（既定 50。`turn1` と同じ値を使う）試し、評価関数の平均で選ぶ）
-- td の init・extend・train・probe・prune は `npm run td -- …`（`scripts/td-main.ts`）で行い、td selfplay の書き出したファイルをそのまま渡せる
+- td の init・extend・train・probe・prune は `npm run td -- …`（`scripts/td-main.ts`）で行い、td selfplay の書き出したファイルをそのまま渡せる。
+  train・prune は Rust 版（`svwb td train`・`prune`、`engine/src/runner/td_train.rs`・`td_data.rs`）もあり、同じモデルを速く少ないメモリで書く（`npm run td -- train … --impl rust` でも呼べる。実験用の引数は TypeScript 版だけ）
 
 ## 構成
 
@@ -103,7 +106,7 @@ npm run misses -- run --label 名前                         # 見落とし問�
 - `engine/src/golden.rs`・`canonical.rs`・`sim.rs`・`main.rs`: ゴールデンテスト・計測・CLI
 - `engine/src/prof.rs`: 処理ごとの時間の計測（`--features profile` のときだけ働く。`svwb profile`）
 - `engine/src/replay_index.rs`: 記録した試合を打ち直したターンごとのまとめ（開発サーバーの「リプレイ検索」。WASM の `replayIndex`。形は `src/replays/types.ts`）
-- `engine/src/runner/`: 実験のランナー（compare・rhino-compare・deck-compare・meta・mulligan-compare・td selfplay・yardstick・human-plan-value・deep-gap・survey・two-turn・defer-playout・beam-gap・profile・misses。消したランナーは `docs/removed.md`）。`parallel.rs`（並列実行）、`ledger.rs`（実験の台帳に 1 行足す）、`options.rs`（設定の JSON）、
+- `engine/src/runner/`: 実験のランナー（compare・rhino-compare・deck-compare・meta・mulligan-compare・td selfplay・td train・td prune・yardstick・human-plan-value・deep-gap・survey・two-turn・defer-playout・beam-gap・profile・misses。消したランナーは `docs/removed.md`）。`parallel.rs`（並列実行）、`ledger.rs`（実験の台帳に 1 行足す）、`options.rs`（設定の JSON）、
   `json.rs`（項目の順番を保つ JSON）、`jsnum.rs`（JavaScript の `Number#toString`・`toPrecision`・`toFixed` と同じ数の書き方）
 - `engine/src/ai/`: AI。`registry.rs`（選べる AI の一覧）、`search.rs`（ターン単位のビームサーチ・相手のターンの読み）、`eval.rs`（評価関数）、
   `valuenet.rs`（学習した補正の推論。形・入力・学習は `docs/value-net.md`）、`lethal.rs`（リーサル探索）、`lethal_hint.rs`（対戦画面の「リーサル」表示）、`determinize.rs`、

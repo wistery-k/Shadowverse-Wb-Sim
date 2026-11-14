@@ -96,6 +96,8 @@ profile --games 49
 - **td**・**potential**（TypeScript の学習。`npm run td`・`npm run potential` と同じ引数）: `td train … --out @/n.json --est <全体の秒>`。1 つのジョブが 1 区切りで、
   `--out` のファイルを作る。途中では止められない（止める時刻に 15 分を足しても終わらなければ止め、次は最初から）ので、`--est` を多めに書く。
   `start` のときにスクリプトをビルドして回のフォルダの `bin/td/`・`bin/potential/` に置き、それを回す（夜の間にチェックアウトが替わっても同じコード）
+  `td train`・`td prune` の行に `--impl rust` を付けると、Rust 版（`svwb td train`・`prune`。同じモデルを書き、速くてメモリが少ない。[commands.md](commands.md)「svwb」）を
+  回のフォルダに写した svwb で回す（スクリプトのビルドは要らない）。付けない行は TypeScript 版のまま（2026-11-14。確かめが済んだら既定を切り替えて `--est` を直す）
 - **pick**: `pick --compare <前の compare の台帳の名前> --pass <ファイル> --fail <ファイル> --out <ファイル>`。その compare の済んだ区切りをまとめ、
   A の勝率 − 50% − 2 SE が 0 より大きければ `--pass`、そうでなければ `--fail` のファイルを `--out` に写す（回す前に決めた線で、後のジョブの設定を選ぶ）。
   結果は回のフォルダの `pick-<番号>.json` と、`status`・`finish` の表

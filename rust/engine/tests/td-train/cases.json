@@ -1,0 +1,6 @@
+[
+  { "name": "train-a", "cmd": "train", "args": ["--model", "model.json", "--data", "data.jsonl", "--epochs", "2", "--lr", "0.01", "--l2", "0.001", "--batch", "16", "--best", "1", "--bestOn", "end,imagined", "--ivRes", "1"] },
+  { "name": "train-b", "cmd": "train", "args": ["--model", "model.json", "--data", "data.jsonl", "--epochs", "2", "--lr", "0.003", "--holdout", "0.3", "--seed", "5", "--lambda", "0.5", "--fitA", "0", "--base", "default", "--batch", "7", "--dropInputs", "myBoard"] },
+  { "name": "train-c", "cmd": "train", "args": ["--model", "model.json", "--data", "data.jsonl", "--epochs", "1", "--lr", "0.01", "--base", "zero", "--excludeDecks", "スペルウィッチ", "--ivWeight", "0.5", "--imaginedWeight", "0", "--ivRes", "0"] },
+  { "name": "prune-a", "cmd": "prune", "args": ["--model", "train-a.json", "--data", "data.jsonl", "--onlyDecks", "アマリアロイヤル,疾走ドラゴン"] }
+]
