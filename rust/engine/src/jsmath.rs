@@ -310,9 +310,7 @@ pub fn pow(x: f64, y: f64) -> f64 {
     if (n | (yisint - 1)) == 0 {
         s = -ONE;
     }
-    let t1: f64;
-    let t2: f64;
-    if iy > 0x41e0_0000 {
+    let (t1, t2) = if iy > 0x41e0_0000 {
         if iy > 0x43f0_0000 {
             if ix <= 0x3fef_ffff {
                 return if hy < 0 { HUGE * HUGE } else { TINY * TINY };
@@ -339,8 +337,8 @@ pub fn pow(x: f64, y: f64) -> f64 {
         let w = (t * t) * (0.5 - t * (0.3333333333333333333333 - t * 0.25));
         let u = IVLN2_H * t;
         let v = t * IVLN2_L - w * IVLN2;
-        t1 = with_lo(u + v, 0);
-        t2 = v - (t1 - u);
+        let t1 = with_lo(u + v, 0);
+        (t1, v - (t1 - u))
     } else {
         n = 0;
         if ix < 0x0010_0000 {
@@ -385,9 +383,9 @@ pub fn pow(x: f64, y: f64) -> f64 {
         let z_h = CP_H * p_h;
         let z_l = CP_L * p_h + p_l * CP + DP_L[k];
         let t = n as f64;
-        t1 = with_lo(((z_h + z_l) + DP_H[k]) + t, 0);
-        t2 = z_l - (((t1 - t) - DP_H[k]) - z_h);
-    }
+        let t1 = with_lo(((z_h + z_l) + DP_H[k]) + t, 0);
+        (t1, z_l - (((t1 - t) - DP_H[k]) - z_h))
+    };
     let y1 = with_lo(y, 0);
     let p_l = (y - y1) * t1 + y * t2;
     let mut p_h = y1 * t1;
