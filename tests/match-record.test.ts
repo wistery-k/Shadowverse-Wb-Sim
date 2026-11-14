@@ -15,6 +15,7 @@ import {
   evaluate,
   exportRecord,
   newRecord,
+  nextHandOrder,
   parseRecord,
   replay,
   RecordError,
@@ -242,6 +243,43 @@ describe("試合の記録: ランダムな結果", () => {
     }
   });
 
+  it("引けるカードが 1 種類に決まる確定サーチ（屈辱なる放逐）は聞かずに決め、2 種類以上なら条件に合うカードだけを並べる", () => {
+    const { s, me } = setup(11);
+    const bane = id("束刃の咎人・カットスロート");
+    s.players[me].deck = [bane, bane, ...Array(20).fill(FILLER)].map((cardId: string) => ({ iid: s.nextIid++, cardId }));
+    const discard = toHand(s, me, "不屈のファイター");
+    toHand(s, me, "探偵のルーペ");
+    const spell = toHand(s, me, "屈辱なる放逐");
+    const played = applyAction(s, { type: "play", iid: spell });
+    expect(played.pending?.kind).toBe("choose");
+    const action: Action = { type: "choose", targets: [discard] };
+    const r = evaluate(played, { action, draws: [[], []] }, NAMES);
+    expect(r.ev.kind).toBe("done");
+    expect(r.step.draws[me]).toEqual([bane]);
+    if (r.ev.kind === "done") expect(r.ev.next.players[me].hand.map((h) => h.cardId)).toContain(bane);
+
+    // 条件に合うカードが 2 種類: 聞く。並べるのはその 2 種類だけ
+    const iron = id("獣性の鉄人");
+    played.players[me].deck = [...played.players[me].deck, { iid: played.nextIid++, cardId: iron }];
+    const r2 = evaluate(played, { action, draws: [[], []] }, NAMES);
+    expect(r2.ev.kind).toBe("draw");
+    if (r2.ev.kind === "draw") expect([...r2.ev.pool.keys()].sort()).toEqual([bane, iron].sort());
+
+    // 山札に重複が無く、条件付きで引いた後に上から 2 枚引く: 最初の枠（条件付き）は条件に合うカードだけ、後の枠は山札の全部
+    const others = ["激震のゴリアテ", "不屈のファイター", "探偵のルーペ", "知恵の輝き"].map(id);
+    played.players[me].deck = [bane, iron, ...others].map((cardId) => ({ iid: played.nextIid++, cardId }));
+    const r3 = evaluate(played, { action, draws: [[], []] }, NAMES);
+    expect(r3.ev.kind).toBe("draw");
+    if (r3.ev.kind !== "draw") return;
+    expect(r3.ev.undecided).toHaveLength(3);
+    expect([...r3.ev.pool.keys()].sort()).toEqual([bane, iron].sort());
+    const draws: Draws = [[], []];
+    draws[me].push(bane);
+    const r4 = evaluate(played, { action, draws }, NAMES);
+    expect(r4.ev.kind).toBe("draw");
+    if (r4.ev.kind === "draw") expect([...r4.ev.pool.keys()].sort()).toEqual([iron, ...others].sort());
+  });
+
   it("引けないカードを選ぶと mismatch", () => {
     const { s, me } = setup(9);
     s.players[me].deck = [id("不屈のファイター"), id("探偵のルーペ")].map((cardId) => ({ iid: s.nextIid++, cardId })).concat(s.players[me].deck);
@@ -252,6 +290,21 @@ describe("試合の記録: ランダムな結果", () => {
     const r = evaluate(s, { action: { type: "endTurn" }, draws: me === 0 ? [[], [id("激震のゴリアテ")]] : [[id("激震のゴリアテ")], []] }, NAMES);
     expect(r.ev.kind === "error" || r.ev.kind === "mismatch").toBe(true);
     expect(opp).not.toBe(me);
+  });
+});
+
+describe("試合の記録: 手札を出す順", () => {
+  it("マリガンで引いたカードは返したカードの枠に入り、そのあとも枠を保つ", () => {
+    // エンジンは残したカードを前に詰め、引いたカードを末尾に足す
+    const m = nextHandOrder([1, 2, 3, 4], [1, 2, 3, 4], [2, 4, 5, 6], [1, 3]);
+    expect(m).toEqual([5, 2, 6, 4]);
+    // 引いたカードは右に足す。プレイしたカードは抜ける
+    expect(nextHandOrder(m, [2, 4, 5, 6], [2, 4, 5, 6, 7], null)).toEqual([5, 2, 6, 4, 7]);
+    expect(nextHandOrder([5, 2, 6, 4, 7], [2, 4, 5, 6, 7], [2, 4, 6, 7], null)).toEqual([2, 6, 4, 7]);
+    // 手札を離れて戻ってきたカード（山札に戻して引き直す等。実体 ID は同じ）は右に
+    expect(nextHandOrder([5, 2, 6, 4], [2, 4, 5, 6], [2, 4, 6, 5], null)).toEqual([2, 6, 4, 5]);
+    // 全部返したとき
+    expect(nextHandOrder([1, 2, 3, 4], [1, 2, 3, 4], [5, 6, 7, 8], [1, 2, 3, 4])).toEqual([5, 6, 7, 8]);
   });
 });
 

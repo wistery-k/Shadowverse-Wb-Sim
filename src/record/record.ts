@@ -409,11 +409,11 @@ function changesOf(before: View, after: View, names: readonly [string, string]):
     if (a.leader !== b.leader) out.push(`${who}のリーダー: 体力 ${b.leader} → ${a.leader}`);
     const beforeBoard = new Map(b.board.map((c) => [c.iid, c.text]));
     const afterBoard = new Map(a.board.map((c) => [c.iid, c.text]));
-    // 同じ名前のカードが場に 2 枚以上あれば、左から何枚目かを添える（動画で見分けるため）
+    // 同じ名前のカードが場に 2 枚以上あれば、場に出た古いほうから何枚目かを添える（動画で見分けるため。画面の上の席は左右が逆なので、左右では言わない）
     const pos = (iid: number, text: string) => {
       const name = text.split(" ")[0];
       const i = b.board.findIndex((c) => c.iid === iid);
-      return b.board.filter((c) => c.text.split(" ")[0] === name).length > 1 ? `（左から ${i + 1} 枚目）` : "";
+      return b.board.filter((c) => c.text.split(" ")[0] === name).length > 1 ? `（場の古いほうから ${i + 1} 枚目）` : "";
     };
     for (const [iid, text] of beforeBoard) {
       const t = afterBoard.get(iid);
@@ -542,7 +542,8 @@ export type Evaluation =
   /**
    * 引いたカードを決める（player の山札から。known はまだ決めていない引いたカードの枚数）。
    * preview は仮に打った局面（画面に見せる。undecided はその手札のうち、まだ決めていない引いたカード）、
-   * pool は引けたカード（仮に打った後の山札と、まだ決めていない引いたカード。手札から山札に戻したカードも入る）
+   * pool は引けたカード（仮に打った後の山札と、まだ決めていない引いたカード。手札から山札に戻したカードも入る。
+   * 条件付きで引くときは条件に合うカードだけ。1 種類なら evaluate が聞かずに決める）
    */
   | { kind: "draw"; player: PlayerIndex; known: number; preview: GameState; undecided: number[]; pool: Map<string, number> }
   | { kind: "done"; next: GameState };
@@ -554,6 +555,47 @@ export type Evaluation =
  * 3. 引いたのにまだ決めていないカードがあれば決める 4. 無ければ打った局面
  */
 export function evaluate(state: GameState, step: PendingStep, names: readonly [string, string]): { step: PendingStep; ev: Evaluation } {
+  for (let guard = 0; guard < 60; guard++) {
+    const r = evaluateOnce(state, step, names);
+    if (r.ev.kind !== "draw" || r.ev.pool.size !== 1) return r;
+    // 引けるカードが 1 種類しか無い（確定サーチ等）: 聞かずに決める
+    const draws: Draws = [[...r.step.draws[0]], [...r.step.draws[1]]];
+    draws[r.ev.player].push([...r.ev.pool.keys()][0]!);
+    step = { ...r.step, draws };
+  }
+  return { step, ev: { kind: "error", message: "引いたカードが決まりません" } };
+}
+
+/** 引いたカードの実体 ID の並び（席ごと。乱数で変わるかを比べる） */
+const drawnIids = (run: { arranged: GameState; next: GameState }) =>
+  ([0, 1] as const).map((p) => drawnCards(run.arranged, run.next, p).map((c) => c.iid).join()).join("/");
+
+/**
+ * 席 p が次に引いたカード（まだ決めていない最初の 1 枚）として、引けたカード（pool のうち）。そのカードを山札の上に並べて打ち、
+ * その枠で引かれたものだけ（条件付きで引くときは条件に合うカードだけ。1 種類なら確定サーチ。
+ * 屈辱なる放逐のように、条件付きで引いてから上から引くとき、条件に合わないカードは後の枠で引かれるので外す）。
+ * 引くカードが乱数で変わる手（山札を切り直してから引く等）は、並べ方で決まらないので pool のまま
+ */
+function drawOptions(state: GameState, step: PendingStep, p: PlayerIndex, run: { arranged: GameState; next: GameState }, pool: Map<string, number>): Map<string, number> {
+  const other = tryRun(state, step.action, step.draws, variantRng(step.rng ?? state.rng, SEARCH_FROM - 2));
+  if (other === null || drawnIids(other) !== drawnIids(run)) return pool;
+  const drawn = drawnCards(run.arranged, run.next, p);
+  const first = extraDraws(drawn, step.draws[p]).extra[0];
+  const slot = first ? drawn.indexOf(first) : -1;
+  if (slot < 0) return pool;
+  const out = new Map<string, number>();
+  for (const [id, n] of pool) {
+    const draws: Draws = [[...step.draws[0]], [...step.draws[1]]];
+    draws[p].push(id);
+    const r = tryRun(state, step.action, draws, step.rng);
+    if (!r) continue;
+    const got = drawnCards(r.arranged, r.next, p);
+    if (got[slot]?.cardId === id && extraDraws(got, draws[p]).missing === null) out.set(id, n);
+  }
+  return out.size > 0 ? out : pool;
+}
+
+function evaluateOnce(state: GameState, step: PendingStep, names: readonly [string, string]): { step: PendingStep; ev: Evaluation } {
   let run: { arranged: GameState; next: GameState };
   try {
     run = runStep(state, step.action, step.draws, step.rng);
@@ -593,10 +635,44 @@ export function evaluate(state: GameState, step: PendingStep, names: readonly [s
       const pool = new Map<string, number>();
       for (const c of [...run.next.players[p].deck, ...extra]) pool.set(c.cardId, (pool.get(c.cardId) ?? 0) + 1);
       const undecided = drawn.flatMap((d) => d.extra.map((c) => c.iid));
-      return { step, ev: { kind: "draw", player: p, known: extra.length, preview: run.next, undecided, pool } };
+      return { step, ev: { kind: "draw", player: p, known: extra.length, preview: run.next, undecided, pool: drawOptions(state, step, p, run, pool) } };
     }
   }
   return { step, ev: { kind: "done", next: run.next } };
+}
+
+// ---- 手札を出す順 ----
+
+/** 席 p の手札の実体 ID（エンジンの並び） */
+export const handIids = (s: GameState, p: PlayerIndex) => s.players[p].hand.map((h) => h.iid);
+
+/**
+ * 手を打った後の手札を出す順（試合の記録の画面の表示だけ。エンジンの手札の並びは変えない）。order は打つ前に出していた順、prev・next は打つ前と後のエンジンの手札の並び。
+ * マリガンで引いたカードは返したカードの枠に入れる。そのほかの手では、手札に残ったカードは前の並びを保ち、
+ * 新しく入ったカード（引いた・戻ってきた・手札で変わった）はエンジンの位置に置く。
+ * エンジンは手札に入るカードを末尾に足すので、前の手札での順が崩れたカードは、いったん手札を離れて戻ってきたもの
+ */
+export function nextHandOrder(order: readonly number[], prev: readonly number[], next: readonly number[], swap: readonly number[] | null): number[] {
+  const cur = [...order.filter((iid) => prev.includes(iid)), ...prev.filter((iid) => !order.includes(iid))];
+  if (swap) {
+    const added = next.filter((iid) => !prev.includes(iid));
+    let k = 0;
+    const out = cur.flatMap((iid) => (swap.includes(iid) ? (k < added.length ? [added[k++]!] : []) : [iid]));
+    return [...out.filter((iid) => next.includes(iid)), ...added.slice(k), ...next.filter((iid) => !out.includes(iid) && !added.includes(iid))];
+  }
+  const prevIndex = new Map(prev.map((iid, i) => [iid, i]));
+  const stayed = new Set<number>();
+  let last = -1;
+  for (const iid of next) {
+    const i = prevIndex.get(iid);
+    if (i !== undefined && i > last) {
+      stayed.add(iid);
+      last = i;
+    }
+  }
+  const queue = cur.filter((iid) => stayed.has(iid));
+  let q = 0;
+  return next.map((iid) => (stayed.has(iid) ? queue[q++]! : iid));
 }
 
 // ---- たどる ----

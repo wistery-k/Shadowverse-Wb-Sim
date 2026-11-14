@@ -1,0 +1,9709 @@
+{
+ "format": "svwb-match-record",
+ "version": 1,
+ "meta": {
+  "event": "ps26-27-08b",
+  "eventName": "Premier Series 26-27 第8節 後半戦",
+  "seats": [
+   {
+    "deck": "ps26-27-08b/VL_ドラゴン",
+    "team": "VL",
+    "cls": "dragon"
+   },
+   {
+    "deck": "ps26-27-08b/DFM_ネメシス",
+    "team": "DFM",
+    "cls": "nemesis"
+   }
+  ],
+  "memo": "Battle2",
+  "commit": "4e28860fca0c87d8a5dece32578304248c88b276",
+  "dirty": false,
+  "createdAt": "2026-11-14T08:00:55.486Z",
+  "updatedAt": "2026-11-14T08:18:37.487Z"
+ },
+ "decks": [
+  [
+   "10843310",
+   "10843310",
+   "10403120",
+   "10403120",
+   "10403120",
+   "10543310",
+   "10543310",
+   "10543310",
+   "10644120",
+   "10644120",
+   "10644120",
+   "10741110",
+   "10741110",
+   "10741110",
+   "10842120",
+   "10842120",
+   "10042310",
+   "10042310",
+   "10042310",
+   "10444120",
+   "10444120",
+   "10444120",
+   "10503310",
+   "10444110",
+   "10444110",
+   "10644110",
+   "10644110",
+   "10644110",
+   "10944120",
+   "10944120",
+   "10944120",
+   "10844120",
+   "10844120",
+   "10844120",
+   "10744110",
+   "10744110",
+   "10744110",
+   "10544110",
+   "10544110",
+   "10544110"
+  ],
+  [
+   "10573310",
+   "10771310",
+   "10871130",
+   "10971110",
+   "10972310",
+   "10974110",
+   "10974110",
+   "10974110",
+   "10071120",
+   "10072210",
+   "10403120",
+   "10471130",
+   "10574120",
+   "10674120",
+   "10772110",
+   "10803110",
+   "10871120",
+   "10874120",
+   "10471110",
+   "10574110",
+   "10602210",
+   "10702110",
+   "10773110",
+   "10872120",
+   "10973310",
+   "10403110",
+   "10571110",
+   "10572110",
+   "10774120",
+   "10971120",
+   "10972110",
+   "10401110",
+   "10474110",
+   "10874110",
+   "10973110",
+   "10404110",
+   "10473310",
+   "10674110",
+   "10974120",
+   "10774110"
+  ]
+ ],
+ "seed": 1227411288,
+ "steps": [
+  {
+   "kind": "hand",
+   "player": 0,
+   "cards": [
+    "10644120",
+    "10944120",
+    "10744110",
+    "10042310"
+   ]
+  },
+  {
+   "kind": "hand",
+   "player": 1,
+   "cards": [
+    "10572110",
+    "10973110",
+    "10674110",
+    "10471110"
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "mulligan",
+    "player": 0,
+    "swap": [
+     10,
+     36
+    ]
+   },
+   "draws": [
+    [
+     "10503310",
+     "10444110"
+    ],
+    []
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "mulligan",
+    "player": 1,
+    "swap": [
+     68,
+     75,
+     78,
+     59
+    ]
+   },
+   "draws": [
+    [
+     "10644110"
+    ],
+    [
+     "10772110",
+     "10871130",
+     "10972310",
+     "10972110"
+    ]
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "endTurn"
+   },
+   "draws": [
+    [],
+    [
+     "10404110"
+    ]
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "extraPp"
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 55
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "endTurn"
+   },
+   "draws": [
+    [
+     "10842120"
+    ],
+    []
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 15
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "choose",
+    "targets": [
+     25
+    ]
+   },
+   "draws": [
+    [
+     "10444120"
+    ],
+    []
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "endTurn"
+   },
+   "draws": [
+    [],
+    [
+     "10874120"
+    ]
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 81
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "attack",
+    "attacker": 81,
+    "target": 15
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 43
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "attack",
+    "attacker": 55,
+    "target": "leader"
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "endTurn"
+   },
+   "draws": [
+    [
+     "10042310"
+    ],
+    []
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 18
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "endTurn"
+   },
+   "draws": [
+    [],
+    [
+     "10803110"
+    ]
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 56
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 83
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "attack",
+    "attacker": 55,
+    "target": "leader"
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "attack",
+    "attacker": 43,
+    "target": "leader"
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "endTurn"
+   },
+   "draws": [
+    [
+     "10042310"
+    ],
+    []
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 20
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "endTurn"
+   },
+   "draws": [
+    [],
+    [
+     "10773110"
+    ]
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "evolve",
+    "iid": 55
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 84
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "attack",
+    "attacker": 84,
+    "target": 20
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 82
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "attack",
+    "attacker": 82,
+    "target": 20
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "attack",
+    "attacker": 55,
+    "target": "leader"
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "attack",
+    "attacker": 43,
+    "target": "leader"
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "attack",
+    "attacker": 56,
+    "target": "leader"
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "attack",
+    "attacker": 83,
+    "target": "leader"
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 58
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "endTurn"
+   },
+   "draws": [
+    [
+     "10744110"
+    ],
+    []
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 29
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "mode",
+    "index": 0
+   },
+   "draws": [
+    [
+     "10644110"
+    ],
+    []
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "evolve",
+    "iid": 29
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "mode",
+    "index": 1
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "endTurn"
+   },
+   "draws": [
+    [],
+    [
+     "10974110"
+    ]
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 48
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "evolve",
+    "iid": 48
+   },
+   "draws": [
+    [],
+    [
+     "10974110"
+    ]
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 45
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "choose",
+    "targets": [
+     85
+    ]
+   },
+   "draws": [
+    [],
+    [
+     "10974110",
+     "10874110",
+     "10474110"
+    ]
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 63
+   },
+   "draws": [
+    [],
+    [
+     "10971120"
+    ]
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "attack",
+    "attacker": 48,
+    "target": 29
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "endTurn"
+   },
+   "draws": [
+    [
+     "10741110"
+    ],
+    []
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 27
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "choose",
+    "targets": [
+     19
+    ]
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 88
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "choose",
+    "targets": [
+     17
+    ]
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "choose",
+    "targets": [
+     63
+    ]
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "evolve",
+    "iid": 27
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "attack",
+    "attacker": 27,
+    "target": "leader"
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "endTurn"
+   },
+   "draws": [
+    [],
+    [
+     "10771310"
+    ]
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 47
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 70
+   },
+   "draws": [
+    [],
+    [
+     "10403120"
+    ]
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 42
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "mode",
+    "index": 0
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "superEvolve",
+    "iid": 87
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "attack",
+    "attacker": 47,
+    "target": 27
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "attack",
+    "attacker": 87,
+    "target": "leader"
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "endTurn"
+   },
+   "draws": [
+    [
+     "10741110"
+    ],
+    []
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 35
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "superEvolve",
+    "iid": 35
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "endTurn"
+   },
+   "draws": [
+    [],
+    [
+     "10574120"
+    ]
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 91
+   },
+   "draws": [
+    [],
+    [
+     "10973310"
+    ]
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 71
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 46
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "superEvolve",
+    "iid": 46
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "attack",
+    "attacker": 46,
+    "target": 35
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "endTurn"
+   },
+   "draws": [
+    [
+     "10644120"
+    ],
+    []
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 26
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "choose",
+    "targets": [
+     11
+    ]
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "superEvolve",
+    "iid": 95
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 93
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "choose",
+    "targets": [
+     96
+    ]
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "choose",
+    "targets": [
+     46
+    ]
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 94
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "choose",
+    "targets": [
+     97
+    ]
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "choose",
+    "targets": [
+     71
+    ]
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 89
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "choose",
+    "targets": [
+     98
+    ]
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "attack",
+    "attacker": 26,
+    "target": "leader"
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "endTurn"
+   },
+   "draws": [
+    [],
+    [
+     "10674110"
+    ]
+   ]
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 65
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "extraPp"
+   }
+  },
+  {
+   "kind": "action",
+   "action": {
+    "type": "play",
+    "iid": 76
+   }
+  }
+ ],
+ "result": {
+  "winner": 1,
+  "reason": "leader"
+ },
+ "turns": [
+  {
+   "turn": 1,
+   "step": 4,
+   "state": {
+    "phase": "main",
+    "players": [
+     {
+      "leaderHp": 20,
+      "leaderMaxHp": 20,
+      "maxPp": 1,
+      "pp": 1,
+      "ep": 2,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 1,
+      "deck": [
+       {
+        "iid": 11,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 35,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 15,
+        "cardId": "10842120"
+       },
+       {
+        "iid": 3,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 31,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 27,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 5,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 20,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 16,
+        "cardId": "10842120"
+       },
+       {
+        "iid": 30,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 14,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 18,
+        "cardId": "10042310"
+       },
+       {
+        "iid": 34,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 22,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 33,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 24,
+        "cardId": "10444110"
+       },
+       {
+        "iid": 8,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 37,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 2,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 28,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 17,
+        "cardId": "10042310"
+       },
+       {
+        "iid": 7,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 10,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 13,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 21,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 4,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 9,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 1,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 36,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 12,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 6,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 40,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 38,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 39,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 32,
+        "cardId": "10844120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 29,
+        "cardId": "10944120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 19,
+        "cardId": "10042310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 23,
+        "cardId": "10503310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 25,
+        "cardId": "10444110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 26,
+        "cardId": "10644110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [],
+      "crests": [],
+      "graveyard": 0,
+      "graveyardFollowers": [],
+      "destroyedAmulets": [],
+      "handLog": "i40 i39 i38 i37 i36 i35 d d i36",
+      "destroyedThisTurn": [],
+      "combo": 0,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true
+     },
+     {
+      "leaderHp": 20,
+      "leaderMaxHp": 20,
+      "maxPp": 0,
+      "pp": 0,
+      "ep": 2,
+      "sep": 2,
+      "extraPpAvailable": true,
+      "turnCount": 0,
+      "deck": [
+       {
+        "iid": 64,
+        "cardId": "10872120"
+       },
+       {
+        "iid": 58,
+        "cardId": "10874120"
+       },
+       {
+        "iid": 48,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 66,
+        "cardId": "10403110"
+       },
+       {
+        "iid": 63,
+        "cardId": "10773110"
+       },
+       {
+        "iid": 78,
+        "cardId": "10674110"
+       },
+       {
+        "iid": 50,
+        "cardId": "10072210"
+       },
+       {
+        "iid": 74,
+        "cardId": "10874110"
+       },
+       {
+        "iid": 68,
+        "cardId": "10572110"
+       },
+       {
+        "iid": 42,
+        "cardId": "10771310"
+       },
+       {
+        "iid": 72,
+        "cardId": "10401110"
+       },
+       {
+        "iid": 70,
+        "cardId": "10971120"
+       },
+       {
+        "iid": 80,
+        "cardId": "10774110"
+       },
+       {
+        "iid": 47,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 51,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 67,
+        "cardId": "10571110"
+       },
+       {
+        "iid": 59,
+        "cardId": "10471110"
+       },
+       {
+        "iid": 76,
+        "cardId": "10404110"
+       },
+       {
+        "iid": 75,
+        "cardId": "10973110"
+       },
+       {
+        "iid": 73,
+        "cardId": "10474110"
+       },
+       {
+        "iid": 69,
+        "cardId": "10774120"
+       },
+       {
+        "iid": 49,
+        "cardId": "10071120"
+       },
+       {
+        "iid": 53,
+        "cardId": "10574120"
+       },
+       {
+        "iid": 65,
+        "cardId": "10973310"
+       },
+       {
+        "iid": 44,
+        "cardId": "10971110"
+       },
+       {
+        "iid": 61,
+        "cardId": "10602210"
+       },
+       {
+        "iid": 56,
+        "cardId": "10803110"
+       },
+       {
+        "iid": 54,
+        "cardId": "10674120"
+       },
+       {
+        "iid": 52,
+        "cardId": "10471130"
+       },
+       {
+        "iid": 46,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 60,
+        "cardId": "10574110"
+       },
+       {
+        "iid": 62,
+        "cardId": "10702110"
+       },
+       {
+        "iid": 79,
+        "cardId": "10974120"
+       },
+       {
+        "iid": 41,
+        "cardId": "10573310"
+       },
+       {
+        "iid": 77,
+        "cardId": "10473310"
+       },
+       {
+        "iid": 57,
+        "cardId": "10871120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 55,
+        "cardId": "10772110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 43,
+        "cardId": "10871130",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 45,
+        "cardId": "10972310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 71,
+        "cardId": "10972110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [],
+      "crests": [],
+      "graveyard": 0,
+      "graveyardFollowers": [],
+      "destroyedAmulets": [],
+      "handLog": "i40 i39 i38 i37 i36 i35 i34 i33 d d d d",
+      "destroyedThisTurn": [],
+      "combo": 0,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true,
+      "evolvedCount": 0,
+      "enteredKinds": []
+     }
+    ],
+    "first": 0,
+    "active": 0,
+    "turn": 1,
+    "winner": null,
+    "rng": 3547777777,
+    "nextIid": 81,
+    "nextOrder": 1,
+    "stack": [],
+    "queue": [],
+    "pending": null,
+    "attack": null
+   }
+  },
+  {
+   "turn": 2,
+   "step": 5,
+   "state": {
+    "phase": "main",
+    "players": [
+     {
+      "leaderHp": 20,
+      "leaderMaxHp": 20,
+      "maxPp": 1,
+      "pp": 1,
+      "ep": 2,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 1,
+      "deck": [
+       {
+        "iid": 11,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 35,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 15,
+        "cardId": "10842120"
+       },
+       {
+        "iid": 3,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 31,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 27,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 5,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 20,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 16,
+        "cardId": "10842120"
+       },
+       {
+        "iid": 30,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 14,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 18,
+        "cardId": "10042310"
+       },
+       {
+        "iid": 34,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 22,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 33,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 24,
+        "cardId": "10444110"
+       },
+       {
+        "iid": 8,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 37,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 2,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 28,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 17,
+        "cardId": "10042310"
+       },
+       {
+        "iid": 7,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 10,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 13,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 21,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 4,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 9,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 1,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 36,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 12,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 6,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 40,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 38,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 39,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 32,
+        "cardId": "10844120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 29,
+        "cardId": "10944120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 19,
+        "cardId": "10042310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 23,
+        "cardId": "10503310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 25,
+        "cardId": "10444110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 26,
+        "cardId": "10644110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [],
+      "crests": [],
+      "graveyard": 0,
+      "graveyardFollowers": [],
+      "destroyedAmulets": [],
+      "handLog": "i40 i39 i38 i37 i36 i35 d d i36",
+      "destroyedThisTurn": [],
+      "combo": 0,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true
+     },
+     {
+      "leaderHp": 20,
+      "leaderMaxHp": 20,
+      "maxPp": 1,
+      "pp": 1,
+      "ep": 2,
+      "sep": 2,
+      "extraPpAvailable": true,
+      "turnCount": 1,
+      "deck": [
+       {
+        "iid": 64,
+        "cardId": "10872120"
+       },
+       {
+        "iid": 58,
+        "cardId": "10874120"
+       },
+       {
+        "iid": 48,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 66,
+        "cardId": "10403110"
+       },
+       {
+        "iid": 63,
+        "cardId": "10773110"
+       },
+       {
+        "iid": 78,
+        "cardId": "10674110"
+       },
+       {
+        "iid": 50,
+        "cardId": "10072210"
+       },
+       {
+        "iid": 74,
+        "cardId": "10874110"
+       },
+       {
+        "iid": 68,
+        "cardId": "10572110"
+       },
+       {
+        "iid": 42,
+        "cardId": "10771310"
+       },
+       {
+        "iid": 72,
+        "cardId": "10401110"
+       },
+       {
+        "iid": 70,
+        "cardId": "10971120"
+       },
+       {
+        "iid": 80,
+        "cardId": "10774110"
+       },
+       {
+        "iid": 47,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 51,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 67,
+        "cardId": "10571110"
+       },
+       {
+        "iid": 59,
+        "cardId": "10471110"
+       },
+       {
+        "iid": 75,
+        "cardId": "10973110"
+       },
+       {
+        "iid": 73,
+        "cardId": "10474110"
+       },
+       {
+        "iid": 69,
+        "cardId": "10774120"
+       },
+       {
+        "iid": 49,
+        "cardId": "10071120"
+       },
+       {
+        "iid": 53,
+        "cardId": "10574120"
+       },
+       {
+        "iid": 65,
+        "cardId": "10973310"
+       },
+       {
+        "iid": 44,
+        "cardId": "10971110"
+       },
+       {
+        "iid": 61,
+        "cardId": "10602210"
+       },
+       {
+        "iid": 56,
+        "cardId": "10803110"
+       },
+       {
+        "iid": 54,
+        "cardId": "10674120"
+       },
+       {
+        "iid": 52,
+        "cardId": "10471130"
+       },
+       {
+        "iid": 46,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 60,
+        "cardId": "10574110"
+       },
+       {
+        "iid": 62,
+        "cardId": "10702110"
+       },
+       {
+        "iid": 79,
+        "cardId": "10974120"
+       },
+       {
+        "iid": 41,
+        "cardId": "10573310"
+       },
+       {
+        "iid": 77,
+        "cardId": "10473310"
+       },
+       {
+        "iid": 57,
+        "cardId": "10871120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 55,
+        "cardId": "10772110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 43,
+        "cardId": "10871130",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 45,
+        "cardId": "10972310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 71,
+        "cardId": "10972110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 76,
+        "cardId": "10404110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [],
+      "crests": [],
+      "graveyard": 0,
+      "graveyardFollowers": [],
+      "destroyedAmulets": [],
+      "handLog": "i40 i39 i38 i37 i36 i35 i34 i33 d d d d i36",
+      "destroyedThisTurn": [],
+      "combo": 0,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true,
+      "evolvedCount": 0,
+      "enteredKinds": []
+     }
+    ],
+    "first": 0,
+    "active": 1,
+    "turn": 2,
+    "winner": null,
+    "rng": 3547777777,
+    "nextIid": 81,
+    "nextOrder": 1,
+    "stack": [],
+    "queue": [],
+    "pending": null,
+    "attack": null
+   }
+  },
+  {
+   "turn": 3,
+   "step": 8,
+   "state": {
+    "phase": "main",
+    "players": [
+     {
+      "leaderHp": 20,
+      "leaderMaxHp": 20,
+      "maxPp": 2,
+      "pp": 2,
+      "ep": 2,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 2,
+      "deck": [
+       {
+        "iid": 11,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 35,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 3,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 31,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 27,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 5,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 20,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 16,
+        "cardId": "10842120"
+       },
+       {
+        "iid": 30,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 14,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 18,
+        "cardId": "10042310"
+       },
+       {
+        "iid": 34,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 22,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 33,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 24,
+        "cardId": "10444110"
+       },
+       {
+        "iid": 8,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 37,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 2,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 28,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 17,
+        "cardId": "10042310"
+       },
+       {
+        "iid": 7,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 10,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 13,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 21,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 4,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 9,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 1,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 36,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 12,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 6,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 40,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 38,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 39,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 32,
+        "cardId": "10844120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 29,
+        "cardId": "10944120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 19,
+        "cardId": "10042310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 23,
+        "cardId": "10503310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 25,
+        "cardId": "10444110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 26,
+        "cardId": "10644110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 15,
+        "cardId": "10842120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [],
+      "crests": [],
+      "graveyard": 0,
+      "graveyardFollowers": [],
+      "destroyedAmulets": [],
+      "handLog": "i40 i39 i38 i37 i36 i35 d d i36 i35",
+      "destroyedThisTurn": [],
+      "combo": 0,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true
+     },
+     {
+      "leaderHp": 20,
+      "leaderMaxHp": 20,
+      "maxPp": 1,
+      "pp": 0,
+      "ep": 2,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 1,
+      "deck": [
+       {
+        "iid": 64,
+        "cardId": "10872120"
+       },
+       {
+        "iid": 58,
+        "cardId": "10874120"
+       },
+       {
+        "iid": 48,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 66,
+        "cardId": "10403110"
+       },
+       {
+        "iid": 63,
+        "cardId": "10773110"
+       },
+       {
+        "iid": 78,
+        "cardId": "10674110"
+       },
+       {
+        "iid": 50,
+        "cardId": "10072210"
+       },
+       {
+        "iid": 74,
+        "cardId": "10874110"
+       },
+       {
+        "iid": 68,
+        "cardId": "10572110"
+       },
+       {
+        "iid": 42,
+        "cardId": "10771310"
+       },
+       {
+        "iid": 72,
+        "cardId": "10401110"
+       },
+       {
+        "iid": 70,
+        "cardId": "10971120"
+       },
+       {
+        "iid": 80,
+        "cardId": "10774110"
+       },
+       {
+        "iid": 47,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 51,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 67,
+        "cardId": "10571110"
+       },
+       {
+        "iid": 59,
+        "cardId": "10471110"
+       },
+       {
+        "iid": 75,
+        "cardId": "10973110"
+       },
+       {
+        "iid": 73,
+        "cardId": "10474110"
+       },
+       {
+        "iid": 69,
+        "cardId": "10774120"
+       },
+       {
+        "iid": 49,
+        "cardId": "10071120"
+       },
+       {
+        "iid": 53,
+        "cardId": "10574120"
+       },
+       {
+        "iid": 65,
+        "cardId": "10973310"
+       },
+       {
+        "iid": 44,
+        "cardId": "10971110"
+       },
+       {
+        "iid": 61,
+        "cardId": "10602210"
+       },
+       {
+        "iid": 56,
+        "cardId": "10803110"
+       },
+       {
+        "iid": 54,
+        "cardId": "10674120"
+       },
+       {
+        "iid": 52,
+        "cardId": "10471130"
+       },
+       {
+        "iid": 46,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 60,
+        "cardId": "10574110"
+       },
+       {
+        "iid": 62,
+        "cardId": "10702110"
+       },
+       {
+        "iid": 79,
+        "cardId": "10974120"
+       },
+       {
+        "iid": 41,
+        "cardId": "10573310"
+       },
+       {
+        "iid": 77,
+        "cardId": "10473310"
+       },
+       {
+        "iid": 57,
+        "cardId": "10871120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 43,
+        "cardId": "10871130",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 45,
+        "cardId": "10972310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 71,
+        "cardId": "10972110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 76,
+        "cardId": "10404110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 81,
+        "cardId": "90071140",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": true,
+        "drawnBy": null
+       }
+      ],
+      "board": [
+       {
+        "iid": 55,
+        "cardId": "10772110",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 1,
+        "kind": "follower",
+        "attack": 2,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 2,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       }
+      ],
+      "crests": [],
+      "graveyard": 0,
+      "graveyardFollowers": [],
+      "destroyedAmulets": [],
+      "handLog": "i40 i39 i38 i37 i36 i35 i34 i33 d d d d i36 o10772110/2/_/0/0",
+      "destroyedThisTurn": [],
+      "combo": 1,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true,
+      "evolvedCount": 0,
+      "enteredKinds": [
+       "10772110"
+      ]
+     }
+    ],
+    "first": 0,
+    "active": 0,
+    "turn": 3,
+    "winner": null,
+    "rng": 3547777777,
+    "nextIid": 82,
+    "nextOrder": 2,
+    "stack": [],
+    "queue": [],
+    "pending": null,
+    "attack": null
+   }
+  },
+  {
+   "turn": 4,
+   "step": 11,
+   "state": {
+    "phase": "main",
+    "players": [
+     {
+      "leaderHp": 20,
+      "leaderMaxHp": 20,
+      "maxPp": 2,
+      "pp": 0,
+      "ep": 2,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 2,
+      "deck": [
+       {
+        "iid": 11,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 35,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 3,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 31,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 27,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 5,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 16,
+        "cardId": "10842120"
+       },
+       {
+        "iid": 30,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 14,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 18,
+        "cardId": "10042310"
+       },
+       {
+        "iid": 34,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 22,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 33,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 24,
+        "cardId": "10444110"
+       },
+       {
+        "iid": 8,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 37,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 2,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 28,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 17,
+        "cardId": "10042310"
+       },
+       {
+        "iid": 7,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 10,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 13,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 21,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 4,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 9,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 1,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 36,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 12,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 6,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 40,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 38,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 39,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 32,
+        "cardId": "10844120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 29,
+        "cardId": "10944120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 19,
+        "cardId": "10042310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 23,
+        "cardId": "10503310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 26,
+        "cardId": "10644110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 20,
+        "cardId": "10444120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [
+       {
+        "iid": 15,
+        "cardId": "10842120",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 2,
+        "kind": "follower",
+        "attack": 2,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 3,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       }
+      ],
+      "crests": [],
+      "graveyard": 1,
+      "graveyardFollowers": [],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "10444110"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 d d i36 i35 o10842120/2/_/0/0 u i34",
+      "destroyedThisTurn": [],
+      "combo": 1,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true
+     },
+     {
+      "leaderHp": 20,
+      "leaderMaxHp": 20,
+      "maxPp": 2,
+      "pp": 2,
+      "ep": 2,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 2,
+      "deck": [
+       {
+        "iid": 64,
+        "cardId": "10872120"
+       },
+       {
+        "iid": 48,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 66,
+        "cardId": "10403110"
+       },
+       {
+        "iid": 63,
+        "cardId": "10773110"
+       },
+       {
+        "iid": 78,
+        "cardId": "10674110"
+       },
+       {
+        "iid": 50,
+        "cardId": "10072210"
+       },
+       {
+        "iid": 74,
+        "cardId": "10874110"
+       },
+       {
+        "iid": 68,
+        "cardId": "10572110"
+       },
+       {
+        "iid": 42,
+        "cardId": "10771310"
+       },
+       {
+        "iid": 72,
+        "cardId": "10401110"
+       },
+       {
+        "iid": 70,
+        "cardId": "10971120"
+       },
+       {
+        "iid": 80,
+        "cardId": "10774110"
+       },
+       {
+        "iid": 47,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 51,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 67,
+        "cardId": "10571110"
+       },
+       {
+        "iid": 59,
+        "cardId": "10471110"
+       },
+       {
+        "iid": 75,
+        "cardId": "10973110"
+       },
+       {
+        "iid": 73,
+        "cardId": "10474110"
+       },
+       {
+        "iid": 69,
+        "cardId": "10774120"
+       },
+       {
+        "iid": 49,
+        "cardId": "10071120"
+       },
+       {
+        "iid": 53,
+        "cardId": "10574120"
+       },
+       {
+        "iid": 65,
+        "cardId": "10973310"
+       },
+       {
+        "iid": 44,
+        "cardId": "10971110"
+       },
+       {
+        "iid": 61,
+        "cardId": "10602210"
+       },
+       {
+        "iid": 56,
+        "cardId": "10803110"
+       },
+       {
+        "iid": 54,
+        "cardId": "10674120"
+       },
+       {
+        "iid": 52,
+        "cardId": "10471130"
+       },
+       {
+        "iid": 46,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 60,
+        "cardId": "10574110"
+       },
+       {
+        "iid": 62,
+        "cardId": "10702110"
+       },
+       {
+        "iid": 79,
+        "cardId": "10974120"
+       },
+       {
+        "iid": 41,
+        "cardId": "10573310"
+       },
+       {
+        "iid": 77,
+        "cardId": "10473310"
+       },
+       {
+        "iid": 57,
+        "cardId": "10871120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 43,
+        "cardId": "10871130",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 45,
+        "cardId": "10972310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 71,
+        "cardId": "10972110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 76,
+        "cardId": "10404110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 81,
+        "cardId": "90071140",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": true,
+        "drawnBy": null
+       },
+       {
+        "iid": 58,
+        "cardId": "10874120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [
+       {
+        "iid": 55,
+        "cardId": "10772110",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 1,
+        "kind": "follower",
+        "attack": 2,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 2,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       }
+      ],
+      "crests": [],
+      "graveyard": 0,
+      "graveyardFollowers": [],
+      "destroyedAmulets": [],
+      "handLog": "i40 i39 i38 i37 i36 i35 i34 i33 d d d d i36 o10772110/2/_/0/0 i35",
+      "destroyedThisTurn": [],
+      "combo": 0,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true,
+      "evolvedCount": 0,
+      "enteredKinds": [
+       "10772110"
+      ]
+     }
+    ],
+    "first": 0,
+    "active": 1,
+    "turn": 4,
+    "winner": null,
+    "rng": 3547777777,
+    "nextIid": 82,
+    "nextOrder": 3,
+    "stack": [],
+    "queue": [],
+    "pending": null,
+    "attack": null
+   }
+  },
+  {
+   "turn": 5,
+   "step": 16,
+   "state": {
+    "phase": "main",
+    "players": [
+     {
+      "leaderHp": 18,
+      "leaderMaxHp": 20,
+      "maxPp": 3,
+      "pp": 3,
+      "ep": 2,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 3,
+      "deck": [
+       {
+        "iid": 11,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 35,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 3,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 31,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 27,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 5,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 16,
+        "cardId": "10842120"
+       },
+       {
+        "iid": 30,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 14,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 34,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 22,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 33,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 24,
+        "cardId": "10444110"
+       },
+       {
+        "iid": 8,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 37,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 2,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 28,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 17,
+        "cardId": "10042310"
+       },
+       {
+        "iid": 7,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 10,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 13,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 21,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 4,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 9,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 1,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 36,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 12,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 6,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 40,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 38,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 39,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 32,
+        "cardId": "10844120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 29,
+        "cardId": "10944120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 19,
+        "cardId": "10042310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 23,
+        "cardId": "10503310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 26,
+        "cardId": "10644110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 20,
+        "cardId": "10444120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 18,
+        "cardId": "10042310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [],
+      "crests": [],
+      "graveyard": 2,
+      "graveyardFollowers": [
+       "10842120"
+      ],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "10444110"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 d d i36 i35 o10842120/2/_/0/0 u i34 a1 i33",
+      "destroyedThisTurn": [],
+      "combo": 0,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true
+     },
+     {
+      "leaderHp": 20,
+      "leaderMaxHp": 20,
+      "maxPp": 2,
+      "pp": 0,
+      "ep": 2,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 2,
+      "deck": [
+       {
+        "iid": 64,
+        "cardId": "10872120"
+       },
+       {
+        "iid": 48,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 66,
+        "cardId": "10403110"
+       },
+       {
+        "iid": 63,
+        "cardId": "10773110"
+       },
+       {
+        "iid": 78,
+        "cardId": "10674110"
+       },
+       {
+        "iid": 50,
+        "cardId": "10072210"
+       },
+       {
+        "iid": 74,
+        "cardId": "10874110"
+       },
+       {
+        "iid": 68,
+        "cardId": "10572110"
+       },
+       {
+        "iid": 42,
+        "cardId": "10771310"
+       },
+       {
+        "iid": 72,
+        "cardId": "10401110"
+       },
+       {
+        "iid": 70,
+        "cardId": "10971120"
+       },
+       {
+        "iid": 80,
+        "cardId": "10774110"
+       },
+       {
+        "iid": 47,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 51,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 67,
+        "cardId": "10571110"
+       },
+       {
+        "iid": 59,
+        "cardId": "10471110"
+       },
+       {
+        "iid": 75,
+        "cardId": "10973110"
+       },
+       {
+        "iid": 73,
+        "cardId": "10474110"
+       },
+       {
+        "iid": 69,
+        "cardId": "10774120"
+       },
+       {
+        "iid": 49,
+        "cardId": "10071120"
+       },
+       {
+        "iid": 53,
+        "cardId": "10574120"
+       },
+       {
+        "iid": 65,
+        "cardId": "10973310"
+       },
+       {
+        "iid": 44,
+        "cardId": "10971110"
+       },
+       {
+        "iid": 61,
+        "cardId": "10602210"
+       },
+       {
+        "iid": 56,
+        "cardId": "10803110"
+       },
+       {
+        "iid": 54,
+        "cardId": "10674120"
+       },
+       {
+        "iid": 52,
+        "cardId": "10471130"
+       },
+       {
+        "iid": 46,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 60,
+        "cardId": "10574110"
+       },
+       {
+        "iid": 62,
+        "cardId": "10702110"
+       },
+       {
+        "iid": 79,
+        "cardId": "10974120"
+       },
+       {
+        "iid": 41,
+        "cardId": "10573310"
+       },
+       {
+        "iid": 77,
+        "cardId": "10473310"
+       },
+       {
+        "iid": 57,
+        "cardId": "10871120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 45,
+        "cardId": "10972310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 71,
+        "cardId": "10972110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 76,
+        "cardId": "10404110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 58,
+        "cardId": "10874120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 82,
+        "cardId": "90071140",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [
+       {
+        "iid": 55,
+        "cardId": "10772110",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 1,
+        "kind": "follower",
+        "attack": 2,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 1,
+        "enteredTurn": 2,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       },
+       {
+        "iid": 43,
+        "cardId": "10871130",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 4,
+        "kind": "follower",
+        "attack": 1,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 4,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       }
+      ],
+      "crests": [],
+      "graveyard": 1,
+      "graveyardFollowers": [
+       "90071140"
+      ],
+      "destroyedAmulets": [],
+      "handLog": "i40 i39 i38 i37 i36 i35 i34 i33 d d d d i36 o10772110/2/_/0/0 i35 a1 o10871130/1/_/0/0 i0",
+      "destroyedThisTurn": [],
+      "combo": 2,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true,
+      "evolvedCount": 0,
+      "enteredKinds": [
+       "10772110",
+       "10871130",
+       "90071140"
+      ]
+     }
+    ],
+    "first": 0,
+    "active": 0,
+    "turn": 5,
+    "winner": null,
+    "rng": 1084376294,
+    "nextIid": 83,
+    "nextOrder": 5,
+    "stack": [],
+    "queue": [],
+    "pending": null,
+    "attack": null
+   }
+  },
+  {
+   "turn": 6,
+   "step": 18,
+   "state": {
+    "phase": "main",
+    "players": [
+     {
+      "leaderHp": 18,
+      "leaderMaxHp": 20,
+      "maxPp": 4,
+      "pp": 0,
+      "ep": 2,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 3,
+      "deck": [
+       {
+        "iid": 11,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 35,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 3,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 31,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 27,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 5,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 16,
+        "cardId": "10842120"
+       },
+       {
+        "iid": 30,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 14,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 34,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 22,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 33,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 24,
+        "cardId": "10444110"
+       },
+       {
+        "iid": 8,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 37,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 2,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 28,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 17,
+        "cardId": "10042310"
+       },
+       {
+        "iid": 7,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 10,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 13,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 21,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 4,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 9,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 1,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 36,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 12,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 6,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 40,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 38,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 39,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 32,
+        "cardId": "10844120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 29,
+        "cardId": "10944120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 19,
+        "cardId": "10042310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 23,
+        "cardId": "10503310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 26,
+        "cardId": "10644110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 20,
+        "cardId": "10444120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [],
+      "crests": [],
+      "graveyard": 3,
+      "graveyardFollowers": [
+       "10842120"
+      ],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "10444110"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 d d i36 i35 o10842120/2/_/0/0 u i34 a1 i33 o10042310/3/_/0/0 b1",
+      "destroyedThisTurn": [],
+      "combo": 1,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true
+     },
+     {
+      "leaderHp": 20,
+      "leaderMaxHp": 20,
+      "maxPp": 3,
+      "pp": 3,
+      "ep": 2,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 3,
+      "deck": [
+       {
+        "iid": 64,
+        "cardId": "10872120"
+       },
+       {
+        "iid": 48,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 66,
+        "cardId": "10403110"
+       },
+       {
+        "iid": 63,
+        "cardId": "10773110"
+       },
+       {
+        "iid": 78,
+        "cardId": "10674110"
+       },
+       {
+        "iid": 50,
+        "cardId": "10072210"
+       },
+       {
+        "iid": 74,
+        "cardId": "10874110"
+       },
+       {
+        "iid": 68,
+        "cardId": "10572110"
+       },
+       {
+        "iid": 42,
+        "cardId": "10771310"
+       },
+       {
+        "iid": 72,
+        "cardId": "10401110"
+       },
+       {
+        "iid": 70,
+        "cardId": "10971120"
+       },
+       {
+        "iid": 80,
+        "cardId": "10774110"
+       },
+       {
+        "iid": 47,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 51,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 67,
+        "cardId": "10571110"
+       },
+       {
+        "iid": 59,
+        "cardId": "10471110"
+       },
+       {
+        "iid": 75,
+        "cardId": "10973110"
+       },
+       {
+        "iid": 73,
+        "cardId": "10474110"
+       },
+       {
+        "iid": 69,
+        "cardId": "10774120"
+       },
+       {
+        "iid": 49,
+        "cardId": "10071120"
+       },
+       {
+        "iid": 53,
+        "cardId": "10574120"
+       },
+       {
+        "iid": 65,
+        "cardId": "10973310"
+       },
+       {
+        "iid": 44,
+        "cardId": "10971110"
+       },
+       {
+        "iid": 61,
+        "cardId": "10602210"
+       },
+       {
+        "iid": 54,
+        "cardId": "10674120"
+       },
+       {
+        "iid": 52,
+        "cardId": "10471130"
+       },
+       {
+        "iid": 46,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 60,
+        "cardId": "10574110"
+       },
+       {
+        "iid": 62,
+        "cardId": "10702110"
+       },
+       {
+        "iid": 79,
+        "cardId": "10974120"
+       },
+       {
+        "iid": 41,
+        "cardId": "10573310"
+       },
+       {
+        "iid": 77,
+        "cardId": "10473310"
+       },
+       {
+        "iid": 57,
+        "cardId": "10871120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 45,
+        "cardId": "10972310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 71,
+        "cardId": "10972110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 76,
+        "cardId": "10404110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 58,
+        "cardId": "10874120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 82,
+        "cardId": "90071140",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 56,
+        "cardId": "10803110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [
+       {
+        "iid": 55,
+        "cardId": "10772110",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 1,
+        "kind": "follower",
+        "attack": 2,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 2,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       },
+       {
+        "iid": 43,
+        "cardId": "10871130",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 4,
+        "kind": "follower",
+        "attack": 1,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 4,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       }
+      ],
+      "crests": [],
+      "graveyard": 1,
+      "graveyardFollowers": [
+       "90071140"
+      ],
+      "destroyedAmulets": [],
+      "handLog": "i40 i39 i38 i37 i36 i35 i34 i33 d d d d i36 o10772110/2/_/0/0 i35 a1 o10871130/1/_/0/0 i0 i34",
+      "destroyedThisTurn": [],
+      "combo": 0,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true,
+      "evolvedCount": 0,
+      "enteredKinds": [
+       "10772110",
+       "10871130",
+       "90071140"
+      ]
+     }
+    ],
+    "first": 0,
+    "active": 1,
+    "turn": 6,
+    "winner": null,
+    "rng": 1084376294,
+    "nextIid": 83,
+    "nextOrder": 5,
+    "stack": [],
+    "queue": [],
+    "pending": null,
+    "attack": null
+   }
+  },
+  {
+   "turn": 7,
+   "step": 23,
+   "state": {
+    "phase": "main",
+    "players": [
+     {
+      "leaderHp": 15,
+      "leaderMaxHp": 20,
+      "maxPp": 5,
+      "pp": 5,
+      "ep": 2,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 4,
+      "deck": [
+       {
+        "iid": 11,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 35,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 3,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 31,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 27,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 5,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 16,
+        "cardId": "10842120"
+       },
+       {
+        "iid": 30,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 14,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 34,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 22,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 33,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 24,
+        "cardId": "10444110"
+       },
+       {
+        "iid": 8,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 37,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 2,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 28,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 7,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 10,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 13,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 21,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 4,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 9,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 1,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 36,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 12,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 6,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 40,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 38,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 39,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 32,
+        "cardId": "10844120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 29,
+        "cardId": "10944120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 19,
+        "cardId": "10042310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 23,
+        "cardId": "10503310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 26,
+        "cardId": "10644110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 20,
+        "cardId": "10444120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 17,
+        "cardId": "10042310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [],
+      "crests": [],
+      "graveyard": 3,
+      "graveyardFollowers": [
+       "10842120"
+      ],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "10444110"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 d d i36 i35 o10842120/2/_/0/0 u i34 a1 i33 o10042310/3/_/0/0 b1 i32",
+      "destroyedThisTurn": [],
+      "combo": 0,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true
+     },
+     {
+      "leaderHp": 20,
+      "leaderMaxHp": 20,
+      "maxPp": 3,
+      "pp": 0,
+      "ep": 2,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 3,
+      "deck": [
+       {
+        "iid": 64,
+        "cardId": "10872120"
+       },
+       {
+        "iid": 48,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 66,
+        "cardId": "10403110"
+       },
+       {
+        "iid": 63,
+        "cardId": "10773110"
+       },
+       {
+        "iid": 78,
+        "cardId": "10674110"
+       },
+       {
+        "iid": 50,
+        "cardId": "10072210"
+       },
+       {
+        "iid": 74,
+        "cardId": "10874110"
+       },
+       {
+        "iid": 68,
+        "cardId": "10572110"
+       },
+       {
+        "iid": 42,
+        "cardId": "10771310"
+       },
+       {
+        "iid": 72,
+        "cardId": "10401110"
+       },
+       {
+        "iid": 70,
+        "cardId": "10971120"
+       },
+       {
+        "iid": 80,
+        "cardId": "10774110"
+       },
+       {
+        "iid": 47,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 51,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 67,
+        "cardId": "10571110"
+       },
+       {
+        "iid": 59,
+        "cardId": "10471110"
+       },
+       {
+        "iid": 75,
+        "cardId": "10973110"
+       },
+       {
+        "iid": 73,
+        "cardId": "10474110"
+       },
+       {
+        "iid": 69,
+        "cardId": "10774120"
+       },
+       {
+        "iid": 49,
+        "cardId": "10071120"
+       },
+       {
+        "iid": 53,
+        "cardId": "10574120"
+       },
+       {
+        "iid": 65,
+        "cardId": "10973310"
+       },
+       {
+        "iid": 44,
+        "cardId": "10971110"
+       },
+       {
+        "iid": 61,
+        "cardId": "10602210"
+       },
+       {
+        "iid": 54,
+        "cardId": "10674120"
+       },
+       {
+        "iid": 52,
+        "cardId": "10471130"
+       },
+       {
+        "iid": 46,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 60,
+        "cardId": "10574110"
+       },
+       {
+        "iid": 62,
+        "cardId": "10702110"
+       },
+       {
+        "iid": 79,
+        "cardId": "10974120"
+       },
+       {
+        "iid": 41,
+        "cardId": "10573310"
+       },
+       {
+        "iid": 77,
+        "cardId": "10473310"
+       },
+       {
+        "iid": 57,
+        "cardId": "10871120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 45,
+        "cardId": "10972310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 71,
+        "cardId": "10972110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 76,
+        "cardId": "10404110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 58,
+        "cardId": "10874120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 82,
+        "cardId": "90071140",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [
+       {
+        "iid": 55,
+        "cardId": "10772110",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 1,
+        "kind": "follower",
+        "attack": 2,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 1,
+        "enteredTurn": 2,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       },
+       {
+        "iid": 43,
+        "cardId": "10871130",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 4,
+        "kind": "follower",
+        "attack": 1,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 1,
+        "enteredTurn": 4,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       },
+       {
+        "iid": 56,
+        "cardId": "10803110",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 5,
+        "kind": "follower",
+        "attack": 2,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 6,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       },
+       {
+        "iid": 83,
+        "cardId": "90071140",
+        "keywords": [
+         "rush"
+        ],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 6,
+        "kind": "follower",
+        "attack": 3,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 6,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       }
+      ],
+      "crests": [],
+      "graveyard": 1,
+      "graveyardFollowers": [
+       "90071140"
+      ],
+      "destroyedAmulets": [],
+      "handLog": "i40 i39 i38 i37 i36 i35 i34 i33 d d d d i36 o10772110/2/_/0/0 i35 a1 o10871130/1/_/0/0 i0 i34 o10803110/2/_/0/0 i0 o90071140/1/_/0/0",
+      "destroyedThisTurn": [],
+      "combo": 2,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true,
+      "evolvedCount": 0,
+      "enteredKinds": [
+       "10772110",
+       "10803110",
+       "10871130",
+       "90071140"
+      ]
+     }
+    ],
+    "first": 0,
+    "active": 0,
+    "turn": 7,
+    "winner": null,
+    "rng": 2915942107,
+    "nextIid": 84,
+    "nextOrder": 7,
+    "stack": [],
+    "queue": [],
+    "pending": null,
+    "attack": null
+   }
+  },
+  {
+   "turn": 8,
+   "step": 25,
+   "state": {
+    "phase": "main",
+    "players": [
+     {
+      "leaderHp": 15,
+      "leaderMaxHp": 20,
+      "maxPp": 6,
+      "pp": 0,
+      "ep": 2,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 4,
+      "deck": [
+       {
+        "iid": 11,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 35,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 3,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 31,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 27,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 5,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 16,
+        "cardId": "10842120"
+       },
+       {
+        "iid": 30,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 14,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 34,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 22,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 33,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 24,
+        "cardId": "10444110"
+       },
+       {
+        "iid": 8,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 37,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 2,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 28,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 7,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 10,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 13,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 21,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 4,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 9,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 1,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 36,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 12,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 6,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 40,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 38,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 39,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 32,
+        "cardId": "10844120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 29,
+        "cardId": "10944120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 19,
+        "cardId": "10042310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 23,
+        "cardId": "10503310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 26,
+        "cardId": "10644110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 17,
+        "cardId": "10042310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [
+       {
+        "iid": 20,
+        "cardId": "10444120",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 7,
+        "kind": "follower",
+        "attack": 5,
+        "defense": 5,
+        "maxDefense": 5,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 7,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       }
+      ],
+      "crests": [],
+      "graveyard": 3,
+      "graveyardFollowers": [
+       "10842120"
+      ],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "10444110"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 d d i36 i35 o10842120/2/_/0/0 u i34 a1 i33 o10042310/3/_/0/0 b1 i32 o10444120/5/_/0/0",
+      "destroyedThisTurn": [],
+      "combo": 1,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true
+     },
+     {
+      "leaderHp": 20,
+      "leaderMaxHp": 20,
+      "maxPp": 4,
+      "pp": 4,
+      "ep": 2,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 4,
+      "deck": [
+       {
+        "iid": 64,
+        "cardId": "10872120"
+       },
+       {
+        "iid": 48,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 66,
+        "cardId": "10403110"
+       },
+       {
+        "iid": 78,
+        "cardId": "10674110"
+       },
+       {
+        "iid": 50,
+        "cardId": "10072210"
+       },
+       {
+        "iid": 74,
+        "cardId": "10874110"
+       },
+       {
+        "iid": 68,
+        "cardId": "10572110"
+       },
+       {
+        "iid": 42,
+        "cardId": "10771310"
+       },
+       {
+        "iid": 72,
+        "cardId": "10401110"
+       },
+       {
+        "iid": 70,
+        "cardId": "10971120"
+       },
+       {
+        "iid": 80,
+        "cardId": "10774110"
+       },
+       {
+        "iid": 47,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 51,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 67,
+        "cardId": "10571110"
+       },
+       {
+        "iid": 59,
+        "cardId": "10471110"
+       },
+       {
+        "iid": 75,
+        "cardId": "10973110"
+       },
+       {
+        "iid": 73,
+        "cardId": "10474110"
+       },
+       {
+        "iid": 69,
+        "cardId": "10774120"
+       },
+       {
+        "iid": 49,
+        "cardId": "10071120"
+       },
+       {
+        "iid": 53,
+        "cardId": "10574120"
+       },
+       {
+        "iid": 65,
+        "cardId": "10973310"
+       },
+       {
+        "iid": 44,
+        "cardId": "10971110"
+       },
+       {
+        "iid": 61,
+        "cardId": "10602210"
+       },
+       {
+        "iid": 54,
+        "cardId": "10674120"
+       },
+       {
+        "iid": 52,
+        "cardId": "10471130"
+       },
+       {
+        "iid": 46,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 60,
+        "cardId": "10574110"
+       },
+       {
+        "iid": 62,
+        "cardId": "10702110"
+       },
+       {
+        "iid": 79,
+        "cardId": "10974120"
+       },
+       {
+        "iid": 41,
+        "cardId": "10573310"
+       },
+       {
+        "iid": 77,
+        "cardId": "10473310"
+       },
+       {
+        "iid": 57,
+        "cardId": "10871120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 45,
+        "cardId": "10972310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 71,
+        "cardId": "10972110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 76,
+        "cardId": "10404110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 58,
+        "cardId": "10874120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 82,
+        "cardId": "90071140",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 63,
+        "cardId": "10773110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [
+       {
+        "iid": 55,
+        "cardId": "10772110",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 1,
+        "kind": "follower",
+        "attack": 2,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 2,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       },
+       {
+        "iid": 43,
+        "cardId": "10871130",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 4,
+        "kind": "follower",
+        "attack": 1,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 4,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       },
+       {
+        "iid": 56,
+        "cardId": "10803110",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 5,
+        "kind": "follower",
+        "attack": 2,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 6,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       },
+       {
+        "iid": 83,
+        "cardId": "90071140",
+        "keywords": [
+         "rush"
+        ],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 6,
+        "kind": "follower",
+        "attack": 3,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 6,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       }
+      ],
+      "crests": [],
+      "graveyard": 1,
+      "graveyardFollowers": [
+       "90071140"
+      ],
+      "destroyedAmulets": [],
+      "handLog": "i40 i39 i38 i37 i36 i35 i34 i33 d d d d i36 o10772110/2/_/0/0 i35 a1 o10871130/1/_/0/0 i0 i34 o10803110/2/_/0/0 i0 o90071140/1/_/0/0 i33",
+      "destroyedThisTurn": [],
+      "combo": 0,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true,
+      "evolvedCount": 0,
+      "enteredKinds": [
+       "10772110",
+       "10803110",
+       "10871130",
+       "90071140"
+      ]
+     }
+    ],
+    "first": 0,
+    "active": 1,
+    "turn": 8,
+    "winner": null,
+    "rng": 2915942107,
+    "nextIid": 84,
+    "nextOrder": 8,
+    "stack": [],
+    "queue": [],
+    "pending": null,
+    "attack": null
+   }
+  },
+  {
+   "turn": 9,
+   "step": 36,
+   "state": {
+    "phase": "main",
+    "players": [
+     {
+      "leaderHp": 5,
+      "leaderMaxHp": 20,
+      "maxPp": 7,
+      "pp": 7,
+      "ep": 2,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 5,
+      "deck": [
+       {
+        "iid": 11,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 3,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 31,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 27,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 5,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 16,
+        "cardId": "10842120"
+       },
+       {
+        "iid": 30,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 14,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 34,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 22,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 33,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 24,
+        "cardId": "10444110"
+       },
+       {
+        "iid": 8,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 37,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 2,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 28,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 7,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 10,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 13,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 21,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 4,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 9,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 1,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 36,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 12,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 6,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 40,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 38,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 39,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 32,
+        "cardId": "10844120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 29,
+        "cardId": "10944120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 19,
+        "cardId": "10042310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 23,
+        "cardId": "10503310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 26,
+        "cardId": "10644110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 17,
+        "cardId": "10042310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 35,
+        "cardId": "10744110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [],
+      "crests": [],
+      "graveyard": 4,
+      "graveyardFollowers": [
+       "10842120",
+       "10444120"
+      ],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "10444110"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 d d i36 i35 o10842120/2/_/0/0 u i34 a1 i33 o10042310/3/_/0/0 b1 i32 o10444120/5/_/0/0 a1 i31",
+      "destroyedThisTurn": [],
+      "combo": 0,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true
+     },
+     {
+      "leaderHp": 20,
+      "leaderMaxHp": 20,
+      "maxPp": 4,
+      "pp": 0,
+      "ep": 1,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 4,
+      "deck": [
+       {
+        "iid": 64,
+        "cardId": "10872120"
+       },
+       {
+        "iid": 48,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 66,
+        "cardId": "10403110"
+       },
+       {
+        "iid": 78,
+        "cardId": "10674110"
+       },
+       {
+        "iid": 50,
+        "cardId": "10072210"
+       },
+       {
+        "iid": 74,
+        "cardId": "10874110"
+       },
+       {
+        "iid": 68,
+        "cardId": "10572110"
+       },
+       {
+        "iid": 42,
+        "cardId": "10771310"
+       },
+       {
+        "iid": 72,
+        "cardId": "10401110"
+       },
+       {
+        "iid": 70,
+        "cardId": "10971120"
+       },
+       {
+        "iid": 80,
+        "cardId": "10774110"
+       },
+       {
+        "iid": 47,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 51,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 67,
+        "cardId": "10571110"
+       },
+       {
+        "iid": 59,
+        "cardId": "10471110"
+       },
+       {
+        "iid": 75,
+        "cardId": "10973110"
+       },
+       {
+        "iid": 73,
+        "cardId": "10474110"
+       },
+       {
+        "iid": 69,
+        "cardId": "10774120"
+       },
+       {
+        "iid": 49,
+        "cardId": "10071120"
+       },
+       {
+        "iid": 53,
+        "cardId": "10574120"
+       },
+       {
+        "iid": 65,
+        "cardId": "10973310"
+       },
+       {
+        "iid": 44,
+        "cardId": "10971110"
+       },
+       {
+        "iid": 61,
+        "cardId": "10602210"
+       },
+       {
+        "iid": 54,
+        "cardId": "10674120"
+       },
+       {
+        "iid": 52,
+        "cardId": "10471130"
+       },
+       {
+        "iid": 46,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 60,
+        "cardId": "10574110"
+       },
+       {
+        "iid": 62,
+        "cardId": "10702110"
+       },
+       {
+        "iid": 79,
+        "cardId": "10974120"
+       },
+       {
+        "iid": 41,
+        "cardId": "10573310"
+       },
+       {
+        "iid": 77,
+        "cardId": "10473310"
+       },
+       {
+        "iid": 57,
+        "cardId": "10871120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 45,
+        "cardId": "10972310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 71,
+        "cardId": "10972110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 76,
+        "cardId": "10404110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null,
+        "ougi": 1
+       },
+       {
+        "iid": 63,
+        "cardId": "10773110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 85,
+        "cardId": "90071130",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": true,
+        "drawnBy": null
+       }
+      ],
+      "board": [
+       {
+        "iid": 55,
+        "cardId": "10772110",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 1,
+        "kind": "follower",
+        "attack": 4,
+        "defense": 3,
+        "maxDefense": 3,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 1,
+        "enteredTurn": 2,
+        "evolve": "evolved",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       },
+       {
+        "iid": 43,
+        "cardId": "10871130",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 4,
+        "kind": "follower",
+        "attack": 1,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 1,
+        "enteredTurn": 4,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       },
+       {
+        "iid": 56,
+        "cardId": "10803110",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 5,
+        "kind": "follower",
+        "attack": 2,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 1,
+        "enteredTurn": 6,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       },
+       {
+        "iid": 83,
+        "cardId": "90071140",
+        "keywords": [
+         "rush"
+        ],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 6,
+        "kind": "follower",
+        "attack": 3,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 1,
+        "enteredTurn": 6,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       },
+       {
+        "iid": 58,
+        "cardId": "10874120",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 10,
+        "kind": "follower",
+        "attack": 2,
+        "defense": 2,
+        "maxDefense": 2,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 8,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       }
+      ],
+      "crests": [],
+      "graveyard": 3,
+      "graveyardFollowers": [
+       "90071140",
+       "90071140",
+       "90071140"
+      ],
+      "destroyedAmulets": [],
+      "handLog": "i40 i39 i38 i37 i36 i35 i34 i33 d d d d i36 o10772110/2/_/0/0 i35 a1 o10871130/1/_/0/0 i0 i34 o10803110/2/_/0/0 i0 o90071140/1/_/0/0 i33 a1 o90071140/1/_/0/0 a1 o10874120/2/_/0/0",
+      "destroyedThisTurn": [],
+      "combo": 3,
+      "evolvedThisTurn": true,
+      "epEvolvedThisTurn": "10772110",
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true,
+      "evolvedCount": 1,
+      "enteredKinds": [
+       "10772110",
+       "10803110",
+       "10871130",
+       "10874120",
+       "90071140"
+      ]
+     }
+    ],
+    "first": 0,
+    "active": 0,
+    "turn": 9,
+    "winner": null,
+    "rng": 2915942107,
+    "nextIid": 86,
+    "nextOrder": 11,
+    "stack": [],
+    "queue": [],
+    "pending": null,
+    "attack": null
+   }
+  },
+  {
+   "turn": 10,
+   "step": 41,
+   "state": {
+    "phase": "main",
+    "players": [
+     {
+      "leaderHp": 8,
+      "leaderMaxHp": 20,
+      "maxPp": 7,
+      "pp": 0,
+      "ep": 1,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 5,
+      "deck": [
+       {
+        "iid": 11,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 3,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 31,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 5,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 16,
+        "cardId": "10842120"
+       },
+       {
+        "iid": 30,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 14,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 34,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 22,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 33,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 24,
+        "cardId": "10444110"
+       },
+       {
+        "iid": 8,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 37,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 2,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 28,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 7,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 10,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 13,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 21,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 4,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 9,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 1,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 36,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 12,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 6,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 40,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 38,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 39,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 32,
+        "cardId": "10844120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 19,
+        "cardId": "10042310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 23,
+        "cardId": "10503310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 26,
+        "cardId": "10644110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 17,
+        "cardId": "10042310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 35,
+        "cardId": "10744110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 27,
+        "cardId": "10644110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [
+       {
+        "iid": 29,
+        "cardId": "10944120",
+        "keywords": [
+         "ward"
+        ],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 11,
+        "kind": "follower",
+        "attack": 7,
+        "defense": 8,
+        "maxDefense": 8,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 9,
+        "evolve": "evolved",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       }
+      ],
+      "crests": [],
+      "graveyard": 4,
+      "graveyardFollowers": [
+       "10842120",
+       "10444120"
+      ],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "10444110"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 d d i36 i35 o10842120/2/_/0/0 u i34 a1 i33 o10042310/3/_/0/0 b1 i32 o10444120/5/_/0/0 a1 i31 o10944120/7/_/0/0 i30",
+      "destroyedThisTurn": [],
+      "combo": 1,
+      "evolvedThisTurn": true,
+      "epEvolvedThisTurn": "10944120",
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true
+     },
+     {
+      "leaderHp": 20,
+      "leaderMaxHp": 20,
+      "maxPp": 5,
+      "pp": 5,
+      "ep": 1,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 5,
+      "deck": [
+       {
+        "iid": 64,
+        "cardId": "10872120"
+       },
+       {
+        "iid": 66,
+        "cardId": "10403110"
+       },
+       {
+        "iid": 78,
+        "cardId": "10674110"
+       },
+       {
+        "iid": 50,
+        "cardId": "10072210"
+       },
+       {
+        "iid": 74,
+        "cardId": "10874110"
+       },
+       {
+        "iid": 68,
+        "cardId": "10572110"
+       },
+       {
+        "iid": 42,
+        "cardId": "10771310"
+       },
+       {
+        "iid": 72,
+        "cardId": "10401110"
+       },
+       {
+        "iid": 70,
+        "cardId": "10971120"
+       },
+       {
+        "iid": 80,
+        "cardId": "10774110"
+       },
+       {
+        "iid": 47,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 51,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 67,
+        "cardId": "10571110"
+       },
+       {
+        "iid": 59,
+        "cardId": "10471110"
+       },
+       {
+        "iid": 75,
+        "cardId": "10973110"
+       },
+       {
+        "iid": 73,
+        "cardId": "10474110"
+       },
+       {
+        "iid": 69,
+        "cardId": "10774120"
+       },
+       {
+        "iid": 49,
+        "cardId": "10071120"
+       },
+       {
+        "iid": 53,
+        "cardId": "10574120"
+       },
+       {
+        "iid": 65,
+        "cardId": "10973310"
+       },
+       {
+        "iid": 44,
+        "cardId": "10971110"
+       },
+       {
+        "iid": 61,
+        "cardId": "10602210"
+       },
+       {
+        "iid": 54,
+        "cardId": "10674120"
+       },
+       {
+        "iid": 52,
+        "cardId": "10471130"
+       },
+       {
+        "iid": 46,
+        "cardId": "10974110"
+       },
+       {
+        "iid": 60,
+        "cardId": "10574110"
+       },
+       {
+        "iid": 62,
+        "cardId": "10702110"
+       },
+       {
+        "iid": 79,
+        "cardId": "10974120"
+       },
+       {
+        "iid": 41,
+        "cardId": "10573310"
+       },
+       {
+        "iid": 77,
+        "cardId": "10473310"
+       },
+       {
+        "iid": 57,
+        "cardId": "10871120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 45,
+        "cardId": "10972310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 71,
+        "cardId": "10972110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 76,
+        "cardId": "10404110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null,
+        "ougi": 1
+       },
+       {
+        "iid": 63,
+        "cardId": "10773110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 85,
+        "cardId": "90071130",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": true,
+        "drawnBy": null
+       },
+       {
+        "iid": 48,
+        "cardId": "10974110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [],
+      "crests": [],
+      "graveyard": 8,
+      "graveyardFollowers": [
+       "90071140",
+       "90071140",
+       "90071140",
+       "10772110",
+       "10871130",
+       "10803110",
+       "90071140",
+       "10874120"
+      ],
+      "destroyedAmulets": [],
+      "handLog": "i40 i39 i38 i37 i36 i35 i34 i33 d d d d i36 o10772110/2/_/0/0 i35 a1 o10871130/1/_/0/0 i0 i34 o10803110/2/_/0/0 i0 o90071140/1/_/0/0 i33 a1 o90071140/1/_/0/0 a1 o10874120/2/_/0/0 a5 i32",
+      "destroyedThisTurn": [],
+      "combo": 0,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true,
+      "evolvedCount": 1,
+      "enteredKinds": [
+       "10772110",
+       "10803110",
+       "10871130",
+       "10874120",
+       "90071140"
+      ]
+     }
+    ],
+    "first": 0,
+    "active": 1,
+    "turn": 10,
+    "winner": null,
+    "rng": 2915942107,
+    "nextIid": 86,
+    "nextOrder": 12,
+    "stack": [],
+    "queue": [],
+    "pending": null,
+    "attack": null
+   }
+  },
+  {
+   "turn": 11,
+   "step": 48,
+   "state": {
+    "phase": "main",
+    "players": [
+     {
+      "leaderHp": 8,
+      "leaderMaxHp": 20,
+      "maxPp": 8,
+      "pp": 8,
+      "ep": 1,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 6,
+      "deck": [
+       {
+        "iid": 11,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 3,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 31,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 5,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 16,
+        "cardId": "10842120"
+       },
+       {
+        "iid": 30,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 34,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 22,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 33,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 24,
+        "cardId": "10444110"
+       },
+       {
+        "iid": 8,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 37,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 2,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 28,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 7,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 10,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 13,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 21,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 4,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 9,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 1,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 36,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 12,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 6,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 40,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 38,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 39,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 32,
+        "cardId": "10844120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 19,
+        "cardId": "10042310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 23,
+        "cardId": "10503310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 26,
+        "cardId": "10644110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 17,
+        "cardId": "10042310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 35,
+        "cardId": "10744110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 27,
+        "cardId": "10644110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 14,
+        "cardId": "10741110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [],
+      "crests": [],
+      "graveyard": 5,
+      "graveyardFollowers": [
+       "10842120",
+       "10444120",
+       "10944120"
+      ],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "10444110"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 d d i36 i35 o10842120/2/_/0/0 u i34 a1 i33 o10042310/3/_/0/0 b1 i32 o10444120/5/_/0/0 a1 i31 o10944120/7/_/0/0 i30 a1 i29",
+      "destroyedThisTurn": [],
+      "combo": 0,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true
+     },
+     {
+      "leaderHp": 20,
+      "leaderMaxHp": 20,
+      "maxPp": 5,
+      "pp": 0,
+      "ep": 0,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 5,
+      "deck": [
+       {
+        "iid": 64,
+        "cardId": "10872120"
+       },
+       {
+        "iid": 66,
+        "cardId": "10403110"
+       },
+       {
+        "iid": 78,
+        "cardId": "10674110"
+       },
+       {
+        "iid": 50,
+        "cardId": "10072210"
+       },
+       {
+        "iid": 68,
+        "cardId": "10572110"
+       },
+       {
+        "iid": 42,
+        "cardId": "10771310"
+       },
+       {
+        "iid": 72,
+        "cardId": "10401110"
+       },
+       {
+        "iid": 80,
+        "cardId": "10774110"
+       },
+       {
+        "iid": 51,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 67,
+        "cardId": "10571110"
+       },
+       {
+        "iid": 59,
+        "cardId": "10471110"
+       },
+       {
+        "iid": 75,
+        "cardId": "10973110"
+       },
+       {
+        "iid": 69,
+        "cardId": "10774120"
+       },
+       {
+        "iid": 49,
+        "cardId": "10071120"
+       },
+       {
+        "iid": 53,
+        "cardId": "10574120"
+       },
+       {
+        "iid": 65,
+        "cardId": "10973310"
+       },
+       {
+        "iid": 44,
+        "cardId": "10971110"
+       },
+       {
+        "iid": 61,
+        "cardId": "10602210"
+       },
+       {
+        "iid": 54,
+        "cardId": "10674120"
+       },
+       {
+        "iid": 52,
+        "cardId": "10471130"
+       },
+       {
+        "iid": 60,
+        "cardId": "10574110"
+       },
+       {
+        "iid": 62,
+        "cardId": "10702110"
+       },
+       {
+        "iid": 79,
+        "cardId": "10974120"
+       },
+       {
+        "iid": 41,
+        "cardId": "10573310"
+       },
+       {
+        "iid": 77,
+        "cardId": "10473310"
+       },
+       {
+        "iid": 57,
+        "cardId": "10871120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 71,
+        "cardId": "10972110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 76,
+        "cardId": "10404110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null,
+        "ougi": 3
+       },
+       {
+        "iid": 47,
+        "cardId": "10974110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 46,
+        "cardId": "10974110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": {
+         "type": "follower",
+         "class": "nemesis",
+         "keyword": "bane"
+        }
+       },
+       {
+        "iid": 74,
+        "cardId": "10874110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 73,
+        "cardId": "10474110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null,
+        "ougi": 1
+       },
+       {
+        "iid": 70,
+        "cardId": "10971120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [
+       {
+        "iid": 63,
+        "cardId": "10773110",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 14,
+        "kind": "follower",
+        "attack": 3,
+        "defense": 3,
+        "maxDefense": 3,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 10,
+        "evolve": "evolved",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       },
+       {
+        "iid": 87,
+        "cardId": "90071130",
+        "keywords": [
+         "rush"
+        ],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 15,
+        "kind": "follower",
+        "attack": 1,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 10,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       }
+      ],
+      "crests": [
+       {
+        "iid": 86,
+        "crestId": "10974112",
+        "countdown": null,
+        "order": 13,
+        "usedOncePerTurn": {
+         "0": 5
+        }
+       }
+      ],
+      "graveyard": 11,
+      "graveyardFollowers": [
+       "90071140",
+       "90071140",
+       "90071140",
+       "10772110",
+       "10871130",
+       "10803110",
+       "90071140",
+       "10874120",
+       "10974110"
+      ],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "90071130"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 i34 i33 d d d d i36 o10772110/2/_/0/0 i35 a1 o10871130/1/_/0/0 i0 i34 o10803110/2/_/0/0 i0 o90071140/1/_/0/0 i33 a1 o90071140/1/_/0/0 a1 o10874120/2/_/0/0 a5 i32 o10974110/1/_/0/0 i0 o10972310/1/_/0/0 b1 w1 u i0 i29 i28 o10773110/3/_/0/0 i27 a1",
+      "destroyedThisTurn": [],
+      "combo": 3,
+      "evolvedThisTurn": true,
+      "epEvolvedThisTurn": "10974110",
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true,
+      "evolvedCount": 3,
+      "enteredKinds": [
+       "10772110",
+       "10773110",
+       "10803110",
+       "10871130",
+       "10874120",
+       "10974110",
+       "90071130",
+       "90071140"
+      ]
+     }
+    ],
+    "first": 0,
+    "active": 0,
+    "turn": 11,
+    "winner": null,
+    "rng": 2915942107,
+    "nextIid": 88,
+    "nextOrder": 16,
+    "stack": [],
+    "queue": [],
+    "pending": null,
+    "attack": null
+   }
+  },
+  {
+   "turn": 12,
+   "step": 56,
+   "state": {
+    "phase": "main",
+    "players": [
+     {
+      "leaderHp": 8,
+      "leaderMaxHp": 20,
+      "maxPp": 8,
+      "pp": 0,
+      "ep": 0,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 6,
+      "deck": [
+       {
+        "iid": 11,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 3,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 31,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 5,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 16,
+        "cardId": "10842120"
+       },
+       {
+        "iid": 30,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 34,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 22,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 33,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 24,
+        "cardId": "10444110"
+       },
+       {
+        "iid": 8,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 37,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 2,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 28,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 7,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 10,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 13,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 21,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 4,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 9,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 1,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 36,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 12,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 6,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 40,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 38,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 39,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 32,
+        "cardId": "10844120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 23,
+        "cardId": "10503310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 2,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 26,
+        "cardId": "10644110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 2,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 35,
+        "cardId": "10744110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 14,
+        "cardId": "10741110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 89,
+        "cardId": "10642310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [
+       {
+        "iid": 27,
+        "cardId": "10644110",
+        "keywords": [
+         "storm",
+         "bane",
+         "aura"
+        ],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 16,
+        "kind": "follower",
+        "attack": 7,
+        "defense": 6,
+        "maxDefense": 6,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 1,
+        "enteredTurn": 11,
+        "evolve": "evolved",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       }
+      ],
+      "crests": [],
+      "graveyard": 8,
+      "graveyardFollowers": [
+       "10842120",
+       "10444120",
+       "10944120"
+      ],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "10444110",
+       "10042310",
+       "10042310"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 d d i36 i35 o10842120/2/_/0/0 u i34 a1 i33 o10042310/3/_/0/0 b1 i32 o10444120/5/_/0/0 a1 i31 o10944120/7/_/0/0 i30 a1 i29 o10644110/7/_/0/0 u b1 w1 u",
+      "destroyedThisTurn": [],
+      "combo": 2,
+      "evolvedThisTurn": true,
+      "epEvolvedThisTurn": "10644110",
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true
+     },
+     {
+      "leaderHp": 13,
+      "leaderMaxHp": 20,
+      "maxPp": 6,
+      "pp": 6,
+      "ep": 0,
+      "sep": 2,
+      "extraPpAvailable": true,
+      "turnCount": 6,
+      "deck": [
+       {
+        "iid": 64,
+        "cardId": "10872120"
+       },
+       {
+        "iid": 66,
+        "cardId": "10403110"
+       },
+       {
+        "iid": 78,
+        "cardId": "10674110"
+       },
+       {
+        "iid": 50,
+        "cardId": "10072210"
+       },
+       {
+        "iid": 68,
+        "cardId": "10572110"
+       },
+       {
+        "iid": 72,
+        "cardId": "10401110"
+       },
+       {
+        "iid": 80,
+        "cardId": "10774110"
+       },
+       {
+        "iid": 51,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 67,
+        "cardId": "10571110"
+       },
+       {
+        "iid": 59,
+        "cardId": "10471110"
+       },
+       {
+        "iid": 75,
+        "cardId": "10973110"
+       },
+       {
+        "iid": 69,
+        "cardId": "10774120"
+       },
+       {
+        "iid": 49,
+        "cardId": "10071120"
+       },
+       {
+        "iid": 53,
+        "cardId": "10574120"
+       },
+       {
+        "iid": 65,
+        "cardId": "10973310"
+       },
+       {
+        "iid": 44,
+        "cardId": "10971110"
+       },
+       {
+        "iid": 61,
+        "cardId": "10602210"
+       },
+       {
+        "iid": 54,
+        "cardId": "10674120"
+       },
+       {
+        "iid": 52,
+        "cardId": "10471130"
+       },
+       {
+        "iid": 60,
+        "cardId": "10574110"
+       },
+       {
+        "iid": 62,
+        "cardId": "10702110"
+       },
+       {
+        "iid": 79,
+        "cardId": "10974120"
+       },
+       {
+        "iid": 41,
+        "cardId": "10573310"
+       },
+       {
+        "iid": 77,
+        "cardId": "10473310"
+       },
+       {
+        "iid": 57,
+        "cardId": "10871120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 71,
+        "cardId": "10972110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 76,
+        "cardId": "10404110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null,
+        "ougi": 3
+       },
+       {
+        "iid": 47,
+        "cardId": "10974110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 46,
+        "cardId": "10974110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": {
+         "type": "follower",
+         "class": "nemesis",
+         "keyword": "bane"
+        }
+       },
+       {
+        "iid": 74,
+        "cardId": "10874110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 73,
+        "cardId": "10474110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null,
+        "ougi": 1
+       },
+       {
+        "iid": 70,
+        "cardId": "10971120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 42,
+        "cardId": "10771310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [
+       {
+        "iid": 87,
+        "cardId": "90071130",
+        "keywords": [
+         "rush"
+        ],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 15,
+        "kind": "follower",
+        "attack": 1,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 10,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       }
+      ],
+      "crests": [
+       {
+        "iid": 86,
+        "crestId": "10974112",
+        "countdown": null,
+        "order": 13,
+        "usedOncePerTurn": {
+         "0": 5
+        }
+       }
+      ],
+      "graveyard": 12,
+      "graveyardFollowers": [
+       "90071140",
+       "90071140",
+       "90071140",
+       "10772110",
+       "10871130",
+       "10803110",
+       "90071140",
+       "10874120",
+       "10974110",
+       "10773110"
+      ],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "90071130"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 i34 i33 d d d d i36 o10772110/2/_/0/0 i35 a1 o10871130/1/_/0/0 i0 i34 o10803110/2/_/0/0 i0 o90071140/1/_/0/0 i33 a1 o90071140/1/_/0/0 a1 o10874120/2/_/0/0 a5 i32 o10974110/1/_/0/0 i0 o10972310/1/_/0/0 b1 w1 u i0 i29 i28 o10773110/3/_/0/0 i27 a2 i26",
+      "destroyedThisTurn": [],
+      "combo": 0,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true,
+      "evolvedCount": 3,
+      "enteredKinds": [
+       "10772110",
+       "10773110",
+       "10803110",
+       "10871130",
+       "10874120",
+       "10974110",
+       "90071130",
+       "90071140"
+      ]
+     }
+    ],
+    "first": 0,
+    "active": 1,
+    "turn": 12,
+    "winner": null,
+    "rng": 2915942107,
+    "nextIid": 90,
+    "nextOrder": 17,
+    "stack": [],
+    "queue": [],
+    "pending": null,
+    "attack": null
+   }
+  },
+  {
+   "turn": 13,
+   "step": 64,
+   "state": {
+    "phase": "main",
+    "players": [
+     {
+      "leaderHp": 4,
+      "leaderMaxHp": 20,
+      "maxPp": 9,
+      "pp": 9,
+      "ep": 0,
+      "sep": 2,
+      "extraPpAvailable": false,
+      "turnCount": 7,
+      "deck": [
+       {
+        "iid": 11,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 3,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 31,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 5,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 16,
+        "cardId": "10842120"
+       },
+       {
+        "iid": 30,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 34,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 22,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 33,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 24,
+        "cardId": "10444110"
+       },
+       {
+        "iid": 8,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 37,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 2,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 28,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 7,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 10,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 21,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 4,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 9,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 1,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 36,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 12,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 6,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 40,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 38,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 39,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 32,
+        "cardId": "10844120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 23,
+        "cardId": "10503310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 2,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 26,
+        "cardId": "10644110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 2,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 35,
+        "cardId": "10744110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 14,
+        "cardId": "10741110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 89,
+        "cardId": "10642310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 13,
+        "cardId": "10741110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [],
+      "crests": [],
+      "graveyard": 9,
+      "graveyardFollowers": [
+       "10842120",
+       "10444120",
+       "10944120",
+       "10644110"
+      ],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "10444110",
+       "10042310",
+       "10042310"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 d d i36 i35 o10842120/2/_/0/0 u i34 a1 i33 o10042310/3/_/0/0 b1 i32 o10444120/5/_/0/0 a1 i31 o10944120/7/_/0/0 i30 a1 i29 o10644110/7/_/0/0 u b1 w1 u a1 i28",
+      "destroyedThisTurn": [],
+      "combo": 0,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true
+     },
+     {
+      "leaderHp": 13,
+      "leaderMaxHp": 20,
+      "maxPp": 6,
+      "pp": 0,
+      "ep": 0,
+      "sep": 1,
+      "extraPpAvailable": true,
+      "turnCount": 6,
+      "deck": [
+       {
+        "iid": 64,
+        "cardId": "10872120"
+       },
+       {
+        "iid": 66,
+        "cardId": "10403110"
+       },
+       {
+        "iid": 78,
+        "cardId": "10674110"
+       },
+       {
+        "iid": 50,
+        "cardId": "10072210"
+       },
+       {
+        "iid": 68,
+        "cardId": "10572110"
+       },
+       {
+        "iid": 72,
+        "cardId": "10401110"
+       },
+       {
+        "iid": 80,
+        "cardId": "10774110"
+       },
+       {
+        "iid": 67,
+        "cardId": "10571110"
+       },
+       {
+        "iid": 59,
+        "cardId": "10471110"
+       },
+       {
+        "iid": 75,
+        "cardId": "10973110"
+       },
+       {
+        "iid": 69,
+        "cardId": "10774120"
+       },
+       {
+        "iid": 49,
+        "cardId": "10071120"
+       },
+       {
+        "iid": 53,
+        "cardId": "10574120"
+       },
+       {
+        "iid": 65,
+        "cardId": "10973310"
+       },
+       {
+        "iid": 44,
+        "cardId": "10971110"
+       },
+       {
+        "iid": 61,
+        "cardId": "10602210"
+       },
+       {
+        "iid": 54,
+        "cardId": "10674120"
+       },
+       {
+        "iid": 52,
+        "cardId": "10471130"
+       },
+       {
+        "iid": 60,
+        "cardId": "10574110"
+       },
+       {
+        "iid": 62,
+        "cardId": "10702110"
+       },
+       {
+        "iid": 79,
+        "cardId": "10974120"
+       },
+       {
+        "iid": 41,
+        "cardId": "10573310"
+       },
+       {
+        "iid": 77,
+        "cardId": "10473310"
+       },
+       {
+        "iid": 57,
+        "cardId": "10871120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 71,
+        "cardId": "10972110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 2,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 76,
+        "cardId": "10404110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 2,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null,
+        "ougi": 5
+       },
+       {
+        "iid": 46,
+        "cardId": "10974110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 74,
+        "cardId": "10874110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 73,
+        "cardId": "10474110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null,
+        "ougi": 3
+       },
+       {
+        "iid": 51,
+        "cardId": "10403120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 91,
+        "cardId": "90071130",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": true,
+        "drawnBy": null
+       }
+      ],
+      "board": [
+       {
+        "iid": 87,
+        "cardId": "90071130",
+        "keywords": [
+         "rush"
+        ],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 15,
+        "kind": "follower",
+        "attack": 4,
+        "defense": 4,
+        "maxDefense": 4,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 1,
+        "enteredTurn": 10,
+        "evolve": "superEvolved",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       },
+       {
+        "iid": 70,
+        "cardId": "10971120",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 18,
+        "kind": "follower",
+        "attack": 3,
+        "defense": 3,
+        "maxDefense": 3,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 12,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       },
+       {
+        "iid": 90,
+        "cardId": "90071130",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 19,
+        "kind": "follower",
+        "attack": 1,
+        "defense": 1,
+        "maxDefense": 1,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 12,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       }
+      ],
+      "crests": [
+       {
+        "iid": 86,
+        "crestId": "10974112",
+        "countdown": null,
+        "order": 13,
+        "usedOncePerTurn": {
+         "0": 6
+        }
+       }
+      ],
+      "graveyard": 14,
+      "graveyardFollowers": [
+       "90071140",
+       "90071140",
+       "90071140",
+       "10772110",
+       "10871130",
+       "10803110",
+       "90071140",
+       "10874120",
+       "10974110",
+       "10773110",
+       "10974110"
+      ],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "90071130"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 i34 i33 d d d d i36 o10772110/2/_/0/0 i35 a1 o10871130/1/_/0/0 i0 i34 o10803110/2/_/0/0 i0 o90071140/1/_/0/0 i33 a1 o90071140/1/_/0/0 a1 o10874120/2/_/0/0 a5 i32 o10974110/1/_/0/0 i0 o10972310/1/_/0/0 b1 w1 u i0 i29 i28 o10773110/3/_/0/0 i27 a2 i26 o10974110/1/_/0/0 o10971120/4/_/0/0 i25 o10771310/1/_/0/0 b1 a1",
+      "destroyedThisTurn": [],
+      "combo": 3,
+      "evolvedThisTurn": true,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": "90071130",
+      "leaderOncePerTurn": {},
+      "mulliganDone": true,
+      "evolvedCount": 5,
+      "enteredKinds": [
+       "10772110",
+       "10773110",
+       "10803110",
+       "10871130",
+       "10874120",
+       "10971120",
+       "10974110",
+       "90071130",
+       "90071140"
+      ]
+     }
+    ],
+    "first": 0,
+    "active": 0,
+    "turn": 13,
+    "winner": null,
+    "rng": 2915942107,
+    "nextIid": 92,
+    "nextOrder": 20,
+    "stack": [],
+    "queue": [],
+    "pending": null,
+    "attack": null
+   }
+  },
+  {
+   "turn": 14,
+   "step": 67,
+   "state": {
+    "phase": "main",
+    "players": [
+     {
+      "leaderHp": 4,
+      "leaderMaxHp": 20,
+      "maxPp": 9,
+      "pp": 0,
+      "ep": 0,
+      "sep": 1,
+      "extraPpAvailable": false,
+      "turnCount": 7,
+      "deck": [
+       {
+        "iid": 11,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 3,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 31,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 5,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 16,
+        "cardId": "10842120"
+       },
+       {
+        "iid": 30,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 34,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 22,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 33,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 24,
+        "cardId": "10444110"
+       },
+       {
+        "iid": 8,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 37,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 2,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 28,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 7,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 10,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 21,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 4,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 9,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 1,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 36,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 12,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 6,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 40,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 38,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 39,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 32,
+        "cardId": "10844120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 23,
+        "cardId": "10503310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 2,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 26,
+        "cardId": "10644110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 2,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 14,
+        "cardId": "10741110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 89,
+        "cardId": "10642310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 13,
+        "cardId": "10741110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [
+       {
+        "iid": 35,
+        "cardId": "10744110",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 20,
+        "kind": "follower",
+        "attack": 12,
+        "defense": 12,
+        "maxDefense": 12,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 13,
+        "evolve": "superEvolved",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       }
+      ],
+      "crests": [],
+      "graveyard": 9,
+      "graveyardFollowers": [
+       "10842120",
+       "10444120",
+       "10944120",
+       "10644110"
+      ],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "10444110",
+       "10042310",
+       "10042310"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 d d i36 i35 o10842120/2/_/0/0 u i34 a1 i33 o10042310/3/_/0/0 b1 i32 o10444120/5/_/0/0 a1 i31 o10944120/7/_/0/0 i30 a1 i29 o10644110/7/_/0/0 u b1 w1 u a1 i28 o10744110/9/_/0/0",
+      "destroyedThisTurn": [],
+      "combo": 1,
+      "evolvedThisTurn": true,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": "10744110",
+      "leaderOncePerTurn": {},
+      "mulliganDone": true
+     },
+     {
+      "leaderHp": 11,
+      "leaderMaxHp": 20,
+      "maxPp": 7,
+      "pp": 7,
+      "ep": 0,
+      "sep": 1,
+      "extraPpAvailable": true,
+      "turnCount": 7,
+      "deck": [
+       {
+        "iid": 64,
+        "cardId": "10872120"
+       },
+       {
+        "iid": 66,
+        "cardId": "10403110"
+       },
+       {
+        "iid": 78,
+        "cardId": "10674110"
+       },
+       {
+        "iid": 50,
+        "cardId": "10072210"
+       },
+       {
+        "iid": 68,
+        "cardId": "10572110"
+       },
+       {
+        "iid": 72,
+        "cardId": "10401110"
+       },
+       {
+        "iid": 80,
+        "cardId": "10774110"
+       },
+       {
+        "iid": 67,
+        "cardId": "10571110"
+       },
+       {
+        "iid": 59,
+        "cardId": "10471110"
+       },
+       {
+        "iid": 75,
+        "cardId": "10973110"
+       },
+       {
+        "iid": 69,
+        "cardId": "10774120"
+       },
+       {
+        "iid": 49,
+        "cardId": "10071120"
+       },
+       {
+        "iid": 65,
+        "cardId": "10973310"
+       },
+       {
+        "iid": 44,
+        "cardId": "10971110"
+       },
+       {
+        "iid": 61,
+        "cardId": "10602210"
+       },
+       {
+        "iid": 54,
+        "cardId": "10674120"
+       },
+       {
+        "iid": 52,
+        "cardId": "10471130"
+       },
+       {
+        "iid": 60,
+        "cardId": "10574110"
+       },
+       {
+        "iid": 62,
+        "cardId": "10702110"
+       },
+       {
+        "iid": 79,
+        "cardId": "10974120"
+       },
+       {
+        "iid": 41,
+        "cardId": "10573310"
+       },
+       {
+        "iid": 77,
+        "cardId": "10473310"
+       },
+       {
+        "iid": 57,
+        "cardId": "10871120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 71,
+        "cardId": "10972110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 2,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 76,
+        "cardId": "10404110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 2,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null,
+        "ougi": 5
+       },
+       {
+        "iid": 46,
+        "cardId": "10974110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 74,
+        "cardId": "10874110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 73,
+        "cardId": "10474110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null,
+        "ougi": 3
+       },
+       {
+        "iid": 51,
+        "cardId": "10403120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 91,
+        "cardId": "90071130",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": true,
+        "drawnBy": null
+       },
+       {
+        "iid": 53,
+        "cardId": "10574120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [],
+      "crests": [
+       {
+        "iid": 86,
+        "crestId": "10974112",
+        "countdown": null,
+        "order": 13,
+        "usedOncePerTurn": {
+         "0": 6
+        }
+       },
+       {
+        "iid": 92,
+        "crestId": "10744112",
+        "countdown": null,
+        "order": 21,
+        "usedOncePerTurn": {}
+       }
+      ],
+      "graveyard": 17,
+      "graveyardFollowers": [
+       "90071140",
+       "90071140",
+       "90071140",
+       "10772110",
+       "10871130",
+       "10803110",
+       "90071140",
+       "10874120",
+       "10974110",
+       "10773110",
+       "10974110",
+       "90071130",
+       "10971120",
+       "90071130"
+      ],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "90071130"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 i34 i33 d d d d i36 o10772110/2/_/0/0 i35 a1 o10871130/1/_/0/0 i0 i34 o10803110/2/_/0/0 i0 o90071140/1/_/0/0 i33 a1 o90071140/1/_/0/0 a1 o10874120/2/_/0/0 a5 i32 o10974110/1/_/0/0 i0 o10972310/1/_/0/0 b1 w1 u i0 i29 i28 o10773110/3/_/0/0 i27 a2 i26 o10974110/1/_/0/0 o10971120/4/_/0/0 i25 o10771310/1/_/0/0 b1 a4 i24",
+      "destroyedThisTurn": [],
+      "combo": 0,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true,
+      "evolvedCount": 5,
+      "enteredKinds": [
+       "10772110",
+       "10773110",
+       "10803110",
+       "10871130",
+       "10874120",
+       "10971120",
+       "10974110",
+       "90071130",
+       "90071140"
+      ]
+     }
+    ],
+    "first": 0,
+    "active": 1,
+    "turn": 14,
+    "winner": null,
+    "rng": 2915942107,
+    "nextIid": 93,
+    "nextOrder": 22,
+    "stack": [],
+    "queue": [],
+    "pending": null,
+    "attack": null
+   }
+  },
+  {
+   "turn": 15,
+   "step": 73,
+   "state": {
+    "phase": "main",
+    "players": [
+     {
+      "leaderHp": 3,
+      "leaderMaxHp": 20,
+      "maxPp": 10,
+      "pp": 10,
+      "ep": 0,
+      "sep": 1,
+      "extraPpAvailable": false,
+      "turnCount": 8,
+      "deck": [
+       {
+        "iid": 3,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 31,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 5,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 16,
+        "cardId": "10842120"
+       },
+       {
+        "iid": 30,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 34,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 22,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 33,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 24,
+        "cardId": "10444110"
+       },
+       {
+        "iid": 8,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 37,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 2,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 28,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 7,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 10,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 21,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 4,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 9,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 1,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 36,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 12,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 6,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 40,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 38,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 39,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 32,
+        "cardId": "10844120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 23,
+        "cardId": "10503310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 2,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 26,
+        "cardId": "10644110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 2,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 14,
+        "cardId": "10741110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 89,
+        "cardId": "10642310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 13,
+        "cardId": "10741110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 11,
+        "cardId": "10644120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [],
+      "crests": [],
+      "graveyard": 10,
+      "graveyardFollowers": [
+       "10842120",
+       "10444120",
+       "10944120",
+       "10644110",
+       "10744110"
+      ],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "10444110",
+       "10042310",
+       "10042310"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 d d i36 i35 o10842120/2/_/0/0 u i34 a1 i33 o10042310/3/_/0/0 b1 i32 o10444120/5/_/0/0 a1 i31 o10944120/7/_/0/0 i30 a1 i29 o10644110/7/_/0/0 u b1 w1 u a1 i28 o10744110/9/_/0/0 a1 i27",
+      "destroyedThisTurn": [],
+      "combo": 0,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true
+     },
+     {
+      "leaderHp": 14,
+      "leaderMaxHp": 20,
+      "maxPp": 7,
+      "pp": 1,
+      "ep": 0,
+      "sep": 0,
+      "extraPpAvailable": true,
+      "turnCount": 7,
+      "deck": [
+       {
+        "iid": 64,
+        "cardId": "10872120"
+       },
+       {
+        "iid": 66,
+        "cardId": "10403110"
+       },
+       {
+        "iid": 78,
+        "cardId": "10674110"
+       },
+       {
+        "iid": 50,
+        "cardId": "10072210"
+       },
+       {
+        "iid": 68,
+        "cardId": "10572110"
+       },
+       {
+        "iid": 72,
+        "cardId": "10401110"
+       },
+       {
+        "iid": 80,
+        "cardId": "10774110"
+       },
+       {
+        "iid": 67,
+        "cardId": "10571110"
+       },
+       {
+        "iid": 59,
+        "cardId": "10471110"
+       },
+       {
+        "iid": 75,
+        "cardId": "10973110"
+       },
+       {
+        "iid": 69,
+        "cardId": "10774120"
+       },
+       {
+        "iid": 49,
+        "cardId": "10071120"
+       },
+       {
+        "iid": 44,
+        "cardId": "10971110"
+       },
+       {
+        "iid": 61,
+        "cardId": "10602210"
+       },
+       {
+        "iid": 54,
+        "cardId": "10674120"
+       },
+       {
+        "iid": 52,
+        "cardId": "10471130"
+       },
+       {
+        "iid": 60,
+        "cardId": "10574110"
+       },
+       {
+        "iid": 62,
+        "cardId": "10702110"
+       },
+       {
+        "iid": 79,
+        "cardId": "10974120"
+       },
+       {
+        "iid": 41,
+        "cardId": "10573310"
+       },
+       {
+        "iid": 77,
+        "cardId": "10473310"
+       },
+       {
+        "iid": 57,
+        "cardId": "10871120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 76,
+        "cardId": "10404110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 2,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null,
+        "ougi": 7
+       },
+       {
+        "iid": 74,
+        "cardId": "10874110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 73,
+        "cardId": "10474110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null,
+        "ougi": 5
+       },
+       {
+        "iid": 51,
+        "cardId": "10403120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 53,
+        "cardId": "10574120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 65,
+        "cardId": "10973310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [
+       {
+        "iid": 91,
+        "cardId": "90071130",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 22,
+        "kind": "follower",
+        "attack": 3,
+        "defense": 3,
+        "maxDefense": 3,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 14,
+        "evolve": "evolved",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       },
+       {
+        "iid": 71,
+        "cardId": "10972110",
+        "keywords": [
+         "ward"
+        ],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 23,
+        "kind": "follower",
+        "attack": 4,
+        "defense": 4,
+        "maxDefense": 4,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 14,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       },
+       {
+        "iid": 46,
+        "cardId": "10974110",
+        "keywords": [
+         "bane"
+        ],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 24,
+        "kind": "follower",
+        "attack": 4,
+        "defense": 4,
+        "maxDefense": 4,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 1,
+        "enteredTurn": 14,
+        "evolve": "superEvolved",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       }
+      ],
+      "crests": [
+       {
+        "iid": 86,
+        "crestId": "10974112",
+        "countdown": null,
+        "order": 13,
+        "usedOncePerTurn": {
+         "0": 7
+        }
+       },
+       {
+        "iid": 92,
+        "crestId": "10744112",
+        "countdown": null,
+        "order": 21,
+        "usedOncePerTurn": {
+         "1": 7
+        }
+       }
+      ],
+      "graveyard": 17,
+      "graveyardFollowers": [
+       "90071140",
+       "90071140",
+       "90071140",
+       "10772110",
+       "10871130",
+       "10803110",
+       "90071140",
+       "10874120",
+       "10974110",
+       "10773110",
+       "10974110",
+       "90071130",
+       "10971120",
+       "90071130"
+      ],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "90071130"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 i34 i33 d d d d i36 o10772110/2/_/0/0 i35 a1 o10871130/1/_/0/0 i0 i34 o10803110/2/_/0/0 i0 o90071140/1/_/0/0 i33 a1 o90071140/1/_/0/0 a1 o10874120/2/_/0/0 a5 i32 o10974110/1/_/0/0 i0 o10972310/1/_/0/0 b1 w1 u i0 i29 i28 o10773110/3/_/0/0 i27 a2 i26 o10974110/1/_/0/0 o10971120/4/_/0/0 i25 o10771310/1/_/0/0 b1 a4 i24 i23 o10972110/4/_/0/0 o10974110/1/_/0/0",
+      "destroyedThisTurn": [],
+      "combo": 3,
+      "evolvedThisTurn": true,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": "10974110",
+      "leaderOncePerTurn": {},
+      "mulliganDone": true,
+      "evolvedCount": 7,
+      "enteredKinds": [
+       "10772110",
+       "10773110",
+       "10803110",
+       "10871130",
+       "10874120",
+       "10971120",
+       "10972110",
+       "10974110",
+       "90071130",
+       "90071140"
+      ]
+     }
+    ],
+    "first": 0,
+    "active": 0,
+    "turn": 15,
+    "winner": null,
+    "rng": 2915942107,
+    "nextIid": 93,
+    "nextOrder": 25,
+    "stack": [],
+    "queue": [],
+    "pending": null,
+    "attack": null
+   }
+  },
+  {
+   "turn": 16,
+   "step": 86,
+   "state": {
+    "phase": "main",
+    "players": [
+     {
+      "leaderHp": 6,
+      "leaderMaxHp": 20,
+      "maxPp": 10,
+      "pp": 0,
+      "ep": 0,
+      "sep": 0,
+      "extraPpAvailable": false,
+      "turnCount": 8,
+      "deck": [
+       {
+        "iid": 3,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 31,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 5,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 16,
+        "cardId": "10842120"
+       },
+       {
+        "iid": 30,
+        "cardId": "10944120"
+       },
+       {
+        "iid": 34,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 22,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 33,
+        "cardId": "10844120"
+       },
+       {
+        "iid": 24,
+        "cardId": "10444110"
+       },
+       {
+        "iid": 8,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 37,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 2,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 28,
+        "cardId": "10644110"
+       },
+       {
+        "iid": 7,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 10,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 21,
+        "cardId": "10444120"
+       },
+       {
+        "iid": 4,
+        "cardId": "10403120"
+       },
+       {
+        "iid": 9,
+        "cardId": "10644120"
+       },
+       {
+        "iid": 1,
+        "cardId": "10843310"
+       },
+       {
+        "iid": 36,
+        "cardId": "10744110"
+       },
+       {
+        "iid": 12,
+        "cardId": "10741110"
+       },
+       {
+        "iid": 6,
+        "cardId": "10543310"
+       },
+       {
+        "iid": 40,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 38,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 39,
+        "cardId": "10544110"
+       },
+       {
+        "iid": 32,
+        "cardId": "10844120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 23,
+        "cardId": "10503310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 5,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 14,
+        "cardId": "10741110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 4,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 13,
+        "cardId": "10741110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 3,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [
+       {
+        "iid": 26,
+        "cardId": "10644110",
+        "keywords": [
+         "storm",
+         "bane",
+         "aura"
+        ],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 25,
+        "kind": "follower",
+        "attack": 5,
+        "defense": 4,
+        "maxDefense": 4,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 1,
+        "enteredTurn": 15,
+        "evolve": "none",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       },
+       {
+        "iid": 95,
+        "cardId": "10644120",
+        "keywords": [
+         "bane"
+        ],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 26,
+        "kind": "follower",
+        "attack": 3,
+        "defense": 5,
+        "maxDefense": 5,
+        "tempAttack": 0,
+        "maxAttacks": 1,
+        "attacksThisTurn": 0,
+        "enteredTurn": 15,
+        "evolve": "superEvolved",
+        "cannotAttackUntil": null,
+        "x": null,
+        "usedOncePerTurn": {}
+       }
+      ],
+      "crests": [],
+      "graveyard": 17,
+      "graveyardFollowers": [
+       "10842120",
+       "10444120",
+       "10944120",
+       "10644110",
+       "10744110"
+      ],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "10444110",
+       "10042310",
+       "10042310"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 d d i36 i35 o10842120/2/_/0/0 u i34 a1 i33 o10042310/3/_/0/0 b1 i32 o10444120/5/_/0/0 a1 i31 o10944120/7/_/0/0 i30 a1 i29 o10644110/7/_/0/0 u b1 w1 u a1 i28 o10744110/9/_/0/0 a1 i27 o10644110/7/_/0/0 u b1 w1 w1 w1 w1 u o10642310/1/_/0/0 b1 u o10642310/1/_/0/0 b1 u",
+      "destroyedThisTurn": [],
+      "combo": 4,
+      "evolvedThisTurn": true,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": "10644120",
+      "leaderOncePerTurn": {},
+      "mulliganDone": true
+     },
+     {
+      "leaderHp": 4,
+      "leaderMaxHp": 20,
+      "maxPp": 8,
+      "pp": 8,
+      "ep": 0,
+      "sep": 0,
+      "extraPpAvailable": true,
+      "turnCount": 8,
+      "deck": [
+       {
+        "iid": 64,
+        "cardId": "10872120"
+       },
+       {
+        "iid": 66,
+        "cardId": "10403110"
+       },
+       {
+        "iid": 50,
+        "cardId": "10072210"
+       },
+       {
+        "iid": 68,
+        "cardId": "10572110"
+       },
+       {
+        "iid": 72,
+        "cardId": "10401110"
+       },
+       {
+        "iid": 80,
+        "cardId": "10774110"
+       },
+       {
+        "iid": 67,
+        "cardId": "10571110"
+       },
+       {
+        "iid": 59,
+        "cardId": "10471110"
+       },
+       {
+        "iid": 75,
+        "cardId": "10973110"
+       },
+       {
+        "iid": 69,
+        "cardId": "10774120"
+       },
+       {
+        "iid": 49,
+        "cardId": "10071120"
+       },
+       {
+        "iid": 44,
+        "cardId": "10971110"
+       },
+       {
+        "iid": 61,
+        "cardId": "10602210"
+       },
+       {
+        "iid": 54,
+        "cardId": "10674120"
+       },
+       {
+        "iid": 52,
+        "cardId": "10471130"
+       },
+       {
+        "iid": 60,
+        "cardId": "10574110"
+       },
+       {
+        "iid": 62,
+        "cardId": "10702110"
+       },
+       {
+        "iid": 79,
+        "cardId": "10974120"
+       },
+       {
+        "iid": 41,
+        "cardId": "10573310"
+       },
+       {
+        "iid": 77,
+        "cardId": "10473310"
+       },
+       {
+        "iid": 57,
+        "cardId": "10871120"
+       }
+      ],
+      "hand": [
+       {
+        "iid": 76,
+        "cardId": "10404110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 2,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null,
+        "ougi": 7
+       },
+       {
+        "iid": 74,
+        "cardId": "10874110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 73,
+        "cardId": "10474110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null,
+        "ougi": 5
+       },
+       {
+        "iid": 51,
+        "cardId": "10403120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 1,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 53,
+        "cardId": "10574120",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 65,
+        "cardId": "10973310",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       },
+       {
+        "iid": 78,
+        "cardId": "10674110",
+        "costMod": 0,
+        "attackMod": 0,
+        "defenseMod": 0,
+        "boosts": 0,
+        "x": null,
+        "keywords": [],
+        "fusedKinds": [],
+        "fusedThisTurn": false,
+        "revealed": false,
+        "drawnBy": null
+       }
+      ],
+      "board": [],
+      "crests": [
+       {
+        "iid": 86,
+        "crestId": "10974112",
+        "countdown": null,
+        "order": 13,
+        "usedOncePerTurn": {
+         "0": 7
+        }
+       },
+       {
+        "iid": 92,
+        "crestId": "10744112",
+        "countdown": null,
+        "order": 21,
+        "usedOncePerTurn": {
+         "1": 7
+        }
+       }
+      ],
+      "graveyard": 20,
+      "graveyardFollowers": [
+       "90071140",
+       "90071140",
+       "90071140",
+       "10772110",
+       "10871130",
+       "10803110",
+       "90071140",
+       "10874120",
+       "10974110",
+       "10773110",
+       "10974110",
+       "90071130",
+       "10971120",
+       "90071130",
+       "10974110",
+       "10972110",
+       "90071130"
+      ],
+      "destroyedAmulets": [],
+      "hiddenDiscards": [
+       "90071130"
+      ],
+      "handLog": "i40 i39 i38 i37 i36 i35 i34 i33 d d d d i36 o10772110/2/_/0/0 i35 a1 o10871130/1/_/0/0 i0 i34 o10803110/2/_/0/0 i0 o90071140/1/_/0/0 i33 a1 o90071140/1/_/0/0 a1 o10874120/2/_/0/0 a5 i32 o10974110/1/_/0/0 i0 o10972310/1/_/0/0 b1 w1 u i0 i29 i28 o10773110/3/_/0/0 i27 a2 i26 o10974110/1/_/0/0 o10971120/4/_/0/0 i25 o10771310/1/_/0/0 b1 a4 i24 i23 o10972110/4/_/0/0 o10974110/1/_/0/0 a3 i22",
+      "destroyedThisTurn": [],
+      "combo": 0,
+      "evolvedThisTurn": false,
+      "epEvolvedThisTurn": null,
+      "sepEvolvedThisTurn": null,
+      "leaderOncePerTurn": {},
+      "mulliganDone": true,
+      "evolvedCount": 7,
+      "enteredKinds": [
+       "10772110",
+       "10773110",
+       "10803110",
+       "10871130",
+       "10874120",
+       "10971120",
+       "10972110",
+       "10974110",
+       "90071130",
+       "90071140"
+      ]
+     }
+    ],
+    "first": 0,
+    "active": 1,
+    "turn": 16,
+    "winner": null,
+    "rng": 2915942107,
+    "nextIid": 99,
+    "nextOrder": 27,
+    "stack": [],
+    "queue": [],
+    "pending": null,
+    "attack": null
+   }
+  }
+ ]
+}
