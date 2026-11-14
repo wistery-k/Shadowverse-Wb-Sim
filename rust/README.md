@@ -99,6 +99,7 @@ npm run misses -- run --label 名前                         # 見落とし問�
 - `engine/src/state_json.rs`: 局面・行動を TypeScript の型（`src/engine/types.ts`）の形の JSON で書き出し・読み込む
 - `engine/src/effects.rs`: 能力の解釈と解決スタック
 - `engine/src/game.rs`: 対戦の生成・合法手・行動の適用
+- `engine/src/invariants.rs`: 局面の不変条件（TypeScript 版 `src/engine/invariants.ts` と同じ決まり。`svwb profile --check` が手ごとに確かめる）
 - `engine/src/golden.rs`・`canonical.rs`・`sim.rs`・`main.rs`: ゴールデンテスト・計測・CLI
 - `engine/src/prof.rs`: 処理ごとの時間の計測（`--features profile` のときだけ働く。`svwb profile`）
 - `engine/src/replay_index.rs`: 記録した試合を打ち直したターンごとのまとめ（開発サーバーの「リプレイ検索」。WASM の `replayIndex`。形は `src/replays/types.ts`）

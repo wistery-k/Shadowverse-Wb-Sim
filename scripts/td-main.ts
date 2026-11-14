@@ -7,8 +7,14 @@
 //   npm run td -- init --out m0.json [--hidden 32] [--seed 1] [--a 0.08] [--base stripped|current] [--inputs v2|v1]
 //     L = 0 のモデルを作る（--base current なら今の評価関数をそのまま出発点にする。--inputs v1 なら場の攻撃力・体力等を足す前の入力）。
 //     --hidden 256,32 のように並べると隠れ層を重ねる（最初の層の後ろは全結合。docs/ai-notes.md「大きなネットワークで一から学び直す」）
-//   npm run td -- extend --model data/value-net.json --out m0.json
-//     モデルの入力を今の並び（VALUE_ZONES・VALUE_SCALARS）に広げる。足した入力の重みは 0 なので、補正は元のモデルと同じ
+//   npm run td -- extend --model data/value-net.json --out m0.json [--vocab keep|starter|pool|@<デッキの組>]
+//     モデルの入力を今の並び（VALUE_ZONES・VALUE_SCALARS）に広げる。足した入力の重みは 0 なので、補正は元のモデルと同じ。
+//     --vocab なら語彙（カード・クレスト）もその範囲に広げる（scripts/vocab.ts。今の語彙の後ろに足し、足したカードの行は 0。
+//     場のカードのネットワークの最初の層のカードの行も 0 で足す）。見込みのモデル（data/potential-net.json）も、語彙だけ同じように広げる。
+//     足した行を属性の分で埋めるなら、続けて td attr を回す（0 の行を学んでいない行とみなす）
+//   npm run td -- vocab --vocab <範囲> [--base data/value-net.json] [--out v.json]
+//     範囲の語彙を数える（ベースの語彙に無いカード・トークン・姿・クレストの数）。--out なら語彙を JSON の配列で書く
+//     （svwb beam-gap --vocab に渡すと、見込みの学習のデータをその語彙で書く）
 //   npm run td -- widen --model m.json --hidden 256,32 --out w0.json [--seed 1]
 //     隠れ層 1 つのモデルを、補正を変えずに大きい形に移す。最初の層の先頭に元の層を写し、足した部分は乱数で始めて、
 //     2 つ目の層は元の層の値をそのまま通す（足した部分からの重みは 0）。docs/ai-notes.md「今のモデルを広げて学習を続ける」
@@ -78,7 +84,8 @@
 //   （種類・クラス・コスト・攻撃力・体力・キーワード・タイプ・能力のきっかけ × 効果のプリミティブ等）。学習データに出なかったカードは
 //   R = 0 で属性の分だけになるので、初見のカードもそれらしい行から始まる。書き出す w1 は足し込んだ行なので、推論（Rust）は今のまま。
 //   npm run td -- attr --model m.json --out m2.json [--data d.jsonl,...] [--ridge 3] [--n0 0] [--keepA 1]
-//     学び直さずに、学んだ行に A をリッジ回帰で当てはめ、学んでいない行を属性の分で埋める（関数の先頭の説明）
+//     学び直さずに、学んだ行に A をリッジ回帰で当てはめ、学んでいない行を属性の分で埋める（関数の先頭の説明）。
+//     見込みのモデル（kind が potential-net）も同じように埋める（--data は使えず、0 でない行を学んだ行とみなす。A は残さない）
 //   npm run td -- train ... --attr 1 [--ridge 3] [--l2Res <l2>] [--l2Attr <l2>] [--lrAttr 1]
 //     A と R を一緒に学ぶ。A はモデルの attr か、無ければ今の行への当てはめから始める。R の減衰は --l2Res、A は --l2Attr。
 //     A の学習率は lr × --lrAttr（0 なら A を当てはめたまま動かさない）。
@@ -97,8 +104,10 @@
 //
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { vocabRange, widenVocab } from "./vocab";
 import { gunzipSync } from "node:zlib";
 import { ALL_CARDS, ALL_CRESTS } from "../src/cards";
+import { ALT_PLAY_OF, ENGINE_CARDS } from "../src/cards/pools";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { attributeMatrix, attributeNames, attributeRow, choleskyFactor, choleskySolve, normalEquations, ridgePenalty, ridgeSolve, rowCanOccur, sparseRows } from "./cardAttrs";
 import { nextRandom, type PlayerIndex } from "../src/engine";
@@ -129,6 +138,9 @@ import {
   type SparseInput,
   type ValueNetModel,
 } from "./valueNet";
+
+/** エンジンのカードの表（スターター・前期のローテーション・姿）の ID → カード（td vocab が数える） */
+const ENGINE_CARD_BY_ID = new Map(ENGINE_CARDS.map((c) => [c.id, c]));
 
 /**
  * 評価関数から外す、人が見つけたデッキ専用の項（過去に勝率で確かめて足したもの。docs/ai-notes.md）。
@@ -176,6 +188,7 @@ export async function main(argv: string[]): Promise<number> {
   const args = parseArgs(rest);
   if (cmd === "init") return init(args);
   if (cmd === "extend") return extend(args);
+  if (cmd === "vocab") return vocab(args);
   if (cmd === "widen") return widen(args);
   if (cmd === "board") return board(args);
   if (cmd === "check") return check(args);
@@ -187,7 +200,7 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === "attr") return attr(args);
   if (cmd === "attrcheck") return attrcheck(args);
   if (cmd === "eval") return evalModels(args);
-  throw new Error("npm run td -- init|extend|widen|board|selfplay|train|check|probe|prune|ivcheck|attr|attrcheck|eval ...（scripts/td-main.ts の先頭の説明を参照）");
+  throw new Error("npm run td -- init|extend|vocab|widen|board|selfplay|train|check|probe|prune|ivcheck|attr|attrcheck|eval ...（scripts/td-main.ts の先頭の説明を参照）");
 }
 
 type Args = Map<string, string>;
@@ -277,29 +290,114 @@ function init(args: Args): number {
 // ---- extend ----
 
 function extend(args: Args): number {
-  const model = loadValueNet(need(args, "model"));
-  compileValueNet(model);
+  const path = need(args, "model");
   const out = need(args, "out");
+  const range = vocabRange(args.get("vocab") ?? "keep");
+  const raw = JSON.parse(readFileSync(path, "utf8")) as { kind?: unknown };
+  if (raw.kind === "potential-net") return extendPotential(parsePotential(raw, path), range, out);
+  const model = loadValueNet(path);
+  compileValueNet(model);
   const H = model.hidden;
-  const V = model.vocab.length;
+  const V0 = model.vocab.length;
+  const vocab = widenVocab(model.vocab, range);
+  const V = vocab.length;
   const zones: string[] = [...VALUE_ZONES];
   const scalars: string[] = [...VALUE_SCALARS];
-  // 新しい入力の添字ごとに、元のモデルの入力の添字（無ければ -1）
+  // 新しい入力の添字ごとに、元のモデルの入力の添字（無ければ -1）。語彙は後ろに足すだけなので、元の語彙の添字はそのまま
   const from: number[] = [];
   for (const z of zones) {
     const k = model.zones.indexOf(z);
-    for (let i = 0; i < V; i++) from.push(k < 0 ? -1 : k * V + i);
+    for (let i = 0; i < V; i++) from.push(k < 0 || i >= V0 ? -1 : k * V0 + i);
   }
   for (const sc of scalars) {
     const k = model.scalars.indexOf(sc);
-    from.push(k < 0 ? -1 : model.zones.length * V + k);
+    from.push(k < 0 ? -1 : model.zones.length * V0 + k);
   }
   const w1: number[] = [];
   for (const k of from) for (let j = 0; j < H; j++) w1.push(k < 0 ? 0 : model.w1[k * H + j]!);
   // 場のカードのネットワークの出力の重み（入力の末尾）はそのまま
   w1.push(...model.w1.slice(baseInputSize(model) * H));
-  writeFileSync(out, JSON.stringify({ ...withoutAttr(model), zones, scalars, w1 }));
-  console.log(`${out}: 入力 ${baseInputSize(model)} → ${from.length}（足した ${from.filter((k) => k < 0).length} 個の重みは 0）`);
+  // 場のカードのネットワークの最初の層（入力は語彙のカード・grants・features の順）: 足したカードの行を 0 で挟む
+  const board = model.board && V > V0 ? { ...model.board, layers: model.board.layers.map((l, i) => (i === 0 ? { ...l, w: insertRows(l.w, l.b.length, V0, V - V0) } : l)) } : model.board;
+  writeFileSync(out, JSON.stringify({ ...withoutAttr(model), vocab, zones, scalars, w1, ...(board ? { board } : {}) }));
+  console.log(
+    `${out}: 入力 ${baseInputSize(model)} → ${from.length}（足した ${from.filter((k) => k < 0).length} 個の重みは 0）` +
+      (V > V0 ? `、語彙 ${V0} → ${V}${board ? "（場のカードのネットワークの最初の層にも 0 の行を足した）" : ""}` : ""),
+  );
+  return 0;
+}
+
+/** 行 row の大きさ m の行列 w の、行 at の前に 0 の行を n 行挟んだもの */
+function insertRows(w: readonly number[], m: number, at: number, n: number): number[] {
+  return [...w.slice(0, at * m), ...Array.from({ length: n * m }, () => 0), ...w.slice(at * m)];
+}
+
+/** 見込みのモデル（scripts/potential-main.ts が書く。rust/engine/src/ai/potential.rs の RawPotentialNet） */
+interface PotentialModel {
+  kind: "potential-net";
+  version: number;
+  vocab: string[];
+  zones: string[];
+  scalars: string[];
+  hidden: number;
+  w1: number[];
+  b1: number[];
+  w2: number[];
+  b2: number;
+}
+
+function parsePotential(raw: unknown, path: string): PotentialModel {
+  const m = raw as Partial<Record<keyof PotentialModel, unknown>>;
+  const strs = (x: unknown): x is string[] => Array.isArray(x) && x.every((v) => typeof v === "string");
+  const nums = (x: unknown): x is number[] => Array.isArray(x) && x.every((v) => typeof v === "number");
+  if (m.kind !== "potential-net" || typeof m.version !== "number" || !strs(m.vocab) || !strs(m.zones) || !strs(m.scalars) || typeof m.hidden !== "number" || !nums(m.w1) || !nums(m.b1) || !nums(m.w2) || typeof m.b2 !== "number") {
+    throw new Error(`${path}: 見込みのモデルの形ではありません`);
+  }
+  const model = m as PotentialModel;
+  if (model.w1.length !== (model.zones.length * model.vocab.length + model.scalars.length) * model.hidden) throw new Error(`${path}: w1 の大きさが合いません`);
+  return model;
+}
+
+/** 見込みのモデルの語彙を広げる（ゾーン・数値の入力は今の並びのまま。足したカードの行は 0） */
+function extendPotential(model: PotentialModel, range: string[] | null, out: string): number {
+  const H = model.hidden, V0 = model.vocab.length;
+  const vocab = widenVocab(model.vocab, range);
+  const V = vocab.length;
+  const w1: number[] = [];
+  for (let z = 0; z < model.zones.length; z++) {
+    w1.push(...model.w1.slice(z * V0 * H, (z + 1) * V0 * H));
+    for (let i = V0 * H; i < V * H; i++) w1.push(0);
+  }
+  w1.push(...model.w1.slice(model.zones.length * V0 * H));
+  writeFileSync(out, JSON.stringify({ ...model, vocab, w1 }));
+  console.log(`${out}: 見込みのモデルの語彙 ${V0} → ${V}（足したカードの行は 0）`);
+  return 0;
+}
+
+// ---- vocab ----
+
+/** npm run td -- vocab --vocab <範囲> [--base data/value-net.json] [--out v.json]: 範囲の語彙の中身を数える（--out なら JSON の配列で書く） */
+function vocab(args: Args): number {
+  const spec = need(args, "vocab");
+  const range = vocabRange(spec);
+  if (!range) throw new Error("--vocab keep は数えるものがありません");
+  const basePath = args.get("base") ?? "data/value-net.json";
+  const base = new Set((JSON.parse(readFileSync(basePath, "utf8")) as { vocab: string[] }).vocab);
+  const added = range.filter((id) => !base.has(id));
+  const crests = added.filter((id) => id.startsWith("crest:"));
+  const cards = added.filter((id) => !id.startsWith("crest:")).map((id) => ENGINE_CARD_BY_ID.get(id)!);
+  const forms = new Set(ALT_PLAY_OF.values());
+  const tokens = cards.filter((c) => c.set === "token" && !forms.has(c.id));
+  console.log(
+    `${spec}: 語彙 ${range.length}（${basePath} の語彙 ${base.size} に無いもの ${added.length}: ` +
+      `カード ${cards.length - tokens.length - cards.filter((c) => forms.has(c.id)).length}・トークン ${tokens.length}・` +
+      `アクセラレート・結晶の姿 ${cards.filter((c) => forms.has(c.id)).length}・クレスト ${crests.length}）`,
+  );
+  const out = args.get("out");
+  if (out) {
+    writeFileSync(out, JSON.stringify(range));
+    console.log(`書いた: ${out}`);
+  }
   return 0;
 }
 
@@ -1909,11 +2007,14 @@ interface AttrBasis {
 }
 
 /** モデルの属性（A を持つモデルならその名前、無ければ今のカードから作る。minSupport 項目以上が持つ属性） */
-function attrBasis(model: ValueNetModel, minSupport: number): AttrBasis {
+function attrBasis(model: Pick<ValueNetModel, "vocab" | "attr">, minSupport: number): AttrBasis {
   const names = model.attr?.names ?? attributeNames(model.vocab, minSupport);
   const x = attributeMatrix(model.vocab, names);
   return { names, K: names.length, x, sparse: sparseRows(x, model.vocab.length, names.length) };
 }
+
+/** 最初の層のカードの行を属性で表す計算が使うモデルの部分（補正のモデルと見込みのモデルの両方にある） */
+type AttrModel = Pick<ValueNetModel, "vocab" | "zones" | "hidden" | "w1" | "attr">;
 
 /** w1 の行 row が全部 0 か（学んでいない・td prune で 0 にした行） */
 function rowIsZero(w1: ArrayLike<number>, row: number, H: number): boolean {
@@ -1931,7 +2032,7 @@ function withoutAttr(m: ValueNetModel): ValueNetModel {
  * ゾーンごとに、カードの行のうち fitRow が真の行（既定は 0 でない行 = 学んだ行）に属性の重み A をリッジ回帰で当てはめる。
  * 返すのはゾーン × 属性 × 隠れ層。weight(row) は行の重み（既定 1）
  */
-function fitAttr(model: ValueNetModel, basis: AttrBasis, lambda: number, opts: { fitRow?: (row: number) => boolean; weight?: (row: number) => number } = {}): Float64Array {
+function fitAttr(model: AttrModel, basis: AttrBasis, lambda: number, opts: { fitRow?: (row: number) => boolean; weight?: (row: number) => number } = {}): Float64Array {
   const H = model.hidden, V = model.vocab.length, Z = model.zones.length, K = basis.K;
   const w1 = Float64Array.from(model.w1);
   const a = new Float64Array(Z * K * H);
@@ -1957,7 +2058,7 @@ function fitAttr(model: ValueNetModel, basis: AttrBasis, lambda: number, opts: {
  * モデルの A（model.attr）で、fill が真のカードの行を属性の分にする（w1 を書き換える）。埋めた行の数を返す。
  * そのゾーンに現れえない行（スペルの場の行等。cardAttrs.ts の rowCanOccur）は 0 にする
  */
-function fillFromAttr(model: ValueNetModel, w1: number[] | Float64Array, fill: (row: number) => boolean): number {
+function fillFromAttr(model: AttrModel, w1: number[] | Float64Array, fill: (row: number) => boolean): number {
   const at = model.attr;
   if (!at) throw new Error("モデルに属性の分（attr）がありません");
   const H = model.hidden, V = model.vocab.length, Z = model.zones.length;
@@ -2002,7 +2103,10 @@ function inputCounts(files: string[], n: number, layout: InputLayout): Float64Ar
  * --keepA 0 なら A を残さない（推論に使うだけのモデル。data/value-net.json 等）
  */
 function attr(args: Args): number {
-  const model = loadValueNet(need(args, "model"));
+  const path = need(args, "model");
+  const raw = JSON.parse(readFileSync(path, "utf8")) as { kind?: unknown };
+  if (raw.kind === "potential-net") return attrPotential(parsePotential(raw, path), args);
+  const model = loadValueNet(path);
   compileValueNet(model);
   const out = need(args, "out");
   const H = model.hidden, V = model.vocab.length, ZV = model.zones.length * V, n = baseInputSize(model);
@@ -2025,6 +2129,25 @@ function attr(args: Args): number {
     `${out}: 属性 ${basis.K} 個、カードの行 ${ZV} のうち学んだ ${nLearned} 行に当てはめ（λ ${lambda}${n0 > 0 ? `、n0 ${n0}` : ""}）、` +
       `残りのうち現れうる ${filled} 行を属性の分で埋めました`,
   );
+  return 0;
+}
+
+/** 見込みのモデルの td attr: 0 でない行を学んだ行とみなし、A を当てはめて 0 の行を属性の分で埋める（A は書き出さない） */
+function attrPotential(model: PotentialModel, args: Args): number {
+  if (args.has("data")) throw new Error("見込みのモデルの td attr は --data を使えません（0 でない行を学んだ行とみなす）");
+  const out = need(args, "out");
+  const H = model.hidden, ZV = model.zones.length * model.vocab.length;
+  const basis = attrBasis(model, numArg(args, "minSupport", 3));
+  const lambda = numArg(args, "ridge", 3);
+  const w1 = Float64Array.from(model.w1);
+  const learned = (r: number): boolean => !rowIsZero(w1, r, H);
+  const a = fitAttr(model, basis, lambda, { fitRow: learned });
+  const outW1 = Array.from(model.w1);
+  const filled = fillFromAttr({ ...model, attr: { names: basis.names, a: Array.from(a) } }, outW1, (r) => r < ZV && !learned(r));
+  writeFileSync(out, JSON.stringify({ ...model, w1: outW1 }));
+  let nLearned = 0;
+  for (let r = 0; r < ZV; r++) if (learned(r)) nLearned++;
+  console.log(`${out}: 見込みのモデル。属性 ${basis.K} 個、カードの行 ${ZV} のうち学んだ ${nLearned} 行に当てはめ（λ ${lambda}）、残りのうち現れうる ${filled} 行を属性の分で埋めました`);
   return 0;
 }
 

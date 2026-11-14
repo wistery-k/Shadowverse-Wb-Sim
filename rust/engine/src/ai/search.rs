@@ -13,7 +13,7 @@ use super::converging::{
 use super::determinize::{determinize, determinize_apart_with, determinize_with};
 use super::eval::{evaluate_with, EvalWeights};
 use super::exact_lethal::{search_exact_lethal, sure_lethal_options};
-use super::fusion::{excessive_fusion, last_words_to_hand};
+use super::fusion::{excessive_fusion, last_words_to_hand, needless_material};
 use super::greedy::choose_greedy;
 use super::keys::{hand_eq_noid, state_eq, visible_eq, TurnOrderSet};
 use super::lethal::{
@@ -197,6 +197,9 @@ pub struct SearchOptions {
     pub defer_fuse_last_words: bool,
     /// 素材を入れすぎる融合（同じ融合先を、素材を 1 枚少なく使って作れる融合。ai/fusion.rs）を展開しない
     pub fuse_minimal: bool,
+    /// 素材の条件が無く、融合したカードを見ない融合先（Card::fuse_any_one）は、素材 1 枚の融合だけを展開する。
+    /// どのカードも素材にできるので、手札が多いと融合の手が数百通りになり、読みの中の相手のターンのビームが重くなる（2026-11-14、実験体W）
+    pub fuse_one: bool,
     pub mulligan: MulliganMode,
     /// MulliganMode::Sample・Turn1 で、返し方ごとに引き直しを試す回数
     pub mulligan_samples: usize,
@@ -298,6 +301,9 @@ impl Default for SearchOptions {
             defer_fuse_last_words: true,
             // 素材を入れすぎる融合を展開しないのは、勝率を比べてから決める（docs/ai-notes.md「融合を回した局面で探索が取りこぼすか」）
             fuse_minimal: false,
+            // 素材の条件の無い融合先は素材 1 枚だけ（スターターのカードには無いので、スターターの試合は変わらない。
+            // docs/ai-notes.md「新しいプールで今の AI を調べる」）
+            fuse_one: true,
             // 引き直した後、3 ターン目の終わりまで貪欲法で進めてから採点する
             // （docs/ai-notes.md「引き直した後に先へ進めてから採点するマリガン」。手札の形のモデルより +1.5%）
             mulligan: MulliganMode::Turn1,
@@ -742,6 +748,9 @@ impl<'a> Planner<'a> {
         }
         if self.opts().fuse_minimal {
             legal.retain(|a| !excessive_fusion(s, a));
+        }
+        if self.opts().fuse_one {
+            legal.retain(|a| !needless_material(s, a));
         }
         if self.opts().same_hand_once {
             distinct_plays(s, legal)

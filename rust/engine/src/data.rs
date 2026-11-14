@@ -1216,6 +1216,10 @@ pub struct Card {
     /// 能力が「このバトル中に場に出た自分の…の種類」を見る（デッキに入れると、場に出たカードの種類を覚える）
     #[serde(default)]
     pub count_kinds: bool,
+    /// 素材の条件が無く（どのカードも素材にできる）、融合したカードのコスト・種類も見ない融合先（恍惚の才媛・万術の咎人・セフィー）。
+    /// どの素材を何枚融合しても融合先は同じで、素材を多くするほど手札が減るだけなので、探索は素材 1 枚の融合だけを展開する（SearchOptions.fuseOne）
+    #[serde(default)]
+    pub fuse_any_one: bool,
 }
 
 impl Card {

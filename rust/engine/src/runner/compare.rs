@@ -1,6 +1,6 @@
 //! 探索 AI の設定 A と B を対戦させる（TypeScript 版 scripts/compare-main.ts。npm run compare と同じ試合・同じ出力）。
 //!
-//!   svwb compare <試合数> '<Aの設定JSON>' '<Bの設定JSON>' [最初の試合番号] [Bのデッキ名] [--no-mirror] [--decks <7 つのデッキ>] [--replays <ファイル>]
+//!   svwb compare <試合数> '<Aの設定JSON>' '<Bの設定JSON>' [最初の試合番号] [Bのデッキ名] [--no-mirror] [--decks <デッキ>,…|@<デッキの組>] [--replays <ファイル>]
 //!                [--with <デッキ名> | --without <デッキ名>] [--label <名前>] [--no-ledger]
 //!
 //! 同じデッキの組で席とデッキを入れ替えて 2 試合ずつ行い、A の勝率とデッキごとの A の勝率を出す。
@@ -8,20 +8,21 @@
 //! 組の 2 試合は同じシードで打つ（鏡。デッキと席と山札の順は同じで、A と B だけが入れ替わる。2026-10-22 から）。
 //! 同じ AI どうしはちょうど 50% になり、似た AI どうしは運の分が打ち消し合ってぶれが小さい。
 //! `--no-mirror` は 2026-10-21 までの試合（組の 2 試合で別のシード。物差しと同じ）。
-//! `--decks` なら、比較用の 7 デッキの代わりに、並べた 7 つのデッキ（デフォルトデッキの名前・キーか、デッキのテキストファイル。
-//! td selfplay --decks と同じ）で打つ。学習した補正の知らないカードの入ったデッキで、補正どうしを比べる用
+//! `--decks` なら、比較用の 7 デッキの代わりに、並べたデッキ（デフォルトデッキの名前・キーか、デッキのテキストファイル。
+//! `@<ファイル>` はデッキの組のファイルに並べたデッキ。td selfplay --decks と同じ）で打つ。学習した補正の知らないカードの入ったデッキで、
+//! 補正どうしを比べる用。デッキが n 個なら、試合番号 n² ごとに全部の組を回る（compare_pair。7 個なら今までと同じ組とシード）
 //! （docs/ai-notes.md「カードの重みを属性とカードごとの残りに分ける」）。デフォルトデッキと違うデッキのマリガンは、
 //! 返し方ごとに引き直しを試して選ぶ（td selfplay と同じ。マリガンのモデルはデフォルトデッキしか知らない）。
 //! `--replays` なら、試合ごとにデッキ・シード・行動の列を JSON Lines で書く（1 行の形は runner/mod.rs の ReplayRecord。
 //! npm run dev の「リプレイ検索」タブで読む）。打つ手は変わらない。
 //! 回すたびに、結果を実験の台帳 `docs/ledger.jsonl` に 1 行足す（runner/ledger.rs。`--label <名前>` で名前を付け、`--no-ledger` で書かない）。
 //! 試合数 0 なら設定とデッキを読むだけで終わる。
-//! `--with <デッキ名>` なら、そのデッキの絡む組（A か B のどちらかがそのデッキ。49 組のうち 13 組）だけを打つ。試合番号 k は
+//! `--with <デッキ名>` なら、そのデッキの絡む組（A か B のどちらかがそのデッキ。7 デッキなら 49 組のうち 13 組）だけを打つ。試合番号 k は
 //! 「そのデッキの絡む k 番目の試合番号」（with_game）で、組の 2 試合（鏡）はそのまま。見ていないデッキを渡したときの落ち方を、
 //! そのデッキの絡む試合だけで測る用（docs/STATE.md の案 E）。`--without <デッキ名>` はその逆で、そのデッキの絡まない 36 組だけを打つ
 //! （そのデッキで学び足した補正が、ほかのデッキどうしの判断を壊していないかを測る用）。
 
-use super::deck_compare::read_deck;
+use super::deck_compare::read_deck_list;
 use super::ledger;
 use super::options::compare_options;
 use super::parallel::parallel_map;
@@ -32,10 +33,12 @@ use crate::data::{data, Deck};
 use crate::sim::play_match;
 use std::time::Instant;
 
-/// 試合番号 g（swap で席とデッキを入れ替えた方）の A と B のデッキ
+/// 試合番号 g（swap で席とデッキを入れ替えた方）の A と B のデッキ。n デッキなら、試合番号 n² ごとに全部の組（同じデッキどうしを含む）を
+/// 1 回ずつ回る（g = q n + r なら A は r、B は (3r + 1 + q) mod n。r ごとに q で B が全部回る）。7 デッキの組は 2026-11-14 より前と同じ
 pub fn compare_pair(decks: &[&'static Deck], g: u32, swap: bool) -> (&'static Deck, &'static Deck) {
-    let i = (g % 7) as usize;
-    let j = ((g * 3 + 1 + g / 7) % 7) as usize;
+    let n = decks.len() as u32;
+    let i = (g % n) as usize;
+    let j = ((g * 3 + 1 + g / n) % n) as usize;
     if swap {
         (decks[j], decks[i])
     } else {
@@ -43,14 +46,15 @@ pub fn compare_pair(decks: &[&'static Deck], g: u32, swap: bool) -> (&'static De
     }
 }
 
-/// --with: デッキ with の絡む（A か B のどちらかがそのデッキの）k 番目の試合番号。compare_pair は試合番号 49 ごとに同じ組を繰り返す
+/// --with: デッキ with の絡む（A か B のどちらかがそのデッキの）k 番目の試合番号。compare_pair は試合番号 n²（7 デッキなら 49）ごとに同じ組を繰り返す
 pub fn with_game(decks: &[&'static Deck], with: &str, k: u32) -> u32 {
     deck_game(decks, with, true, k)
 }
 
 /// --with（involved）・--without（!involved）: デッキ name の絡む・絡まない k 番目の試合番号
 pub fn deck_game(decks: &[&'static Deck], name: &str, involved: bool, k: u32) -> u32 {
-    let table: Vec<u32> = (0..49)
+    let nn = (decks.len() * decks.len()) as u32;
+    let table: Vec<u32> = (0..nn)
         .filter(|&g| {
             let (a, b) = compare_pair(decks, g, false);
             (a.name == name || b.name == name) == involved
@@ -62,7 +66,7 @@ pub fn deck_game(decks: &[&'static Deck], name: &str, involved: bool, k: u32) ->
         if involved { "絡む" } else { "絡まない" }
     );
     let n = table.len() as u32;
-    49 * (k / n) + table[(k % n) as usize]
+    nn * (k / n) + table[(k % n) as usize]
 }
 
 /// 試合番号 g のシード。mirror なら組の 2 試合で同じ
@@ -96,6 +100,16 @@ pub fn play_compare_game(
     (deck, won)
 }
 
+/// デッキ d で打つときの設定。デフォルトデッキと違うデッキ（--decks）では、デッキごとのモデルを使うマリガン（model・weights）の代わりに、
+/// 返し方ごとに引き直しを試して選ぶ
+pub fn deck_options(o: &SearchOptions, d: &Deck) -> SearchOptions {
+    let mut o = o.clone();
+    if o.mulligan.needs_deck_model() && !data().decks.iter().any(|x| x.cards == d.cards) {
+        o.mulligan = MulliganMode::Sample;
+    }
+    o
+}
+
 /// play_compare_game と同じ試合。labels（A・B の名前）があれば、リプレイ検索用の 1 行（ReplayRecord）も返す
 pub fn play_compare_game_with(
     a: &SearchOptions,
@@ -107,17 +121,8 @@ pub fn play_compare_game_with(
     labels: Option<[&str; 2]>,
 ) -> (String, bool, Option<String>) {
     let (a_seat, seats, seed) = compare_setup(decks, g, swap, mirror);
-    // デフォルトデッキと違うデッキ（--decks）では、デッキごとのモデルを使うマリガン（model・weights）の代わりに、
-    // 返し方ごとに引き直しを試して選ぶ
-    let opts = |o: &SearchOptions, d: &Deck| {
-        let mut o = o.clone();
-        if o.mulligan.needs_deck_model() && !data().decks.iter().any(|x| x.cards == d.cards) {
-            o.mulligan = MulliganMode::Sample;
-        }
-        o
-    };
-    let mut a = SearchAgent::new(opts(a, seats[a_seat]));
-    let mut b = SearchAgent::new(opts(b, seats[1 - a_seat]));
+    let mut a = SearchAgent::new(deck_options(a, seats[a_seat]));
+    let mut b = SearchAgent::new(deck_options(b, seats[1 - a_seat]));
     let mut agents: [&mut dyn Agent; 2] = if a_seat == 0 {
         [&mut a, &mut b]
     } else {
@@ -224,7 +229,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     if let Some(i) = argv.iter().position(|s| s == "--decks") {
         deck_list = Some(
             argv.get(i + 1)
-                .ok_or("--decks の後に 7 つのデッキをカンマで並べます")?
+                .ok_or("--decks の後にデッキをカンマで並べます（@<ファイル> でデッキの組）")?
                 .clone(),
         );
         argv.drain(i..i + 2);
@@ -232,15 +237,13 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let games = number_arg(argv.first(), 28.0)?;
     let decks: Vec<&'static Deck> = match deck_list {
         None => compare_decks(),
-        Some(list) => list
-            .split(',')
-            .map(str::trim)
-            .filter(|x| !x.is_empty())
-            .map(|name| read_deck(name).map(|d| &*Box::leak(Box::new(d))))
-            .collect::<Result<_, _>>()?,
+        Some(list) => read_deck_list(&list)?
+            .into_iter()
+            .map(|d| &*Box::leak(Box::new(d)))
+            .collect(),
     };
-    if decks.len() != 7 {
-        return Err("比較用のデッキは 7 つの想定です".into());
+    if decks.len() < 2 {
+        return Err("比較用のデッキは 2 つ以上".into());
     }
     let a_text = argv.get(1).map(|s| s.as_str()).unwrap_or("{}");
     let b_text = argv.get(2).map(|s| s.as_str()).unwrap_or("{}");

@@ -1,9 +1,14 @@
 //! 対戦の速さの計測（定期的なプロファイリング）。比較用の 7 デッキの総当たりを探索 AI どうしで打ち、
 //! デッキごとの 1 試合の時間と、思考の処理ごとの時間の内訳を出す。
 //!
-//!   svwb profile [--games 49] [--start 0] [--opts '<設定JSON>'] [--rhino] [--json 結果.json]
+//!   svwb profile [--games 49] [--start 0] [--opts '<設定JSON>'] [--rhino] [--decks <デッキ>,…|@<デッキの組>] [--check] [--log <フォルダ>] [--json 結果.json]
 //!                [--baseline 測らないビルドの結果.json] [--report 報告.md] [--label 名前] [--record]
 //!
+//! - --check なら、手を打つたびに局面の不変条件（invariants.rs）を確かめ、破った局面を報告に並べる（1 つでもあれば終わりにエラーを返す）
+//! - 報告には、デッキ（名前の「（」の前が同じものは型にまとめる）ごとの勝率と、仕組み（アクセラレート・結晶・エンハンス・奥義・進化・
+//!   超進化・融合・アクト・エクストラPP・攻撃）を使った回数も出す。--log <フォルダ> なら、1 試合ずつ手の並びを文章で書く（試合を読むため）
+//! - --decks なら、比較用の 7 デッキの代わりに並べたデッキで打つ（compare --decks と同じ組とシード。n デッキなら --games n² で全部の組）。
+//!   --record とは一緒に使えない（docs/profile.md の表の列は 7 デッキ）
 //! - 試合は compare と同じデッキの組で、試合番号ごとに席とデッキを入れ替えて 2 試合打つ（両方の席が同じ設定。
 //!   シードは compare --no-mirror と同じ）。--games 49 で 7×7 のデッキの組（同じデッキどうしも含む）を 2 回ずつ、98 試合
 //! - --opts は compare の設定と同じ形（`{}` で今の探索 AI の既定）。--rhino ならリノセウスエルフはリノセウス用 AI（rhino）で打つ
@@ -14,7 +19,10 @@
 //! - --record で docs/profile.md の表に 1 行足す（--label で名前を付ける）
 //! - 時間は試合を打ったスレッドの経過時間。並列数（THREADS）・CPU で変わるので、比べるときは同じ環境の行どうしで比べる
 
-use super::compare::compare_setup;
+use super::compare::{compare_setup, deck_options};
+use super::deck_compare::read_deck_list;
+use super::deep_gap::describe;
+use super::human_plan::step_text;
 use super::options::compare_options;
 use super::parallel::{parallel_map, thread_count};
 use super::yardstick::{command_line, commit_label_excluding, short_name};
@@ -22,11 +30,12 @@ use super::{compare_decks, fixed};
 use crate::ai::rhino::RhinoAgent;
 use crate::ai::search::{SearchAgent, SearchOptions};
 use crate::ai::Agent;
-use crate::data::Deck;
-use crate::game::{acting_player, apply_action, create_game, legal_actions};
+use crate::data::{CardIdx, CardType, Deck};
+use crate::game::{acting_player, apply_action, create_game, legal_actions, play_as, play_cost};
+use crate::invariants::invariant_violations;
 use crate::prof::{self, Profile, Sec};
 use crate::sim::MatchRng;
-use crate::state::Phase;
+use crate::state::{card, Action, GameState, Phase, PlayerIndex};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -47,6 +56,116 @@ struct GameRecord {
     decisions: [u32; 2],
     /// 席ごとの処理の内訳
     prof: [Profile; 2],
+    /// 席ごとの自分のターンの数（考えたターン）
+    own_turns: [u32; 2],
+    /// 時間の長かった手番（長い順に SLOW_PER_GAME まで）
+    slow: Vec<SlowDecision>,
+    /// 不変条件を破った局面（--check。1 試合で最初の 5 つまで）
+    violations: Vec<String>,
+    /// 席ごとの仕組みを使った回数（USAGE の順）
+    usage: [[u32; USAGE.len()]; 2],
+    /// 席ごとの、最初に進化・超進化した自分のターン（0 はしなかった）
+    first: [[u32; 2]; 2],
+    /// 手の並びの文章（--log）
+    log: Vec<String>,
+    /// 席ごとの、プレイできるカードがあって PP も残っているのにターンを終えた数と、そのときに残した PP の合計
+    idle: [[u32; 2]; 2],
+    /// 席ごとの、そのとき（idle）にプレイできたカード（1 ターンに同じカードは 1 回）
+    idle_cards: [Vec<CardIdx>; 2],
+    /// 先攻の席
+    first_seat: usize,
+}
+
+/// 仕組みを使った回数の列（tally が数える）
+const USAGE: [&str; 13] = [
+    "プレイ",
+    "アクセラレート",
+    "結晶",
+    "エンハンス",
+    "奥義",
+    "解放奥義",
+    "進化",
+    "超進化",
+    "融合",
+    "アクト",
+    "エクストラPP",
+    "リーダーへの攻撃",
+    "フォロワーへの攻撃",
+];
+
+/// 手 a を打つ前の局面 s で、席 p が使った仕組みを数える。アクセラレート・結晶はプレイしたときの姿が違うもの、エンハンスは
+/// エンハンスのコストを払ったもの、奥義・解放奥義は【奥義】を持つカードを奥義ゲージ 10 以上・15 以上でプレイしたもの
+/// （効果が奥義の条件を見るかによらない）
+fn tally(u: &mut [u32; USAGE.len()], s: &GameState, a: &Action, p: PlayerIndex) {
+    let pl = &s.players[p];
+    let col = |name: &str| USAGE.iter().position(|x| *x == name).expect("列");
+    match a {
+        Action::Play(iid) => {
+            u[col("プレイ")] += 1;
+            let Some(h) = pl.hand.iter().find(|h| h.iid == *iid) else {
+                return;
+            };
+            let c = card(h.card);
+            match play_as(h, pl.pp) {
+                Some(f) if f != h.card => {
+                    u[col(if card(f).ctype == CardType::Spell {
+                        "アクセラレート"
+                    } else {
+                        "結晶"
+                    })] += 1
+                }
+                _ if c.enhance.is_some_and(|e| play_cost(c, pl.pp, Some(h)) == e) => {
+                    u[col("エンハンス")] += 1
+                }
+                _ => {}
+            }
+            if c.ougi {
+                let gauge = pl.turn_count + h.ougi;
+                if gauge >= 15 {
+                    u[col("解放奥義")] += 1;
+                } else if gauge >= 10 {
+                    u[col("奥義")] += 1;
+                }
+            }
+        }
+        Action::Evolve(_) => u[col("進化")] += 1,
+        Action::SuperEvolve(_) => u[col("超進化")] += 1,
+        Action::Fuse { .. } => u[col("融合")] += 1,
+        Action::Act(_) => u[col("アクト")] += 1,
+        Action::ExtraPp => u[col("エクストラPP")] += 1,
+        Action::Attack { target: None, .. } => u[col("リーダーへの攻撃")] += 1,
+        Action::Attack { .. } => u[col("フォロワーへの攻撃")] += 1,
+        _ => {}
+    }
+}
+
+/// デッキの型（名前の「（」の前。デッキの組のファイルの名前は「型（大会）」）
+fn archetype(name: &str) -> &str {
+    name.split('（').next().unwrap_or(name)
+}
+
+/// 「PP を残して終えたときにプレイできたカード」の表に出す枚数
+const IDLE_TOP: usize = 8;
+
+/// 1 試合で残す、時間の長かった手番の数
+const SLOW_PER_GAME: usize = 3;
+
+/// 時間の長かった手番（どの局面で考え込んだか）
+#[derive(Clone)]
+struct SlowDecision {
+    g: u32,
+    swap: bool,
+    seat: usize,
+    /// 考えた側が先攻か
+    first: bool,
+    deck: String,
+    turn: i32,
+    secs: f64,
+    legal: usize,
+    hand: usize,
+    board: [usize; 2],
+    pp: i32,
+    choosing: bool,
 }
 
 impl GameRecord {
@@ -78,7 +197,7 @@ fn make_agent(opts: &SearchOptions, deck: &Deck, rhino: bool) -> Box<dyn Agent> 
     if rhino && deck.name == "リノセウスエルフ" {
         Box::new(RhinoAgent::new(true))
     } else {
-        Box::new(SearchAgent::new(opts.clone()))
+        Box::new(SearchAgent::new(deck_options(opts, deck)))
     }
 }
 
@@ -89,6 +208,8 @@ fn play_timed(
     decks: &[&'static Deck],
     g: u32,
     swap: bool,
+    check: bool,
+    log: bool,
 ) -> GameRecord {
     let (_, seats, seed) = compare_setup(decks, g, swap, false);
     let mut agents = [
@@ -103,6 +224,16 @@ fn play_timed(
     let mut decisions = [0u32; 2];
     let mut profs: [Profile; 2] = Default::default();
     let mut actions = 0u32;
+    let mut own_turns = [0u32; 2];
+    let mut last_turn = [-1i32; 2];
+    let mut slow: Vec<SlowDecision> = Vec::new();
+    let mut violations: Vec<String> = Vec::new();
+    let mut usage = [[0u32; USAGE.len()]; 2];
+    let mut idle = [[0u32; 2]; 2];
+    let mut idle_cards: [Vec<CardIdx>; 2] = Default::default();
+    let mut first = [[0u32; 2]; 2];
+    let names = [seats[0].name.clone(), seats[1].name.clone()];
+    let mut lines: Vec<String> = Vec::new();
     while s.phase != Phase::Ended {
         actions += 1;
         assert!(
@@ -116,12 +247,89 @@ fn play_timed(
             let _p = prof::scope(Sec::Think);
             rng.choose(&mut *agents[actor], &s, &legal)
         };
-        think[actor] += t.elapsed().as_secs_f64();
+        let secs = t.elapsed().as_secs_f64();
+        think[actor] += secs;
         decisions[actor] += 1;
+        if s.phase != Phase::Mulligan && last_turn[actor] != s.turn {
+            last_turn[actor] = s.turn;
+            own_turns[actor] += 1;
+            if log {
+                lines.push(String::new());
+                lines.push(format!(
+                    "## ターン {}・席 {actor}（{}）の自分のターン {}",
+                    s.turn, names[actor], own_turns[actor]
+                ));
+                lines.extend(describe(&s, actor, &names));
+            }
+        }
+        if log {
+            lines.push(format!(
+                "- {}{}",
+                step_text(&s, &a, actor),
+                if secs >= 0.5 {
+                    format!("（{} 秒）", fixed(secs, 1))
+                } else {
+                    String::new()
+                }
+            ));
+        }
+        tally(&mut usage[actor], &s, &a, actor);
+        let pp = s.players[actor].pp;
+        if a == Action::EndTurn && pp > 0 && legal.iter().any(|x| matches!(x, Action::Play(_))) {
+            idle[actor][0] += 1;
+            idle[actor][1] += pp as u32;
+            let pl = &s.players[actor];
+            let mut cs: Vec<CardIdx> = legal
+                .iter()
+                .filter_map(|x| match x {
+                    Action::Play(iid) => pl.hand.iter().find(|h| h.iid == *iid).map(|h| h.card),
+                    _ => None,
+                })
+                .collect();
+            cs.sort_unstable();
+            cs.dedup();
+            idle_cards[actor].extend(cs);
+        }
+        let evolved = match a {
+            Action::Evolve(_) => Some(0),
+            Action::SuperEvolve(_) => Some(1),
+            _ => None,
+        };
+        if let Some(k) = evolved.filter(|&k| first[actor][k] == 0) {
+            first[actor][k] = own_turns[actor];
+        }
+        if slow.len() < SLOW_PER_GAME || slow.last().is_some_and(|x| x.secs < secs) {
+            let pl = &s.players[actor];
+            slow.push(SlowDecision {
+                g,
+                swap,
+                seat: actor,
+                first: s.first == actor,
+                deck: seats[actor].name.clone(),
+                turn: s.turn,
+                secs,
+                legal: legal.len(),
+                hand: pl.hand.len(),
+                board: [pl.board.len(), s.players[1 - actor].board.len()],
+                pp: pl.pp,
+                choosing: s.pending.is_some(),
+            });
+            slow.sort_by(|a, b| b.secs.total_cmp(&a.secs));
+            slow.truncate(SLOW_PER_GAME);
+        }
         if prof::ENABLED {
             prof::merge(&mut profs[actor], &prof::take());
         }
         s = apply_action(&s, &a);
+        if check && violations.len() < 5 {
+            for m in invariant_violations(&s) {
+                violations.push(format!(
+                    "g{g}{}・{actions} 手目（ターン {}、{a:?} の後）: {m}",
+                    if swap { "（入れ替え）" } else { "" },
+                    s.turn
+                ));
+            }
+        }
     }
     GameRecord {
         g,
@@ -134,6 +342,15 @@ fn play_timed(
         think,
         decisions,
         prof: profs,
+        own_turns,
+        slow,
+        violations,
+        usage,
+        first,
+        log: lines,
+        idle,
+        idle_cards,
+        first_seat: s.first,
     }
 }
 
@@ -194,7 +411,53 @@ struct DeckStat {
     game_secs: f64,
     decisions: u32,
     turns: i64,
+    /// 自分のターンの数（席ごとの合計）
+    own_turns: u32,
     prof: Profile,
+    /// 勝った席の数（引き分けは数えない）
+    wins: u32,
+    /// 仕組みを使った回数（席ごとの合計）
+    usage: [u64; USAGE.len()],
+    /// 最初に進化・超進化した自分のターンの合計と、した席の数
+    first_sum: [u64; 2],
+    first_n: [u32; 2],
+    /// プレイできるカードがあって PP も残っているのにターンを終えた数と、残した PP の合計
+    idle_turns: u32,
+    idle_pp: u64,
+    /// そのときにプレイできたカードと回数
+    idle_cards: BTreeMap<CardIdx, u32>,
+}
+
+impl DeckStat {
+    /// 1 席分（試合 r の席 seat）を足す。試合の数・時間・ターンは、同じデッキどうしの試合を 1 試合と数えるので別に足す
+    fn add_seat(&mut self, r: &GameRecord, seat: usize, think: f64) {
+        self.seats += 1;
+        self.think += think;
+        self.decisions += r.decisions[seat];
+        self.own_turns += r.own_turns[seat];
+        prof::merge(&mut self.prof, &r.prof[seat]);
+        self.wins += u32::from(r.winner == Some(seat));
+        for (x, &n) in self.usage.iter_mut().zip(&r.usage[seat]) {
+            *x += n as u64;
+        }
+        self.idle_turns += r.idle[seat][0];
+        self.idle_pp += r.idle[seat][1] as u64;
+        for &c in &r.idle_cards[seat] {
+            *self.idle_cards.entry(c).or_insert(0) += 1;
+        }
+        for k in 0..2 {
+            if r.first[seat][k] > 0 {
+                self.first_sum[k] += r.first[seat][k] as u64;
+                self.first_n[k] += 1;
+            }
+        }
+    }
+
+    fn add_game(&mut self, secs: f64, turns: i32) {
+        self.games += 1;
+        self.game_secs += secs;
+        self.turns += turns as i64;
+    }
 }
 
 /// 内訳の木の 1 つの節（path の時間・回数と、子）
@@ -271,10 +534,16 @@ struct Summary {
     ratio: Option<f64>,
     /// 思考の時間が長い順
     decks: Vec<(String, DeckStat)>,
+    /// 型ごと（デッキより型が少ないときだけ。思考の時間が長い順）
+    groups: Vec<(String, DeckStat)>,
     /// 記録の表の列の順（比較用の 7 デッキの順）
     deck_order: Vec<String>,
     all: DeckStat,
     total_games: u32,
+    /// 時間の長かった手番（全試合で長い順）
+    slow: Vec<SlowDecision>,
+    /// --check で不変条件を確かめたか、破った局面
+    check: Option<Vec<String>>,
 }
 
 fn report(sm: &Summary, date: &str, commit: &str, label: &str) -> String {
@@ -358,19 +627,20 @@ fn report(sm: &Summary, date: &str, commit: &str, label: &str) -> String {
     push(&mut out, "");
     push(
         &mut out,
-        "| デッキ | 席 | 思考（秒/試合） | 1 手（ミリ秒） | 手番/試合 | 試合（秒） | ターン/試合 |",
+        "| デッキ | 席 | 思考（秒/試合） | 1 ターン（ミリ秒） | 1 手（ミリ秒） | 手番/試合 | 試合（秒） | ターン/試合 |",
     );
     push(
         &mut out,
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     );
     let row = |name: &str, d: &DeckStat| {
         let seats = d.seats.max(1) as f64;
         let games = d.games.max(1) as f64;
         format!(
-            "| {name} | {} | **{}** | {} | {} | {} | {} |",
+            "| {name} | {} | **{}** | {} | {} | {} | {} | {} |",
             d.seats,
             fixed(d.think / seats, 2),
+            fixed(d.think / d.own_turns.max(1) as f64 * 1000.0, 0),
             fixed(d.think / d.decisions.max(1) as f64 * 1000.0, 1),
             fixed(d.decisions as f64 / seats, 1),
             fixed(d.game_secs / games, 2),
@@ -381,6 +651,174 @@ fn report(sm: &Summary, date: &str, commit: &str, label: &str) -> String {
         push(&mut out, &row(name, d));
     }
     push(&mut out, &row("全体", &sm.all));
+    if !sm.groups.is_empty() {
+        push(&mut out, "");
+        push(&mut out, "## 型ごとの 1 試合の時間");
+        push(&mut out, "");
+        push(
+            &mut out,
+            "上の表を型（デッキの名前の「（」の前）ごとにまとめたもの。試合は、その型のデッキが出た試合（同じ型の違うデッキどうしは 2 試合と数える）。",
+        );
+        push(&mut out, "");
+        push(
+            &mut out,
+            "| 型 | 席 | 思考（秒/試合） | 1 ターン（ミリ秒） | 1 手（ミリ秒） | 手番/試合 | 試合（秒） | ターン/試合 |",
+        );
+        push(
+            &mut out,
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        );
+        for (name, d) in &sm.groups {
+            push(&mut out, &row(name, d));
+        }
+    }
+    push(&mut out, "");
+    push(&mut out, "## 仕組みを使った回数");
+    push(&mut out, "");
+    push(
+        &mut out,
+        "1 席（1 試合で片方の側）あたりの回数。勝率は引き分けを負けと数える。アクセラレート・結晶はその姿でプレイした数、エンハンスはエンハンスのコストを払ってプレイした数、奥義・解放奥義は【奥義】を持つカードを奥義ゲージ 10 以上・15 以上（解放奥義の分は奥義に数えない）でプレイした数。最初の進化・超進化は、した席での自分のターンの平均（括弧はした席の割合）。PP を残して終えたは、手札にプレイできるカードがあり PP も残っているのにターンを終えた割合（自分のターンに対する）と、そのとき残した PP の平均。",
+    );
+    push(&mut out, "");
+    let by = if sm.groups.is_empty() {
+        "デッキ"
+    } else {
+        "型"
+    };
+    let mut head = vec![by.to_string(), "勝率".into(), "ターン/試合".into()];
+    head.extend(USAGE.iter().map(|x| x.to_string()));
+    head.push("最初の進化".into());
+    head.push("最初の超進化".into());
+    head.push("PP を残して終えた".into());
+    push(&mut out, &format!("| {} |", head.join(" | ")));
+    push(
+        &mut out,
+        &format!("| --- |{}", " ---: |".repeat(head.len() - 1)),
+    );
+    let urow = |name: &str, d: &DeckStat| {
+        let seats = d.seats.max(1) as f64;
+        let mut cells = vec![
+            name.to_string(),
+            format!("{}%", fixed(d.wins as f64 / seats * 100.0, 0)),
+            fixed(d.turns as f64 / d.games.max(1) as f64, 1),
+        ];
+        cells.extend(d.usage.iter().map(|&n| fixed(n as f64 / seats, 2)));
+        let idle = |d: &DeckStat| {
+            format!(
+                "{}%（{}）",
+                fixed(d.idle_turns as f64 / d.own_turns.max(1) as f64 * 100.0, 0),
+                fixed(d.idle_pp as f64 / d.idle_turns.max(1) as f64, 1)
+            )
+        };
+        for k in 0..2 {
+            cells.push(if d.first_n[k] == 0 {
+                "-".into()
+            } else {
+                format!(
+                    "{}（{}%）",
+                    fixed(d.first_sum[k] as f64 / d.first_n[k] as f64, 1),
+                    fixed(d.first_n[k] as f64 / seats * 100.0, 0)
+                )
+            });
+        }
+        cells.push(idle(d));
+        format!("| {} |", cells.join(" | "))
+    };
+    for (name, d) in if sm.groups.is_empty() {
+        &sm.decks
+    } else {
+        &sm.groups
+    } {
+        push(&mut out, &urow(name, d));
+    }
+    push(&mut out, &urow("全体", &sm.all));
+    push(&mut out, "");
+    push(&mut out, "## PP を残して終えたときにプレイできたカード");
+    push(&mut out, "");
+    push(
+        &mut out,
+        &format!("上の「PP を残して終えた」ターンに、手札からプレイできたカード（1 ターンに同じカードは 1 回）。多い順に {IDLE_TOP} 枚まで。括弧は回数。"),
+    );
+    push(&mut out, "");
+    push(&mut out, &format!("| {by} | ターン | カード |"));
+    push(&mut out, "| --- | ---: | --- |");
+    for (name, d) in if sm.groups.is_empty() {
+        &sm.decks
+    } else {
+        &sm.groups
+    } {
+        let mut v: Vec<(&CardIdx, &u32)> = d.idle_cards.iter().collect();
+        v.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+        let cells: Vec<String> = v
+            .iter()
+            .take(IDLE_TOP)
+            .map(|(c, n)| format!("{}（{n}）", card(**c).name))
+            .collect();
+        push(
+            &mut out,
+            &format!("| {name} | {} | {} |", d.idle_turns, cells.join("、")),
+        );
+    }
+    if let Some(v) = &sm.check {
+        push(&mut out, "");
+        push(&mut out, "## 不変条件");
+        push(&mut out, "");
+        if v.is_empty() {
+            push(
+                &mut out,
+                &format!(
+                    "{} 試合のすべての手の後の局面で、不変条件（`invariants.rs`）を破らなかった。",
+                    sm.total_games
+                ),
+            );
+        } else {
+            push(
+                &mut out,
+                &format!("破った局面 {} 件（1 試合で 5 件まで）:", v.len()),
+            );
+            push(&mut out, "");
+            for m in v {
+                push(&mut out, &format!("- {m}"));
+            }
+        }
+    }
+    push(&mut out, "");
+    push(&mut out, "## 時間の長かった手番");
+    push(&mut out, "");
+    push(
+        &mut out,
+        &format!("1 試合で長い順に {SLOW_PER_GAME} つまでを集め、全試合で長い順に並べたもの。先後は考えた側が先攻か後攻か。合法手は考えたときの数、手札・場・PP は考えた側のもの（場は自分・相手）。選ぶのは能力の対象・モードを選ぶ手番。"),
+    );
+    push(&mut out, "");
+    push(
+        &mut out,
+        "| 秒 | 試合 | 席 | 先後 | デッキ | ターン | 合法手 | 手札 | 場 | PP | 選ぶ |",
+    );
+    push(
+        &mut out,
+        "| ---: | --- | ---: | --- | --- | ---: | ---: | ---: | --- | ---: | --- |",
+    );
+    for x in &sm.slow {
+        push(
+            &mut out,
+            &format!(
+                "| {} | g{}{} | {} | {} | {} | {} | {} | {} | {}・{} | {} | {} |",
+                fixed(x.secs, 2),
+                x.g,
+                if x.swap { "（入れ替え）" } else { "" },
+                x.seat,
+                if x.first { "先攻" } else { "後攻" },
+                x.deck,
+                x.turn,
+                x.legal,
+                x.hand,
+                x.board[0],
+                x.board[1],
+                x.pp,
+                if x.choosing { "選ぶ" } else { "" },
+            ),
+        );
+    }
     if !sm.profiled {
         return out;
     }
@@ -599,6 +1037,9 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut report_out: Option<String> = None;
     let mut label = String::new();
     let mut write = false;
+    let mut deck_list: Option<String> = None;
+    let mut check = false;
+    let mut log_dir: Option<String> = None;
     let mut i = 0;
     while i < argv.len() {
         let value = |i: usize| {
@@ -618,11 +1059,13 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             "--baseline" => baseline = Some(value(i)?),
             "--report" => report_out = Some(value(i)?),
             "--label" => label = value(i)?,
-            "--rhino" | "--record" => {
-                if argv[i] == "--rhino" {
-                    rhino = true;
-                } else {
-                    write = true;
+            "--decks" => deck_list = Some(value(i)?),
+            "--log" => log_dir = Some(value(i)?),
+            "--rhino" | "--record" | "--check" => {
+                match argv[i].as_str() {
+                    "--rhino" => rhino = true,
+                    "--record" => write = true,
+                    _ => check = true,
                 }
                 i += 1;
                 continue;
@@ -637,8 +1080,27 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     if write && label.is_empty() {
         return Err("--record には --label で名前を付けます".into());
     }
+    if write && deck_list.is_some() {
+        return Err("--record は比較用の 7 デッキだけ（--decks とは一緒に使えない）".into());
+    }
     let opts = compare_options(&opts_text).map_err(|e| format!("--opts: {e}"))?;
-    let decks = compare_decks();
+    let decks: Vec<&'static Deck> = match &deck_list {
+        None => compare_decks(),
+        Some(list) => read_deck_list(list)?
+            .into_iter()
+            .map(|d| &*Box::leak(Box::new(d)))
+            .collect(),
+    };
+    if decks.is_empty() {
+        return Err("--decks にデッキを並べます".into());
+    }
+    {
+        let mut names: Vec<&str> = decks.iter().map(|d| d.name.as_str()).collect();
+        names.sort_unstable();
+        if let Some(w) = names.windows(2).find(|w| w[0] == w[1]) {
+            return Err(format!("同じ名前のデッキが 2 つあります: {}", w[0]));
+        }
+    }
     let base = baseline.as_deref().map(read_baseline).transpose()?;
     let tasks: Vec<(u32, bool)> = (0..games)
         .flat_map(|k| [(start + k, false), (start + k, true)])
@@ -656,7 +1118,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let t0 = Instant::now();
     let records = parallel_map(
         &tasks,
-        |&(g, swap), _| play_timed(&opts, rhino, &decks, g, swap),
+        |&(g, swap), _| play_timed(&opts, rhino, &decks, g, swap, check, log_dir.is_some()),
         |done, total, _, _| {
             if done % 10 == 0 || done == total {
                 eprint!("\r{done}/{total}");
@@ -664,6 +1126,24 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         },
     );
     eprintln!("（{} 秒）", fixed(t0.elapsed().as_secs_f64(), 1));
+    if let Some(dir) = &log_dir {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{dir} を作れません: {e}"))?;
+        for r in &records {
+            let path = format!("{dir}/g{}{}.md", r.g, if r.swap { "s" } else { "" });
+            let head = format!(
+                "# g{}{}: 席 0 {} 対 席 1 {}（先攻は席 {}）、勝者 {}、{} ターン\n",
+                r.g,
+                if r.swap { "（入れ替え）" } else { "" },
+                r.decks[0],
+                r.decks[1],
+                r.first_seat,
+                r.winner.map_or("なし".to_string(), |w| format!("席 {w}")),
+                r.turns
+            );
+            std::fs::write(&path, head + &r.log.join("\n") + "\n")
+                .map_err(|e| format!("{path} に書けません: {e}"))?;
+        }
+    }
 
     // --baseline と同じ試合になったか。思考の時間の比
     let mut ratio = None;
@@ -692,41 +1172,46 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         .map(|d| (d.name.clone(), DeckStat::default()))
         .collect();
     let mut all = DeckStat::default();
+    let mut groups: Vec<(String, DeckStat)> = Vec::new();
     for r in &records {
         let (secs, think) = match time_base.and_then(|b| b.get(&(r.g, r.swap))) {
             Some(x) => (x.secs, x.think),
             None => (r.secs, r.think),
         };
-        all.games += 1;
-        all.game_secs += secs;
-        all.turns += r.turns as i64;
+        all.add_game(secs, r.turns);
         for seat in [0, 1] {
-            all.seats += 1;
-            all.think += think[seat];
-            all.decisions += r.decisions[seat];
-            prof::merge(&mut all.prof, &r.prof[seat]);
+            all.add_seat(r, seat, think[seat]);
             let d = &mut stats
                 .iter_mut()
                 .find(|(n, _)| *n == r.decks[seat])
                 .expect("デッキ")
                 .1;
-            d.seats += 1;
-            d.think += think[seat];
-            d.decisions += r.decisions[seat];
-            prof::merge(&mut d.prof, &r.prof[seat]);
+            d.add_seat(r, seat, think[seat]);
             if seat == 0 || r.decks[0] != r.decks[1] {
-                d.games += 1;
-                d.game_secs += secs;
-                d.turns += r.turns as i64;
+                d.add_game(secs, r.turns);
+            }
+            let k = archetype(&r.decks[seat]);
+            if !groups.iter().any(|(n, _)| n == k) {
+                groups.push((k.to_string(), DeckStat::default()));
+            }
+            let gs = &mut groups.iter_mut().find(|(n, _)| n == k).expect("型").1;
+            gs.add_seat(r, seat, think[seat]);
+            if seat == 0 || r.decks[0] != r.decks[1] {
+                gs.add_game(secs, r.turns);
             }
         }
     }
     // 1 席あたりの思考の時間が長い順
-    stats.sort_by(|a, b| {
+    let by_think = |a: &(String, DeckStat), b: &(String, DeckStat)| {
         let x = a.1.think / a.1.seats.max(1) as f64;
         let y = b.1.think / b.1.seats.max(1) as f64;
         y.total_cmp(&x)
-    });
+    };
+    stats.sort_by(by_think);
+    groups.sort_by(by_think);
+    if groups.len() == stats.len() {
+        groups.clear();
+    }
     let sm = Summary {
         opts_text: opts_text.clone(),
         rhino,
@@ -738,9 +1223,17 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         from_baseline: time_base.is_some(),
         ratio,
         decks: stats,
+        groups,
         deck_order: decks.iter().map(|d| d.name.clone()).collect(),
         all,
         total_games: records.len() as u32,
+        slow: {
+            let mut v: Vec<SlowDecision> = records.iter().flat_map(|r| r.slow.clone()).collect();
+            v.sort_by(|a, b| b.secs.total_cmp(&a.secs));
+            v.truncate(20);
+            v
+        },
+        check: check.then(|| records.iter().flat_map(|r| r.violations.clone()).collect()),
     };
     let date = command_line("date", &["+%Y-%m-%d"]).unwrap_or("?".into());
     let commit = commit_label_excluding("docs/profile.md");
@@ -784,6 +1277,9 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     if write {
         record(&record_row(&sm, &date, &commit, &label), &sm.deck_order)?;
         eprintln!("docs/profile.md に記録しました");
+    }
+    if let Some(v) = sm.check.as_ref().filter(|v| !v.is_empty()) {
+        return Err(format!("不変条件を破った局面が {} 件あります", v.len()));
     }
     Ok(())
 }

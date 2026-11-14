@@ -98,7 +98,7 @@ AI は上位 4 つを読み直すとき、引き直しを 3 通り読んで見�
 ## コマンド
 
 ```sh
-npm run svwb -- survey run --out 結果.jsonl --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8]
+npm run svwb -- survey run --out 結果.jsonl --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8] [--decks <デッキ>,…|@<デッキの組>]
 npm run svwb -- survey report 結果.jsonl… [--label 名前] [--no-ledger] [--top 20] [--states <フォルダ>]
 npm run svwb -- survey recheck 結果.jsonl… --out 打ち直し.jsonl [--m 32] [--peek 1] [--batch 16]
 ```
@@ -112,6 +112,7 @@ npm run svwb -- survey recheck 結果.jsonl… --out 打ち直し.jsonl [--m 32]
 | `--confirm` | 96 | 二段目に打つ回数（AI の選んだ候補と、差の最も大きい候補の 2 つ） |
 | `--flag` | 10 | 二段目に回す、一段目の差（ポイント） |
 | `--batch` | 8 | まとめて打って書く試合の数の上限（大きさはそろえる。17 試合なら 6・6・5。止めたときに失うのは書いていない分だけ） |
+| `--decks` | 比較用の 7 デッキ（`svwb ai-play` と同じ試合） | 並べたデッキ（`@<デッキの組>` も。[commands.md](commands.md)「compare」）で自己対戦を打つ。組とシードは `compare --decks` と同じ（先の席が A）。デフォルトデッキと違うデッキのマリガンは compare と同じ |
 | `report --label` | なし | 台帳の名前 |
 | `report --no-ledger` | なし | 台帳に書かない |
 | `report --top` | 20 | 問題集に足す候補を出す数 |

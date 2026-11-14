@@ -7,13 +7,18 @@
 // 学習データに出なかったカードは R = 0、つまり属性の分 A だけで見る（初見のカードがそれらしい値から始まる）。
 // 最初の層は線形なので、A と R を足してカードごとの行に戻して書き出せば、推論は今のまま。
 
-import { ALL_CARDS, ALL_CRESTS } from "../src/cards";
 import { CARD_ABILITIES, CREST_ABILITIES } from "../src/cards/abilities";
+import { AZVALDT_CARD_ABILITIES, AZVALDT_CREST_ABILITIES } from "../src/cards/abilities/azvaldt";
+import { ENGINE_CARDS, ENGINE_CRESTS } from "../src/cards/pools";
 import type { CardAbilities, Effect, Target, Value } from "../src/engine/dsl";
-import { enhanceCost, staticOf } from "../src/engine";
+import { enhanceCost, staticInfoOf } from "../src/engine";
 
-const CARD_BY_ID = new Map(ALL_CARDS.map((c) => [c.id, c]));
-const CREST_BY_ID = new Map(ALL_CRESTS.map((c) => [c.id, c]));
+// エンジンのカード・クレストの表（スターターのものを先頭に、前期のローテーションのもの・アクセラレート・結晶の姿・信仰を後ろに。
+// スターターのカードはスターターの表と同じもの）。能力の定義は前期のローテーションのものを先に見る（ID は重ならない）
+const CARD_BY_ID = new Map(ENGINE_CARDS.map((c) => [c.id, c]));
+const CREST_BY_ID = new Map(ENGINE_CRESTS.map((c) => [c.id, c]));
+const cardAbilities = (id: string): CardAbilities | undefined => AZVALDT_CARD_ABILITIES[id] ?? CARD_ABILITIES[id];
+const crestAbilities = (id: string): CardAbilities | undefined => AZVALDT_CREST_ABILITIES[id] ?? CREST_ABILITIES[id];
 
 /** 数値（変数・枚数等で決まる値は 1 とみなす） */
 const amountOf = (v: Value | "max"): number => (typeof v === "number" ? v : 1);
@@ -125,7 +130,7 @@ export function rawAttributes(vocabId: string): Map<string, number> {
     const src = CARD_BY_ID.get(cr.source);
     if (src) add(`class:${src.class}`);
     if (cr.countdown !== undefined) add("countdown", cr.countdown / 5);
-    addAbilities(CREST_ABILITIES[cr.id], add);
+    addAbilities(crestAbilities(cr.id), add);
     return out;
   }
   const c = CARD_BY_ID.get(vocabId);
@@ -141,7 +146,7 @@ export function rawAttributes(vocabId: string): Map<string, number> {
     add("def", c.defense / 5);
   }
   if (c.type === "amulet" && c.countdown !== undefined) add("countdown", c.countdown / 5);
-  const st = staticOf(c.id);
+  const st = staticInfoOf(c.text);
   for (const k of st.keywords) add(`kw:${k}`);
   if (st.maxAttacks > 1) add("maxAttacks", st.maxAttacks - 1);
   if (st.earthSigil) add("earthSigil");
@@ -151,12 +156,13 @@ export function rawAttributes(vocabId: string): Map<string, number> {
     add("enhanceCost", enh / 10);
   }
   for (const t of c.tribes ?? []) add(`tribe:${t}`);
-  addAbilities(CARD_ABILITIES[c.id], add);
+  addAbilities(cardAbilities(c.id), add);
   return out;
 }
 
 /**
- * ゾーン zone（scripts/valueNet.ts の VALUE_ZONES）に、vocab の項目 vocabId の行が入力として現れうるか（rust/engine/src/ai/valuenet.rs の encode）。
+ * ゾーン zone（scripts/valueNet.ts の VALUE_ZONES と、見込みのモデルの P_ZONES）に、vocab の項目 vocabId の行が入力として現れうるか
+ * （rust/engine/src/ai/valuenet.rs・potential.rs の encode）。
  * 現れない行（スペルの場の行、アミュレットの攻撃力の行等）は属性の分で埋めない（ファイルが大きくなるだけ）
  */
 export function rowCanOccur(zone: string, vocabId: string): boolean {
@@ -174,7 +180,12 @@ export function rowCanOccur(zone: string, vocabId: string): boolean {
       return true;
     case "myBoard":
     case "oppBoard":
+    case "board":
       return c.type !== "spell";
+    case "boardReady":
+    case "boardUnevolved":
+    case "boardEvolved":
+      return c.type === "follower";
     case "myBoardCountdown":
       return c.type === "amulet";
     case "myBoardEvolved":

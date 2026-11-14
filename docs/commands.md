@@ -25,6 +25,7 @@
 | `npm run wasm` | エンジンの WASM を作る（引数なし） | `scripts/build-wasm.mjs` |
 | `npm run cards` | `data/raw/*.json` からスターターのカードデータ（`data/cards.json`・`data/crests.json`）を作る。`-- --pool azvaldt` で前期のローテーション（`data/raw/azvaldt/*.json` → `data/pools/azvaldt/`。元データはブランチ `wistery-k-patch-1` の `azvaldt*.json` を `git show origin/wistery-k-patch-1:<file> > data/raw/azvaldt/<file>` で取り出す） | `scripts/convert-cards.ts` |
 | `npm run decks` | 前期のローテーションのプロのデッキを `data/raw/decks/svlabo/`（シャドラボの記事が読み込むデータファイル）から `data/pools/azvaldt/decks/<大会>/` に書く（取り出し方は `docs/pools/azvaldt.md`「プロのデッキ」） | `scripts/convert-decks.ts` |
+| `npm run deck-sets` | 前期のローテーションのプロのデッキから、比べと調査に使うデッキの組のファイル（`data/pools/azvaldt/sets/` の `rep10.txt`: 10 型の代表、`all84.txt`: 84 個全部）を書く。代表の選び方は `scripts/deck-sets.ts` の先頭。デッキのファイルを変えたら回し直す（`tests/deck-sets.test.ts` が確かめる） | `scripts/deck-sets.ts` |
 | `npm run rust-data` | Rust に埋め込むデータを書き出す（`[出力先] [AI データの出力先] [--quiet]`） | `scripts/rust-data-main.ts` |
 | `npm run sim` | デフォルトデッキの総当たり（下） | `scripts/simulate-main.ts` |
 | `npm run sim-report` | `sim --json` の結果を Markdown の表にする（下） | `scripts/sim-report-main.ts` |
@@ -125,13 +126,18 @@ npm run diverge -- --a <記録のディレクトリ A> --b <記録のディレ�
 ## compare
 
 ```sh
-npm run compare -- [試合数 28] ['<A の設定>' '{}'] ['<B の設定>' '{}'] [最初の試合番号 0] [B のデッキ] [--no-mirror] [--decks <7 つのデッキ>] [--replays 記録.jsonl]
+npm run compare -- [試合数 28] ['<A の設定>' '{}'] ['<B の設定>' '{}'] [最初の試合番号 0] [B のデッキ] [--no-mirror] [--decks <デッキ>,…|@<デッキの組>] [--replays 記録.jsonl]
                    [--with <デッキ> | --without <デッキ>] [--label 名前] [--no-ledger]
 ```
 
 引数は名前なしで、この順に書く。1 試合番号ごとに席とデッキを入れ替えて 2 試合打つので、試合数 105 なら 210 試合。
 A の勝率と、A のデッキごとの勝率を出す。5 番目にデッキ名を書くと、B がそのデッキの試合だけ行う。設定の JSON は下の「探索 AI の設定」。
 `--replays` で、試合ごとのデッキ・シード・行動の列を JSON Lines で書く（下の「リプレイ検索」で読む。打つ手は変わらない）。
+`--decks` は、比較用の 7 デッキの代わりに並べたデッキ（デフォルトデッキの名前・キーか、デッキのテキストファイル）で打つ。`@<ファイル>` はデッキの組のファイル
+（1 行に 1 つ。`data/pools/azvaldt/sets/rep10.txt`・`all84.txt`。上の `deck-sets`）に並べたデッキ。n 個なら試合番号 n² ごとに全部の組（同じデッキどうしも）を 1 回ずつ回る
+（7 個なら今までと同じ組とシード）。違う大会の同じ名前のデッキは、名前の括弧に大会を足して見分ける（例: 「海賊R（CR・ps26-27-09b）」）。
+デフォルトデッキと違うデッキのマリガンは、返し方ごとに引き直しを試して選ぶ（マリガンのモデルはデフォルトデッキしか知らない）。
+`td selfplay`・`survey run`・`profile`・`beam-gap` の `--decks` も同じ形・同じ組。
 `--with <デッキ>` はそのデッキの絡む組（49 組のうち 13 組）だけ、`--without <デッキ>` は絡まない 36 組だけを打つ（試合番号 k は、その組の k 番目の番号。
 見ていないデッキの落ち方と、学び足しがほかのデッキどうしを壊していないかを測る用。docs/STATE.md の案 B の問い 3）。
 回すたびに、結果を実験の台帳 `docs/ledger.jsonl` に 1 行足す（下の「ledger」）。`--label` で名前を付け、`--no-ledger` で書かない（名前付きの引数は、どこに書いてもよい）。
@@ -318,7 +324,8 @@ PC で対戦を回す夜のキュー。ジョブのファイルは 1 行 1 ジ�
 
 ```sh
 npm run profile -- [--games 49] [--start 0] [--opts '<設定>'] [--rhino] [--out <場所>] [--time-only] [--label 名前 --record]
-npm run svwb -- profile [--games 49] [--start 0] [--opts '<設定>'] [--rhino] [--json 結果.json] [--baseline 前の結果.json] [--report 報告.md] [--label 名前] [--record]
+npm run svwb -- profile [--games 49] [--start 0] [--opts '<設定>'] [--rhino] [--decks <デッキ>,…|@<デッキの組>] [--check] [--log <フォルダ>]
+                        [--json 結果.json] [--baseline 前の結果.json] [--report 報告.md] [--label 名前] [--record]
 ```
 
 探索 AI どうしの対戦の速さ（`docs/profile.md`）。`compare` と同じデッキの組で席とデッキを入れ替えた 2 試合ずつ（`--games 49` で 7×7 の組を 2 回ずつ、98 試合）を、
@@ -332,9 +339,15 @@ npm run svwb -- profile [--games 49] [--start 0] [--opts '<設定>'] [--rhino] [
 | `--out 場所`（npm run profile） | `rust/target/profile-report` | `time.json`（測らないビルド）・`sections.json`（測るビルド）・`report.md` を置く場所 |
 | `--time-only`（npm run profile） | なし | 測らないビルドだけで回す（内訳なし） |
 | `--baseline 前.json`（svwb profile） | なし | 前の実行の `--json`。同じ試合になったかを確かめ（違えばエラー）、思考の時間の比を出す。測るビルドなら時間の表はこちらの値を使う |
-| `--label 名前 --record` | なし | `docs/profile.md` の表に 1 行足す |
+| `--label 名前 --record` | なし | `docs/profile.md` の表に 1 行足す（`--decks` とは一緒に使えない） |
+| `--decks <デッキ>,…\|@<デッキの組>`（svwb profile） | 比較用の 7 デッキ | 並べたデッキで打つ（`compare --decks` と同じ組とシード）。名前の「（」の前が同じデッキは、型ごとの表にもまとめる |
+| `--check`（svwb profile） | なし | 手を打つたびに局面の不変条件（`rust/engine/src/invariants.rs`。TypeScript 版 `src/engine/invariants.ts` と同じ決まり）を確かめ、破った局面を報告に出す（あればエラーで終わる） |
+| `--log フォルダ`（svwb profile） | なし | 1 試合ずつ、自分のターンの最初の局面と打った手を文章で書く（`g<番号>.md`、入れ替えた方は `g<番号>s.md`。試合を読む用） |
 
 内訳は `--features profile` でビルドしたときだけ測る（`rust/engine/src/prof.rs`）。`npm run profile` は測らないビルドと測るビルド（`rust/target/profile`）を続けて回す。
+報告には、時間の長かった手番（1 試合で長い順に 3 つ、全試合で上位 20）と、デッキ（型）ごとの勝率・仕組みを使った回数
+（アクセラレート・結晶・エンハンス・奥義・解放奥義・進化・超進化・融合・アクト・エクストラPP・攻撃、最初に進化・超進化した自分のターン、
+プレイできるカードがあって PP も残っているのにターンを終えた割合）も出す。
 
 ## svwb（Rust 版の CLI）
 
@@ -357,7 +370,7 @@ npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 
 npm run svwb -- deep-gap play --out gap.jsonl [--games 100] [--start 0] [--deep '<設定の JSON>'] [--k 4] [--evalSeeds 48] [--turns 1-30]
 npm run svwb -- deep-gap rollout --in gap.jsonl[,…] --out roll.jsonl [--top 200] [--random 200] [--seed 1] [--m 48]
 npm run svwb -- deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 30] [--only <内訳の一部>] [--skipDecks <デッキ>,…] [--sort gap|rollout] [--listOnly 1]
-npm run svwb -- survey run --out 結果.jsonl --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8]
+npm run svwb -- survey run --out 結果.jsonl --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8] [--decks <デッキ>,…|@<デッキの組>]
 npm run svwb -- survey report 結果.jsonl… [--label 名前] [--no-ledger] [--top 20] [--states <フォルダ>]
 npm run svwb -- survey recheck 結果.jsonl… --out 打ち直し.jsonl [--m 32] [--peek 1] [--batch 16]
 npm run svwb -- two-turn show [--only <局面>,…] [--sandbox <フォルダ>]
@@ -365,7 +378,7 @@ npm run svwb -- two-turn run --out tt.jsonl [--only <局面>,…] [--m 64] [--re
 npm run svwb -- two-turn report tt.jsonl… [--only <局面>,…]
 npm run svwb -- two-turn trace --only <局面> --cand <候補> [--r 0] [--seed 1] [--opts '<設定の JSON>']
 npm run svwb -- defer-playout --dir <記録のディレクトリ> --opts '<回す版の設定>' [--cont '<設定>'] [--seeds 8] [--seedBase 0] [--out 結果.jsonl]
-npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth":4096,"potentialNet":null}'] [--variants '{"名前":{設定},…}'] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl] [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl] [--inputs 学習のデータ.jsonl]
+npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth":4096,"potentialNet":null}'] [--variants '{"名前":{設定},…}'] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl] [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl] [--inputs 学習のデータ.jsonl] [--vocab 語彙.json] [--decks <デッキ>,…|@<デッキの組>]
 ```
 
 draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・lethal-diff は 2026-11-10 に消した（docs/removed.md。戻し方もそこに書いてある）。
@@ -378,7 +391,7 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
   その後は今の探索 AI で打った試合を 1 試合 1 行で追記する（初手・残したか・先後・勝敗。TypeScript 版の `mulligan-data` と同じ形）。
   残し方の因果的な効き目の推定と、どんなマリガンの勝率も試合を打たずに推定する（逆確率重み付け）のに使う
 - `td selfplay`: TD 学習の自己対戦。各引数の意味は `rust/engine/src/runner/td.rs` の先頭。
-  `--decks` で、比較用の 7 デッキの代わりに並べたデッキ（デフォルトデッキの名前かデッキのテキストファイル）の全組を回す（例: `rust/engine/td-pool/royal-counter/*.txt`）。
+  `--decks` で、比較用の 7 デッキの代わりに並べたデッキ（デフォルトデッキの名前かデッキのテキストファイル。`@<デッキの組>` も。上の「compare」）の全組を回す（例: `rust/engine/td-pool/royal-counter/*.txt`）。
   `--ivZone drawn` は、カードを引いた瞬間に手札から抜いて最後まで打つ介入（`td ivcheck` で「（引いたとき）」の行。デッキに 1 枚入れる価値に近い）。
   `--vs <デッキ>` で、どの試合も片方をそのデッキにし、もう片方（挑戦する側）だけ並べたデッキを回して、介入も挑戦する側だけにする（特定の相手との試合でのカードの価値を測る用）。
   `--frozen '{}'` で、片方の席（学ぶ側。49 試合ごとに入れ替わる）だけを `--model` の補正で打ち、もう片方を設定の JSON の探索 AI（`'{}'` は今の既定の AI）に固定する。
@@ -428,7 +441,8 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
 
 ```sh
 npm run td -- init --out m0.json [--hidden 32] [--seed 1] [--a 0.08] [--base stripped|current] [--inputs v2|v1]
-npm run td -- extend --model data/value-net.json --out m0.json
+npm run td -- extend --model data/value-net.json --out m0.json [--vocab keep|starter|pool|@<デッキの組>]
+npm run td -- vocab --vocab <範囲> [--base data/value-net.json] [--out 語彙.json]
 npm run td -- widen --model m.json --hidden 256,32 --out w0.json [--seed 1]
 npm run td -- board --model m.json --out b0.json [--layers 32,16] [--seed 1]
 npm run td -- check --model m.json --data d.jsonl
@@ -442,6 +456,11 @@ npm run td -- eval --model a.json,b.json --data d.jsonl [--cards <カード名,�
 ```
 
 自己対戦（`selfplay`）は Rust 版（`npm run svwb -- td selfplay`）で行う。各引数の意味は `scripts/td-main.ts` の先頭。
+`extend --vocab` は語彙（入力のカード・クレストの並び）をその範囲に広げる（`scripts/vocab.ts`。今の語彙の後ろに足し、足したカードの行は 0。場のカードのネットワークの最初の層も）。
+範囲は `starter`（スターターのカードとクレスト）・`pool`（エンジンのカードの表の全部）・`@<デッキの組>`（その組のデッキのカードと、そこから出うるトークン・
+アクセラレート・結晶の姿・信仰・クレスト）。見込みのモデル（`data/potential-net.json`）も語彙だけ同じように広げる。足した行を属性の分で埋めるなら、続けて
+`td attr --model m0.json --out m1.json`（0 の行を学んでいない行とみなす。見込みのモデルも同じ。見込みのモデルには `--data` は使えない）。
+`vocab` は範囲の語彙を数え（ベースの語彙に無いカード・トークン・姿・クレストの数）、`--out` なら JSON の配列で書く（`beam-gap --vocab` に渡す）。
 `--seat learner` は `td selfplay --frozen` の自己対戦の学ぶ側の席の局面だけを、`--seat frozen` は固定した相手の席の局面だけを読む（既定 both は両方）。
 `train --base default` は出発点の評価 S を基準の重みのもの（自己対戦の `"sd"`。`td selfplay --sDefault 1` で書く）に、`--base zero` は 0 にして学び、
 書き出すモデルの `baseWeights` をその重みにする（`--base search` は探索の既定の重み。省略すると元のモデルのまま）。
@@ -453,6 +472,7 @@ npm run td -- eval --model a.json,b.json --data d.jsonl [--cards <カード名,�
 
 ```sh
 npm run svwb -- beam-gap --games 200 --variants '{"w32":{"beamWidth":32,"potentialNet":null}}' --sample 100 --inputs d1.jsonl --savePositions pos1.jsonl --out rows1.jsonl
+                         [--vocab 語彙.json] [--decks <デッキ>,…|@<デッキの組>]
 npm run potential -- train --data d1.jsonl[,d2.jsonl] --out model.json [--hidden 64] [--epochs 8] [--T 5] [--lr 0.001]
                        [--l2 0.000001] [--batch 256] [--scale 20] [--valid 160-199] [--seed 1]
 npm run svwb -- beam-gap --positions pos1.jsonl --refFrom rows1.jsonl --variants '{"w32":{"beamWidth":32,"potentialNet":null},"w32p":{"beamWidth":32,"potentialNet":"model.json"}}'
@@ -461,6 +481,8 @@ npm run svwb -- beam-gap --positions pos1.jsonl --refFrom rows1.jsonl --variants
 `beam-gap --sample k --inputs` は、基準のビーム（既定は幅 4096）が残した途中の局面を局面ごとに k 個（と最善の並びの途中の局面）選び、
 見込みのネットワークの入力・そこでターンを終えた点数・そこから届いた最善を書く。`train` は同じ局面・同じ手数の局面の組ごとに、
 「終えた点数 + 見込み」の順位が届いた最善の順位に合うように学ぶ（ListNet。`--T` は softmax の温度で点数の単位）。
+`beam-gap --vocab` なら、その語彙（`td vocab --out` の配列か、`"vocab"` を持つモデルのファイル）で入力を書く（既定はスターターのカード）。
+`--decks` なら、並べたデッキで自己対戦を打って局面を集める（`compare --decks` と同じ組とシード）。新しいプールの見込みを学ぶ用。
 `--valid` の範囲の試合（`game`）は学ばず、確かめの損失と「1 位の当たり」を出す。この 2 つは目安で、良し悪しは学びに使っていない試合の局面での
 `beam-gap`（`--positions` と `--refFrom` で基準のビームを打ち直さずに比べる）で決める。docs/ai-notes.md「ターン途中の見込みを学ぶ」
 

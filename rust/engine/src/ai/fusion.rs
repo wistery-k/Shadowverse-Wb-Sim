@@ -8,7 +8,7 @@ use super::keys::state_eq;
 use crate::data::{CardIdx, Effect, On, Value};
 use crate::effects::board_abilities_on;
 use crate::game::try_apply_action;
-use crate::state::{hand_cost, Action, GameState, HandCard, PlayerIndex};
+use crate::state::{card, hand_cost, Action, GameState, HandCard, PlayerIndex};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -114,6 +114,18 @@ fn distinct(mats: &[&HandCard], idx: impl Iterator<Item = usize>) -> Vec<usize> 
         }
     })
     .collect()
+}
+
+/// 素材の条件が無く、融合したカードを見ない融合先（Card::fuse_any_one）に、素材を 2 枚以上融合する手（SearchOptions.fuseOne）。
+/// 融合先はどの素材でも同じになり、素材を多くするほど手札が減るだけ（素材 1 枚の融合は、素材の種類ごとに合法手に残る）。
+/// 手札を減らすために素材を足す使い方（手札の上限で引いたカードが消えるのを避ける等）は読まなくなる
+pub fn needless_material(s: &GameState, a: &Action) -> bool {
+    let Action::Fuse { host, materials } = a else {
+        return false;
+    };
+    materials.len() > 1
+        && s.hand_card(*host)
+            .is_some_and(|h| card(h.card).fuse_any_one)
 }
 
 /// 手 a（局面 s の合法手）が、素材を入れすぎる融合か。次のどれかなら入れすぎ:

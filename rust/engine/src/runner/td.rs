@@ -37,7 +37,7 @@
 //! 貪欲法で読む探索 AI（ビームは 1 回・既定の幅（今は 256））。--iv とは一緒に使えない。docs/ai-notes.md「同じ局面からの手の比べ合いを学ぶ」
 //!
 //! --decks なら、比較用の 7 デッキの代わりに、並べたデッキ（デフォルトデッキの名前・キーか、デッキのテキストファイル。
-//! deck-compare の --file と同じ形式）の全組を順に回す（n デッキなら試合 g は (g mod n, (g / n) mod n) の組）。
+//! deck-compare の --file と同じ形式。`@<ファイル>` はデッキの組のファイルに並べたデッキ）の全組を順に回す（n デッキなら試合 g は (g mod n, (g / n) mod n) の組）。
 //! 学習した補正の知らないカードの入ったデッキを自己対戦に混ぜて学び直す用。デフォルトデッキと違うデッキのマリガンは、
 //! 返し方ごとに引き直しを試して選ぶ（`mulligan: "sample"`。マリガンのモデルはデフォルトデッキしか知らない）。
 //! docs/ai-notes.md「ロイヤルに勝ち越せるデッキを探す」
@@ -72,7 +72,7 @@
 //! --check 1 なら、各局面にモデルの補正の値（評価の点数の単位）も書く（"z"）。`npm run td -- check` で、学習側（scripts/valueNet.ts）が
 //! "x" と "b" から出す補正が探索の補正と同じかを確かめる（場のカードのネットワークを変えたとき用）。
 
-use super::deck_compare::read_deck;
+use super::deck_compare::{read_deck, read_deck_list};
 use super::options::{compare_options, model_eval};
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
@@ -1124,12 +1124,7 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     };
     let owned: Vec<Deck> = match arg(args, "decks") {
         None => Vec::new(),
-        Some(list) => list
-            .split(',')
-            .map(str::trim)
-            .filter(|x| !x.is_empty())
-            .map(read_deck)
-            .collect::<Result<_, _>>()?,
+        Some(list) => read_deck_list(list)?,
     };
     if arg(args, "decks").is_some() {
         if owned.len() < 2 {
