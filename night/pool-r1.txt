@@ -1,0 +1,51 @@
+# 段階 4 の本番: 新しいプール（プロのデッキ 84 個）で補正と見込みを学び直す 1 回目（R1）。計画は共有フォルダの notes/pool-stage4-main-plan.md と docs/STATE.md。
+# 回す前に決めた問い・線・試合数は計画のもの（S1: R1 対 v0 の 4000 試合、差 − 2 SE > 0 なら R1 を新しいプールの補正にする）。変えるなら回す前に審査とユーザーに。
+# 同じ並びを小さくしたもの（night/pool-r1-small.txt）を、2026-11-14 にクラウド環境で最後まで通した（docs/ai-notes/13-2026-11-13.md「段階 4 の本番のキュー」）。
+# PC（svwb-docker、28 スレッド）で 1 晩（見込み 7 時間ほど。night plan --machine svwb-docker で見る）。止まっても resume で続きから（作ったファイルのあるジョブは飛ばす）。
+#
+# 入力（自分の山札に残るカード・相手のまだ見えていないカード）: 既定は「なし」（学習の行の --dropInputs myDeckCards,oppUnseen）。
+#   B の問い 1 が「効く」で、ユーザーが入力ありを採ったら、2. の td train の行から --dropInputs myDeckCards,oppUnseen を消す（ほかの行はそのまま。作るファイルの名前も同じ）。
+#   入力ありは、学習が 1.4 倍ほど延び（--est を 1200 に）、思考が 6〜8% 遅くなる（自己対戦は v0 で打つので、この回の自己対戦の時間は変わらない）。
+# 学習・間引きは Rust 版（--impl rust）。6 万試合（1050 万局面ほど）でメモリの山は入力なし 2GB ほど・入力あり 3GB ほど、クラウド環境で学習 9 分・12 分の見込み
+#   （小さい回の自己対戦を 64 倍まで重ねて測り、局面の数で延ばした。docs/ai-notes/13-2026-11-13.md「段階 4 の本番のキュー」）。
+#   Rust 版の照らし合わせ（B のデータで TypeScript 版と同じモデルになるか）が合わなかったら、2. の 2 行の --impl rust を消し、--est を TypeScript 版のもの（学習 3600、入力ありは 5400・間引き 900）にする。
+#   TypeScript 版のメモリの山は、同じ測りで入力なし 7.6GB・入力あり 12.5GB ほど。入力ありは PC のコンテナで使える 14GB に近いので、回す前に free -g で確かめる。
+# --est は PC の見込み。B の 1 晩目（自己対戦 0.343 秒/試合）と、クラウド環境でのスターター（night/relearn-b-small.txt）と新しいプール（pool-r1-small.txt）の比から。
+# 朝: finish --commit で compare の行を台帳に足す。モデル（@/ の *.json）は pack-run で共有フォルダの data/models/pool-r1/ へ。
+#
+# R2 からの使い方（計画「1 回の流れ」。出発の補正が前の回のものになるだけ）: このファイルを写して、
+#   - 0. の 3 行を、前の回の補正と見込みを写す 2 行にする（前の回のフォルダは絶対パスで。PC のコンテナなら ~/svwb-data/night/pool-r1/ の下）:
+#       td extend --model <前の回のフォルダ>/r.json --out @/v0.json --est 10
+#       td extend --model <前の回のフォルダ>/rpot.json --out @/v0pot.json --est 10
+#   - 自己対戦の --start を重ならない番号に（R1 は g7000000〜7059999。R2 は 7100000 から等）
+#   - compare は 1.2 万試合（compare 6000）、--label を 新しいプール-R2 に（線は S2: 差 − 2 SE > 0 なら採る、差が +2 以上ならもう 1 回）
+# B の問い 2 で B の補正を既定に採ったら、data/value-net.json・data/potential-net.json がそれに替わるので、0. の行はそのままでよい（v0 の指紋は下の aa2d1cc1 から替わる）
+
+# 0. 出発の補正 v0: 今の既定の補正を 84 個のデッキの語彙に広げ（476 枚）、新しいカードの行を属性で埋めたもの。
+#    台帳の「新しいプール-属性で埋めた補正」と同じ作り方で、今の既定からなら指紋 aa2d1cc1（小さく通した回で同じになった）。
+#    足した入力（myDeckCards・oppUnseen）の行は 0 のまま（属性で埋めるのは、学んだ行があるゾーンだけ）
+td extend --model data/value-net.json --vocab @data/pools/azvaldt/sets/all84.txt --out @/v0e.json --est 10
+td attr --model @/v0e.json --out @/v0.json --keepA 0 --est 30
+# v0 の側の見込みは、今の既定のまま（写すだけ。R2 からは前の回の見込みにする）
+td extend --model data/potential-net.json --out @/v0pot.json --est 10
+
+# 1. 自己対戦 6 万試合（g7000000〜7059999）。3000 試合ずつ s-1〜s-20。B・relearn9 と同じ打ち方で、デッキだけ 84 個（全部の組を 8 回ほど回る）
+td selfplay --model @/v0.json --decks @data/pools/azvaldt/sets/all84.txt --games 60000 --start 7000000 --chunk 3000 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --out @/s-{k}.jsonl.gz --est 0.35
+
+# 2. 学習（B と同じ学び方）、間引き、属性で埋める → r.json
+td train --impl rust --model @/v0.json --data @/s-{1..20}.jsonl.gz --out @/rt.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --dropInputs myDeckCards,oppUnseen --est 900
+td prune --impl rust --model @/rt.json --data @/s-{1..20}.jsonl.gz --out @/rp.json --est 120
+td attr --model @/rp.json --out @/r.json --keepA 0 --est 60
+
+# 3. 見込みを、学んだ補正の点数で学び直す（beam-gap 2000 試合、84 個のデッキ、広げた語彙。語彙は r.json から）
+beam-gap --games 2000 --from 1000 --chunk 500 --decks @data/pools/azvaldt/sets/all84.txt --vocab @/r.json --ref '{"beamWidth":4096,"potentialNet":null,"valueNet":"@/r.json"}' --variants '{"w32":{"beamWidth":32,"potentialNet":null,"valueNet":"@/r.json"}}' --sample 100 --inputs @/pot-{k}.jsonl --out @/pot-{k}-rows.jsonl --est 0.40
+potential train --data @/pot-{1..4}.jsonl --valid 2800-2999 --out @/rpot.json --est 300
+
+# 4. S1: R1 対 v0（84 個のデッキの鏡の compare、4000 試合）。v0 の側の見込みは今の既定のまま、学んだ側は学び直した見込み
+compare 2000 '{"valueNet":"@/r.json","potentialNet":"@/rpot.json"}' '{"valueNet":"@/v0.json","potentialNet":"@/v0pot.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 新しいプール-R1 --est 0.16
+
+# 5. 線ではないが毎回見る数字: PP とプレイできるカードを残して終えたターンの割合（今の補正 29%、v0 15%、スターター 6%）・1 試合のターンの数・型ごとの勝率。
+#    数字は下ごしらえの測り（notes/pool-stage4-prep.md）。profile の報告は回のフォルダの speed-<ジョブの番号>.md（型ごとの表の「PP を残して終えた」「ターン/試合」）。
+#    両方の席が同じ設定で 420 組（席とデッキを入れ替えて 840 試合。1 つのデッキが 20 試合ほどに出る）
+profile --opts '{"valueNet":"@/r.json","potentialNet":"@/rpot.json"}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.16
+profile --opts '{"valueNet":"@/v0.json","potentialNet":"@/v0pot.json"}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.16

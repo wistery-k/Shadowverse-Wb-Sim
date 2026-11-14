@@ -1,5 +1,6 @@
 // 夜のキュー（scripts/night-main.ts・docs/night.md）。svwb の代わりに、台帳の行だけを書く偽物を回して、区切り・再開・止め方・まとめを確かめる
 
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,6 +26,7 @@ import {
   standIn,
   jobArgv,
   wallClock,
+  workerPid,
   type WorkerControl,
 } from "../scripts/night-main";
 
@@ -373,6 +375,28 @@ const finish = () => {
 };
 if (String(first) === process.env.FAKE_HANG) setTimeout(finish, 60000); else finish();
 `;
+
+describe("worker の pid", () => {
+  it("切り離した worker は引数の回のフォルダで、--foreground は start・resume のプロセスそのもので見分ける", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "night-pid-"));
+    const sleeper = (...args: string[]) => spawn(process.execPath, ["-e", "setTimeout(() => {}, 20000)", ...args], { stdio: "ignore" });
+    const kids = [sleeper("night-main", "worker", dir), sleeper("night-main", "start", "q.txt", "--foreground"), sleeper("night-main", "start", "q.txt")];
+    try {
+      await new Promise((r) => setTimeout(r, 300));
+      const at = (i: number) => {
+        writeFileSync(join(dir, "worker.pid"), String(kids[i]!.pid));
+        return workerPid(dir);
+      };
+      expect(at(0)).toBe(kids[0]!.pid);
+      expect(at(1)).toBe(kids[1]!.pid);
+      // 回のフォルダも --foreground も無いプロセスは、pid が使い回されたもの
+      expect(at(2)).toBeNull();
+    } finally {
+      for (const k of kids) k.kill();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("区切って回す（偽物の svwb で）", () => {
   let tmp = "";

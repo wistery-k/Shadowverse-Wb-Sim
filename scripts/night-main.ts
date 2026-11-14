@@ -897,9 +897,10 @@ export function workerPid(dir: string): number | null {
   const pid = Number(readFileSync(f, "utf8").trim());
   if (!Number.isInteger(pid) || pid <= 0) return null;
   try {
-    // pid が使い回されていないか（電源を入れ直した後など）。worker は引数に回のフォルダを持つ
+    // pid が使い回されていないか（電源を入れ直した後など）。切り離した worker は引数に回のフォルダを持つ。
+    // start・resume --foreground は、その start・resume のプロセスが worker（引数に回のフォルダは無い）
     const cmd = readFileSync(`/proc/${pid}/cmdline`, "utf8");
-    return cmd.includes("night-main") && cmd.includes(dir) ? pid : null;
+    return cmd.includes("night-main") && (cmd.includes(dir) || cmd.split("\0").includes("--foreground")) ? pid : null;
   } catch {
     try {
       process.kill(pid, 0);
