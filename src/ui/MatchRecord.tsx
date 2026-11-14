@@ -21,6 +21,7 @@ import {
   type Action,
   type EvolveState,
   type GameState,
+  type HandCard,
   type PlayerIndex,
 } from "../engine";
 import { PRO_EVENTS, PRO_DECKS, findProDeck } from "../record/decks";
@@ -29,16 +30,22 @@ import {
   exportRecord,
   newRecord,
   outcomeLabel,
+  entryCardId,
+  entryName,
   handIids,
+  keptLabel,
   nextHandOrder,
+  outcomeMatches,
   outcomeParts,
   parseRecord,
   RANDOM_SAMPLES,
+  reapplySteps,
   recordFileName,
   replay,
   resultOf,
   sampleOutcomes,
   setInitialHand,
+  varyingFacets,
   type Draws,
   type Evaluation,
   type MatchRecord as Rec,
@@ -314,6 +321,14 @@ interface Resolving {
 
 type Mode = "play" | "edit";
 
+/** 「この手を選び直す」の結果（prev は選び直す前。total はその先の手順の数、kept はたどり直せた数） */
+interface Rebased {
+  prev: Live;
+  total: number;
+  kept: number;
+  stopped: { label: string; reason: string } | null;
+}
+
 function RecordView({ live, setLive, setError, onNew }: { live: Live; setLive: (l: Live) => void; setError: (e: string) => void; onNew: () => void }) {
   const { record, states, index } = live;
   const state = states[index]!;
@@ -368,14 +383,60 @@ function RecordView({ live, setLive, setError, onNew }: { live: Live; setLive: (
     return () => clearInterval(t);
   }, []);
 
+  // 「この手を選び直す」: 1 手戻ってから、その手を決め直す（redo）。決まったら、その先の手順をたどり直す（rebase）
+  const redoRef = useRef<Action | null>(null);
+  const rebaseRef = useRef(false);
+  const [rebased, setRebased] = useState<Rebased | null>(null);
+
   // 位置が変わったら、決めている途中の手はやめる
   useEffect(() => {
     setResolving(null);
     setBusy("");
     setPicks(NO_PICKS);
+    const redo = redoRef.current;
+    redoRef.current = null;
+    rebaseRef.current = redo !== null;
+    if (redo) run({ action: redo, draws: [[], []] }, "選び直しています…");
   }, [index, record]);
 
+  function startRedo() {
+    const st = record.steps[index - 1];
+    if (st?.kind !== "action") return;
+    setRebased(null);
+    redoRef.current = st.action;
+    go(index - 1);
+  }
+
+  /** 選び直した手（step。打った後の局面 next）を今の位置に置き、その先の手順をたどれる所までたどり直す */
+  function rebase(step: RecordStep, next: GameState) {
+    const cur = live;
+    const at = cur.index;
+    const rest = cur.record.steps.slice(at + 1);
+    setBusy("その先の手順をたどり直しています…");
+    setTimeout(() => {
+      const r = reapplySteps(next, rest, names);
+      const steps2 = [...cur.record.steps.slice(0, at), step, ...r.steps];
+      const last = r.states.at(-1) ?? next;
+      setLive({
+        record: { ...cur.record, steps: steps2, meta: { ...cur.record.meta, updatedAt: new Date().toISOString() } },
+        states: [...cur.states.slice(0, at + 1), next, ...r.states],
+        index: at + 1 + r.steps.length,
+      });
+      setRebased({
+        prev: cur,
+        total: rest.length,
+        kept: r.steps.length,
+        // たどれなくなった手の説明は、選び直す前の局面で作る（消えたカードの名前も出る）
+        stopped: r.stopped
+          ? { label: stepLabel(rest[r.stopped.at]!, cur.states[at + 1 + r.stopped.at] ?? last, cur.states[at + 2 + r.stopped.at], names), reason: r.stopped.reason }
+          : null,
+      });
+      setBusy("");
+    }, 20);
+  }
+
   function push(step: RecordStep, next: GameState) {
+    setRebased(null);
     const cur = live;
     const kept = cur.record.steps.slice(0, cur.index);
     const record2: Rec = { ...cur.record, steps: [...kept, step], meta: { ...cur.record.meta, updatedAt: new Date().toISOString() } };
@@ -393,7 +454,13 @@ function RecordView({ live, setLive, setError, onNew }: { live: Live; setLive: (
       if (r.ev.kind === "done") {
         const s = r.step;
         const draws: Draws | undefined = s.draws[0].length + s.draws[1].length > 0 ? s.draws : undefined;
-        push({ kind: "action", action: s.action, ...(draws ? { draws } : {}), ...(s.rng !== undefined ? { rng: s.rng } : {}), ...(s.outcome ? { outcome: s.outcome } : {}) }, r.ev.next);
+        const rec: RecordStep = { kind: "action", action: s.action, ...(draws ? { draws } : {}), ...(s.rng !== undefined ? { rng: s.rng } : {}), ...(s.outcome ? { outcome: s.outcome } : {}) };
+        if (rebaseRef.current) {
+          rebaseRef.current = false;
+          rebase(rec, r.ev.next);
+        } else {
+          push(rec, r.ev.next);
+        }
         setResolving(null);
       } else {
         setResolving(r);
@@ -443,6 +510,14 @@ function RecordView({ live, setLive, setError, onNew }: { live: Live; setLive: (
         <button type="button" title="戻した手をやり直す" disabled={!!busy || index >= record.steps.length} onClick={() => go(index + 1)}>
           やり直す →
         </button>
+        <button
+          type="button"
+          title="いま見ている手（手順の一覧で色の付いた手）を、引いたカード・ランダムな結果から選び直します。その先の手順は、たどれる所までたどり直します"
+          disabled={!!busy || !!resolving || record.steps[index - 1]?.kind !== "action"}
+          onClick={startRedo}
+        >
+          この手を選び直す
+        </button>
         <button type="button" onClick={onNew} disabled={!!busy}>
           新しい試合
         </button>
@@ -458,6 +533,29 @@ function RecordView({ live, setLive, setError, onNew }: { live: Live; setLive: (
           {marks > 0 ? ` / 印 ${marks}` : ""}
         </span>
       </div>
+      {rebased && (
+        <div class="banner record-rebased">
+          <span>
+            {rebased.total === 0
+              ? "この手を選び直しました。"
+              : rebased.stopped
+                ? `選び直した手の先の ${rebased.total} 手のうち、${rebased.kept} 手をたどり直しました。「${rebased.stopped.label}」でたどれなくなったので（${rebased.stopped.reason}）、そこから先の ${rebased.total - rebased.kept} 手は消しました。ここから入れ直してください。`
+                : `選び直した手の先の ${rebased.total} 手を、すべてたどり直しました。`}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setLive(rebased.prev);
+              setRebased(null);
+            }}
+          >
+            選び直す前に戻す
+          </button>
+          <button type="button" onClick={() => setRebased(null)}>
+            閉じる
+          </button>
+        </div>
+      )}
       <div class="game record-game">
         {([opponent(bottom), bottom] as const).map((p, k) => (
           <SeatPanel
@@ -488,7 +586,10 @@ function RecordView({ live, setLive, setError, onNew }: { live: Live; setLive: (
               names={names}
               onRun={run}
               onUpdate={setResolving}
-              onCancel={() => setResolving(null)}
+              onCancel={() => {
+                rebaseRef.current = false;
+                setResolving(null);
+              }}
               setBusy={setBusy}
             />
           ) : result ? (
@@ -852,41 +953,49 @@ function ActionButtons({ state, names, act, info, setPicks }: { state: GameState
 /** カード ID → 枚数を、コストの低い順（同じなら ID の順）に並べる */
 const TYPE_ORDER: Record<string, number> = { follower: 0, spell: 1, amulet: 2 };
 
-/** カードの種類の短い説明（フォロワーは攻撃力/体力） */
-function typeLabel(id: string): string {
+/** カードの種類の短い説明（フォロワーは攻撃力/体力。山札で受けたバフ等の、手札での状態 kept があれば足す） */
+function typeLabel(id: string, kept?: HandCard): string {
   const c = cardOf(id);
-  if (c.type === "follower") return `${c.attack}/${c.defense}`;
+  if (c.type === "follower") return `${c.attack + (kept?.attackMod ?? 0)}/${c.defense + (kept?.defenseMod ?? 0)}`;
   return c.type === "spell" ? "スペル" : "アミュレット";
 }
 
-/** コストごとの行に分けたカードの一覧（行の中はフォロワー・スペル・アミュレットの順） */
-function byCost(m: ReadonlyMap<string, number>): [number, [string, number][]][] {
+/** 今のコスト（手札での状態があればその変化を足す） */
+const costOf = (id: string, kept?: HandCard) => Math.max(0, cardOf(id).cost + (kept?.costMod ?? 0));
+
+/** コストごとの行に分けたカードの一覧（行の中はフォロワー・スペル・アミュレットの順）。キーはカード ID か引いたカードの指定 */
+function byCost(m: ReadonlyMap<string, number>, kept?: ReadonlyMap<string, HandCard>): [number, [string, number][]][] {
   const rows = new Map<number, [string, number][]>();
-  for (const [id, n] of m) {
-    const cost = cardOf(id).cost;
-    rows.set(cost, [...(rows.get(cost) ?? []), [id, n]]);
+  for (const [e, n] of m) {
+    const cost = costOf(entryCardId(e), kept?.get(e));
+    rows.set(cost, [...(rows.get(cost) ?? []), [e, n]]);
   }
-  const order = (id: string) => TYPE_ORDER[cardOf(id).type] ?? 3;
+  const order = (e: string) => TYPE_ORDER[cardOf(entryCardId(e)).type] ?? 3;
   return [...rows.entries()]
     .sort(([a], [b]) => a - b)
     .map(([cost, cards]) => [cost, cards.sort(([a], [b]) => order(a) - order(b) || a.localeCompare(b))]);
 }
 
-function CardButtons({ counts, onPick }: { counts: ReadonlyMap<string, number>; onPick: (cardId: string) => void }) {
+/** カードを選ぶボタンの一覧。kept は、引いたカードの指定 → 山札での手札での状態（バフ等。攻撃力・体力・コストに足し、太字で添える） */
+function CardButtons({ counts, kept, onPick }: { counts: ReadonlyMap<string, number>; kept?: ReadonlyMap<string, HandCard>; onPick: (entry: string) => void }) {
   return (
     <div class="record-cards">
-      {byCost(counts).map(([cost, cards]) => (
+      {byCost(counts, kept).map(([cost, cards]) => (
         <div class="record-cost-row" key={cost}>
           <span class="record-cost-label" title={`コスト ${cost}`}>
             {cost}
           </span>
           <div class="record-cost-cards">
-            {cards.map(([id, n]) => {
+            {cards.map(([e, n]) => {
+              const id = entryCardId(e);
               const c = cardOf(id);
+              const k = kept?.get(e);
+              const mods = keptLabel(k);
               return (
-                <button type="button" key={id} class={`record-card class-${c.class}`} title={c.text} onClick={() => onPick(id)}>
+                <button type="button" key={e} class={`record-card class-${c.class}`} title={c.text} onClick={() => onPick(e)}>
                   <span class="record-card-name">{c.name}</span>
-                  <span class="muted record-card-type">{typeLabel(id)}</span>
+                  <span class="muted record-card-type">{typeLabel(id, k)}</span>
+                  {mods && <span class="record-card-kept">{mods}</span>}
                   <span class="record-card-count">×{n}</span>
                 </button>
               );
@@ -965,7 +1074,7 @@ function ResolvePanel({
   const title = describeAction(state, step.action, names);
   const chosenText = ([0, 1] as const)
     .filter((p) => step.draws[p].length > 0)
-    .map((p) => `${names[p]}: ${step.draws[p].map((id) => cardOf(id).name).join("、")}`)
+    .map((p) => `${names[p]}: ${step.draws[p].map(entryName).join("、")}`)
     .join(" / ");
   const popDraw = (p: PlayerIndex) => {
     const draws: Draws = [[...step.draws[0]], [...step.draws[1]]];
@@ -996,6 +1105,7 @@ function ResolvePanel({
         <div class="muted">盤面は、この手を打った後（ターン終了時の効果などの後）の見込みです。青い枠の「引いたカード（いま選ぶ）」が、いま選んでいるカードです。</div>
         <CardButtons
           counts={ev.pool}
+          kept={ev.kept}
           onPick={(id) => {
             const draws: Draws = [[...step.draws[0]], [...step.draws[1]]];
             draws[p].push(id);
@@ -1017,50 +1127,8 @@ function ResolvePanel({
     return (
       <div class="banner column record-picker" ref={ref}>
         {head}
-        <div>
-          この手には<strong>運で決まるところ</strong>（対象・出るカードなど）があります。<strong>動画で起きた結果</strong>を選んでください
-        </div>
-        <div class="muted">太字が結果ごとの違い、薄い字はどの結果でも同じところです（乱数を変えて {ev.samples} 回打った結果。多い順）</div>
-        <ol class="record-outcomes">
-          {ev.outcomes.map((o: Outcome, i) => {
-            const { parts, hidden } = outcomeParts(o);
-            return (
-              <li key={i}>
-                <button type="button" onClick={() => onRun({ ...step, rng: o.rng, outcomeKey: o.key, outcome: outcomeLabel(o) }, "選んだ結果で打っています…")}>
-                  選ぶ
-                </button>{" "}
-                {o.changes.length === 0 && <span>（見える違いなし）</span>}
-                {parts.map((c, k) => (
-                  <span key={k} class={c.diff ? "record-outcome-diff" : "muted"}>
-                    {k > 0 ? "、" : ""}
-                    {c.text}
-                  </span>
-                ))}{" "}
-                <span class="muted">
-                  （{o.count} 回{hidden > 0 ? `。ほかに、どの結果でも同じ変化 ${hidden} 件` : ""}）
-                </span>
-              </li>
-            );
-          })}
-        </ol>
-        <div class="row-buttons">
-          <button
-            type="button"
-            title="まれな結果が出ていないとき"
-            onClick={() => {
-              setBusy("ほかの結果を探しています…");
-              setTimeout(() => {
-                const outcomes = sampleOutcomes(state, step.action, step.draws, names, MORE_SAMPLES, ev.outcomes, ev.samples);
-                setBusy("");
-                onUpdate({ step, ev: { kind: "random", outcomes, samples: ev.samples + MORE_SAMPLES } });
-              }, 20);
-            }}
-          >
-            もっと探す（+{MORE_SAMPLES} 回）
-          </button>
-          {cancel}
-        </div>
-        <div class="muted">動画の結果が無いときは、近いものを選んで、あとで「手で直す」で直し、「動画と違う」の印を付けてください。</div>
+        <RandomOutcomes key={JSON.stringify([step.action, step.draws])} state={state} step={step} ev={ev} names={names} onRun={onRun} onUpdate={onUpdate} setBusy={setBusy} />
+        <div class="row-buttons">{cancel}</div>
       </div>
     );
   }
@@ -1069,7 +1137,7 @@ function ResolvePanel({
       <div class="banner column record-picker" ref={ref}>
         {head}
         <div class="problems">
-          {names[ev.player]}が{ev.cardId ? `「${cardOf(ev.cardId).name}」を` : ""}引く結果が見つかりません（その手では引けないカードか、山札を切り直す手で {RANDOM_SAMPLES} 回より多く探しても出ないカード）。
+          {names[ev.player]}が{ev.entry ? `「${entryName(ev.entry)}」を` : ""}引く結果が見つかりません（その手では引けないカードか、山札を切り直す手で {RANDOM_SAMPLES} 回より多く探しても出ないカード）。
         </div>
         <div class="row-buttons">
           {lastPicked !== undefined && (
@@ -1092,6 +1160,113 @@ function ResolvePanel({
     );
   }
   return null;
+}
+
+/** ランダムな結果の一覧（値が結果ごとに違う項目で絞り込める） */
+function RandomOutcomes({
+  state,
+  step,
+  ev,
+  names,
+  onRun,
+  onUpdate,
+  setBusy,
+}: {
+  state: GameState;
+  step: PendingStep;
+  ev: Extract<Evaluation, { kind: "random" }>;
+  names: [string, string];
+  onRun: (step: PendingStep, label: string) => void;
+  onUpdate: (r: Resolving) => void;
+  setBusy: (s: string) => void;
+}) {
+  const [filter, setFilter] = useState<Record<string, string>>({});
+  const facets = useMemo(() => varyingFacets(ev.outcomes), [ev.outcomes]);
+  const shown = ev.outcomes.filter((o) => outcomeMatches(o, filter));
+  const toggle = (key: string, value: string) => {
+    const next = { ...filter };
+    if (next[key] === value) delete next[key];
+    else next[key] = value;
+    setFilter(next);
+  };
+  const filtering = Object.keys(filter).length > 0;
+  return (
+    <>
+      <div>
+        この手には<strong>運で決まるところ</strong>（対象・出るカードなど）があります。<strong>動画で起きた結果</strong>を選んでください
+      </div>
+      <div class="muted">太字が結果ごとの違い、薄い字はどの結果でも同じところです（乱数を変えて {ev.samples} 回打った結果。多い順）</div>
+      {facets.length > 0 && ev.outcomes.length > 2 && (
+        <div class="record-facets">
+          <div class="muted">結果で絞り込む（動画の、打った後の値をクリック。もう一度クリックで外す）:</div>
+          {facets.map(([key, values]) => (
+            <div class="record-facet" key={key}>
+              <span class="record-facet-key">{key}</span>
+              {values.map((v) => {
+                const selected = filter[key] === v;
+                const n = ev.outcomes.filter((o) => outcomeMatches(o, { ...filter, [key]: v })).length;
+                return (
+                  <button type="button" key={v} class={`record-facet-value ${selected ? "selected" : ""}`} disabled={!selected && n === 0} onClick={() => toggle(key, v)}>
+                    {v}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+          {filtering && (
+            <div class="row-buttons">
+              <span>
+                {ev.outcomes.length} 件のうち {shown.length} 件
+              </span>
+              <button type="button" onClick={() => setFilter({})}>
+                絞り込みを外す
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      <ol class="record-outcomes">
+        {shown.map((o: Outcome) => {
+          const { parts, hidden } = outcomeParts(o);
+          return (
+            <li key={o.key}>
+              <button type="button" onClick={() => onRun({ ...step, rng: o.rng, outcomeKey: o.key, outcome: outcomeLabel(o) }, "選んだ結果で打っています…")}>
+                選ぶ
+              </button>{" "}
+              {o.changes.length === 0 && <span>（見える違いなし）</span>}
+              {parts.map((c, k) => (
+                <span key={k} class={c.diff ? "record-outcome-diff" : "muted"}>
+                  {k > 0 ? "、" : ""}
+                  {c.text}
+                </span>
+              ))}{" "}
+              <span class="muted">
+                （{o.count} 回{hidden > 0 ? `。ほかに、どの結果でも同じ変化 ${hidden} 件` : ""}）
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+      {filtering && shown.length === 0 && <div class="muted">合う結果がありません。「もっと探す」で探すか、絞り込みを外してください。</div>}
+      <div class="row-buttons">
+        <button
+          type="button"
+          title="まれな結果が出ていないとき"
+          onClick={() => {
+            setBusy("ほかの結果を探しています…");
+            setTimeout(() => {
+              const outcomes = sampleOutcomes(state, step.action, step.draws, names, MORE_SAMPLES, ev.outcomes, ev.samples);
+              setBusy("");
+              onUpdate({ step, ev: { kind: "random", outcomes, samples: ev.samples + MORE_SAMPLES } });
+            }, 20);
+          }}
+        >
+          もっと探す（+{MORE_SAMPLES} 回）
+        </button>
+      </div>
+      <div class="muted">動画の結果が無いときは、近いものを選んで、あとで「手で直す」で直し、「動画と違う」の印を付けてください。</div>
+    </>
+  );
 }
 
 // ---- 印・リタイア・手で直す ----
@@ -1347,7 +1522,7 @@ function stepLabel(step: RecordStep, before: GameState, after: GameState | undef
       // マリガンで引いたカードは describeAction が書く（相手の席の引いたカードだけ足す）
       const own = step.action.type === "mulligan" ? step.action.player : null;
       const drawn = ([0, 1] as const).filter((p) => p !== own && (step.draws?.[p].length ?? 0) > 0);
-      if (drawn.length > 0) text += `（引いた: ${drawn.map((p) => `${names[p]} ${step.draws![p].map((id) => cardOf(id).name).join("、")}`).join(" / ")}）`;
+      if (drawn.length > 0) text += `（引いた: ${drawn.map((p) => `${names[p]} ${step.draws![p].map(entryName).join("、")}`).join(" / ")}）`;
       if (step.outcome) text += `［ランダム: ${step.outcome}］`;
       return text;
     }

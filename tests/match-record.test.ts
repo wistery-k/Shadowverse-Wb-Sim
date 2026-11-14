@@ -16,12 +16,15 @@ import {
   exportRecord,
   newRecord,
   nextHandOrder,
+  outcomeMatches,
   parseRecord,
+  reapplySteps,
   replay,
   RecordError,
   runStep,
   setInitialHand,
   turnSnapshots,
+  varyingFacets,
   type Draws,
   type MatchRecord,
   type PendingStep,
@@ -192,6 +195,21 @@ describe("試合の記録: ランダムな結果", () => {
     const again = applyStep(s, { kind: "action", action, rng: o.rng });
     expect(JSON.stringify(again)).toBe(JSON.stringify(done.ev.next));
     expect(foes.length).toBe(2);
+
+    // 絞り込み: 打つ前に場にあったカードごとの、打った後の値（同じ名前が 2 枚あれば、場の古いほうから何枚目か）
+    const facets = new Map(varyingFacets(r.ev.outcomes));
+    const second = [...facets.keys()].find((k) => k.includes("キャラバンマンモス") && k.includes("2 枚目"));
+    expect(second).toBeDefined();
+    expect(facets.get(second!)).toContain("場から離れた");
+    const gone = r.ev.outcomes.filter((x) => outcomeMatches(x, { [second!]: "場から離れた" }));
+    expect(gone.length).toBeGreaterThan(0);
+    expect(gone.length).toBeLessThan(r.ev.outcomes.length);
+    for (const x of gone) expect(x.changes.some((c) => c.includes("の場から: キャラバンマンモス") && c.includes("2 枚目"))).toBe(true);
+    // 項目を全部決めると 1 つに決まる
+    for (const x of r.ev.outcomes) {
+      const all = Object.fromEntries(x.facets.filter((f) => facets.has(f.key)).map((f) => [f.key, f.value]));
+      expect(r.ev.outcomes.filter((y) => outcomeMatches(y, all))).toEqual([x]);
+    }
   });
 
   it("手札を山札に戻して切り直してから引く手でも、決めたカードを引く乱数を探す", () => {
@@ -280,6 +298,32 @@ describe("試合の記録: ランダムな結果", () => {
     if (r4.ev.kind === "draw") expect([...r4.ev.pool.keys()].sort()).toEqual([iron, ...others].sort());
   });
 
+  it("山札に同じカードで手札での状態の違うもの（バフを受けたもの）があれば、分けて並べ、選んだほうを引く", () => {
+    const { s, opp } = setup(12);
+    const x = id("不屈のファイター");
+    toHand(s, opp, "不屈のファイター", { attackMod: 1, defenseMod: 1 });
+    const buffed = s.players[opp].hand.pop()!;
+    s.players[opp].deck = [{ iid: s.nextIid++, cardId: x }, { iid: buffed.iid, cardId: x, kept: buffed }, ...s.players[opp].deck];
+    const action: Action = { type: "endTurn" };
+    const r = evaluate(s, { action, draws: [[], []] }, NAMES);
+    expect(r.ev.kind).toBe("draw");
+    if (r.ev.kind !== "draw") return;
+    expect(r.ev.pool.get(`${x}|+1/+1`)).toBe(1);
+    expect(r.ev.pool.get(`${x}|`)).toBe(1);
+    expect(r.ev.kept.get(`${x}|+1/+1`)?.attackMod).toBe(1);
+    const drawWith = (entry: string) => {
+      const draws: Draws = [[], []];
+      draws[opp].push(entry);
+      const d = evaluate(s, { action, draws }, NAMES);
+      expect(d.ev.kind).toBe("done");
+      return d.ev.kind === "done" ? d.ev.next.players[opp].hand.find((h) => h.cardId === x)?.attackMod : undefined;
+    };
+    expect(drawWith(`${x}|+1/+1`)).toBe(1);
+    expect(drawWith(`${x}|`)).toBe(0);
+    // 状態を付けない指定（前の記録）は、山札の上から見て最初のもの
+    expect(drawWith(x)).toBe(0);
+  });
+
   it("引けないカードを選ぶと mismatch", () => {
     const { s, me } = setup(9);
     s.players[me].deck = [id("不屈のファイター"), id("探偵のルーペ")].map((cardId) => ({ iid: s.nextIid++, cardId })).concat(s.players[me].deck);
@@ -290,6 +334,41 @@ describe("試合の記録: ランダムな結果", () => {
     const r = evaluate(s, { action: { type: "endTurn" }, draws: me === 0 ? [[], [id("激震のゴリアテ")]] : [[id("激震のゴリアテ")], []] }, NAMES);
     expect(r.ev.kind === "error" || r.ev.kind === "mismatch").toBe(true);
     expect(opp).not.toBe(me);
+  });
+});
+
+describe("試合の記録: 選び直して、その先をたどり直す", () => {
+  it("引いたカードを選び直すと、その先の手順をたどり直し、たどれなくなった所・手で直した局面で止める", () => {
+    const { s, me, opp } = setup(21);
+    const a = id("刹那のクイックブレイダー");
+    const b = id("天晶の魔手");
+    s.players[opp].deck = [a, b].map((cardId) => ({ iid: s.nextIid++, cardId })).concat(s.players[opp].deck);
+    const aIid = s.players[opp].deck[0]!.iid;
+    const end: Action = { type: "endTurn" };
+    const drawsOf = (p: PlayerIndex, e: string): Draws => {
+      const d: Draws = [[], []];
+      d[p].push(e);
+      return d;
+    };
+    const playA: RecordStep = { kind: "action", action: { type: "play", iid: aIid } };
+    const endOpp: RecordStep = { kind: "action", action: end, draws: drawsOf(me, FILLER) };
+    const s1 = applyStep(s, { kind: "action", action: end, draws: drawsOf(opp, a) });
+    expect(reapplySteps(s1, [playA, endOpp], NAMES).stopped).toBeNull();
+    // 刹那のクイックブレイダーでなく天晶の魔手を引いたことにする: 刹那のクイックブレイダーをプレイする手でたどれなくなる
+    const redone = applyStep(s, { kind: "action", action: end, draws: drawsOf(opp, b) });
+    const r = reapplySteps(redone, [playA, endOpp], NAMES);
+    expect(r.steps).toHaveLength(0);
+    expect(r.stopped?.at).toBe(0);
+    // 刹那のクイックブレイダーを出さない先なら最後までたどる
+    const mark: RecordStep = { kind: "mark", note: "x" };
+    const r2 = reapplySteps(redone, [mark, endOpp], NAMES);
+    expect(r2.stopped).toBeNull();
+    expect(r2.steps).toHaveLength(2);
+    expect(r2.states[1]!.players[opp].hand.some((h) => h.cardId === b)).toBe(true);
+    // 手で直した局面では止める
+    const r3 = reapplySteps(redone, [mark, { kind: "edit", label: "x", state: s1 }], NAMES);
+    expect(r3.steps).toHaveLength(1);
+    expect(r3.stopped?.at).toBe(1);
   });
 });
 
