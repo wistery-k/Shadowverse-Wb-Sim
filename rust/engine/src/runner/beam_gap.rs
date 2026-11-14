@@ -3,7 +3,7 @@
 //!   svwb beam-gap [--games 50] [--from 0] [--ref '{"beamWidth":4096,"potentialNet":null}'] [--variants '{"名前":{設定},…}']
 //!                 [--every 1] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl]
 //!                 [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl]
-//!                 [--inputs 学習のデータ.jsonl]
+//!                 [--inputs 学習のデータ.jsonl] [--vocab 語彙.json] [--decks <デッキ>,…|@<デッキの組>]
 //!
 //! 今の既定どうしの自己対戦（`sim::play_ai`、比較用の 7 デッキ）の、自分のターンの最初の局面（`--every k` なら k 局面に 1 つ）を集め、
 //! 視点のプレイヤーから決定化した局面で、基準の設定（`--ref`）と比べる設定（`--variants`）のビームを 1 回ずつ打つ（相手のターンは読まない）。
@@ -20,11 +20,17 @@
 //! （`--sample` とは一緒に使えない）。
 //! `--inputs` なら、`--sample` で選んだ局面（段 1 以上）の見込みのネットワークの入力（ai/potential.rs）と、終えた点数・届いた最善を書く
 //! （1 行目は語彙と入力の並び。学習は npm run potential -- train）。
+//! `--vocab` なら、その語彙（JSON のカード・クレストの ID の配列か、`"vocab"` を持つモデルのファイル。npm run td -- vocab・extend が書く）で
+//! 入力を作る（既定はスターターのカード。新しいプールの見込みを学ぶ用）。
+//! `--decks` なら、比較用の 7 デッキの代わりに並べたデッキで自己対戦を打つ（compare --decks と同じ組とシード。デフォルトデッキと違うデッキの
+//! マリガンは compare と同じ）。
 //! docs/ai-notes.md「ターン途中の評価の見直し」
 //!
 //! `--out` の行には、設定ごとに最初の手ごとの最善（firsts）と、その局面でリーサル探索が勝ちを見つけるか（lethal）も書く。
 //! `--nodes` の行には、学習した見込みの値（pot）と、その局面から先へ広げられるか（open）も書く。
 
+use super::compare::{compare_pair, compare_seed, deck_options};
+use super::deck_compare::read_deck_list;
 use super::human_plan::{is_start_of_turn, mean_se};
 use super::options::compare_options;
 use super::parallel::parallel_map;
@@ -36,14 +42,31 @@ use crate::ai::potential::{
 };
 use crate::ai::search::{is_chance_step, BeamProbe, SearchAgent, SearchOptions};
 use crate::ai::{Agent, Rng};
-use crate::data::data;
+use crate::data::{data, Deck};
 use crate::game::{acting_player, apply_legal};
 use crate::json::Json;
-use crate::sim::{ai_game_setup, play_ai};
+use crate::sim::{ai_game_setup, play_ai, play_match};
 use crate::state::{Action, GameState, Phase, PlayerIndex};
 use crate::state_json::{action_to_json, state_from_json, state_to_json};
 use std::io::{BufRead, Write};
 use std::time::Instant;
+
+/// --vocab のファイル（カード・クレストの ID の配列か、"vocab" を持つモデル）の語彙
+fn read_vocab(path: &str) -> Result<Vec<String>, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{path} を読めません: {e}"))?;
+    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
+    let arr = v
+        .as_array()
+        .or_else(|| v.get("vocab").and_then(|x| x.as_array()))
+        .ok_or_else(|| format!("{path}: 語彙の配列（か vocab を持つモデル）ではありません"))?;
+    arr.iter()
+        .map(|x| {
+            x.as_str()
+                .map(String::from)
+                .ok_or_else(|| format!("{path}: 語彙に文字列でないものがあります"))
+        })
+        .collect()
+}
 
 /// 勝ち負けの点が付いた局面とみなす点数の大きさ
 const DECIDED: f64 = 1e5;
@@ -86,7 +109,11 @@ struct Row {
     inputs: Vec<String>,
 }
 
-fn deck_names(g: u32) -> [String; 2] {
+fn deck_names(g: u32, list: Option<&[&'static Deck]>) -> [String; 2] {
+    if let Some(list) = list {
+        let (a, b) = compare_pair(list, g, false);
+        return [a.name.clone(), b.name.clone()];
+    }
     let (decks, _) = ai_game_setup(g, false);
     let name = |cs: &[crate::data::CardIdx]| {
         data()
@@ -98,16 +125,23 @@ fn deck_names(g: u32) -> [String; 2] {
     [name(&decks[0]), name(&decks[1])]
 }
 
-/// 試合 g を今の既定どうしで打ち、自分のターンの最初の局面を集める（every 局面に 1 つ）
-fn collect(g: u32, every: usize) -> Vec<Position> {
-    let names = deck_names(g);
-    let mut a0 = SearchAgent::new(SearchOptions::default());
-    let mut a1 = SearchAgent::new(SearchOptions::default());
+/// 試合 g を今の既定どうしで打ち、自分のターンの最初の局面を集める（every 局面に 1 つ）。list があれば並べたデッキで
+/// compare --decks と同じ組とシード
+fn collect(g: u32, every: usize, list: Option<&[&'static Deck]>) -> Vec<Position> {
+    let names = deck_names(g, list);
+    let o = SearchOptions::default();
+    let pair = list.map(|l| compare_pair(l, g, false));
+    let (o0, o1) = match pair {
+        Some((a, b)) => (deck_options(&o, a), deck_options(&o, b)),
+        None => (o.clone(), o),
+    };
+    let mut a0 = SearchAgent::new(o0);
+    let mut a1 = SearchAgent::new(o1);
     let mut agents: [&mut dyn Agent; 2] = [&mut a0, &mut a1];
     let mut last_turn = -1;
     let mut n = 0usize;
     let mut out = Vec::new();
-    play_ai(g, false, &mut agents, |s, _| {
+    let visit = |s: &GameState, _: &Action| {
         if is_start_of_turn(s) && acting_player(s) == s.active && s.turn != last_turn {
             last_turn = s.turn;
             if n.is_multiple_of(every.max(1)) {
@@ -121,7 +155,21 @@ fn collect(g: u32, every: usize) -> Vec<Position> {
             }
             n += 1;
         }
-    });
+    };
+    match pair {
+        // compare --decks と同じシード（survey --decks と同じ。先の席が A）
+        Some((a, b)) => {
+            play_match(
+                &mut agents,
+                [&a.cards, &b.cards],
+                compare_seed(g, false, true),
+                visit,
+            );
+        }
+        None => {
+            play_ai(g, false, &mut agents, visit);
+        }
+    }
     out
 }
 
@@ -349,6 +397,8 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut save_path: Option<String> = None;
     let mut ref_from: Option<String> = None;
     let mut inputs_path: Option<String> = None;
+    let mut vocab_path: Option<String> = None;
+    let mut deck_list: Option<String> = None;
     let mut i = 0;
     while i < argv.len() {
         let v = argv.get(i + 1).cloned().ok_or("引数の値がありません")?;
@@ -365,6 +415,8 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             "--savePositions" => save_path = Some(v),
             "--refFrom" => ref_from = Some(v),
             "--inputs" => inputs_path = Some(v),
+            "--vocab" => vocab_path = Some(v),
+            "--decks" => deck_list = Some(v),
             k => return Err(format!("不明な引数: {k}（runner/beam_gap.rs）")),
         }
         i += 2;
@@ -372,8 +424,24 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     if inputs_path.is_some() && sample == 0 {
         return Err("--inputs には --sample が要ります".into());
     }
-    let vocab = default_vocab();
+    let vocab = match &vocab_path {
+        None => default_vocab(),
+        Some(path) => read_vocab(path)?,
+    };
     let encoder = PotentialEncoder::new(&vocab);
+    let list: Option<Vec<&'static Deck>> = match &deck_list {
+        None => None,
+        Some(spec) => {
+            let v: Vec<&'static Deck> = read_deck_list(spec)?
+                .into_iter()
+                .map(|d| &*Box::leak(Box::new(d)))
+                .collect();
+            if v.len() < 2 {
+                return Err("--decks にはデッキを 2 つ以上並べます".into());
+            }
+            Some(v)
+        }
+    };
     if ref_from.is_some() && sample > 0 {
         return Err("--refFrom と --sample は一緒に使えません".into());
     }
@@ -416,7 +484,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             let items: Vec<u32> = (from..from + games).collect();
             let per_game = parallel_map(
                 &items,
-                |&g, _| collect(g, every),
+                |&g, _| collect(g, every, list.as_deref()),
                 |done, total, _, _| {
                     if done % 10 == 0 || done == total {
                         eprintln!(

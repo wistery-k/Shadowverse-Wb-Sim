@@ -74,8 +74,15 @@ export function engineData() {
       const alt = ALT_PLAY_OF.get(c.id);
       const faith = FAITH_OF.get(c.id);
       // 能力の定義が使う条件・値（エンジンはこれを持つカードだけ、奥義ゲージ・場に出たフォロワーの枚数・払ったコスト・融合していたかを数える）
-      const defJson = JSON.stringify(AZVALDT_CARD_ABILITIES[c.id] ?? CARD_ABILITIES[c.id] ?? {});
+      const def = AZVALDT_CARD_ABILITIES[c.id] ?? CARD_ABILITIES[c.id];
+      const defJson = JSON.stringify(def ?? {});
       const uses = (kind: string) => defJson.includes(`"kind":"${kind}"`);
+      // 素材の条件が無く（どのカードも素材にできる）、融合したカードのコスト・種類も見ない融合先。どの素材を何枚融合しても融合先は同じになる
+      const fuseAnyOne =
+        def?.fusion !== undefined &&
+        Object.keys(def.fusion).length === 0 &&
+        !defJson.includes(`"name":"fusedCost"`) &&
+        !defJson.includes(`"name":"fusedKinds"`);
       return {
         id: c.id,
         name: c.name,
@@ -102,6 +109,7 @@ export function engineData() {
         countEntered: countEntered.has(c.id),
         countEvolved: uses("evolvedCount"),
         countKinds: uses("enteredKinds"),
+        fuseAnyOne,
       };
     }),
     crests: ENGINE_CRESTS.map((c) => ({ id: c.id, countdown: c.countdown ?? null, faith: FAITH_CREST_IDS.has(c.id) })),

@@ -1,0 +1,23 @@
+# 10 型の代表（npm run deck-sets で書く。scripts/deck-sets.ts）
+# 型ごとに、いちばん新しい大会のその型のデッキのうち、その型の中心のカード（その型の半分以上のデッキに入るカード）を
+# いちばん多く含むもの（種類で数える。同じならファイル名の順で先のもの）。行の後ろの注は、型・中心のカードを何種含むか・その型のデッキの数
+data/pools/azvaldt/decks/ps26-27-09b/CR_ウィッチ.txt
+# ↑ 実験体W: 中心のカード 15/15、6 個から
+data/pools/azvaldt/decks/ps26-27-09b/CR_ドラゴン.txt
+# ↑ ランプD: 中心のカード 14/14、12 個から
+data/pools/azvaldt/decks/ps26-27-09b/CR_ナイトメア.txt
+# ↑ アグロNi: 中心のカード 15/15、6 個から
+data/pools/azvaldt/decks/ps26-27-09b/CR_ロイヤル.txt
+# ↑ 海賊R: 中心のカード 15/16、12 個から
+data/pools/azvaldt/decks/ps26-27-09b/LVH_ナイトメア.txt
+# ↑ ミッドレンジNi: 中心のカード 14/17、6 個から
+data/pools/azvaldt/decks/ps26-27-09b/LVH_ビショップ.txt
+# ↑ アミュレットB: 中心のカード 15/15、11 個から
+data/pools/azvaldt/decks/ps26-27-09b/VL_ウィッチ.txt
+# ↑ スペルW: 中心のカード 15/15、6 個から
+data/pools/azvaldt/decks/ps26-27-09b/VL_エルフ.txt
+# ↑ コンボE: 中心のカード 16/16、12 個から
+data/pools/azvaldt/decks/ps26-27-09b/VL_ネメシス.txt
+# ↑ ハイランダーNm: 中心のカード 36/36、12 個から
+data/pools/azvaldt/decks/ps26-27-09b/ZETA_ビショップ.txt
+# ↑ クキシロB: 中心のカード 15/15、1 個から

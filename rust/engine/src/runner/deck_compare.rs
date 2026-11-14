@@ -358,6 +358,61 @@ pub(crate) fn read_deck(name: &str) -> Result<Deck, String> {
     })
 }
 
+/// カンマで並べたデッキ（read_deck と同じ形）を読む。`@<ファイル>` は、デッキの組のファイル
+/// （1 行に 1 つのデッキ。空の行と `#` で始まる行は飛ばす。`data/pools/azvaldt/sets/`）に並べたデッキに展開する。
+/// compare・td selfplay・survey・profile の `--decks` で使う
+pub(crate) fn read_deck_list(spec: &str) -> Result<Vec<Deck>, String> {
+    let mut out = Vec::new();
+    for item in spec.split(',').map(str::trim).filter(|x| !x.is_empty()) {
+        match item.strip_prefix('@') {
+            Some(path) => {
+                let text = std::fs::read_to_string(path)
+                    .map_err(|e| format!("デッキの組 {path} を読めません: {e}"))?;
+                let names = deck_set_entries(&text);
+                if names.is_empty() {
+                    return Err(format!("デッキの組 {path} にデッキがありません"));
+                }
+                for name in names {
+                    out.push(read_deck(name).map_err(|e| format!("{path}: {e}"))?);
+                }
+            }
+            None => out.push(read_deck(item)?),
+        }
+    }
+    distinguish_names(&mut out);
+    Ok(out)
+}
+
+/// 同じ名前のデッキが 2 つ以上あれば（大会の違う同じチームの同じ型。「海賊R（CR）」等）、ファイルのデッキの名前に
+/// ファイルのあるフォルダの名前（大会）を足して見分ける（「海賊R（CR・ps26-27-09b）」）。デッキごとの集計は名前で分けるため
+fn distinguish_names(decks: &mut [Deck]) {
+    let names: Vec<String> = decks.iter().map(|d| d.name.clone()).collect();
+    for d in decks.iter_mut() {
+        if names.iter().filter(|n| **n == d.name).count() < 2 {
+            continue;
+        }
+        let Some(dir) = std::path::Path::new(&d.key)
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+        else {
+            continue;
+        };
+        d.name = match d.name.strip_suffix('）') {
+            Some(head) => format!("{head}・{dir}）"),
+            None => format!("{}（{dir}）", d.name),
+        };
+    }
+}
+
+/// デッキの組のファイルの、デッキの行
+pub(crate) fn deck_set_entries(text: &str) -> Vec<&str> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .collect()
+}
+
 /// 変更を読みやすい名前に（「知恵の輝き-1,最果ての罪・サタン+1」）
 pub(crate) fn changes_label(changes: &[(CardIdx, i32)]) -> String {
     changes
