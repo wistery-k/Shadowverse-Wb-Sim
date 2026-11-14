@@ -1,0 +1,24 @@
+# 段階 4 の本番（新しいプールの学び直し R1）を小さく試す（night/pool-r1.txt と同じ並びで、試合数だけ小さくしたもの。Claude のクラウド環境の 4 スレッド）。
+# 流し方: npm run night -- start night/pool-r1-small.txt --yes --name pool-r1-small --foreground --until +2h
+# 見込みの --est はクラウド環境（4 スレッド）のもの。結果の数字（勝率）は試合が少ないので見ない（流れが通るか・時間・ファイルの大きさ・メモリを見る）。
+# 入力あり・なしの両方の学習を通す（本番はどちらか 1 つ）
+
+td extend --model data/value-net.json --vocab @data/pools/azvaldt/sets/all84.txt --out @/v0e.json --est 5
+td attr --model @/v0e.json --out @/v0.json --keepA 0 --est 20
+td extend --model data/potential-net.json --out @/v0pot.json --est 5
+
+td selfplay --model @/v0.json --decks @data/pools/azvaldt/sets/all84.txt --games 300 --start 7090000 --chunk 150 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --out @/s-{k}.jsonl.gz --est 1.8
+
+td train --impl rust --model @/v0.json --data @/s-{1..2}.jsonl.gz --out @/rt.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --dropInputs myDeckCards,oppUnseen --est 60
+td prune --impl rust --model @/rt.json --data @/s-{1..2}.jsonl.gz --out @/rp.json --est 20
+td attr --model @/rp.json --out @/r.json --keepA 0 --est 20
+
+td train --impl rust --model @/v0.json --data @/s-{1..2}.jsonl.gz --out @/it.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 60
+td prune --impl rust --model @/it.json --data @/s-{1..2}.jsonl.gz --out @/ip.json --est 20
+td attr --model @/ip.json --out @/i.json --keepA 0 --est 20
+
+beam-gap --games 40 --from 1000 --chunk 20 --decks @data/pools/azvaldt/sets/all84.txt --vocab @/r.json --ref '{"beamWidth":4096,"potentialNet":null,"valueNet":"@/r.json"}' --variants '{"w32":{"beamWidth":32,"potentialNet":null,"valueNet":"@/r.json"}}' --sample 100 --inputs @/pot-{k}.jsonl --out @/pot-{k}-rows.jsonl --est 2
+potential train --data @/pot-{1..2}.jsonl --valid 1036-1039 --out @/rpot.json --est 30
+
+compare 50 '{"valueNet":"@/r.json","potentialNet":"@/rpot.json"}' '{"valueNet":"@/v0.json","potentialNet":"@/v0pot.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 小-新しいプール-R1 --est 0.8
+compare 50 '{"valueNet":"@/i.json"}' '{"valueNet":"@/r.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 小-新しいプール-R1-入力 --est 0.8
