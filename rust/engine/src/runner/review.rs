@@ -1356,13 +1356,15 @@ fn report(argv: &[String]) -> Result<(), String> {
             })
             .count();
         let pro_in = thought.iter().filter(|(r, _)| r["proIn"].is_u64()).count();
+        // 局面ごとの平均を並べて、局面の間のばらつきから誤差を出す（打ち比べの回を全部並べると、1 局面が大きく外れたときに誤差が小さく出る）
         let ds: Vec<f64> = cmp
             .iter()
             .filter(|(r, _)| r["w"].is_object())
-            .flat_map(|(r, _)| {
-                paired(&chars_of(&r["w"]["pro"]), &chars_of(&r["w"]["ai"]), |_| {
+            .filter_map(|(r, _)| {
+                let d = paired(&chars_of(&r["w"]["pro"]), &chars_of(&r["w"]["ai"]), |_| {
                     true
-                })
+                });
+                (!d.is_empty()).then(|| d.iter().sum::<f64>() / d.len() as f64)
             })
             .collect();
         let (dm, dse) = mean_se(&ds);
@@ -1385,7 +1387,7 @@ fn report(argv: &[String]) -> Result<(), String> {
     }
     md.push(String::new());
     md.push("- 同じ並びは、比べた局面のうち、プロの並びと AI の選んだ並びの後の局面が同じもの（手札の同じカードのどちらを出したかは問わない。打ち比べない）。最初の手（手の説明が同じ）・使うカード・候補は、AI が考えた局面（リーサルを除く）のうち".into());
-    md.push("- 差の平均は、打ち比べた局面の一段目の組にした差（プロ − AI、ポイント）の平均。局面の選び方の偏り（同じ並びを除く）が入るので、目安".into());
+    md.push("- 差の平均は、打ち比べた局面ごとの一段目の組にした差（プロ − AI、ポイント）の平均を、局面の間で平均したもの。± は局面の間のばらつきから出した標準誤差。局面の選び方の偏り（同じ並びを除く）が入るので、目安".into());
     md.push(String::new());
     let mut counts: BTreeMap<Verdict, usize> = BTreeMap::new();
     for (_, j) in &judged {
@@ -1637,10 +1639,32 @@ mod tests {
         for (x, y) in ca.players[p].hand.iter().zip(s.players[p].hand.iter()) {
             assert_eq!((x.iid, x.card), (y.iid, y.card));
         }
-        assert_eq!(
-            state_to_json(&ca).get("players"),
-            state_to_json(&ca).get("players")
-        );
+        // 山札（両方）と相手の手札（見えない札を置き直す）と局面の乱数のほかは、元の局面と同じ
+        let visible = |st: &GameState| {
+            let mut j = state_to_json(st);
+            j.take("rng");
+            let mut players = match j.take("players") {
+                Some(Json::Arr(v)) => v,
+                _ => panic!("players"),
+            };
+            for (q, pj) in players.iter_mut().enumerate() {
+                pj.take("deck");
+                if q == o {
+                    pj.take("hand");
+                }
+            }
+            (
+                j.stringify(),
+                players.iter().map(|x| x.stringify()).collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(visible(&ca), visible(s));
+        // 相手の見せた手札は、場所も中身もそのまま
+        for (x, y) in ca.players[o].hand.iter().zip(s.players[o].hand.iter()) {
+            if y.revealed {
+                assert_eq!((x.iid, x.card, x.revealed), (y.iid, y.card, true));
+            }
+        }
         // 中身（両方のデッキの残り）は変えない
         let multiset = |st: &GameState, q: PlayerIndex| {
             let mut v: Vec<u32> = st.players[q]
