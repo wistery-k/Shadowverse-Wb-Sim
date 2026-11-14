@@ -189,7 +189,7 @@ function arrangeDeck(deck: readonly DeckCard[], ids: readonly string[]): DeckCar
   const rest = [...deck];
   const top: DeckCard[] = [];
   for (const id of ids) {
-    const i = rest.findIndex((c) => c.cardId === id);
+    const i = rest.findIndex((c) => entryMatches(id, c));
     if (i >= 0) top.push(rest.splice(i, 1)[0]!);
   }
   return [...top, ...rest];
@@ -234,7 +234,7 @@ function redrawnCards(arranged: GameState, next: GameState, p: PlayerIndex, from
   return after.hand
     .filter((h) => had.has(h.iid))
     .slice(-n)
-    .map((h) => ({ iid: h.iid, cardId: h.cardId }));
+    .map((h) => ({ iid: h.iid, cardId: h.cardId, kept: h }));
 }
 
 /**
@@ -263,18 +263,61 @@ export function drawnCards(arranged: GameState, next: GameState, p: PlayerIndex)
   return [...toHand, ...redrawnCards(arranged, next, p, toHand.length), ...burned];
 }
 
-/** 引いたカードのうち、決めた引いたカード（ids）で説明できないもの（引いた順）。ids のうち引かれなかったものがあれば、そのカード ID も */
+/**
+ * 引いたカードの指定（Draws の 1 つ）: カード ID か、「カード ID|手札での状態」。後のほうは、山札に同じカードで状態の違うもの
+ * （ダストデイズのバフを受けたものと、その後に手札から戻したもの等）があるときに使う（状態の無いものは「カード ID|」）。
+ * カード ID だけのものは、そのカードのどれでもよい（山札の上から見て最初のもの）
+ */
+const ENTRY_SEP = "|";
+export const entryCardId = (e: string): string => (e.includes(ENTRY_SEP) ? e.slice(0, e.indexOf(ENTRY_SEP)) : e);
+const entryState = (e: string): string | null => (e.includes(ENTRY_SEP) ? e.slice(e.indexOf(ENTRY_SEP) + 1) : null);
+const entryMatches = (e: string, c: DeckCard): boolean => {
+  const st = entryState(e);
+  return entryCardId(e) === c.cardId && (st === null || st === keptLabel(c.kept));
+};
+/** 引いたカードの指定の名前（手札での状態があれば添える） */
+export function entryName(e: string): string {
+  const st = entryState(e);
+  return `${cardOf(entryCardId(e)).name}${st ? `（${st}）` : ""}`;
+}
+
+/** 山札のカードの、手札での状態（バフ・コスト・スペルブースト等）の説明。無ければ "" */
+export const keptLabel = (h: HandCard | undefined): string => (h ? handMods(h).join("・") : "");
+
+/**
+ * 引けるカードの一覧: 指定（entry）→ 枚数と、指定 → 手札での状態（画面で攻撃力・体力・コストを出すため）。
+ * 同じカードで手札での状態の違うものがあるときだけ、指定に状態を付ける
+ */
+export function drawPool(cards: readonly DeckCard[]): { pool: Map<string, number>; kept: Map<string, HandCard> } {
+  const states = new Map<string, Set<string>>();
+  for (const c of cards) {
+    const set = states.get(c.cardId) ?? new Set<string>();
+    set.add(keptLabel(c.kept));
+    states.set(c.cardId, set);
+  }
+  const pool = new Map<string, number>();
+  const kept = new Map<string, HandCard>();
+  for (const c of cards) {
+    const st = keptLabel(c.kept);
+    const e = st === "" && states.get(c.cardId)!.size === 1 ? c.cardId : `${c.cardId}${ENTRY_SEP}${st}`;
+    pool.set(e, (pool.get(e) ?? 0) + 1);
+    if (c.kept && st !== "" && !kept.has(e)) kept.set(e, c.kept);
+  }
+  return { pool, kept };
+}
+
+/** 引いたカードのうち、決めた引いたカード（ids）で説明できないもの（引いた順）。ids のうち引かれなかったものがあれば、その指定も */
 function extraDraws(drawn: readonly DeckCard[], ids: readonly string[]): { extra: DeckCard[]; missing: string | null } {
-  const want = new Map<string, number>();
-  for (const id of ids) want.set(id, (want.get(id) ?? 0) + 1);
+  const want = [...ids];
   const extra: DeckCard[] = [];
   for (const c of drawn) {
-    const n = want.get(c.cardId) ?? 0;
-    if (n > 0) want.set(c.cardId, n - 1);
+    // 状態まで指定したものを先に当てる
+    let i = want.findIndex((e) => entryState(e) !== null && entryMatches(e, c));
+    if (i < 0) i = want.findIndex((e) => entryMatches(e, c));
+    if (i >= 0) want.splice(i, 1);
     else extra.push(c);
   }
-  const missing = [...want.entries()].find(([, n]) => n > 0)?.[0] ?? null;
-  return { extra, missing };
+  return { extra, missing: want[0] ?? null };
 }
 
 /** 局面の見える中身（ランダムな結果をまとめる・説明するのに使う） */
@@ -301,14 +344,19 @@ function boardText(c: OnBoard): string {
   return `${name}${cd}${extra.length > 0 ? `（${extra.join("・")}）` : ""}`;
 }
 
-function handText(h: HandCard): string {
-  const name = cardOf(h.cardId).name;
-  const mods = [
+/** 手札での状態の違い（コスト・攻撃力と体力・スペルブースト・X） */
+function handMods(h: HandCard): string[] {
+  return [
     h.costMod !== 0 ? `コスト${h.costMod > 0 ? "+" : ""}${h.costMod}` : "",
     h.attackMod !== 0 || h.defenseMod !== 0 ? `+${h.attackMod}/+${h.defenseMod}` : "",
     h.boosts > 0 ? `SB ${h.boosts}` : "",
     h.x !== null && h.x !== 0 ? `X ${h.x}` : "",
   ].filter((x) => x !== "");
+}
+
+function handText(h: HandCard): string {
+  const name = cardOf(h.cardId).name;
+  const mods = handMods(h);
   return mods.length > 0 ? `${name}（${mods.join("・")}）` : name;
 }
 
@@ -368,12 +416,87 @@ export interface Outcome {
   changes: string[];
   /** changes のうち、ほかの候補にもあるもの（ランダムでない結果。画面では薄く出す） */
   common: string[];
+  /** 絞り込みの項目ごとの、この結果での値（場のカードがどうなったか・リーダーの体力など） */
+  facets: Facet[];
 }
+
+/** ランダムな結果を絞り込む項目（key）と、ある結果での値（value） */
+export interface Facet {
+  key: string;
+  value: string;
+}
+
+/** 場から離れたカードの値 */
+const LEFT_BOARD = "場から離れた";
+
+/**
+ * 結果を絞り込む項目: 席ごとの、打つ前に場にあったカードそれぞれの打った後（「5/2（守護）」等。離れたら「場から離れた」）、
+ * リーダーの体力、場に出たカード、手札に加わったカード。同じターンに場に出た同じカードは見分けない（viewKey と同じ）ので、まとめて 1 項目にする
+ */
+function facetsOf(before: View, after: View, names: readonly [string, string]): Facet[] {
+  const out: Facet[] = [];
+  for (const p of [0, 1] as const) {
+    const b = before.seats[p];
+    const a = after.seats[p];
+    const who = names[p];
+    out.push({ key: `${who}のリーダーの体力`, value: a.leader });
+    const afterText = new Map(a.board.map((c) => [c.iid, c.text]));
+    const nameOf = (text: string) => text.split(" ")[0]!;
+    // 名前が同じなら能力値などだけにする
+    const fate = (iid: number, text: string) => {
+      const t = afterText.get(iid);
+      if (t === undefined) return LEFT_BOARD;
+      return nameOf(t) === nameOf(text) ? t.slice(nameOf(text).length).trim() || "（そのまま）" : t;
+    };
+    const groups = new Map<string, { text: string; iids: number[] }>();
+    for (const c of b.board) {
+      const k = `${c.text}|${c.turn}`;
+      const g = groups.get(k) ?? { text: c.text, iids: [] };
+      g.iids.push(c.iid);
+      groups.set(k, g);
+    }
+    for (const { text, iids } of groups.values()) {
+      if (iids.length > 1) {
+        out.push({ key: `${who}の場: ${text} ×${iids.length}`, value: iids.map((i) => fate(i, text)).sort().join("・") });
+        continue;
+      }
+      const i = b.board.findIndex((c) => c.iid === iids[0]);
+      const same = b.board.filter((c) => nameOf(c.text) === nameOf(text)).length > 1;
+      out.push({ key: `${who}の場: ${text}${same ? `（場の古いほうから ${i + 1} 枚目）` : ""}`, value: fate(iids[0]!, text) });
+    }
+    const had = new Set(b.board.map((c) => c.iid));
+    out.push({ key: `${who}の場に出たカード`, value: a.board.filter((c) => !had.has(c.iid)).map((c) => c.text).sort().join("、") || "なし" });
+    out.push({ key: `${who}の手札に加わったカード`, value: multisetDiff(b.hand, a.hand).added.sort().join("、") || "なし" });
+  }
+  return out;
+}
+
+/** 結果の一覧で、値が結果ごとに違う項目と、その値（絞り込みに出す。項目は facets の順、値は並べ替えたもの） */
+export function varyingFacets(outcomes: readonly Outcome[]): [string, string[]][] {
+  const values = new Map<string, Set<string>>();
+  for (const o of outcomes) {
+    for (const f of o.facets) {
+      const set = values.get(f.key) ?? new Set<string>();
+      set.add(f.value);
+      values.set(f.key, set);
+    }
+  }
+  // どの結果にもある項目だけ（打つ前の場のカードは、どの結果でも同じ項目になる）
+  return [...values.entries()]
+    .filter(([k, vs]) => vs.size > 1 && outcomes.every((o) => o.facets.some((f) => f.key === k)))
+    .map(([k, vs]) => [k, [...vs].sort((x, y) => (x === LEFT_BOARD ? 1 : y === LEFT_BOARD ? -1 : x.localeCompare(y)))]);
+}
+
+/** 絞り込み（項目 → 選んだ値）に合う結果か */
+export const outcomeMatches = (o: Outcome, filter: Readonly<Record<string, string>>): boolean =>
+  Object.entries(filter).every(([k, v]) => o.facets.some((f) => f.key === k && f.value === v));
+
+const NO_VISIBLE_CHANGE = "（見える違いなし）";
 
 /** 結果の説明（ほかの候補と違うところだけ。無ければ全部） */
 export const outcomeLabel = (o: Outcome): string => {
   const distinct = o.changes.filter((c) => !o.common.includes(c));
-  return (distinct.length > 0 ? distinct : o.changes).join("、") || "（見える違いなし）";
+  return (distinct.length > 0 ? distinct : o.changes).join("、") || NO_VISIBLE_CHANGE;
 };
 
 /**
@@ -497,7 +620,9 @@ export function sampleOutcomes(
   const all = list.map(([, g]) => changesOf(before, g.view, names));
   // どの候補にもある違い（ランダムでない結果）は除く
   const common = all.reduce<string[]>((acc, cs) => acc.filter((c) => cs.includes(c)), all[0] ?? []);
-  return list.map(([key, g], i) => ({ rng: g.rng, key, count: g.count, changes: all[i]!, common })).sort((a, b) => b.count - a.count);
+  return list
+    .map(([key, g], i) => ({ rng: g.rng, key, count: g.count, changes: all[i]!, common, facets: facetsOf(before, g.view, names) }))
+    .sort((a, b) => b.count - a.count);
 }
 
 /** ランダムな結果があるかを確かめるときに試す回数 */
@@ -535,8 +660,8 @@ export interface PendingStep {
 
 export type Evaluation =
   | { kind: "error"; message: string }
-  /** 決めた引いたカードを引く結果が見つからない（条件に合わない等） */
-  | { kind: "mismatch"; player: PlayerIndex; cardId: string }
+  /** 決めた引いたカードを引く結果が見つからない（条件に合わない等。entry は引いたカードの指定） */
+  | { kind: "mismatch"; player: PlayerIndex; entry: string }
   /** ランダムな結果を選ぶ */
   | { kind: "random"; outcomes: Outcome[]; samples: number }
   /**
@@ -545,7 +670,7 @@ export type Evaluation =
    * pool は引けたカード（仮に打った後の山札と、まだ決めていない引いたカード。手札から山札に戻したカードも入る。
    * 条件付きで引くときは条件に合うカードだけ。1 種類なら evaluate が聞かずに決める）
    */
-  | { kind: "draw"; player: PlayerIndex; known: number; preview: GameState; undecided: number[]; pool: Map<string, number> }
+  | { kind: "draw"; player: PlayerIndex; known: number; preview: GameState; undecided: number[]; pool: Map<string, number>; kept: Map<string, HandCard> }
   | { kind: "done"; next: GameState };
 
 /**
@@ -590,7 +715,8 @@ function drawOptions(state: GameState, step: PendingStep, p: PlayerIndex, run: {
     const r = tryRun(state, step.action, draws, step.rng);
     if (!r) continue;
     const got = drawnCards(r.arranged, r.next, p);
-    if (got[slot]?.cardId === id && extraDraws(got, draws[p]).missing === null) out.set(id, n);
+    const c = got[slot];
+    if (c && entryMatches(id, c) && extraDraws(got, draws[p]).missing === null) out.set(id, n);
   }
   return out.size > 0 ? out : pool;
 }
@@ -622,7 +748,7 @@ function evaluateOnce(state: GameState, step: PendingStep, names: readonly [stri
     const rng = same && missing >= 0 ? null : searchRng(state, step.action, step.draws, target);
     if (rng === null) {
       const p = (missing >= 0 ? missing : 0) as PlayerIndex;
-      return { step, ev: { kind: "mismatch", player: p, cardId: drawn[p]!.missing ?? step.draws[p].at(-1) ?? "" } };
+      return { step, ev: { kind: "mismatch", player: p, entry: drawn[p]!.missing ?? step.draws[p].at(-1) ?? "" } };
     }
     step = { ...step, rng, outcomeKey: target };
     run = runStep(state, step.action, step.draws, rng);
@@ -632,10 +758,9 @@ function evaluateOnce(state: GameState, step: PendingStep, names: readonly [stri
   for (const p of [acting, opponent(acting)]) {
     const extra = drawn[p]!.extra;
     if (extra.length > 0) {
-      const pool = new Map<string, number>();
-      for (const c of [...run.next.players[p].deck, ...extra]) pool.set(c.cardId, (pool.get(c.cardId) ?? 0) + 1);
+      const { pool, kept } = drawPool([...run.next.players[p].deck, ...extra]);
       const undecided = drawn.flatMap((d) => d.extra.map((c) => c.iid));
-      return { step, ev: { kind: "draw", player: p, known: extra.length, preview: run.next, undecided, pool: drawOptions(state, step, p, run, pool) } };
+      return { step, ev: { kind: "draw", player: p, known: extra.length, preview: run.next, undecided, pool: drawOptions(state, step, p, run, pool), kept } };
     }
   }
   return { step, ev: { kind: "done", next: run.next } };
@@ -687,7 +812,7 @@ export function applyStep(state: GameState, step: RecordStep): GameState {
       const { arranged, next } = runStep(state, step.action, draws, step.rng);
       for (const p of [0, 1] as const) {
         const { missing } = extraDraws(drawnCards(arranged, next, p), draws[p]);
-        if (missing !== null) throw new RecordError(`${cardOf(missing).name}を引いたはずが、引かれませんでした`);
+        if (missing !== null) throw new RecordError(`${entryName(missing)}を引いたはずが、引かれませんでした`);
       }
       return next;
     }
@@ -737,6 +862,61 @@ export function replay(record: Pick<MatchRecord, "decks" | "seed" | "steps">): {
     states.push(state);
   }
   return { states, error: null };
+}
+
+/** 選び直した手の先をたどり直した結果。stopped は、たどれなくなった手順（steps の中の位置）と理由 */
+export interface Reapplied {
+  steps: RecordStep[];
+  states: GameState[];
+  stopped: { at: number; reason: string } | null;
+}
+
+/**
+ * 前の手を選び直した後、その先の手順（steps）を、選び直した後の局面 state からたどり直す（引いたカード・乱数は記録のまま）。
+ * 次の手順で止め、そこから先は返さない: 打てない、決めた引いたカードが引かれない、まだ決めていない引いたカードが出る、
+ * ランダムな結果が変わる（記録した結果の説明が、今の結果に無い）、ランダムでなかった手にランダムな結果が出る、
+ * 手で直した局面（局面をそのまま置き換えるので、選び直した違いを消してしまう）
+ */
+export function reapplySteps(state: GameState, steps: readonly RecordStep[], names: readonly [string, string]): Reapplied {
+  const out: RecordStep[] = [];
+  const states: GameState[] = [];
+  const stop = (at: number, reason: string): Reapplied => ({ steps: out, states, stopped: { at, reason } });
+  let cur = state;
+  for (let i = 0; i < steps.length; i++) {
+    const st = steps[i]!;
+    if (st.kind === "edit") return stop(i, "手で直した局面は、選び直した違いを消してしまうので、たどり直しません");
+    if (st.kind === "hand") {
+      try {
+        cur = applyStep(cur, st);
+      } catch (e) {
+        return stop(i, e instanceof Error ? e.message : String(e));
+      }
+    }
+    if (st.kind === "action") {
+      const draws = st.draws ?? [[], []];
+      let run: { arranged: GameState; next: GameState };
+      try {
+        run = runStep(cur, st.action, draws, st.rng);
+      } catch {
+        return stop(i, "この局面では打てない手になりました");
+      }
+      for (const p of [0, 1] as const) {
+        const d = extraDraws(drawnCards(run.arranged, run.next, p), draws[p]);
+        if (d.missing !== null) return stop(i, `${entryName(d.missing)}を引けなくなりました`);
+        if (d.extra.length > 0) return stop(i, `${names[p]}の引いたカードが増えました`);
+      }
+      if (st.rng === undefined) {
+        if (sampleOutcomes(cur, st.action, draws, names, RANDOM_PROBE).length > 1) return stop(i, "ランダムな結果が出るようになりました");
+      } else if (st.outcome && st.outcome !== NO_VISIBLE_CHANGE) {
+        const now = changesOf(viewOf(run.arranged, run.arranged), viewOf(run.arranged, run.next), names).join("、");
+        if (st.outcome.split("、").some((part) => !now.includes(part))) return stop(i, "ランダムな結果が変わりました");
+      }
+      cur = run.next;
+    }
+    out.push(st);
+    states.push(cur);
+  }
+  return { steps: out, states, stopped: null };
 }
 
 /** 各ターンの最初の局面（メインフェイズで、ターンが変わった直後） */
