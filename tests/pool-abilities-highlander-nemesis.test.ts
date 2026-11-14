@@ -476,6 +476,8 @@ describe("ハイランダーNm のカード", () => {
     let foe = toBoard(s, opp, "キャラバンマンモス");
     let t = play(s, toHand(s, me, "錬磨の用心棒"));
     expect(follower(t, foe.iid)?.defense).toBe(MAMMOTH);
+    // 重複があれば回復もしない（質問 41）
+    expect(t.players[me].leaderHp).toBe(10);
     t = play(t, toHand(t, me, "鋳鉄の腹心"));
     expect(names(t, opp)).toEqual([]);
     expect(follower(t, board(t, me)[1]!.iid)?.keywords).not.toContain("storm");
@@ -574,7 +576,7 @@ describe("ハイランダーNm のカード", () => {
     expect(follower(t, foe.iid)?.defense).toBe(MAMMOTH - 2);
   });
 
-  it("ステージメーカー: 改良型・操り人形と操り人形。【エンハンス_7】どちらも【疾走】（暫定）", () => {
+  it("ステージメーカー: 改良型・操り人形と操り人形。【エンハンス_7】どちらも【疾走】（質問 40）", () => {
     let { s, me } = setup();
     s.players[me].pp = 6;
     let t = play(s, toHand(s, me, "ステージメーカー"));

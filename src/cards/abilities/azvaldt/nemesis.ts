@@ -152,6 +152,7 @@ export const NEMESIS: Record<string, CardAbilities> = {
     abilities: [fanfare(summon("アナライズアーティファクト")), onEvolve(summon("アナライズアーティファクト"))],
   },
   [id("錬磨の用心棒")]: {
+    // 重複が無いときだけ、ダメージも回復も（docs/rules.md 12章の質問 41）
     abilities: [fanfare(when(DECK_UNIQUE, [choose(oppFollowers()), damage(slot(), 4), heal(4)]))],
   },
   [id("決断の交差・アシュレイ＆リディア")]: {
@@ -191,7 +192,7 @@ export const NEMESIS: Record<string, CardAbilities> = {
     abilities: [fanfare(addDestroyedCopy(ARTIFACT_FOLLOWER))],
   },
   [id("ステージメーカー")]: {
-    // 【エンハンス】の「それ」は、出した 2 枚とも（暫定。docs/rules.md 12章の 40）
+    // 【エンハンス】の「それ」は、出した 2 枚とも（docs/rules.md 12章の質問 40）
     abilities: [
       fanfare(
         summon("改良型・操り人形", 1, "a"),
