@@ -29,6 +29,8 @@ import {
   exportRecord,
   newRecord,
   outcomeLabel,
+  handIids,
+  nextHandOrder,
   outcomeParts,
   parseRecord,
   RANDOM_SAMPLES,
@@ -340,6 +342,20 @@ function RecordView({ live, setLive, setError, onNew }: { live: Live; setLive: (
   const preview = resolving?.ev.kind === "draw" ? resolving.ev : null;
   const shown = preview?.preview ?? state;
   const shownInfo = preview ? inputInfo(preview.preview, [], NO_PICKS) : info;
+  // 手札を出す順（席ごとの iid の並び）。手順を始めからたどって作る
+  const handOrder = useMemo(() => {
+    let out: [number[], number[]] = [handIids(states[0]!, 0), handIids(states[0]!, 1)];
+    const step = (before: GameState, after: GameState, action: Action | null) => {
+      const swap = action?.type === "mulligan" ? action : null;
+      out = [0, 1].map((p) => nextHandOrder(out[p]!, handIids(before, p as PlayerIndex), handIids(after, p as PlayerIndex), swap?.player === p ? swap.swap : null)) as [
+        number[],
+        number[],
+      ];
+    };
+    record.steps.slice(0, index).forEach((st, i) => step(states[i]!, states[i + 1]!, st.kind === "action" ? st.action : null));
+    if (preview && resolving) step(state, preview.preview, resolving.step.action);
+    return out;
+  }, [record.steps, states, index, preview]);
   const undecided = useMemo(() => {
     if (!preview) return null;
     const iids = new Set(preview.undecided);
@@ -459,6 +475,7 @@ function RecordView({ live, setLive, setError, onNew }: { live: Live; setLive: (
             editTarget={editTarget}
             setEditTarget={setEditTarget}
             undecided={undecided}
+            handOrder={handOrder[p]}
           />
         ))}
         <section class="controls record-controls">
@@ -527,6 +544,10 @@ function RecordView({ live, setLive, setError, onNew }: { live: Live; setLive: (
 
 // ---- 席（盤面・手札・リーダー）と、手の入力 ----
 
+/**
+ * マリガンの後の手札の枠の番号（iid → 番号）。残したカードは元の枠、引いたカードは返したカードの枠に（引いた順に、左の枠から）。
+ * エンジンは引いたカードを手札の末尾に足すが、実際のゲームの画面と同じ並びで見せる（表示だけ）
+ */
 interface SeatProps {
   state: GameState;
   p: PlayerIndex;
@@ -547,6 +568,8 @@ interface SeatProps {
    * asking はいま選んでいるカード（その席の、まだ決めていない最初の 1 枚）
    */
   undecided: { iids: ReadonlySet<number>; asking: number | null } | null;
+  /** 手札を出す順（iid の並び。マリガンで引いたカードを、返したカードの枠に出す。無いカードはエンジンの並び） */
+  handOrder: readonly number[];
 }
 
 /** 選んでいるもの（手の入力: 主体のカードと、対象・素材・マリガンで返すカード） */
@@ -596,7 +619,7 @@ function inputInfo(state: GameState, legal: readonly Action[], picks: Picks) {
 }
 type InputInfo = ReturnType<typeof inputInfo>;
 
-function SeatPanel({ state, p, top, names, cls, onDetail, input, editing, info, setPicks, editTarget, setEditTarget, undecided }: SeatProps) {
+function SeatPanel({ state, p, top, names, cls, onDetail, input, editing, info, setPicks, editTarget, setEditTarget, undecided, handOrder }: SeatProps) {
   const pl = state.players[p];
   const attackable = info.actor === p && state.active === p ? attackStatuses(state) : new Map();
   const leader = leaderId(p);
@@ -637,9 +660,12 @@ function SeatPanel({ state, p, top, names, cls, onDetail, input, editing, info, 
   const isEditing = (iid: number) => editing !== null && editTarget?.kind === "card" && editTarget.iid === iid;
   const mulliganMark = (iid: number) => (info.mulligan && p === info.actor && input ? (info.picks.picks.includes(iid) ? "return" : "keep") : null);
 
+  // 上の席は観戦画面と同じに左右を逆にする（右が古いカード）
+  const boardCards = top ? [...pl.board].reverse() : pl.board;
   const board = (
     <div class="board">
-      {pl.board.map((c) => (
+      {top && <BoardSlots count={pl.board.length} />}
+      {boardCards.map((c) => (
         <CardView
           key={c.iid}
           cardId={c.cardId}
@@ -652,7 +678,7 @@ function SeatPanel({ state, p, top, names, cls, onDetail, input, editing, info, 
           onClick={() => click(c.iid, c.cardId)}
         />
       ))}
-      <BoardSlots count={pl.board.length} />
+      {!top && <BoardSlots count={pl.board.length} />}
     </div>
   );
   const leaderRow = (
@@ -667,9 +693,17 @@ function SeatPanel({ state, p, top, names, cls, onDetail, input, editing, info, 
     </div>
   );
   const head = <PlayerInfo label={`${names[p]}${state.first === p ? "（先攻）" : "（後攻）"}${info.actor === p && state.phase !== "ended" ? " ← 手番" : ""}`} state={state} p={p} cls={cls} />;
+  // 手札の並び: マリガンで引いたカードは返したカードの枠に（handOrder）、上の席は左右を逆に（右が古いカード）
+  const rank = new Map(handOrder.map((iid, i) => [iid, i]));
+  const ordered = pl.hand
+    .map((h, i) => ({ h, key: rank.get(h.iid) ?? 1000 + i }))
+    .sort((a, b) => a.key - b.key)
+    .map((x) => x.h);
+  const handCards = top ? ordered.reverse() : ordered;
   const hand = (
     <div class="hand">
-      {pl.hand.map((h) =>
+      {top && <EmptySlots count={pl.hand.length} />}
+      {handCards.map((h) =>
         undecided?.iids.has(h.iid) ? (
           <span key={h.iid} class={`slot-empty record-undecided ${undecided.asking === h.iid ? "asking" : ""}`}>
             {undecided.asking === h.iid ? "引いたカード（いま選ぶ）" : "引いたカード（このあと選ぶ）"}
@@ -689,7 +723,7 @@ function SeatPanel({ state, p, top, names, cls, onDetail, input, editing, info, 
         />
         ),
       )}
-      <EmptySlots count={pl.hand.length} />
+      {!top && <EmptySlots count={pl.hand.length} />}
     </div>
   );
   return (
