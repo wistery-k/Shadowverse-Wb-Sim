@@ -34,6 +34,7 @@ fn hint_eq(a: &Option<DrawHint>, b: &Option<DrawHint>) -> bool {
                 && f.ids == g.ids
                 && f.cost_max == g.cost_max
                 && f.cost_min == g.cost_min
+                && f.keyword == g.keyword
                 && x.cost_eq == y.cost_eq
         }
         _ => false,
@@ -175,6 +176,7 @@ fn feff_eq(a: &FEff, b: &FEff) -> bool {
         | (FEff::Cleanup, FEff::Cleanup)
         | (FEff::StartTurn, FEff::StartTurn)
         | (FEff::StartTurnDraw, FEff::StartTurnDraw)
+        | (FEff::DirectSummon, FEff::DirectSummon)
         | (FEff::FinishMulligan, FEff::FinishMulligan) => true,
         _ => false,
     }
@@ -200,6 +202,15 @@ fn queued_eq(a: &Queued, b: &Queued) -> bool {
 
 /// プレイヤーの、山札・手札・場・クレスト以外が同じか。手札の記録（hand_log）は比べない
 /// （ルールに効かない相手の決定化のための記録なので、同じ局面に別の順番で着いても同じ局面とみなす）
+/// 無いか、中身が同じ共有のリスト
+fn opt_list_eq<T: PartialEq>(a: &Option<Shared<T>>, b: &Option<Shared<T>>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(x), Some(y)) => x[..] == y[..],
+        _ => false,
+    }
+}
+
 fn player_rest_eq(a: &PlayerState, b: &PlayerState) -> bool {
     a.leader_hp == b.leader_hp
         && a.leader_max_hp == b.leader_max_hp
@@ -224,6 +235,9 @@ fn player_rest_eq(a: &PlayerState, b: &PlayerState) -> bool {
         && a.leader_damage_zero_until == b.leader_damage_zero_until
         && a.followers_entered == b.followers_entered
         && a.entered_counts == b.entered_counts
+        && a.evolved_count == b.evolved_count
+        && opt_list_eq(&a.entered_kinds, &b.entered_kinds)
+        && opt_list_eq(&a.temp_costs, &b.temp_costs)
 }
 
 fn player_eq(a: &PlayerState, b: &PlayerState) -> bool {

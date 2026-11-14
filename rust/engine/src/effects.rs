@@ -198,8 +198,13 @@ fn resolve_into(s: &GameState, ctx: &Ctx, t: &Target, out: &mut Vec<Iid>) {
                 }
             }
         }
-        Target::Hand { filter } => {
-            for c in &s.players[ctx.controller].hand {
+        Target::Hand { filter, side } => {
+            let owner = if *side == Some(Side::Opponent) {
+                opponent(ctx.controller)
+            } else {
+                ctx.controller
+            };
+            for c in &s.players[owner].hand {
                 if card_matches(s, ctx, c.iid, filter.as_ref()) {
                     out.push(c.iid);
                 }
@@ -331,7 +336,7 @@ fn kept_card(s: &GameState, iid: Iid) -> Option<&HandCard> {
 /// 処理待ちの【スペルブースト時】等は、カードが山札に戻っても働く（オーバーディメンションで戻して引き直さなかったカード。
 /// 公式の問い合わせの答え。docs/rules.md 11 章「スペルブーストのタイミング」）。
 /// 場から山札に戻ったカードは手札での状態を持たないので、場の能力の効果は届かない
-fn hand_state_mut(s: &mut GameState, iid: Iid) -> Option<&mut HandCard> {
+pub(crate) fn hand_state_mut(s: &mut GameState, iid: Iid) -> Option<&mut HandCard> {
     if let Some((q, i)) = s.find_hand(iid) {
         return Some(&mut s.players[q].hand.make_mut()[i]);
     }
@@ -397,6 +402,12 @@ pub fn eval_value(s: &GameState, ctx: &Ctx, v: &Value) -> i32 {
             .filter(|e| ids.contains(&e.0))
             .map(|e| e.1)
             .sum(),
+        ValueObj::EnteredKinds { filter } => pl.entered_kinds.as_ref().map_or(0, |v| {
+            v.iter()
+                .filter(|&&c| played_card_matches(s, ctx, c, Some(filter)))
+                .count() as i32
+        }),
+        ValueObj::EvolvedCount => pl.evolved_count.unwrap_or(0),
     }
 }
 
@@ -412,6 +423,11 @@ pub fn eval_cond(s: &GameState, ctx: &Ctx, c: &Condition) -> bool {
             .map(|f| f.evolve == Evolve::SuperEvolved)
             .unwrap_or(false),
         Condition::HandCount { at_most } => pl.hand.len() as i32 <= *at_most,
+        Condition::DeckUnique => {
+            let mut seen: Vec<CardIdx> = pl.deck.iter().map(|r| r.card).collect();
+            seen.sort_unstable();
+            seen.windows(2).all(|w| w[0] != w[1])
+        }
         Condition::AttackingFollower => ctx.event.map(|e| !is_leader(e)).unwrap_or(false),
         Condition::VarAtLeast { name, value } => ctx.var(*name) >= *value,
         Condition::ThisXAtLeast { value } => source_x(s, ctx) >= *value,
@@ -656,6 +672,12 @@ pub fn enter_board(s: &mut GameState, p: PlayerIndex, mut c: OnBoard) -> bool {
             *n += 1;
         }
     }
+    // 「このバトル中に場に出た自分の…の種類」: 覚えるプレイヤーなら、場に出たカードの種類を足す
+    if let Some(v) = s.players[p].entered_kinds.as_mut() {
+        if let Err(k) = v.binary_search(&cid) {
+            v.make_mut().insert(k, cid);
+        }
+    }
     // 「このバトル中に場に出た自分の『…』の枚数」を見る能力があるカード。
     // 「これが場に出たとき」の能力には、これが場に出た時点の枚数を持たせる（一緒に出たものは、後から出たものを数えない）
     let mut entered_at_enter = None;
@@ -837,6 +859,11 @@ pub fn damage_follower(s: &mut GameState, iid: Iid, amount: i32) -> i32 {
     if f.evolve == Evolve::SuperEvolved && p == active {
         return 0;
     }
+    // 「受けるN以上のダメージをMにする。」
+    let amount = match abilities_of(f.card).damage_cap {
+        Some(cap) if amount >= cap.at_least => cap.to,
+        _ => amount,
+    };
     f.defense -= amount;
     amount
 }
@@ -908,6 +935,10 @@ pub fn evolve_follower(s: &mut GameState, p: PlayerIndex, iid: Iid, kind: Evolve
     let evolved = board_abilities_on(f, On::Evolved);
     for a in evolved {
         queue(s, a, Ctx::new(p, iid));
+    }
+    // このバトル中に自分のフォロワーが進化した回数（数えるプレイヤーだけ）
+    if let Some(n) = s.players[p].evolved_count.as_mut() {
+        *n += 1;
     }
     // 奥義ゲージ: 手札の【奥義】を持つカードは、自分のフォロワーが進化した回数を数える（超進化・効果による進化を含む。docs/rules.md 12章）
     if s.players[p].hand.iter().any(|h| card(h.card).ougi) {
@@ -1037,6 +1068,65 @@ pub fn fire_ally_attack(s: &mut GameState, p: PlayerIndex, attacker: Iid) {
         }
         _ => None,
     });
+}
+
+/// p のフォロワー attacker が攻撃するときの、相手側の誘発（【相手のフォロワーが攻撃するとき】）を誘発待ちに入れる。
+/// at_leader はリーダーを攻撃するか。文脈の event は攻撃するフォロワー
+pub fn fire_enemy_attack(s: &mut GameState, p: PlayerIndex, attacker: Iid, at_leader: bool) {
+    let o = opponent(p);
+    fire_side(s, o, On::EnemyAttack, |s, t, src| match t {
+        Trigger::EnemyAttack { filter, leader }
+            if (!leader || at_leader)
+                && card_matches(s, &Ctx::new(o, src), attacker, filter.as_ref()) =>
+        {
+            Some(Some(attacker))
+        }
+        _ => None,
+    });
+}
+
+/// p の山札から【直接召喚】する（自分のターン開始時。docs/rules.md 12章「直接召喚」）。
+/// 条件を満たすカード 1 種類につき 1 枚（同じカードが何枚あってもランダムに 1 枚）。場が埋まっていれば山札に残る
+pub fn direct_summon(s: &mut GameState, p: PlayerIndex) {
+    let mut kinds: Vec<CardIdx> = s.players[p]
+        .deck
+        .iter()
+        .map(|r| r.card)
+        .filter(|&c| abilities_of(c).direct_summon.is_some())
+        .collect();
+    kinds.sort_unstable();
+    kinds.dedup();
+    for c in kinds {
+        let Some(cond) = abilities_of(c).direct_summon.as_ref() else {
+            continue;
+        };
+        let copies: Vec<Iid> = s.players[p]
+            .deck
+            .iter()
+            .filter(|r| r.card == c)
+            .map(|r| r.iid)
+            .collect();
+        if copies.is_empty()
+            || !s.can_add_to_board(p)
+            || !eval_cond(s, &Ctx::new(p, copies[0]), cond)
+        {
+            continue;
+        }
+        let iid = copies[s.rng_int(copies.len())];
+        let pl = &mut s.players[p];
+        if let Some(k) = pl.deck.iter().position(|r| r.iid == iid) {
+            pl.deck.make_mut().remove(k);
+        }
+        pl.deck_kept.retain(|h| h.iid != iid);
+        let b = s.new_board_card(c, None);
+        let bid = b.iid;
+        let enter_abilities = own_abilities(c, On::DirectSummoned);
+        if enter_board(s, p, b) {
+            for a in enter_abilities {
+                queue(s, a, Ctx::new(p, bid));
+            }
+        }
+    }
 }
 
 pub fn fire_ally_act(s: &mut GameState, p: PlayerIndex) {
@@ -1569,6 +1659,12 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             for id in targets!(target) {
                 if is_leader(id) {
                     heal_leader(s, leader_owner(id), amount);
+                } else if let Some((q, i)) = s.find_follower(id) {
+                    // フォロワーの回復は体力の最大値まで
+                    let f = &mut s.players[q].board.make_mut()[i];
+                    f.defense = (f.defense + amount.max(0))
+                        .min(f.max_defense)
+                        .max(f.defense);
                 }
             }
         }
@@ -1585,6 +1681,40 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
             count,
             filter,
             side,
+            distinct: true,
+        } => {
+            // count 種類: 1 枚ずつ、引いたカードと同じカードを除いて引く
+            let n = val!(count);
+            let p = if *side == Some(Side::Opponent) {
+                opponent(p)
+            } else {
+                p
+            };
+            let mut drawn: Vec<Iid> = Vec::new();
+            let mut kinds: Vec<CardIdx> = Vec::new();
+            for _ in 0..n {
+                let ctx = &frame.ctx;
+                let hint = filter.as_ref().map(|f| draw_hint(s, ctx, f));
+                let pred = |st: &GameState, r: &CardRef| {
+                    !kinds.contains(&r.card)
+                        && filter
+                            .as_ref()
+                            .is_none_or(|f| deck_card_matches(st, ctx, p, r, f))
+                };
+                let got = s.draw_cards(p, 1, Some(&pred), hint);
+                let Some(&iid) = got.first() else { break };
+                if let Some(h) = s.hand_card(iid) {
+                    kinds.push(h.card);
+                }
+                drawn.push(iid);
+            }
+            fire_ally_draw(s, p, &drawn);
+        }
+        Effect::Draw {
+            count,
+            filter,
+            side,
+            ..
         } => {
             let n = val!(count);
             let p = if *side == Some(Side::Opponent) {
@@ -1937,10 +2067,24 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 }
             }
         }
-        Effect::CostChange { target, amount } => {
+        Effect::CostChange {
+            target,
+            amount,
+            duration,
+        } => {
             for id in targets!(target) {
                 if let Some(h) = hand_state_mut(s, id) {
                     h.cost_mod += amount;
+                    // ターン終了まで: 戻す量を手札の持ち主に覚える
+                    if *duration == Some(Duration::EndOfTurn) {
+                        if let Some((q, _)) = s.find_hand(id) {
+                            s.players[q]
+                                .temp_costs
+                                .get_or_insert_with(Shared::default)
+                                .make_mut()
+                                .push((id, -amount));
+                        }
+                    }
                 }
             }
         }
@@ -2142,6 +2286,71 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 return true;
             }
         }
+        Effect::RandomUnusedOption { options } => {
+            // まだ働いていないもの（これの used_once に UNUSED_OPTION_KEY + 番号で覚える）からランダムに 1 つ
+            let src = frame.ctx.source;
+            let used = used_list(s, src).map(|l| l.to_vec()).unwrap_or_default();
+            let rest: Vec<usize> = (0..options.len())
+                .filter(|&k| !used.iter().any(|e| e.0 == UNUSED_OPTION_KEY + k as u8))
+                .collect();
+            if !rest.is_empty() {
+                let k = rest[s.rng_int(rest.len())];
+                if let Some(l) = used_list_mut(s, src) {
+                    l.push((UNUSED_OPTION_KEY + k as u8, 0));
+                }
+                splice(frame, &options[k], 1);
+                return true;
+            }
+        }
+        Effect::AddDestroyedCopy { filter } => {
+            let ctx = &frame.ctx;
+            let cands: Vec<CardIdx> = s.players[p]
+                .graveyard_followers
+                .iter()
+                .copied()
+                .filter(|&c| played_card_matches(s, ctx, c, filter.as_ref()))
+                .collect();
+            if !cands.is_empty() {
+                let c = cands[s.rng_int(cands.len())];
+                // 非公開で加える（相手には中身が分からない）
+                let h = s.new_hand_card(c, None);
+                s.add_hand_card(p, h);
+            }
+        }
+        Effect::AddCopyToHand { from, slot } => {
+            let mut ids = Vec::new();
+            for id in frame.ctx.slot(*from).to_vec() {
+                let src = s
+                    .board_card(id)
+                    .map(|b| b.card)
+                    .or_else(|| s.hand_card(id).map(|h| h.card));
+                let Some(c) = src else { continue };
+                let h = s.new_hand_card(c, None);
+                let iid = h.iid;
+                if s.add_hand_card(p, h) {
+                    ids.push(iid);
+                }
+            }
+            if let Some(sl) = slot {
+                frame.ctx.set_slot(*sl, ids);
+            }
+        }
+        Effect::TransformToDeckCopy { target, side } => {
+            let q = if *side == Side::Opponent {
+                opponent(p)
+            } else {
+                p
+            };
+            for id in targets!(target) {
+                let n = s.players[q].deck.len();
+                if n == 0 || s.find_hand(id).is_none() {
+                    continue;
+                }
+                let k = s.rng_int(n);
+                let c = s.players[q].deck[k].card;
+                transform(s, id, c);
+            }
+        }
         Effect::LoseLastWords { target } => {
             for id in targets!(target) {
                 if let Some((q, i)) = s.find_board(id) {
@@ -2278,6 +2487,12 @@ fn deck_card_matches(
             return false;
         }
     }
+    // 山札のカードの【必殺】などは、カードの元のキーワードで見る
+    if let Some(k) = f.keyword {
+        if !cd.keywords.has(k) {
+            return false;
+        }
+    }
     let cost = s.deck_cost(p, r);
     if let Some(v) = &f.cost_in {
         if !v.contains(&cost) {
@@ -2395,4 +2610,30 @@ pub mod coverage {
     pub fn hits() -> HashMap<&'static str, u64> {
         HITS.lock().unwrap().clone().unwrap_or_default()
     }
+}
+
+/// RandomUnusedOption が、働いた選択肢を used_once に覚えるときの番号の始め（能力の添字と重ならないように）
+const UNUSED_OPTION_KEY: u8 = 0x80;
+
+/// 場のカードかクレスト iid の used_once
+fn used_list(s: &GameState, iid: Iid) -> Option<&Vec<(u8, i32)>> {
+    if let Some(b) = s.board_card(iid) {
+        return Some(&b.used_once);
+    }
+    s.players
+        .iter()
+        .find_map(|pl| pl.crests.iter().find(|c| c.iid == iid))
+        .map(|c| &c.used_once)
+}
+
+fn used_list_mut(s: &mut GameState, iid: Iid) -> Option<&mut Vec<(u8, i32)>> {
+    if let Some((q, i)) = s.find_board(iid) {
+        return Some(&mut s.players[q].board.make_mut()[i].used_once);
+    }
+    for q in 0..2 {
+        if let Some(i) = s.players[q].crests.iter().position(|c| c.iid == iid) {
+            return Some(&mut s.players[q].crests.make_mut()[i].used_once);
+        }
+    }
+    None
 }

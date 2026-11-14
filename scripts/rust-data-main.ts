@@ -100,6 +100,8 @@ export function engineData() {
         paidCost: uses("paidCost"),
         thisFused: uses("thisFused"),
         countEntered: countEntered.has(c.id),
+        countEvolved: uses("evolvedCount"),
+        countKinds: uses("enteredKinds"),
       };
     }),
     crests: ENGINE_CRESTS.map((c) => ({ id: c.id, countdown: c.countdown ?? null, faith: FAITH_CREST_IDS.has(c.id) })),
@@ -155,3 +157,4 @@ export async function main(argv: string[]): Promise<number> {
   if (!quiet) console.log(changed.some((c) => c) ? `${out}・${aiOut} に書き出しました` : `${out}・${aiOut} は変わっていません`);
   return 0;
 }
+

@@ -324,6 +324,9 @@ fn hint_json(h: &DrawHint) -> Json {
     if let Some(e) = h.cost_eq {
         o.push(("costEq", num(e)));
     }
+    if let Some(k) = f.keyword {
+        o.push(("keyword", s(k.names()[0])));
+    }
     obj(o)
 }
 
@@ -510,6 +513,25 @@ fn player_json(p: &PlayerState) -> Json {
     if let Some(n) = p.followers_entered {
         o.push(("followersEntered", num(n)));
     }
+    // このバトル中に自分のフォロワーが進化した回数（数えないときは省く）
+    if let Some(n) = p.evolved_count {
+        o.push(("evolvedCount", num(n)));
+    }
+    // このバトル中に場に出た自分のカードの種類（覚えないときは省く）
+    if let Some(v) = &p.entered_kinds {
+        o.push(("enteredKinds", cards(v)));
+    }
+    // ターン終了まで変えた手札のコスト（無ければ省く。[iid, 戻すときに足す量] の配列）
+    if let Some(tc) = &p.temp_costs {
+        o.push((
+            "tempCosts",
+            Json::Arr(
+                tc.iter()
+                    .map(|&(i, n)| Json::Arr(vec![num(i), num(n)]))
+                    .collect(),
+            ),
+        ));
+    }
     // 場に出た自分のカードの枚数（数えるカードが出たときだけ書く）
     if !p.entered_counts.is_empty() {
         o.push((
@@ -569,6 +591,7 @@ fn feff_json(e: &FEff) -> Json {
         FEff::Cleanup => op("_cleanup"),
         FEff::StartTurn => op("_startTurn"),
         FEff::StartTurnDraw => op("_startTurnDraw"),
+        FEff::DirectSummon => op("_directSummon"),
         FEff::FinishMulligan => op("_finishMulligan"),
     }
 }
@@ -888,6 +911,9 @@ fn hint_of(v: &Json) -> R<Option<DrawHint>> {
     if v.get("costMin").is_some() {
         f.cost_min = Some(int(v, "costMin")?);
     }
+    if let Some(Json::Str(k)) = v.get("keyword") {
+        f.keyword = Some(kw_from_name(k).ok_or_else(|| format!("未知のキーワード: {k}"))?);
+    }
     let cost_eq = if v.get("costEq").is_some() {
         Some(int(v, "costEq")?)
     } else {
@@ -1094,6 +1120,37 @@ fn player_of(v: &Json) -> R<PlayerState> {
                 .collect::<R<Vec<_>>>()?,
             Some(_) => return Err("\"enteredCounts\" はオブジェクト".into()),
         },
+        evolved_count: match v.get("evolvedCount") {
+            None | Some(Json::Null) => None,
+            Some(_) => Some(int(v, "evolvedCount")?),
+        },
+        entered_kinds: match v.get("enteredKinds") {
+            None | Some(Json::Null) => None,
+            Some(_) => {
+                let mut k = card_list(v, "enteredKinds")?;
+                k.sort_unstable();
+                k.dedup();
+                Some(Shared::from(k))
+            }
+        },
+        temp_costs: match v.get("tempCosts") {
+            None | Some(Json::Null) => None,
+            Some(Json::Arr(items)) if items.is_empty() => None,
+            Some(Json::Arr(items)) => Some(Shared::from(
+                items
+                    .iter()
+                    .map(|x| match x {
+                        Json::Arr(pair) if pair.len() == 2 => Ok((
+                            int_of("tempCosts", &pair[0])? as Iid,
+                            i32::try_from(int_of("tempCosts", &pair[1])?)
+                                .map_err(|e| e.to_string())?,
+                        )),
+                        _ => Err("\"tempCosts\" の要素は [iid, 量]".to_string()),
+                    })
+                    .collect::<R<Vec<_>>>()?,
+            )),
+            Some(_) => return Err("\"tempCosts\" は配列".into()),
+        },
     })
 }
 
@@ -1163,6 +1220,7 @@ fn feff_of(v: &Json) -> R<FEff> {
             "_cleanup" => FEff::Cleanup,
             "_startTurn" => FEff::StartTurn,
             "_startTurnDraw" => FEff::StartTurnDraw,
+            "_directSummon" => FEff::DirectSummon,
             "_finishMulligan" => FEff::FinishMulligan,
             _ => return Err(format!("未知のエンジン内部の処理: {op}")),
         }),

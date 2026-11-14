@@ -395,7 +395,7 @@ impl fmt::Debug for HandLog {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct PlayerState {
     pub leader_hp: i32,
     pub leader_max_hp: i32,
@@ -432,6 +432,37 @@ pub struct PlayerState {
     pub followers_entered: Option<i32>,
     /// このバトル中に場に出た自分のカードの枚数（Card::count_entered のカードだけ。出たカードの順）
     pub entered_counts: Vec<(CardIdx, i32)>,
+    /// このバトル中に自分のフォロワーが進化した回数。デッキに Card::count_evolved のカードがあるときだけ数える（ほかは None）
+    pub evolved_count: Option<i32>,
+    /// このバトル中に場に出た自分のカードの種類（カードの表の番号の順）。デッキに Card::count_kinds のカードがあるときだけ覚える（ほかは None）。
+    /// 使わない試合の局面を大きくしない（複製のたびに写す量を増やさない）ように、共有のリストにする
+    pub entered_kinds: Option<Shared<CardIdx>>,
+    /// ターン終了まで変えた手札のコスト（手札の iid と、戻すときに足す量）。ターン終了時に戻す。無ければ None
+    pub temp_costs: Option<Shared<(Iid, i32)>>,
+}
+
+/// 局面を写すたびに呼ぶので、derive の代わりに書いて呼び出し元に展開させる（GameState の clone を参照）。
+/// 写すだけの項目は `..*self` で写す（Copy でない項目を足すと、ここに書くまでコンパイルが通らない）
+impl Clone for PlayerState {
+    #[inline(always)]
+    fn clone(&self) -> Self {
+        PlayerState {
+            deck: self.deck.clone(),
+            deck_kept: self.deck_kept.clone(),
+            hand: self.hand.clone(),
+            board: self.board.clone(),
+            crests: self.crests.clone(),
+            graveyard_followers: self.graveyard_followers.clone(),
+            destroyed_amulets: self.destroyed_amulets.clone(),
+            hidden_discards: self.hidden_discards.clone(),
+            hand_log: self.hand_log.clone(),
+            destroyed_this_turn: self.destroyed_this_turn.clone(),
+            entered_counts: self.entered_counts.clone(),
+            entered_kinds: self.entered_kinds.clone(),
+            temp_costs: self.temp_costs.clone(),
+            ..*self
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -494,12 +525,17 @@ impl Ctx {
 #[derive(Clone, Copy, Debug)]
 pub enum FEff {
     Dsl(&'static Effect),
-    Combat { attacker: Iid, target: Option<Iid> },
+    Combat {
+        attacker: Iid,
+        target: Option<Iid>,
+    },
     CombatEnd,
     EndTurn,
     Cleanup,
     StartTurn,
     StartTurnDraw,
+    /// ターン開始時の【直接召喚】（クレストなどのターン開始時の能力の後、ドローの前）
+    DirectSummon,
     FinishMulligan,
 }
 
@@ -591,7 +627,7 @@ pub struct AttackInProgress {
     pub defender_destroyed: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct GameState {
     pub phase: Phase,
     pub players: [PlayerState; 2],
@@ -606,6 +642,30 @@ pub struct GameState {
     pub queue: VecDeque<Queued>,
     pub pending: Option<Pending>,
     pub attack: Option<AttackInProgress>,
+}
+
+/// 探索は局面を 1 手ごとに写すので、derive の代わりに書く。derive の配列の clone は、
+/// PlayerState の項目を足したときに 2 人分の展開をやめ、別の場所で作ってから局面ごと写す（memcpy）ようになり遅くなったため。
+/// PlayerState の clone も展開させる（展開しないと、作ったものを写す memcpy が残った）
+impl Clone for GameState {
+    #[inline]
+    fn clone(&self) -> Self {
+        GameState {
+            phase: self.phase,
+            players: [self.players[0].clone(), self.players[1].clone()],
+            first: self.first,
+            active: self.active,
+            turn: self.turn,
+            winner: self.winner,
+            rng: self.rng,
+            next_iid: self.next_iid,
+            next_order: self.next_order,
+            stack: self.stack.clone(),
+            queue: self.queue.clone(),
+            pending: self.pending.clone(),
+            attack: self.attack,
+        }
+    }
 }
 
 /// 攻撃先（None はリーダー）
@@ -756,6 +816,11 @@ pub fn hint_matches(c: CardIdx, hint: &DrawHint) -> bool {
             return false;
         }
     }
+    if let Some(k) = f.keyword {
+        if !cd.keywords.has(k) {
+            return false;
+        }
+    }
     true
 }
 
@@ -769,7 +834,8 @@ pub fn same_hint(a: &DrawHint, b: &DrawHint) -> bool {
                 && f.class == g.class
                 && f.ids == g.ids
                 && f.cost_max == g.cost_max
-                && f.cost_min == g.cost_min))
+                && f.cost_min == g.cost_min
+                && f.keyword == g.keyword))
 }
 
 pub fn hand_cost(h: &HandCard) -> i32 {

@@ -375,7 +375,7 @@ const deckFiles = import.meta.glob<string>("../data/pools/azvaldt/decks/*/*.txt"
   import: "default",
   eager: true,
 });
-const DONE_ARCHETYPES = /^名前: (スペルW|アグロNi|ランプD|アミュレットB|コンボE|海賊R|ミッドレンジNi|実験体W|クキシロB)（/m;
+const DONE_ARCHETYPES = /^名前: (スペルW|アグロNi|ランプD|アミュレットB|コンボE|海賊R|ミッドレンジNi|実験体W|クキシロB|ハイランダーNm)（/m;
 /** 能力定義が不要な行（tests/abilities-coverage.test.ts と同じ） */
 const STATIC_LINE = /^(【(守護|疾走|突進|必殺|ドレイン|潜伏|威圧|バリア|オーラ|土の印|カウントダウン_\d+)】|1ターンに\d回攻撃できる。)$/;
 
@@ -395,6 +395,7 @@ describe("前期のローテーション: 能力の定義", () => {
     tokens.push("天槍の深淵", "フェアリー", "森の神秘", "天剣の深淵", "戦慄の海賊旗", "黄金の靴", "黄金の杯", "輝く金貨");
     tokens.push("黄金の小剣", "黄金の首飾り", "スティールナイト", "ナイト", "決意の輝竜・アーサー");
     tokens.push("スケルトン", "腐臭のゾンビ", "天眼の深淵", "真理の召喚", "クレイゴーレム", "大地の魔片", "天晶の魔手", "清純なる白狐");
+    tokens.push("アナライズアーティファクト", "天斧の深淵", "低劣の玩具", "拙劣の人形", "撃針の看守", "イマリの小鬼");
     const deckCards = [...names].map((n) => byName.get(n)!);
     const alts = deckCards.flatMap((c) => (c.specials ?? []).map((sp) => CARD.get(sp)).filter((c2) => c2 !== undefined));
     expect(alts.map((c) => c.name)).toEqual(
@@ -403,6 +404,7 @@ describe("前期のローテーション: 能力の定義", () => {
         "結晶：崇奉の怯者",
         "最古の獄卒（アクセラレート）",
         "結晶：淵底の大佐",
+        "愚劣の兵器（アクセラレート）",
       ]),
     );
     const cards = [...deckCards, ...alts, ...tokens.map((n) => CARD.get(id(n))!)];

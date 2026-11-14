@@ -15,12 +15,15 @@ import {
   buff,
   buffDeck,
   combo,
+  costChangeUntilEnd,
   crestIdOf,
   damage,
   destroy,
   evolveIt,
   exists,
   grant,
+  handCards,
+  heal,
   id,
   lastWords,
   onAllyAmuletDestroyed,
@@ -30,6 +33,7 @@ import {
   onAllyEvolved,
   onAllyPlay,
   onAllyPlayEnhanced,
+  onEnemyAttack,
   onLeaderHealed,
   onTurnEnd,
   onTurnStart,
@@ -37,6 +41,7 @@ import {
   oppFollowers,
   random,
   randomOption,
+  randomUnusedOption,
   repeat,
   slot,
   specialId,
@@ -105,6 +110,17 @@ export const CRESTS: Record<string, CardAbilities> = {
   [crestIdOf("希望の光彩・リテュエル")]: {
     abilities: [lastWords(summon("希望の光彩・リテュエル", 1, "c"), evolveIt(slot("c")))],
   },
+  // ハイランダーNm
+  [crestIdOf("天司長の後継・サンダルフォン")]: { abilities: [onTurnEnd(heal(1, union(allyFollowers(), SELF_LEADER)))] },
+  // 攻撃するフォロワーの【攻撃時】などの後、戦闘の前に下がる
+  [crestIdOf("光の理・ル・オー")]: { abilities: [onEnemyAttack({ keyword: "storm" }, true, buff(EVENT, -3, 0, "endOfTurn"))] },
+  // 相手が持つ（持ち主から見て「自分」）。働くのはターン開始時の手札だけ
+  [crestIdOf("廻る《運命の輪》・スロース")]: {
+    abilities: [
+      onTurnStart(randomUnusedOption([costChangeUntilEnd(handCards(), 1)], [buff(allyFollowers(), -2, -2)], [damage(SELF_LEADER, 3)])),
+    ],
+  },
+  [crestIdOf("束刃の咎人・カットスロート")]: { abilities: [oncePerOwnTurn(onAllyPlay({ type: "follower" }, evolveIt(EVENT)))] },
   [crestIdOf("霧巻花・クキシロ")]: {
     abilities: [
       onAllyDraw(

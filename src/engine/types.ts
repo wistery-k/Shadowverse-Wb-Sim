@@ -193,6 +193,12 @@ export interface PlayerState {
   followersEntered?: number;
   /** このバトル中に場に出た自分のカードの枚数（カードID → 枚数。能力が見るカードだけ数える。無ければ省く） */
   enteredCounts?: Record<string, number>;
+  /** このバトル中に自分のフォロワーが進化した回数（能力が見るカードがデッキにあるときだけ数える。無ければ省く） */
+  evolvedCount?: number;
+  /** ターン終了時に戻す手札のコストの増減（[iid, 戻す量]。無ければ省く） */
+  tempCosts?: [number, number][];
+  /** このバトル中に場に出た自分のカードの種類（カードID。能力が見るカードがデッキにあるときだけ覚える。無ければ省く） */
+  enteredKinds?: string[];
 }
 
 export type Phase = "mulligan" | "main" | "ended";
