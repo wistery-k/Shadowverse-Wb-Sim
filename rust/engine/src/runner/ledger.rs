@@ -89,7 +89,7 @@ fn opts_json(text: &str) -> Json {
 }
 
 /// 設定の中の、ファイルを指す文字列（`"valueNet":"tpa.json"` 等）と、その中身の指紋。同じ名前で中身の違うファイルを見分けるため
-fn file_fingerprints(opts: &[&Json]) -> Vec<(String, Json)> {
+pub(crate) fn file_fingerprints(opts: &[&Json]) -> Vec<(String, Json)> {
     fn walk(j: &Json, out: &mut Vec<(String, Json)>) {
         match j {
             Json::Str(s) => {

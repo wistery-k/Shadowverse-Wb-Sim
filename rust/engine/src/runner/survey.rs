@@ -202,7 +202,7 @@ struct Prep {
     sec: f64,
 }
 
-fn actions_json(acts: &[Action]) -> Value {
+pub(crate) fn actions_json(acts: &[Action]) -> Value {
     Value::Array(
         acts.iter()
             .map(|a| serde_json::from_str(&action_to_json(a).stringify()).unwrap_or(Value::Null))
@@ -211,7 +211,7 @@ fn actions_json(acts: &[Action]) -> Value {
 }
 
 /// 局面 start から手の列 acts の説明（打てない手が来たらそこまで）
-fn texts(start: &GameState, acts: &[Action], p: PlayerIndex) -> Vec<String> {
+pub(crate) fn texts(start: &GameState, acts: &[Action], p: PlayerIndex) -> Vec<String> {
     let mut t = start.clone();
     let mut out = Vec::new();
     for a in acts {
@@ -390,6 +390,32 @@ pub(crate) fn playout_ends(
     r: u32,
     peek_opp_hand: bool,
     fixed: bool,
+    log: Option<&mut PlayoutLog>,
+) -> PlayoutEnd {
+    playout_ends_with(
+        &SearchOptions::default(),
+        start,
+        p,
+        plan,
+        seed,
+        r,
+        peek_opp_hand,
+        fixed,
+        log,
+    )
+}
+
+/// playout_ends と同じ。両方の席の AI を設定 opts で打つ（試合の記録の検討。`svwb review`）
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn playout_ends_with(
+    opts: &SearchOptions,
+    start: &GameState,
+    p: PlayerIndex,
+    plan: &[Action],
+    seed: u32,
+    r: u32,
+    peek_opp_hand: bool,
+    fixed: bool,
     mut log: Option<&mut PlayoutLog>,
 ) -> PlayoutEnd {
     let mut next: Option<[i32; 4]> = None;
@@ -404,7 +430,7 @@ pub(crate) fn playout_ends(
         );
         let x = mix(seed, 2_000_000 + r);
         let mut rng = MatchRng::with_shared(x, x);
-        let mut me = SearchAgent::new(SearchOptions::default());
+        let mut me = SearchAgent::new(opts.clone());
         let s = if fixed {
             let mut t = det.clone();
             for a in plan {
@@ -444,7 +470,7 @@ pub(crate) fn playout_ends(
             apply_legal(&det, first)
         };
         let mut s = s;
-        let mut other = SearchAgent::new(SearchOptions::default());
+        let mut other = SearchAgent::new(opts.clone());
         let mut seen = start.turn;
         for _ in 0..10000 {
             if s.phase == Phase::Ended {
@@ -509,7 +535,7 @@ pub(crate) fn playout_ends(
 }
 
 /// 勝ち負けの 1 文字を勝ちの数に（打てなかったものは None）
-fn win_of(c: char) -> Option<f64> {
+pub(crate) fn win_of(c: char) -> Option<f64> {
     match c {
         '1' => Some(1.0),
         '0' => Some(0.0),
@@ -519,7 +545,7 @@ fn win_of(c: char) -> Option<f64> {
 }
 
 /// 2 つの勝ち負けの列の、両方が打てた回の差（a − b）
-fn paired(a: &[char], b: &[char], keep: impl Fn(usize) -> bool) -> Vec<f64> {
+pub(crate) fn paired(a: &[char], b: &[char], keep: impl Fn(usize) -> bool) -> Vec<f64> {
     a.iter()
         .zip(b)
         .enumerate()
@@ -683,7 +709,7 @@ fn run_batch(games: &[u32], cfg: &Cfg, list: Option<&[&'static Deck]>) -> Vec<Va
     rows
 }
 
-fn float_flag(flags: &[(String, String)], k: &str, def: f64) -> Result<f64, String> {
+pub(crate) fn float_flag(flags: &[(String, String)], k: &str, def: f64) -> Result<f64, String> {
     match flag(flags, k) {
         None => Ok(def),
         Some(v) => v
@@ -905,7 +931,7 @@ fn strs(v: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn pm(m: f64, se: f64, f: usize) -> String {
+pub(crate) fn pm(m: f64, se: f64, f: usize) -> String {
     if m.is_nan() {
         "-".into()
     } else if se.is_nan() {

@@ -81,24 +81,54 @@ fn redeal_hidden(
     hand_boosts: bool,
 ) {
     let o = opponent(viewer);
-    let hidden: Vec<usize> = if peek_opp_hand {
+    let hidden = hidden_slots(s, o, peek_opp_hand);
+    let mut pool = hidden_pool(s, o, &hidden);
+    rng.shuffle(&mut pool);
+    let k = deal_hand(s, o, &hidden, &mut pool, false);
+    if hand_boosts && !hidden.is_empty() {
+        reapply_hidden_counts(s, o, &hidden, rng);
+    }
+    deal_rest(s, o, &pool, k);
+    let a = rng.int(1 << 30) as f64;
+    let b = rng.int(4) as f64;
+    s.rng = (a * 4.0 + b).floor() as u32;
+}
+
+/// 相手 o の伏せた手札の添字（peek なら無し）
+fn hidden_slots(s: &GameState, o: PlayerIndex, peek_opp_hand: bool) -> Vec<usize> {
+    if peek_opp_hand {
         Vec::new()
     } else {
         (0..s.players[o].hand.len())
             .filter(|&i| !is_public(&s.players[o].hand[i]))
             .collect()
-    };
+    }
+}
+
+/// 相手 o の見えないカードの中身（伏せた手札・山札・どれか分からない捨てたカードの順）
+fn hidden_pool(s: &GameState, o: PlayerIndex, hidden: &[usize]) -> Vec<CardIdx> {
     let opp = &s.players[o];
-    let mut pool: Vec<CardIdx> = hidden
+    hidden
         .iter()
         .map(|&i| opp.hand[i].card)
         .chain(opp.deck.iter().map(|r| r.card))
         .chain(opp.hidden_discards.iter().copied())
-        .collect();
-    rng.shuffle(&mut pool);
-    // 条件付きで引いたカードから先に、条件に合うカードを取る
+        .collect()
+}
+
+/// pool から相手 o の伏せた手札に配る（条件付きで引いたカードから先に、条件に合うカードを pool から抜いて取り、残りの枠に頭から配る）。
+/// 頭から配った枚数を返す（pool のその先が山札と捨てたカードの分）。
+/// keep_hint なら、配り直した枠に条件付きで引いた印を残す（canonical_view。後の決定化がその印を見るので）
+fn deal_hand(
+    s: &mut GameState,
+    o: PlayerIndex,
+    hidden: &[usize],
+    pool: &mut Vec<CardIdx>,
+    keep_hint: bool,
+) -> usize {
+    let opp = &s.players[o];
     let mut assigned: Vec<(Iid, CardIdx)> = Vec::new();
-    for &i in &hidden {
+    for &i in hidden {
         let h = &opp.hand[i];
         let Some(hint) = &h.drawn_by else { continue };
         if let Some(idx) = pool.iter().position(|&c| hint_matches(c, hint)) {
@@ -106,7 +136,7 @@ fn redeal_hidden(
         }
     }
     let mut k = 0;
-    for &i in &hidden {
+    for &i in hidden {
         let iid = opp.hand[i].iid;
         if !assigned.iter().any(|(x, _)| *x == iid) {
             assigned.push((iid, pool[k]));
@@ -116,13 +146,19 @@ fn redeal_hidden(
     for i in 0..s.players[o].hand.len() {
         let iid = s.players[o].hand[i].iid;
         if let Some(&(_, c)) = assigned.iter().find(|(x, _)| *x == iid) {
-            let h = s.new_hand_card(c, Some(iid));
+            let hint = s.players[o].hand[i].drawn_by;
+            let mut h = s.new_hand_card(c, Some(iid));
+            if keep_hint {
+                h.drawn_by = hint;
+            }
             s.players[o].hand.make_mut()[i] = h;
         }
     }
-    if hand_boosts && !hidden.is_empty() {
-        reapply_hidden_counts(s, o, &hidden, rng);
-    }
+    k
+}
+
+/// deal_hand の続き: pool の k 枚目から先を、相手 o の山札と、どれか分からない捨てたカードに置く
+fn deal_rest(s: &mut GameState, o: PlayerIndex, pool: &[CardIdx], mut k: usize) {
     for r in s.players[o].deck.make_mut().iter_mut() {
         r.card = pool[k];
         k += 1;
@@ -133,9 +169,31 @@ fn redeal_hidden(
     }
     // 山札に戻った相手のカードの状態も、伏せた手札と同じく作り直したものとみなす
     s.players[o].deck_kept.clear();
-    let a = rng.int(1 << 30) as f64;
-    let b = rng.int(4) as f64;
-    s.rng = (a * 4.0 + b).floor() as u32;
+}
+
+/// 置き直した局面の乱数の状態（canonical_view。決定化が作り直すので、値に意味は無い）
+const CANON_RNG: u32 = 0x5245_5657;
+
+/// viewer から見えない部分を、決まった形に置き直した局面（試合の記録の検討。docs/match-record.md「検討」）。
+/// 記録の局面は、配信で見えた両方の手札と、記録が並べた山札の順番を持つ。決定化（determinize）はこの部分を作り直すが、
+/// 作り直し方は元の順番に依る（同じ乱数でも、元の山札の順番が違えば結果が違う）ので、先にここで置き直して、
+/// 結果が「viewer に見えている部分と、両方のデッキの中身」だけで決まるようにする。置き直しは決定化の分布を変えない。
+/// - 両方の山札: iid の順に並べる（中身と iid の組はそのまま）
+/// - 相手の伏せた手札・山札・どれか分からない捨てたカード: 中身をカードの番号の順に並べ、決定化と同じ配り方で置き直す
+///   （伏せた枠は配り直したカード。条件付きで引いた印は残す）
+/// - 局面の乱数: 決まった値
+pub fn canonical_view(state: &GameState, viewer: PlayerIndex) -> GameState {
+    let mut s = state.clone();
+    let o = opponent(viewer);
+    s.players[viewer].deck.make_mut().sort_by_key(|r| r.iid);
+    s.players[o].deck.make_mut().sort_by_key(|r| r.iid);
+    let hidden = hidden_slots(&s, o, false);
+    let mut pool = hidden_pool(&s, o, &hidden);
+    pool.sort_unstable();
+    let k = deal_hand(&mut s, o, &hidden, &mut pool, true);
+    deal_rest(&mut s, o, &pool, k);
+    s.rng = CANON_RNG;
+    s
 }
 
 // ---- 伏せた手札のスペルブースト等の見込み ----

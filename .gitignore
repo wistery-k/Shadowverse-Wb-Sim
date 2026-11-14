@@ -12,3 +12,5 @@ rust/engine/data/
 src/engine/svwb.wasm
 # docker/remote-control の手元の設定（UID・GID など）
 docker/remote-control/.env
+# 試合の記録の検討の出力（npm run review。docs/match-record.md「検討」）
+reviews/

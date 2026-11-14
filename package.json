@@ -40,7 +40,8 @@
     "rust-data": "node scripts/vite-run.mjs scripts/rust-data-main.ts",
     "pack-run": "node scripts/vite-run.mjs scripts/pack-run-main.ts",
     "ledger": "node scripts/ledger-main.ts",
-    "night": "node scripts/night-main.ts"
+    "night": "node scripts/night-main.ts",
+    "review": "node scripts/vite-run.mjs scripts/review-main.ts"
   },
   "repository": {
     "type": "git",
