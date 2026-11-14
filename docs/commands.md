@@ -20,7 +20,7 @@
 
 | コマンド | 何をするか | 本体 |
 |---|---|---|
-| `npm run dev` | 開発サーバー（Vite の引数をそのまま渡せる。例: `-- --host`）。サンドボックスとリプレイ検索（下）のタブはここだけで出る | `vite` |
+| `npm run dev` | 開発サーバー（Vite の引数をそのまま渡せる。例: `-- --host`）。サンドボックスとリプレイ検索（下）と試合の記録（`docs/match-record.md`）のタブはここだけで出る | `vite` |
 | `npm run build` / `preview` / `typecheck` / `test` | 本番ビルド / ビルド結果の確認 / 型チェック / テスト（`test` は Vitest の引数を渡せる。例: `-- src/engine`） | |
 | `npm run wasm` | エンジンの WASM を作る（引数なし） | `scripts/build-wasm.mjs` |
 | `npm run cards` | `data/raw/*.json` からスターターのカードデータ（`data/cards.json`・`data/crests.json`）を作る。`-- --pool azvaldt` で前期のローテーション（`data/raw/azvaldt/*.json` → `data/pools/azvaldt/`。元データはブランチ `wistery-k-patch-1` の `azvaldt*.json` を `git show origin/wistery-k-patch-1:<file> > data/raw/azvaldt/<file>` で取り出す） | `scripts/convert-cards.ts` |

@@ -3,7 +3,7 @@ import { statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import preact from "@preact/preset-vite";
-import { devOnlyReplaySearch, replayFiles } from "./scripts/replay-files.ts";
+import { devOnlyModules, replayFiles } from "./scripts/replay-files.ts";
 
 /** ビルド時点の最終コミット（画面に表示する）。git が使えなければ空 */
 function gitInfo(): { commit: string; date: string; dirty: boolean } {
@@ -32,8 +32,8 @@ export default defineConfig(({ command, isSsrBuild }) => ({
   // GitHub Pages はリポジトリ名のサブパスで配信される
   base: "/Shadowverse-Wb-Sim/",
   // replayFiles: 開発サーバーだけで、リプレイ検索が読む手元の試合の記録を配る（vite build では働かない）。
-  // devOnlyReplaySearch: vite build で、リプレイ検索の画面を何も表示しないものに置き換える（公開サイトに入れない）
-  plugins: [preact(), replayFiles(), devOnlyReplaySearch()],
+  // devOnlyModules: vite build で、リプレイ検索と試合の記録の画面を何も表示しないものに置き換える（公開サイトに入れない）
+  plugins: [preact(), replayFiles(), devOnlyModules()],
   define: {
     __BUILD_COMMIT__: JSON.stringify(git.commit),
     __BUILD_DATE__: JSON.stringify(git.date),
