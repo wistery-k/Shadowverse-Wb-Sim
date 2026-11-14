@@ -29,9 +29,8 @@
 }
 /* 引いたカード・初期手札を選ぶ一覧 */
 .record-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 4px;
+  display: flex;
+  flex-direction: column;
 }
 .record-card {
   display: flex;
@@ -104,5 +103,54 @@
   min-width: 0;
 }
 .record-outcome-diff {
+  font-weight: bold;
+}
+.record-undecided {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: center;
+}
+.record-undecided.asking {
+  border: 3px solid var(--accent);
+  color: var(--fg);
+  font-weight: bold;
+}
+.record-cost-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  padding: 3px 0;
+  border-top: 1px solid var(--line);
+}
+.record-cost-row:first-child {
+  border-top: none;
+}
+.record-cost-label {
+  flex: 0 0 auto;
+  width: 1.8em;
+  height: 1.8em;
+  line-height: 1.8em;
+  text-align: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-weight: bold;
+  font-size: 13px;
+}
+.record-cost-cards {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 4px;
+}
+.record-card-type {
+  font-size: 11px;
+}
+.record-card-count {
   font-weight: bold;
 }

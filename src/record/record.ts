@@ -121,6 +121,22 @@ export function startGame(decks: [readonly string[], readonly string[]], seed: n
   }
 }
 
+/**
+ * メモの URL から、共有した人をたどれる引数（YouTube の si=）を除く（記録はリポジトリに置いて公開するので）。
+ * 例: `https://www.youtube.com/live/X?si=abc&t=1657` → `https://www.youtube.com/live/X?t=1657`
+ */
+export function cleanMemo(memo: string): string {
+  return memo.replace(/https?:\/\/\S+/g, (url) => {
+    const q = url.indexOf("?");
+    if (q < 0) return url;
+    const params = url
+      .slice(q + 1)
+      .split("&")
+      .filter((kv) => kv !== "" && !/^si=/i.test(kv));
+    return params.length > 0 ? `${url.slice(0, q)}?${params.join("&")}` : url.slice(0, q);
+  });
+}
+
 /** 新しい記録（手順は空） */
 export function newRecord(o: { event: string; eventName: string; seats: [RecordSeat, RecordSeat]; memo: string; commit: string; dirty: boolean; seed: number; now: string }): MatchRecord {
   const decks = o.seats.map((seat) => {
@@ -132,7 +148,7 @@ export function newRecord(o: { event: string; eventName: string; seats: [RecordS
   return {
     format: RECORD_FORMAT,
     version: RECORD_VERSION,
-    meta: { event: o.event, eventName: o.eventName, seats: o.seats, memo: o.memo, commit: o.commit, dirty: o.dirty, createdAt: o.now, updatedAt: o.now },
+    meta: { event: o.event, eventName: o.eventName, seats: o.seats, memo: cleanMemo(o.memo), commit: o.commit, dirty: o.dirty, createdAt: o.now, updatedAt: o.now },
     decks,
     seed,
     steps: [],
@@ -165,14 +181,16 @@ export function setInitialHand(state: GameState, p: PlayerIndex, cards: readonly
 
 // ---- 手を打つ（引いたカード・乱数を決めて） ----
 
-/** 山札の上に ids のカードを順に並べた山札（残りは元の順）。足りないカードがあればそのカード ID */
-function arrangeDeck(deck: readonly DeckCard[], ids: readonly string[]): DeckCard[] | string {
+/**
+ * 山札の上に ids のカードを順に並べた山札（残りは元の順）。山札に無いカードは飛ばす
+ * （手札から山札に戻してから引くカードは、この手の中で山札に入る。引けたかは打った後に確かめる）
+ */
+function arrangeDeck(deck: readonly DeckCard[], ids: readonly string[]): DeckCard[] {
   const rest = [...deck];
   const top: DeckCard[] = [];
   for (const id of ids) {
     const i = rest.findIndex((c) => c.cardId === id);
-    if (i < 0) return id;
-    top.push(rest.splice(i, 1)[0]!);
+    if (i >= 0) top.push(rest.splice(i, 1)[0]!);
   }
   return [...top, ...rest];
 }
@@ -182,9 +200,7 @@ export function arrange(state: GameState, draws: Draws, rng?: number): GameState
   const players = state.players.map((pl, p) => {
     const ids = draws[p as PlayerIndex];
     if (ids.length === 0) return pl;
-    const deck = arrangeDeck(pl.deck, ids);
-    if (typeof deck === "string") throw new RecordError(`${cardOf(deck).name}は山札に残っていません`);
-    return { ...pl, deck };
+    return { ...pl, deck: arrangeDeck(pl.deck, ids) };
   }) as GameState["players"];
   return { ...state, players, ...(rng !== undefined ? { rng: rng >>> 0 } : {}) };
 }
@@ -199,15 +215,40 @@ export function runStep(state: GameState, action: Action, draws: Draws, rng?: nu
   }
 }
 
-/** 打つ前の山札から、手札に引いたカード（引いた順）。手札が上限で墓場に行ったものも含む */
+/** 手札の記録（handLog）のうち、re に合う出来事の数（「入った」「山札に戻った」は前の出来事とまとまらないので、数の差がこの手の分） */
+const logCount = (log: string | undefined, re: RegExp): number => (log ? log.split(" ").filter((t) => re.test(t)).length : 0);
+
+/**
+ * 手札から山札に戻して、同じ手の中で引き直したカード（耳飾りのように、戻して切り直してから引く手）。
+ * 山札の一番上から引いた数（手札の記録の i<山札の枚数>）が、打つ前の山札から手札に来たカードより多ければ、その分は戻したカードを引いた。
+ * 引いたカードは手札の末尾に足されるので、打つ前から手札にあったカードのうち末尾のもの
+ */
+function redrawnCards(arranged: GameState, next: GameState, p: PlayerIndex, fromDeck: number): DeckCard[] {
+  const before = arranged.players[p];
+  const after = next.players[p];
+  const topDraws = logCount(after.handLog, /^i[1-9]/) - logCount(before.handLog, /^i[1-9]/);
+  const returned = logCount(after.handLog, /^[dD]/) - logCount(before.handLog, /^[dD]/);
+  const n = Math.min(topDraws - fromDeck, returned);
+  if (n <= 0) return [];
+  const had = new Set(before.hand.map((h) => h.iid));
+  return after.hand
+    .filter((h) => had.has(h.iid))
+    .slice(-n)
+    .map((h) => ({ iid: h.iid, cardId: h.cardId }));
+}
+
+/**
+ * この手で引いたカード（引いた順）: 打つ前の山札から手札に来たもの、手札が上限で墓場に行ったもの、
+ * 手札から山札に戻して引き直したもの
+ */
 export function drawnCards(arranged: GameState, next: GameState, p: PlayerIndex): DeckCard[] {
   const before = arranged.players[p].deck;
   const beforeIids = new Set(before.map((c) => c.iid));
   const after = next.players[p];
   const left = new Set(after.deck.map((c) => c.iid));
   const departed = before.filter((c) => !left.has(c.iid));
-  if (departed.length === 0) return [];
   const handIndex = new Map(after.hand.map((h, i) => [h.iid, i]));
+  if (departed.length === 0) return redrawnCards(arranged, next, p, 0);
   const elsewhere = new Set<number>();
   for (const pl of next.players) {
     for (const c of pl.board) elsewhere.add(c.iid);
@@ -219,7 +260,7 @@ export function drawnCards(arranged: GameState, next: GameState, p: PlayerIndex)
   const replaced = after.deck.filter((c) => !beforeIids.has(c.iid)).length >= 10;
   const gone = departed.filter((c) => !elsewhere.has(c.iid));
   const burned = replaced ? [] : gone.slice(0, Math.max(0, after.graveyard - arranged.players[p].graveyard));
-  return [...toHand, ...burned];
+  return [...toHand, ...redrawnCards(arranged, next, p, toHand.length), ...burned];
 }
 
 /** 引いたカードのうち、決めた引いたカード（ids）で説明できないもの（引いた順）。ids のうち引かれなかったものがあれば、そのカード ID も */
@@ -498,8 +539,12 @@ export type Evaluation =
   | { kind: "mismatch"; player: PlayerIndex; cardId: string }
   /** ランダムな結果を選ぶ */
   | { kind: "random"; outcomes: Outcome[]; samples: number }
-  /** 引いたカードを決める（player の山札から。known はまだ決めていない引いたカードの枚数） */
-  | { kind: "draw"; player: PlayerIndex; known: number }
+  /**
+   * 引いたカードを決める（player の山札から。known はまだ決めていない引いたカードの枚数）。
+   * preview は仮に打った局面（画面に見せる。undecided はその手札のうち、まだ決めていない引いたカード）、
+   * pool は引けたカード（仮に打った後の山札と、まだ決めていない引いたカード。手札から山札に戻したカードも入る）
+   */
+  | { kind: "draw"; player: PlayerIndex; known: number; preview: GameState; undecided: number[]; pool: Map<string, number> }
   | { kind: "done"; next: GameState };
 
 /**
@@ -544,21 +589,14 @@ export function evaluate(state: GameState, step: PendingStep, names: readonly [s
   const acting = actingPlayer(state);
   for (const p of [acting, opponent(acting)]) {
     const extra = drawn[p]!.extra;
-    if (extra.length > 0) return { step, ev: { kind: "draw", player: p, known: extra.length } };
+    if (extra.length > 0) {
+      const pool = new Map<string, number>();
+      for (const c of [...run.next.players[p].deck, ...extra]) pool.set(c.cardId, (pool.get(c.cardId) ?? 0) + 1);
+      const undecided = drawn.flatMap((d) => d.extra.map((c) => c.iid));
+      return { step, ev: { kind: "draw", player: p, known: extra.length, preview: run.next, undecided, pool } };
+    }
   }
   return { step, ev: { kind: "done", next: run.next } };
-}
-
-/** 山札に残っているカード（カード ID → 枚数。決めた引いたカードの分を除く） */
-export function deckRemaining(state: GameState, p: PlayerIndex, taken: readonly string[] = []): Map<string, number> {
-  const m = new Map<string, number>();
-  for (const c of state.players[p].deck) m.set(c.cardId, (m.get(c.cardId) ?? 0) + 1);
-  for (const id of taken) {
-    const n = m.get(id) ?? 0;
-    if (n <= 1) m.delete(id);
-    else m.set(id, n - 1);
-  }
-  return m;
 }
 
 // ---- たどる ----
@@ -651,7 +689,12 @@ export function resultOf(steps: readonly RecordStep[], last: GameState): RecordR
 export function exportRecord(record: MatchRecord, now: string): MatchRecord {
   const { states, error } = replay(record);
   if (error) throw new RecordError(`手順 ${error.step + 1} をたどれません: ${error.message}`);
-  return { ...record, meta: { ...record.meta, updatedAt: now }, turns: turnSnapshots(states), result: resultOf(record.steps, states[states.length - 1]!) };
+  return {
+    ...record,
+    meta: { ...record.meta, memo: cleanMemo(record.meta.memo), updatedAt: now },
+    turns: turnSnapshots(states),
+    result: resultOf(record.steps, states[states.length - 1]!),
+  };
 }
 
 /** 書き出した記録のファイルの名前（大会_先攻_vs_後攻_日時。環境によって日本語のファイル名で保存できないので、クラスは ID で） */
@@ -699,9 +742,24 @@ function checkStep(v: unknown, i: number): RecordStep {
   }
 }
 
+/** 書き出した記録の結果（無い・読めなければ null） */
+function checkResult(v: unknown): RecordResult | null {
+  if (!isObj(v) || !isSeatIndex(v.winner)) return null;
+  return v.reason === "leader" || v.reason === "deck" || v.reason === "retire" ? { winner: v.winner, reason: v.reason } : null;
+}
+
+/** 書き出した記録の各ターンの最初の局面（形だけ見る。局面の中身はエンジンに読ませるときに確かめる） */
+function checkTurns(v: unknown): TurnSnapshot[] {
+  if (!Array.isArray(v)) throw new RecordError("各ターンの最初の局面が読めません");
+  return v.map((t: unknown, i) => {
+    if (!isObj(t) || typeof t.turn !== "number" || typeof t.step !== "number" || !isObj(t.state)) throw new RecordError(`各ターンの最初の局面 ${i + 1} が読めません`);
+    return { turn: t.turn, step: t.step, state: t.state as unknown as GameState };
+  });
+}
+
 /**
  * 書き出した記録を読む。デッキはプロのデッキと同じものでなければ読まない（CLAUDE.md の試合の記録の条件）。
- * 手順の形だけを確かめる（たどれるかは replay で見る）
+ * 手順の形だけを確かめる（たどれるかは replay で見る）。各ターンの最初の局面と結果も、あれば読む
  */
 export function parseRecord(text: string): MatchRecord {
   let v: unknown;
@@ -744,7 +802,8 @@ export function parseRecord(text: string): MatchRecord {
     decks: [decks[0] as string[], decks[1] as string[]],
     seed: v.seed >>> 0,
     steps: v.steps.map(checkStep),
-    result: null,
+    ...(v.turns !== undefined ? { turns: checkTurns(v.turns) } : {}),
+    result: checkResult(v.result),
   };
 }
 

@@ -1,6 +1,7 @@
 // 試合の記録（src/record/。開発サーバーだけの「試合の記録」の画面の中身）:
 // プロのデッキだけを選べること、引いたカード・ランダムな結果を決めて手を打てること、記録をたどると同じ局面になること。
 
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ALL_CARDS, CARDS_BY_ID } from "../src/cards";
 import { AZVALDT_CARDS } from "../src/cards/pools";
@@ -9,7 +10,7 @@ import { findProDeck, PRO_DECKS, PRO_EVENTS, proDeck } from "../src/record/decks
 import { POOL_CARD_BY_NAME } from "../src/record/pool";
 import {
   applyStep,
-  deckRemaining,
+  cleanMemo,
   drawnCards,
   evaluate,
   exportRecord,
@@ -25,7 +26,7 @@ import {
   type PendingStep,
   type RecordStep,
 } from "../src/record/record";
-import { setup, toBoard, toHand } from "./poolScenario";
+import { FILLER, setup, toBoard, toHand } from "./poolScenario";
 
 const NAMES: [string, string] = ["先攻", "後攻"];
 const id = (name: string) => POOL_CARD_BY_NAME.get(name)!.id;
@@ -46,7 +47,7 @@ function resolve(state: GameState, action: Action, pickDraw?: (p: PlayerIndex, r
       step = { ...step, rng: o.rng, outcomeKey: o.key };
       continue;
     }
-    const remaining = deckRemaining(state, ev.player, step.draws[ev.player]);
+    const remaining = ev.pool;
     const card = pickDraw ? pickDraw(ev.player, remaining, step.draws[ev.player]) : [...remaining.keys()].sort((a, b) => cardOf(a).cost - cardOf(b).cost || a.localeCompare(b))[0]!;
     const draws: Draws = [[...step.draws[0]], [...step.draws[1]]];
     draws[ev.player].push(card);
@@ -215,6 +216,32 @@ describe("試合の記録: ランダムな結果", () => {
     expect(opponent(me)).not.toBe(me);
   });
 
+  it("手札を山札に戻してから引く手（陽光の耳飾り）は、戻したカードを引き直しても、ランダムな結果でなく引いたカードとして聞く", () => {
+    const { s, me } = setup(7);
+    const back = toHand(s, me, "探偵のルーペ");
+    toHand(s, me, "不屈のファイター");
+    const ear = toHand(s, me, "陽光の耳飾り");
+    const played = applyAction(s, { type: "play", iid: ear });
+    expect(played.pending?.kind).toBe("choose");
+    const action: Action = { type: "choose", targets: [back] };
+    const r = evaluate(played, { action, draws: [[], []] }, NAMES);
+    expect(r.ev.kind).toBe("draw");
+    if (r.ev.kind !== "draw") return;
+    // 引けたカードには、山札に戻した（山札に 1 枚も無かった）カードも入る。仮に打った局面の手札に、まだ決めていない引いたカードがある
+    expect(r.ev.pool.get(id("探偵のルーペ"))).toBe(1);
+    const { undecided, preview } = r.ev;
+    expect(undecided.length).toBe(1);
+    expect(preview.players[me].hand.some((h) => h.iid === undecided[0])).toBe(true);
+    // 戻したカードを引き直したことにしても、ほかのカードを引いたことにしても打てて、たどると同じ局面
+    for (const pick of [id("探偵のルーペ"), FILLER]) {
+      const { step, next } = resolve(played, action, () => pick);
+      const hand = next.players[me].hand.map((h) => h.cardId);
+      expect(hand).toContain(pick);
+      expect(hand.filter((c) => c === id("探偵のルーペ")).length).toBe(pick === FILLER ? 0 : 1);
+      expect(JSON.stringify(applyStep(played, step))).toBe(JSON.stringify(next));
+    }
+  });
+
   it("引けないカードを選ぶと mismatch", () => {
     const { s, me } = setup(9);
     s.players[me].deck = [id("不屈のファイター"), id("探偵のルーペ")].map((cardId) => ({ iid: s.nextIid++, cardId })).concat(s.players[me].deck);
@@ -226,4 +253,26 @@ describe("試合の記録: ランダムな結果", () => {
     expect(r.ev.kind === "error" || r.ev.kind === "mismatch").toBe(true);
     expect(opp).not.toBe(me);
   });
+});
+
+describe("試合の記録: リポジトリに置いた記録（records/pro/）", () => {
+  it("メモの URL から YouTube の si= を除く", () => {
+    expect(cleanMemo("https://www.youtube.com/live/abc?si=XyZ_1&t=1657")).toBe("https://www.youtube.com/live/abc?t=1657");
+    expect(cleanMemo("https://youtu.be/abc?si=XyZ 後半")).toBe("https://youtu.be/abc 後半");
+    expect(cleanMemo("1 試合目 https://www.youtube.com/watch?v=abc&si=q&t=30s")).toBe("1 試合目 https://www.youtube.com/watch?v=abc&t=30s");
+    expect(cleanMemo("動画の 28 分あたり")).toBe("動画の 28 分あたり");
+  });
+
+  // たどれるかは見ない（カードの能力を書き足すと、前に入れた記録がたどれなくなりうる。そのときは各ターンの最初の局面から検討する）
+  const dir = "records/pro";
+  const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
+  it("記録がある", () => expect(files.length).toBeGreaterThan(0));
+  for (const f of files) {
+    it(`${f}: 読めて、勝敗まで入っていて、各ターンの最初の局面がある`, () => {
+      const rec = parseRecord(readFileSync(`${dir}/${f}`, "utf8"));
+      expect(rec.result).not.toBeNull();
+      expect(rec.turns?.length ?? 0).toBeGreaterThan(0);
+      expect(rec.meta.memo).toBe(cleanMemo(rec.meta.memo));
+    });
+  }
 });
