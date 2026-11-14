@@ -1498,4 +1498,54 @@ mod tests {
         assert_eq!(a.m1, b.m1);
         assert_eq!(a.m2, b.m2);
     }
+
+    /// TypeScript 版が書いた照らし合わせの出力（rust/engine/tests/td-train/README.md）と、同じファイルを書く。
+    /// TypeScript 版は tests/tdRust.test.ts が同じファイルと比べる
+    #[test]
+    fn fixtures_match_typescript() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/td-train");
+        let cases = Json::parse(&std::fs::read_to_string(dir.join("cases.json")).unwrap()).unwrap();
+        let Json::Arr(cases) = cases else {
+            panic!("cases.json")
+        };
+        let tmp = std::env::temp_dir().join(format!("svwb-td-fixtures-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        for c in &cases {
+            let name = match c.get("name") {
+                Some(Json::Str(s)) => s.clone(),
+                _ => panic!("name"),
+            };
+            let Some(Json::Arr(words)) = c.get("args") else {
+                panic!("args")
+            };
+            let words: Vec<String> = words
+                .iter()
+                .map(|w| match w {
+                    Json::Str(s)
+                        if ["model.json", "data.jsonl", "train-a.json"].contains(&s.as_str()) =>
+                    {
+                        dir.join(s).to_string_lossy().into_owned()
+                    }
+                    Json::Str(s) => s.clone(),
+                    _ => panic!("args"),
+                })
+                .collect();
+            let out = tmp.join(format!("{name}.json"));
+            let mut args: Vec<(String, String)> = words
+                .chunks(2)
+                .map(|p| (p[0].trim_start_matches("--").to_string(), p[1].clone()))
+                .collect();
+            args.push(("out".into(), out.to_string_lossy().into_owned()));
+            let r = match c.get("cmd") {
+                Some(Json::Str(s)) if s == "train" => train(&args),
+                Some(Json::Str(s)) if s == "prune" => prune(&args),
+                _ => panic!("cmd"),
+            };
+            r.unwrap();
+            let got = std::fs::read_to_string(&out).unwrap();
+            let want = std::fs::read_to_string(dir.join(format!("{name}.json"))).unwrap();
+            assert!(got == want, "{name} が TypeScript 版と違う");
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }

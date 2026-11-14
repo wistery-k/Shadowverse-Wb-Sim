@@ -68,6 +68,9 @@
 //   train ... --dropInputs myDeckCards,oppUnseen: 出発点のモデルからその入力（zones・scalars の名前）を外して学ぶ（入力を足したモデルで作った自己対戦から、足す前の補正を学ぶ）
 //   train・prune ... --excludeDecks <デッキ名,...>: どちらかの席がそのデッキの試合を学ばない・数えない。--onlyDecks <デッキ名,...>: そのデッキの試合だけ
 //     （見ていないデッキでの落ち方と、学び足しを測る用。デッキ名はデフォルトデッキの名前）
+//   train・prune ... --impl rust: Rust 版（svwb td train・prune。rust/engine/src/runner/td_train.rs）で回す。同じデータ・同じ引数で、このファイルと同じモデル（バイトまで）を書き、
+//     速くてメモリが少ない（docs/ai-notes.md「補正の学習を Rust に移す」）。学び直しの流れの引数だけを持ち、実験用の引数（--attr・--cmpWeight・--v1Only・--searchTarget・--seat・--exclude 等）は
+//     エラーにする。既定はこのファイル（照らし合わせの元）
 //   npm run td -- prune --model m4.json --data d0.jsonl,d1.jsonl,... --out data/value-net.json [--seat both]
 //     学習データに一度も現れなかった入力（デフォルトデッキに無いカードなど）の重みを 0 にする。学ばれずに初期値の乱数のまま残っているので、
 //     そのカードを使う自作デッキで補正がでたらめに動かないようにする（ファイルも小さくなる）。
