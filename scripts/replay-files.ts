@@ -1,5 +1,5 @@
 // 開発サーバー（npm run dev）だけで、手元のフォルダにある試合の記録（「リプレイ検索」タブで読むファイル）の一覧と中身を配る（vite.config.ts）。
-// 公開サイト（vite build）には入らない（画面のモジュールも devOnlyReplaySearch で置き換える）。
+// 公開サイト（vite build）には入らない（画面のモジュールも devOnlyModules で置き換える）。
 //
 // 探すフォルダは環境変数 SVWB_REPLAY_DIRS（区切りは Linux・macOS は「:」、Windows は「;」）。無ければ ~/svwb-data と、リポジトリの replays/。
 // その下（深さ 6 まで）の .json・.jsonl・.json.gz・.jsonl.gz のうち、始めの部分が試合の記録らしいもの（"seed"・"decks"・"actions" があり、
@@ -165,15 +165,20 @@ export function replayFiles(): Plugin {
 }
 
 /** 開発サーバーだけのモジュール（vite build では中身を読まず、何も表示しないものに置き換える） */
-const DEV_ONLY_MODULES: Record<string, string> = {
+export const DEV_ONLY_MODULES: Record<string, string> = {
   // リプレイ検索の画面。Worker（src/replays/worker.ts）と CSS ごと公開サイトに入れない
   "/src/ui/ReplaySearch.tsx": "export function ReplaySearch() { return null; }",
+  // 試合の記録の画面。前期のローテーションのカード・プロのデッキ（src/record/）と CSS ごと公開サイトに入れない（CLAUDE.md の試合の記録の条件）
+  "/src/ui/MatchRecord.tsx": "export function MatchRecord() { return null; }",
 };
 
-/** vite build で、開発サーバーだけのモジュールを置き換えるプラグイン（App.tsx の REPLAY_SEARCH が false なので使われない） */
-export function devOnlyReplaySearch(): Plugin {
+/**
+ * vite build で、開発サーバーだけのモジュールを置き換えるプラグイン
+ * （App.tsx の REPLAY_SEARCH・MATCH_RECORD が false なので使われない）
+ */
+export function devOnlyModules(): Plugin {
   return {
-    name: "svwb-dev-only-replay-search",
+    name: "svwb-dev-only-modules",
     apply: "build",
     enforce: "pre",
     load(id) {

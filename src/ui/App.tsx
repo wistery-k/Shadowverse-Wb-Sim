@@ -6,6 +6,7 @@ import { DeckSelect, resolveDeck, type DeckChoice } from "./DeckSelect";
 import { Decks } from "./Decks";
 import { Game } from "./Game";
 import { HumanCompare, loadHumanRecords, saveHumanRecords, type HumanMatchChoice } from "./HumanCompare";
+import { MatchRecord } from "./MatchRecord";
 import { isMissesHash, Misses } from "./Misses";
 import { ReplaySearch } from "./ReplaySearch";
 import { Sandbox, type SandboxIncoming } from "./Sandbox";
@@ -43,7 +44,7 @@ function saveSetup(setup: Setup): void {
   }
 }
 
-type Tab = "play" | "decks" | "sim" | "compare" | "misses" | "sandbox" | "replays";
+type Tab = "play" | "decks" | "sim" | "compare" | "misses" | "sandbox" | "replays" | "record";
 
 /**
  * サンドボックス（好きな局面を作って AI に考えさせる）は、ゲームの実際の対戦の局面を入れて手を聞く
@@ -53,6 +54,12 @@ const SANDBOX = import.meta.env.DEV;
 
 /** リプレイ検索（手元の自己対戦の記録から条件に合うターンを探す）は、手元のファイルを読むので開発サーバーだけで出す */
 const REPLAY_SEARCH = import.meta.env.DEV;
+
+/**
+ * 試合の記録（プロの試合を見ながら手を入れる）は開発サーバーだけで出す。CLAUDE.md「決定済みの前提」の試合の記録の条件:
+ * デッキはプロのデッキだけ・入れている間は AI を呼ばない・前期のローテーションだけ。vite build では画面のモジュールを空のものに置き換える
+ */
+const MATCH_RECORD = import.meta.env.DEV;
 
 // 問題集（見落とし問題集の局面を見る）は公開サイトにも出す。見られるのはリポジトリにある決まった局面だけで、
 // 局面の編集・貼り付け・読み込みは付けない（サンドボックスと違い、実際の対戦の局面を入れて手を聞くことはできない。CLAUDE.md「ソフト打ち」）
@@ -65,6 +72,7 @@ const TABS: readonly [Tab, string][] = [
   ["misses", "問題集"],
   ...(SANDBOX ? [["sandbox", "サンドボックス"] as [Tab, string]] : []),
   ...(REPLAY_SEARCH ? [["replays", "リプレイ検索"] as [Tab, string]] : []),
+  ...(MATCH_RECORD ? [["record", "試合の記録"] as [Tab, string]] : []),
 ];
 
 export function App() {
@@ -74,9 +82,12 @@ export function App() {
   const [replaysOpened, setReplaysOpened] = useState(false);
   // 問題集も、最初に開くまで作らない（開くと問のデータを読み込む）
   const [missesOpened, setMissesOpened] = useState(() => isMissesHash());
+  // 試合の記録も、最初に開くまで作らない（開くとブラウザに残した途中の記録をたどり直す）
+  const [recordOpened, setRecordOpened] = useState(false);
   const setTab = (t: Tab) => {
     setTabState(t);
     if (t === "replays") setReplaysOpened(true);
+    if (t === "record") setRecordOpened(true);
     if (t === "misses") setMissesOpened(true);
     // 問題集を離れたら URL の #misses を消す（読み込み直したときに問題集が開かないように）
     else if (isMissesHash()) {
@@ -141,7 +152,7 @@ export function App() {
     <div class="app">
       <header>
         <h1>Shadowverse: Worlds Beyond Simulator</h1>
-        <span class="muted">スターター（ベーシック＋伝説の幕開け）</span>
+        <span class="muted">{MATCH_RECORD && tab === "record" ? "前期のローテーション（プロのデッキ）" : "スターター（ベーシック＋伝説の幕開け）"}</span>
         {!game && (
           <nav class="tabs">
             {TABS.map(([key, label]) => (
@@ -169,6 +180,12 @@ export function App() {
             <ReplaySearch {...(SANDBOX ? { onSandbox: openSandbox } : {})} />
           </div>
         )}
+        {/* 試合の記録も、入れている途中の局面を残すため隠すだけにする */}
+        {MATCH_RECORD && recordOpened && (
+          <div hidden={!!game || tab !== "record"}>
+            <MatchRecord />
+          </div>
+        )}
         {/* 問題集も、開いた問と打たせた並びを残すため隠すだけにする */}
         {missesOpened && (
           <div hidden={!!game || tab !== "misses"}>
@@ -187,7 +204,7 @@ export function App() {
           />
         ) : tab === "decks" ? (
           <Decks decks={saved} onChange={updateDecks} />
-        ) : tab === "sim" || tab === "sandbox" || tab === "replays" || tab === "misses" ? null : tab === "compare" ? (
+        ) : tab === "sim" || tab === "sandbox" || tab === "replays" || tab === "misses" || tab === "record" ? null : tab === "compare" ? (
           <HumanCompare onStart={startCompare} saveError={compareError} />
         ) : (
           <div class="setup panel">

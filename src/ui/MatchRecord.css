@@ -1,0 +1,108 @@
+/* 試合の記録（開発サーバーだけのタブ。src/ui/MatchRecord.tsx が読み込む。vite build には入らない） */
+.match-record,
+.record-view {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+.setup.record-setup {
+  max-width: 520px;
+}
+.record-seat {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
+  gap: 4px 8px;
+  align-items: end;
+}
+.record-seat > span {
+  grid-column: 1 / -1;
+  font-size: 13px;
+}
+.record-controls {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+.side.acting {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+/* 引いたカード・初期手札を選ぶ一覧 */
+.record-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 4px;
+}
+.record-card {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  text-align: left;
+  border-left: 4px solid var(--class-color, var(--neutral));
+  padding: 4px 8px;
+  font-size: 13px;
+}
+.record-card .cost {
+  min-width: 1.4em;
+  font-weight: bold;
+}
+.record-card-name {
+  flex: 1;
+  min-width: 0;
+}
+.record-chosen {
+  font-size: 13px;
+  padding: 3px 8px;
+}
+.record-outcomes {
+  margin: 0;
+  padding-left: 24px;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.record-outcomes button {
+  padding: 2px 10px;
+}
+.record-tools {
+  font-size: 13px;
+}
+.record-tools button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.record-mark {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.record-mark input {
+  width: 14em;
+  padding: 3px 6px;
+}
+.record-edit {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+.record-edit h3 {
+  font-size: 14px;
+  margin: 0;
+}
+.record-log {
+  max-height: 60vh;
+}
+.record-log li.record-log-mark {
+  color: var(--target);
+}
+.record-setup select,
+.record-setup input[type="text"] {
+  width: 100%;
+  min-width: 0;
+}
+.record-outcome-diff {
+  font-weight: bold;
+}

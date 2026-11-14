@@ -1,14 +1,16 @@
 // UI 表示用の文言
 
-import { ALL_CARDS, CLASS_NAMES, type Card, type ClassId } from "../cards";
+import { CLASS_NAMES, type Card, type ClassId } from "../cards";
 import {
   abilitiesOf,
   actingPlayer,
   attackReach,
   cardOf,
+  cardTableVersion,
   crestOf,
   findBoard,
   findHand,
+  knownCards,
   type Action,
   type GameState,
   type PlayerIndex,
@@ -98,8 +100,8 @@ function collectModes(v: unknown, found: (mode: unknown) => void): void {
   }
 }
 
-/** 【モード】の効果（canonicalJson）→ その効果を能力に持つカードのID */
-let modeCards: Map<string, string> | undefined;
+/** 【モード】の効果（canonicalJson）→ その効果を能力に持つカードのID（作ったときのカードの表の版と） */
+let modeCards: { map: Map<string, string>; version: number } | undefined;
 
 /** モード選択待ちの【モード】の効果を持つカードのID。
  *  局面（エンジンの JSON）にはどのカードの能力かが入っていない（スペルはプレイすると場にも手札にも残らない）ので、
@@ -107,17 +109,17 @@ let modeCards: Map<string, string> | undefined;
 export function modeSourceCard(state: GameState): string | null {
   const frame = state.stack[state.stack.length - 1];
   if (!frame || state.pending?.kind !== "mode") return null;
-  if (!modeCards) {
+  if (modeCards?.version !== cardTableVersion()) {
     const m = new Map<string, string>();
-    for (const card of ALL_CARDS) {
+    for (const card of knownCards()) {
       collectModes(abilitiesOf(card.id), (mode) => {
         const key = canonicalJson(mode);
         if (!m.has(key)) m.set(key, card.id);
       });
     }
-    modeCards = m;
+    modeCards = { map: m, version: cardTableVersion() };
   }
-  return modeCards.get(canonicalJson(frame.effects[frame.pc])) ?? null;
+  return modeCards.map.get(canonicalJson(frame.effects[frame.pc])) ?? null;
 }
 
 /** モードの選択肢の文言（そのカードの能力テキストの「（1）…」の行） */
