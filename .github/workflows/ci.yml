@@ -6,7 +6,11 @@ on:
     branches-ignore: [main]
 
 jobs:
-  # ドキュメント（*.md と docs/ の下）だけの変更かを調べる。そうなら下の check と rust を飛ばす。
+  # 変わったファイルから、下の check と rust のどちらを回すかを決める。
+  # - ドキュメント（*.md と docs/ の下）と夜のキューのジョブのファイル（night/ の下。PC で回すコマンドの並びで、テストもビルドも読まない）だけなら、両方飛ばす
+  # - それに加えて、画面（src/ui/ の下）と TypeScript のテスト（tests/ の下）だけなら、rust を飛ばす
+  #   （Rust に埋め込むデータ（npm run rust-data）も Rust のテストも、この 2 つを読まない。エンジンと AI は check の npm test でも WASM で動く）
+  # - ほかのファイルが 1 つでもあれば、両方回す（rust/・data/・src/cards/・src/engine/・src/ai/・scripts/・misses/・records/ 等は、Rust のビルドやテストが読む）
   # 比べる相手は PR ならマージ先、ブランチへの push なら main との分かれ目（そこからの変更をまとめて見る）。
   # ワークフローごと paths-ignore で止めると、必須のチェックにしたときに「待ち」のまま残ってマージできないので、
   # ジョブの if で飛ばす（飛ばしたジョブは成功の扱いになる）。
@@ -14,6 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.diff.outputs.code }}
+      rust: ${{ steps.diff.outputs.rust }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,22 +30,34 @@ jobs:
           TARGET: ${{ github.base_ref || 'main' }}
         run: |
           code=false
+          rust=false
           if ! files=$(git diff --name-only --no-renames "origin/$TARGET...HEAD"); then
             echo "origin/$TARGET と比べられないので、すべて調べる"
             code=true
+            rust=true
           fi
           while IFS= read -r f; do
             case "$f" in
-              '' | docs/* | *.md) ;;
-              *)
-                echo "ドキュメント以外の変更: $f"
+              '' | docs/* | *.md | night/*) ;;
+              tests/* | src/ui/*)
+                if [ "$code" = false ]; then echo "画面か TypeScript のテストの変更: $f"; fi
                 code=true
+                ;;
+              *)
+                echo "Rust のビルドやテストが読みうるファイルの変更: $f"
+                code=true
+                rust=true
                 break
                 ;;
             esac
           done <<< "$files"
-          if [ "$code" = false ]; then echo "ドキュメントだけの変更なので check と rust を飛ばす"; fi
+          if [ "$code" = false ]; then
+            echo "ドキュメントと夜のキューのジョブのファイルだけの変更なので check と rust を飛ばす"
+          elif [ "$rust" = false ]; then
+            echo "画面と TypeScript のテストだけの変更なので rust を飛ばす"
+          fi
           echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"
 
   # 画面・スクリプト（TypeScript）。エンジンと AI は WASM（npm test の前に npm run wasm で作る）
   check:
@@ -62,7 +79,7 @@ jobs:
   # エンジンと AI（rust/）: 書式・lint・単体テストと、決まった試合の結果が保存したものと同じか（rust/engine/tests/golden.rs）
   rust:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
