@@ -99,7 +99,8 @@ profile --games 49
   `td train`・`td prune` の行は、Rust 版（`svwb td train`・`prune`。同じモデルを書き、速くてメモリが少ない。[commands.md](commands.md)「svwb」）を
   回のフォルダに写した svwb で回す（2026-11-15 から既定。B の 6 万試合で TypeScript 版と同じモデルになるのを確かめた）。実験用の引数（`--attr` 等）を使う行は
   `--impl ts` を付けて TypeScript 版で回す（Rust 版はその引数をエラーにする）。2026-11-14 までの行（`night/relearn-b.txt` 等）は、`--impl` が無ければ TypeScript 版で回したもの。
-  `--est` は TypeScript 版の時間のままの行が多い（多めに見積もる分には困らない。PC で Rust 版を回した実測で直す）
+  `--est` は TypeScript 版の時間のままの行が多い（多めに見積もる分には困らない）。PC の Rust 版の実測は、段階 4 の R1（新しいプールの自己対戦 6 万試合、入力あり）で
+  学習 14 分・間引き 24 秒（`night/pool-r2.txt` の `--est` はこれから）
 - **pick**: `pick --compare <前の compare の台帳の名前> --pass <ファイル> --fail <ファイル> --out <ファイル>`。その compare の済んだ区切りをまとめ、
   A の勝率 − 50% − 2 SE が 0 より大きければ `--pass`、そうでなければ `--fail` のファイルを `--out` に写す（回す前に決めた線で、後のジョブの設定を選ぶ）。
   結果は回のフォルダの `pick-<番号>.json` と、`status`・`finish` の表
