@@ -1,9 +1,10 @@
 name: CI
 
+# PR のときだけ回す。ブランチへの push でも回していたときは、PR のあるブランチで同じジョブが 2 組ずつ走っていた（2026-11-15 にやめた）。
+# PR を作る前のブランチで回したいときは、手動実行（Actions タブの Run workflow でブランチを選ぶ）。
 on:
   pull_request:
-  push:
-    branches-ignore: [main]
+  workflow_dispatch:
 
 jobs:
   # 変わったファイルから、下の check と rust のどちらを回すかを決める。
@@ -11,7 +12,7 @@ jobs:
   # - それに加えて、画面（src/ui/ の下）と TypeScript のテスト（tests/ の下）だけなら、rust を飛ばす
   #   （Rust に埋め込むデータ（npm run rust-data）も Rust のテストも、この 2 つを読まない。エンジンと AI は check の npm test でも WASM で動く）
   # - ほかのファイルが 1 つでもあれば、両方回す（rust/・data/・src/cards/・src/engine/・src/ai/・scripts/・misses/・records/ 等は、Rust のビルドやテストが読む）
-  # 比べる相手は PR ならマージ先、ブランチへの push なら main との分かれ目（そこからの変更をまとめて見る）。
+  # 比べる相手は PR ならマージ先、手動実行なら main との分かれ目（そこからの変更をまとめて見る）。
   # ワークフローごと paths-ignore で止めると、必須のチェックにしたときに「待ち」のまま残ってマージできないので、
   # ジョブの if で飛ばす（飛ばしたジョブは成功の扱いになる）。
   changes:
