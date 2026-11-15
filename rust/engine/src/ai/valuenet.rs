@@ -302,10 +302,10 @@ fn relu(h: &mut [f64]) {
 }
 
 /// h[j] += x × w[o + j] を、rows の (o, x) の順に足す（層の 1 つの計算。o は重みの行の始まり、h の長さは行の長さ）。
-/// h の要素ごとに rows の順で 1 つずつ足すので、行ごとに h 全体へ足す形と値はビットまで同じ。
-/// h を ROW_BLOCK 個ずつに分け、その分をレジスタに置いたまま全部の行を足す（h を行ごとに読み書きしない）。
-/// x86_64 で AVX2 が使えれば 4 つずつ計算する（積と和は別々に丸めるので、値は同じ。FMA は使わない）
-fn add_rows(w: &[f64], rows: &[(usize, f64)], h: &mut [f64]) {
+/// h の要素ごとに rows の順で 1 つずつ足すので、行ごとに h 全体へ足す形と値はビットまで同じ（足す順は変わらない）。
+/// h を B 個ずつに分け、その分をレジスタに置いたまま全部の行を足す（行ごとに h を読み書きしない）。
+/// x86_64 で AVX2 が使えれば 4 つずつ計算する（積と和は別々に丸めるので値は同じ。FMA は使わない）。docs/value-net.md「形」
+pub(crate) fn add_rows(w: &[f64], rows: &[(usize, f64)], h: &mut [f64]) {
     #[cfg(target_arch = "x86_64")]
     if std::arch::is_x86_feature_detected!("avx2") {
         // SAFETY: AVX2 が使えることを確かめた
@@ -317,12 +317,12 @@ fn add_rows(w: &[f64], rows: &[(usize, f64)], h: &mut [f64]) {
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-unsafe fn add_rows_avx2(w: &[f64], rows: &[(usize, f64)], h: &mut [f64]) {
+fn add_rows_avx2(w: &[f64], rows: &[(usize, f64)], h: &mut [f64]) {
     add_rows_in::<32>(w, rows, h);
 }
 
 #[inline(always)]
-fn add_rows_in<const B: usize>(w: &[f64], rows: &[(usize, f64)], h: &mut [f64]) {
+pub(crate) fn add_rows_in<const B: usize>(w: &[f64], rows: &[(usize, f64)], h: &mut [f64]) {
     let mut chunks = h.chunks_exact_mut(B);
     let mut j = 0;
     for hb in &mut chunks {
