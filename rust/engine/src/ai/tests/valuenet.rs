@@ -711,3 +711,41 @@ fn extended_model_keeps_values_and_layout() {
     assert_eq!(layout["zones"][14], "myDeckCards");
     assert_eq!(layout["scalars"][0], "myHp");
 }
+
+/// 層の計算（add_rows）は、行ごとに h 全体へ足す元の形とビットまで同じ値になる（隠れ層の大きさがまとめる数で割り切れないときも。
+/// 同じ行を 2 度足す・負の値・0 も）。AVX2 の形と、それの無いときの形の両方
+#[test]
+fn add_rows_matches_row_by_row_bitwise() {
+    use crate::ai::valuenet::{add_rows, add_rows_in};
+    let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+    let mut rnd = move || {
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((seed >> 11) as f64 / (1u64 << 53) as f64 - 0.5) * 3.0
+    };
+    for m in [1usize, 3, 15, 16, 17, 31, 32, 33, 64, 100, 256] {
+        let n = 40;
+        let w: Vec<f64> = (0..n * m).map(|_| rnd()).collect();
+        let b: Vec<f64> = (0..m).map(|_| rnd()).collect();
+        let mut rows: Vec<(usize, f64)> = (0..25).map(|k| ((k * 7 % n) * m, rnd())).collect();
+        rows.push((3 * m, 0.0));
+        rows.push((rows[0].0, -rows[0].1));
+        let mut want = b.clone();
+        for &(o, x) in &rows {
+            for (hj, &r) in want.iter_mut().zip(&w[o..o + m]) {
+                *hj += x * r;
+            }
+        }
+        let bits = |h: &[f64]| h.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        let mut got = b.clone();
+        add_rows(&w, &rows, &mut got);
+        assert_eq!(bits(&got), bits(&want), "add_rows（隠れ層 {m}）");
+        let mut got = b.clone();
+        add_rows_in::<16>(&w, &rows, &mut got);
+        assert_eq!(bits(&got), bits(&want), "add_rows_in::<16>（隠れ層 {m}）");
+        let mut got = b.clone();
+        add_rows_in::<32>(&w, &rows, &mut got);
+        assert_eq!(bits(&got), bits(&want), "add_rows_in::<32>（隠れ層 {m}）");
+    }
+}

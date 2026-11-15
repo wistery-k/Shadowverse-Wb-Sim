@@ -301,6 +301,48 @@ fn relu(h: &mut [f64]) {
     }
 }
 
+/// h[j] += x × w[o + j] を、rows の (o, x) の順に足す（層の 1 つの計算。o は重みの行の始まり、h の長さは行の長さ）。
+/// h の要素ごとに rows の順で 1 つずつ足すので、行ごとに h 全体へ足す形と値はビットまで同じ（足す順は変わらない）。
+/// h を B 個ずつに分け、その分をレジスタに置いたまま全部の行を足す（行ごとに h を読み書きしない）。
+/// x86_64 で AVX2 が使えれば 4 つずつ計算する（積と和は別々に丸めるので値は同じ。FMA は使わない）。docs/value-net.md「形」
+pub(crate) fn add_rows(w: &[f64], rows: &[(usize, f64)], h: &mut [f64]) {
+    #[cfg(target_arch = "x86_64")]
+    if std::arch::is_x86_feature_detected!("avx2") {
+        // SAFETY: AVX2 が使えることを確かめた
+        unsafe { add_rows_avx2(w, rows, h) };
+        return;
+    }
+    add_rows_in::<16>(w, rows, h);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+fn add_rows_avx2(w: &[f64], rows: &[(usize, f64)], h: &mut [f64]) {
+    add_rows_in::<32>(w, rows, h);
+}
+
+#[inline(always)]
+pub(crate) fn add_rows_in<const B: usize>(w: &[f64], rows: &[(usize, f64)], h: &mut [f64]) {
+    let (blocks, rest) = h.as_chunks_mut::<B>();
+    let mut j = 0;
+    for hb in blocks.iter_mut() {
+        let mut a = *hb;
+        for &(o, x) in rows {
+            let r: &[f64; B] = w[o + j..o + j + B].try_into().unwrap();
+            for (ak, &rk) in a.iter_mut().zip(r) {
+                *ak += x * rk;
+            }
+        }
+        *hb = a;
+        j += B;
+    }
+    for (k, hk) in rest.iter_mut().enumerate() {
+        for &(o, x) in rows {
+            *hk += x * w[o + j + k];
+        }
+    }
+}
+
 /// 場のカードのネットワークの計算に使う場所
 #[derive(Default)]
 struct BoardBuf {
@@ -435,9 +477,9 @@ impl ValueNet {
     /// 入力（encodeState。添字と値を、最初に現れた順に）。場のカードのネットワークの出力（入力の末尾）は含まない
     /// （自己対戦の書き出しの "x"。学習が "b" から作る）
     pub fn encode(&self, s: &GameState, p: PlayerIndex, phase: ValuePhase) -> Vec<(usize, f64)> {
-        let mut acc = Acc(Vec::new());
+        let mut acc = Acc::new();
         encode(self, s, p, phase, &mut acc);
-        acc.0
+        acc.entries
     }
 
     /// 探索の extraEval（評価の点数の単位の補正。valueNetExtraEval）
@@ -448,18 +490,14 @@ impl ValueNet {
         }
         let hn = self.hidden;
         BUF.with(|buf| {
-            let (acc, h, h2) = &mut *buf.borrow_mut();
-            acc.0.clear();
+            let (acc, h, h2, rows) = &mut *buf.borrow_mut();
+            acc.clear();
             encode(self, s, p, phase, acc);
-            h.clear();
-            h.extend_from_slice(&self.b1);
-            for &(i, x) in &acc.0 {
-                if self.zero_row[i] {
-                    continue;
-                }
-                let row = &self.w1[i * hn..i * hn + hn];
-                for (hj, &r) in h.iter_mut().zip(row) {
-                    *hj += x * r;
+            // 足す行（行の始まりと値）。0 の行は足さない
+            rows.clear();
+            for &(i, x) in &acc.entries {
+                if !self.zero_row[i] {
+                    rows.push((i * hn, x));
                 }
             }
             // 場のカードのネットワークの出力（入力の末尾）
@@ -468,39 +506,29 @@ impl ValueNet {
                     let bb = &mut *bb.borrow_mut();
                     board.sums(self, s, p, bb);
                     for (t, &x) in bb.sums.iter().enumerate() {
-                        if x == 0.0 {
-                            continue;
-                        }
-                        let i = self.n_base + t;
-                        for (hj, &r) in h.iter_mut().zip(&self.w1[i * hn..i * hn + hn]) {
-                            *hj += x * r;
+                        if x != 0.0 {
+                            rows.push(((self.n_base + t) * hn, x));
                         }
                     }
                 });
             }
-            for hj in h.iter_mut() {
-                if *hj < 0.0 {
-                    *hj = 0.0;
-                }
-            }
+            h.clear();
+            h.extend_from_slice(&self.b1);
+            add_rows(&self.w1, rows, h);
+            relu(h);
             // 足した隠れ層（valueNet.ts の forwardRest と同じ順で足す）
             for (w, b) in &self.layers {
                 let m = b.len();
+                rows.clear();
+                for (i, &x) in h.iter().enumerate() {
+                    if x != 0.0 {
+                        rows.push((i * m, x));
+                    }
+                }
                 h2.clear();
                 h2.extend_from_slice(b);
-                for (i, &x) in h.iter().enumerate() {
-                    if x == 0.0 {
-                        continue;
-                    }
-                    for (oj, &r) in h2.iter_mut().zip(&w[i * m..i * m + m]) {
-                        *oj += x * r;
-                    }
-                }
-                for oj in h2.iter_mut() {
-                    if *oj < 0.0 {
-                        *oj = 0.0;
-                    }
-                }
+                add_rows(w, rows, h2);
+                relu(h2);
                 std::mem::swap(h, h2);
             }
             let mut z = self.b2;
@@ -549,27 +577,45 @@ pub fn default_net_weights() -> BaseWeightOptions {
 }
 
 /// 疎な入力（添字と値。TypeScript 版の Map と同じく、最初に現れた順）
-struct Acc(Vec<(usize, f64)>);
+struct Acc {
+    entries: Vec<(usize, f64)>,
+    /// add で入れた添字の entries での位置 + 1（0 なら無い。長さは足していく添字の数 n_base まで伸ばす）。clear で 0 に戻す
+    pos: Vec<u32>,
+}
 
 impl Acc {
+    const fn new() -> Acc {
+        Acc {
+            entries: Vec::new(),
+            pos: Vec::new(),
+        }
+    }
+    fn clear(&mut self) {
+        for &(i, _) in &self.entries {
+            if let Some(q) = self.pos.get_mut(i) {
+                *q = 0;
+            }
+        }
+        self.entries.clear();
+    }
+    /// 添字 i に v を足す（無ければ末尾に入れる）。i は n_base 未満（カード・クレストごとの入力）
     #[inline]
     fn add(&mut self, i: usize, v: f64) {
-        match self.0.iter_mut().find(|(k, _)| *k == i) {
-            Some(e) => e.1 += v,
-            None => self.0.push((i, v)),
+        if self.pos.len() <= i {
+            self.pos.resize(i + 1, 0);
+        }
+        match self.pos[i] {
+            0 => {
+                self.entries.push((i, v));
+                self.pos[i] = self.entries.len() as u32;
+            }
+            q => self.entries[q as usize - 1].1 += v,
         }
     }
-    /// ほかに足さない添字（山札の中身の入力。カードごとにまとめてから 1 回だけ入れる）
+    /// ほかに足さない添字（山札の中身の入力・数値の入力。どちらも同じ添字を 2 度入れず、add の添字とも重ならない）
     #[inline]
     fn push(&mut self, i: usize, v: f64) {
-        self.0.push((i, v));
-    }
-    #[inline]
-    fn set(&mut self, i: usize, v: f64) {
-        match self.0.iter_mut().find(|(k, _)| *k == i) {
-            Some(e) => e.1 = v,
-            None => self.0.push((i, v)),
-        }
+        self.entries.push((i, v));
     }
 }
 
@@ -690,10 +736,11 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
         o[5] / 2.0,
         b(phase == ValuePhase::Imagined),
     ];
+    // 数値の入力の添字（base + k）はカードごとの入力の後ろで、項目ごとに違う（前は set で入れていたが、同じ添字は無いので同じ）
     for (j, &x) in scalars.iter().enumerate() {
         if let Some(k) = net.scalar_slot[j] {
             if x != 0.0 {
-                acc.set(base + k, x);
+                acc.push(base + k, x);
             }
         }
     }
@@ -731,7 +778,10 @@ fn push_counts(
 thread_local! {
     /// push_counts の作業場所（vocab の添字ごとの枚数と、0 でない添字）
     static COUNTS: RefCell<(Vec<u32>, Vec<usize>)> = const { RefCell::new((Vec::new(), Vec::new())) };
-    static BUF: RefCell<(Acc, Vec<f64>, Vec<f64>)> = const { RefCell::new((Acc(Vec::new()), Vec::new(), Vec::new())) };
+    /// eval の作業場所（入力・隠れ層 2 つ・足す行）
+    #[allow(clippy::type_complexity)]
+    static BUF: RefCell<(Acc, Vec<f64>, Vec<f64>, Vec<(usize, f64)>)> =
+        const { RefCell::new((Acc::new(), Vec::new(), Vec::new(), Vec::new())) };
     static BOARD_BUF: RefCell<BoardBuf> = RefCell::new(BoardBuf::default());
 }
 
