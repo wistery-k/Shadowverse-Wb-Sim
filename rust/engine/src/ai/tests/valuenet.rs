@@ -670,9 +670,14 @@ fn deck_inputs_do_not_change_with_determinize() {
 fn extended_model_keeps_values_and_layout() {
     // 山札の中身の入力を重み 0 で足したモデル（npm run td -- extend）は、足す前のモデルと同じ値を出す。入力の並びは先頭の行に書く形で出す
     use crate::ai::valuenet::ZONES;
-    let base = model(4, |i| ((i * 31) % 17) as f64 / 30.0 - 0.25, 0.6);
+    let mut base = model(4, |i| ((i * 31) % 17) as f64 / 30.0 - 0.25, 0.6);
     let v = base.vocab.len();
     let h = base.hidden;
+    // 今の既定の補正（B、2026-11-15）は山札の中身の入力を持つので、それを外した形から始める
+    base.zones
+        .retain(|z| z != "myDeckCards" && z != "oppUnseen");
+    base.w1
+        .truncate((base.zones.len() * v + base.scalars.len()) * h);
     let n_old = base.zones.len() * v;
     let mut zones = base.zones.clone();
     zones.extend(["myDeckCards".to_string(), "oppUnseen".to_string()]);

@@ -146,27 +146,57 @@ fn core_cards_are_still_played() {
     };
     let core = |n: &str| n.ends_with("コア");
     let product = |n: &str| PRODUCTS.contains(&n);
-    // 前の版は、アーティファクトチャージで加えたコアを融合する
-    assert_eq!(count(&end0, &product), 1);
-    // deferFuse は同じ点数のまま、コアを融合せずに残す
+    // deferFuse は同じ点数のまま、コアを融合せずに残す。
+    // 前の版がアーティファクトチャージで加えたコアを融合するかは、学習した補正で変わる（補正 relearn9 では融合し、
+    // 補正 B（入力あり、2026-11-15）では融合しない）ので、融合する並びを選んだとして回した後の手を下で確かめる
+    assert!(count(&end0, &product) <= 1);
     assert_eq!(v0, v1);
     assert_eq!(count(&end1, &core), 2);
     assert_eq!(count(&end1, &product), 0);
+    // アーティファクトチャージを出してから加えたコアを融合する並びは、融合だけを除き、アーティファクトチャージは出す
+    let t = apply_all(&s, std::slice::from_ref(&charge));
+    let fuse = legal_actions(&t)
+        .into_iter()
+        .find(is_fuse)
+        .expect("アーティファクトチャージで加えたコアの融合");
+    let deferred = SearchAgent::new(deferred()).deferred_actions(&s, 0, &[charge.clone(), fuse]);
+    assert_eq!(deferred.first(), Some(&charge), "{deferred:?}");
+    assert!(deferred.iter().all(|a| !is_fuse(a)), "{deferred:?}");
 }
 
 #[test]
 fn fusion_used_this_turn_is_kept() {
-    // PP 3 なら、融合して作ったアタック・キャッスルをそのターンに出す並びは候補に残る
+    // PP 3 なら、融合して作ったアタック・キャッスルをそのターンに出す並びは、融合を回さずにそのまま打つ。
+    // どの並びを選ぶかは学習した補正で変わる（補正 B（入力あり、2026-11-15）では、PP 3 でもコアを融合せずに終える）ので、
+    // 融合して出す並びを選んだとして、回した後の手を確かめる
     let s = af_turn(
         3,
         &["パスト・コア", "パスト・コア", "フューチャー・コア"],
         &[],
     );
-    let with = candidates(&s);
+    let ag = SearchAgent::new(deferred());
+    let mut kept = 0;
+    for fuse in legal_actions(&s).into_iter().filter(is_fuse) {
+        let Action::Fuse { host, .. } = fuse else {
+            unreachable!()
+        };
+        let t = apply_all(&s, std::slice::from_ref(&fuse));
+        let made = t.players[0]
+            .hand
+            .iter()
+            .find(|h| h.iid == host)
+            .map(|h| name_of(h.card));
+        let play = Action::Play(host);
+        if !made.is_some_and(|n| PRODUCTS.contains(&n)) || !legal_actions(&t).contains(&play) {
+            continue;
+        }
+        let deferred = ag.deferred_actions(&s, 0, &[fuse.clone(), play.clone()]);
+        assert_eq!(deferred, [fuse, play], "{made:?}");
+        kept += 1;
+    }
     assert!(
-        with.iter()
-            .any(|(a, _, board)| is_fuse(a) && board.iter().any(|n| PRODUCTS.contains(n))),
-        "{with:?}"
+        kept > 0,
+        "PP 3 で出せるアーティファクトを作る融合がありません"
     );
 }
 
