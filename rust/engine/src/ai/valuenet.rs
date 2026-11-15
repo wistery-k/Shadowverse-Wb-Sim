@@ -323,21 +323,20 @@ fn add_rows_avx2(w: &[f64], rows: &[(usize, f64)], h: &mut [f64]) {
 
 #[inline(always)]
 pub(crate) fn add_rows_in<const B: usize>(w: &[f64], rows: &[(usize, f64)], h: &mut [f64]) {
-    let mut chunks = h.chunks_exact_mut(B);
+    let (blocks, rest) = h.as_chunks_mut::<B>();
     let mut j = 0;
-    for hb in &mut chunks {
-        let mut a = [0.0f64; B];
-        a.copy_from_slice(hb);
+    for hb in blocks.iter_mut() {
+        let mut a = *hb;
         for &(o, x) in rows {
             let r: &[f64; B] = w[o + j..o + j + B].try_into().unwrap();
             for (ak, &rk) in a.iter_mut().zip(r) {
                 *ak += x * rk;
             }
         }
-        hb.copy_from_slice(&a);
+        *hb = a;
         j += B;
     }
-    for (k, hk) in chunks.into_remainder().iter_mut().enumerate() {
+    for (k, hk) in rest.iter_mut().enumerate() {
         for &(o, x) in rows {
             *hk += x * w[o + j + k];
         }
