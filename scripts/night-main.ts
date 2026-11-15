@@ -57,7 +57,7 @@ const HARD_GRACE = 15 * 60;
 export type JobSpec =
   | { kind: "compare"; a: string; b: string; vs: string | null; noMirror: boolean; decks: string | null; with: string | null; without: string | null }
   | { kind: "yardstick"; ref: "classic" | "strong"; opts: string }
-  | { kind: "profile"; opts: string; rhino: boolean }
+  | { kind: "profile"; opts: string; rhino: boolean; decks: string | null }
   /** 見落とし問題集（docs/misses.md）。games は 1 問を打つ回数（--trials） */
   | { kind: "misses"; opts: string; seed: number }
   /** 候補の打ち比べ調査（docs/survey.md）。games は自己対戦の試合の数（1 つの番号で 1 試合） */
@@ -240,9 +240,10 @@ export function parseJob(line: string, index: number): Job {
       const games = intOf(take("--games") ?? "49", "--games", 1);
       const start = intOf(take("--start") ?? "0", "--start", 0);
       const rhino = flag("--rhino");
+      const decks = take("--decks");
       noUnknown();
       if (rest.length > 0) throw new Error(`知らない引数: ${rest.join(" ")}`);
-      return { index, line: text, label, games, start, est, spec: { kind, opts, rhino } };
+      return { index, line: text, label, games, start, est, spec: { kind, opts, rhino, decks } };
     }
     case "misses": {
       // 行の頭の run は書いても書かなくてもよい
@@ -486,6 +487,7 @@ function jobArgvRaw(job: Job, first: number, count: number, dir: string): string
         "--start",
         String(first),
         ...(s.rhino ? ["--rhino"] : []),
+        ...(s.decks === null ? [] : ["--decks", s.decks]),
         "--json",
         join(dir, `speed-${job.index}.json`),
         "--report",
@@ -551,7 +553,7 @@ export function jobTitle(job: Job): string {
   if (s.kind === "data") return `${s.cmd.join(" ")} → ${s.out}`;
   if (s.kind === "node") return `${s.tool} ${s.args[0] ?? ""}${s.impl === "rust" ? "（Rust）" : ""} → ${s.out}`;
   if (s.kind === "pick") return `pick（${s.from} が線を越えたら ${s.pass}、越えなければ ${s.fail}）→ ${s.out}`;
-  return `profile（速さ）${s.opts === "{}" ? "" : ` ${s.opts}`}${s.rhino ? " --rhino" : ""}`;
+  return `profile（速さ）${s.opts === "{}" ? "" : ` ${s.opts}`}${s.rhino ? " --rhino" : ""}${s.decks === null ? "" : ` --decks ${s.decks}`}`;
 }
 
 // ---------------------------------------------------------------- 見積もりと区切り
@@ -632,7 +634,12 @@ export function estimate(job: Job, runs: RunRow[], machine: string, threads: num
     const other = surveyOpts({ ...s, rate: 0.1 }) !== "";
     return { perGame: (sp.ts.survey * (s.rate / 0.1)) / threads, source: `${sp.note}${other ? "（局面の割合のほかの設定の違いは見ていない）" : ""}` };
   }
-  const plain = s.kind === "compare" ? s.a === "{}" && s.b === "{}" && s.decks === null : s.opts === "{}";
+  const plain =
+    s.kind === "compare"
+      ? s.a === "{}" && s.b === "{}" && s.decks === null
+      : s.kind === "profile"
+        ? s.opts === "{}" && s.decks === null
+        : s.opts === "{}";
   if (s.kind === "misses") return { perGame: sp.ts.misses / threads, source: `${sp.note}（10 問のとき）` };
   return { perGame: sp.ts[key] / threads, source: `${sp.note}${plain ? "" : "（設定の違いは見ていない）"}` };
 }
@@ -890,9 +897,10 @@ export function workerPid(dir: string): number | null {
   const pid = Number(readFileSync(f, "utf8").trim());
   if (!Number.isInteger(pid) || pid <= 0) return null;
   try {
-    // pid が使い回されていないか（電源を入れ直した後など）。worker は引数に回のフォルダを持つ
+    // pid が使い回されていないか（電源を入れ直した後など）。切り離した worker は引数に回のフォルダを持つ。
+    // start・resume --foreground は、その start・resume のプロセスが worker（引数に回のフォルダは無い）
     const cmd = readFileSync(`/proc/${pid}/cmdline`, "utf8");
-    return cmd.includes("night-main") && cmd.includes(dir) ? pid : null;
+    return cmd.includes("night-main") && (cmd.includes(dir) || cmd.split("\0").includes("--foreground")) ? pid : null;
   } catch {
     try {
       process.kill(pid, 0);
@@ -1485,39 +1493,47 @@ export function standIn(text: string): string {
   return JSON.stringify(walk(JSON.parse(text), ""));
 }
 
-/** 設定の書き間違いを、回す前に見つける（0 試合の compare は設定を読むだけ。0 回の misses は設定と問題集を読むだけ。
- * データを作るジョブは 0 試合で回す。td・potential・pick は確かめない） */
+/** 回す前に設定の書き間違いを見つけるための svwb の引数（0 試合の compare は設定を読むだけ。0 回の misses は設定と問題集を読むだけ。
+ * データを作るジョブは 0 試合で回す）。td・potential・pick・survey は確かめない（undefined）。
+ * 前のジョブが作るファイル（@/）は、モデル（--model・--vocab・--potential と設定の JSON）なら今の既定のモデルに、ほかは tmp の下の名前にする */
+export function checkArgv(job: Job, tmp: string): string[] | undefined {
+  const s = job.spec;
+  // survey の設定は数だけで、ジョブの行を読むときに確かめた
+  if (s.kind === "survey" || s.kind === "node" || s.kind === "pick") return undefined;
+  if (s.kind === "data") {
+    const standInFor = (prev: string | undefined): string | undefined =>
+      prev === "--model" || prev === "--vocab" ? STAND_INS.valueNet : prev === "--potential" ? STAND_INS.potentialNet : undefined;
+    const sub = (a: string, prev: string | undefined): string =>
+      a.startsWith("{") ? standIn(a) : a.includes("@/") ? (standInFor(prev) ?? join(tmp, basename(a.split("{k}").join("0")))) : a;
+    const rest = s.args.map((a, i) => sub(a, s.args[i - 1]));
+    return [...s.cmd, "--games", "0", s.startFlag, String(job.start), ...rest, s.outFlag, join(tmp, `check-${job.index}.tmp`)];
+  }
+  if (s.kind === "compare") {
+    return [
+      "compare",
+      "0",
+      standIn(s.a),
+      standIn(s.b),
+      "0",
+      ...(s.vs === null ? [] : [s.vs]),
+      ...(s.decks === null ? [] : ["--decks", s.decks]),
+      ...(s.with === null ? [] : ["--with", s.with]),
+      ...(s.without === null ? [] : ["--without", s.without]),
+      "--no-ledger",
+    ];
+  }
+  if (s.kind === "misses") return ["misses", "run", "--opts", standIn(s.opts), "--trials", "0", "--no-ledger"];
+  const decks = s.kind === "profile" && s.decks !== null ? ["--decks", s.decks] : [];
+  return ["compare", "0", standIn(s.opts), "{}", "0", ...decks, "--no-ledger"];
+}
+
+/** 設定の書き間違いを、回す前に見つける（checkArgv の引数で svwb を回す） */
 function validate(bin: string, jobs: Job[]): void {
   const tmp = mkdtempSync(join(tmpdir(), "night-check-"));
   try {
     for (const job of jobs) {
-      const s = job.spec;
-      // survey の設定は数だけで、ジョブの行を読むときに確かめた
-      if (s.kind === "survey" || s.kind === "node" || s.kind === "pick") continue;
-      let args: string[];
-      if (s.kind === "data") {
-        const sub = (a: string, prev: string | undefined): string =>
-          a.startsWith("{") ? standIn(a) : a.includes("@/") ? (prev === "--model" ? STAND_INS.valueNet! : join(tmp, basename(a.split("{k}").join("0")))) : a;
-        const rest = s.args.map((a, i) => sub(a, s.args[i - 1]));
-        args = [...s.cmd, "--games", "0", s.startFlag, String(job.start), ...rest, s.outFlag, join(tmp, `check-${job.index}.tmp`)];
-      } else if (s.kind === "compare") {
-        args = [
-          "compare",
-          "0",
-          standIn(s.a),
-          standIn(s.b),
-          "0",
-          ...(s.vs === null ? [] : [s.vs]),
-          ...(s.decks === null ? [] : ["--decks", s.decks]),
-          ...(s.with === null ? [] : ["--with", s.with]),
-          ...(s.without === null ? [] : ["--without", s.without]),
-          "--no-ledger",
-        ];
-      } else if (s.kind === "misses") {
-        args = ["misses", "run", "--opts", standIn(s.opts), "--trials", "0", "--no-ledger"];
-      } else {
-        args = ["compare", "0", standIn(s.opts), "{}", "0", "--no-ledger"];
-      }
+      const args = checkArgv(job, tmp);
+      if (args === undefined) continue;
       const r = spawnSync(bin, args, { cwd: REPO, encoding: "utf8" });
       if (r.status !== 0) throw new Error(`ジョブ ${job.index} の設定が読めません: ${(r.stderr || r.stdout).trim()}`);
     }

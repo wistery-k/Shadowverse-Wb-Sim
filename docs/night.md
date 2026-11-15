@@ -70,7 +70,7 @@ profile --games 49
 - **compare**: `compare <試合数> '<A>' '<B>' [最初の試合番号] [B のデッキ] [--no-mirror] [--decks …] [--with <デッキ名> | --without <デッキ名>] --label 名前`（`npm run compare` と同じ。
   `--with` はそのデッキの絡む組だけ、`--without` は絡まない組だけ。試合番号はその組の k 番目の番号）
 - **yardstick**: `yardstick [--ref classic|strong] [--opts '<設定>'] [--games 1000] [--start 0] --label 名前`
-- **profile**（速さ）: `profile [--opts '<設定>'] [--games 49] [--start 0] [--rhino]`。結果は回のフォルダの `speed-<番号>.md`・`.json`（`svwb profile` の報告）
+- **profile**（速さ）: `profile [--opts '<設定>'] [--games 49] [--start 0] [--rhino] [--decks <デッキ>,…|@<デッキの組>]`。結果は回のフォルダの `speed-<番号>.md`・`.json`（`svwb profile` の報告。`--decks` なら型ごとの表も出る。PP を残して終えたターンの割合などを、学び直しの回ごとに見るのに使う）
 - **misses**（見落とし問題集、`docs/misses.md`）: `misses [run] [--opts '<設定>'] [--trials 24] [--seed 1] --label 名前`。分けずに 1 区切りで回す。
   見込みの「1 試合」は、全部の問を 1 回ずつ解く秒（台帳の前の回から、問の数の違いを割り直して見込む）。`--only`・`--dir`・`--out` は使えない（問題集全体を解く）
 - **survey**（候補の打ち比べ調査、`docs/survey.md`）: `survey [run] --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8] --label 名前`

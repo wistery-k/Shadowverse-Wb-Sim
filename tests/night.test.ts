@@ -1,5 +1,6 @@
 // 夜のキュー（scripts/night-main.ts・docs/night.md）。svwb の代わりに、台帳の行だけを書く偽物を回して、区切り・再開・止め方・まとめを確かめる
 
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +8,7 @@ import { gunzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseLedger, type MissesRow, type RunRow, type SurveyRow } from "../scripts/ledger-main";
 import {
+  checkArgv,
   chunkJob,
   combineRows,
   estimate,
@@ -24,6 +26,7 @@ import {
   standIn,
   jobArgv,
   wallClock,
+  workerPid,
   type WorkerControl,
 } from "../scripts/night-main";
 
@@ -49,7 +52,24 @@ describe("ジョブの行", () => {
     expect(c.spec).toEqual({ kind: "compare", a: '{"beamWidth":128}', b: "{}", vs: "リノセウスエルフ", noMirror: true, decks: null, with: null, without: null });
     const y = parseJob("svwb yardstick --ref strong --games 4000 --label 強", 2);
     expect(y).toMatchObject({ games: 4000, start: 0, spec: { kind: "yardstick", ref: "strong", opts: "{}" } });
-    expect(parseJob("profile", 3)).toMatchObject({ games: 49, label: "", spec: { kind: "profile", rhino: false } });
+    expect(parseJob("profile", 3)).toMatchObject({ games: 49, label: "", spec: { kind: "profile", rhino: false, decks: null } });
+    const pd = parseJob(`profile --opts '{"valueNet":"@/r.json"}' --games 84 --decks @data/pools/azvaldt/sets/all84.txt`, 3);
+    expect(pd.spec).toEqual({ kind: "profile", opts: '{"valueNet":"@/r.json"}', rhino: false, decks: "@data/pools/azvaldt/sets/all84.txt" });
+    expect(jobArgv(pd, 0, 84, "/r")).toEqual([
+      "profile",
+      "--opts",
+      '{"valueNet":"/r/r.json"}',
+      "--games",
+      "84",
+      "--start",
+      "0",
+      "--decks",
+      "@data/pools/azvaldt/sets/all84.txt",
+      "--json",
+      "/r/speed-3.json",
+      "--report",
+      "/r/speed-3.md",
+    ]);
     expect(parseJob("misses run --trials 12 --seed 3 --label 定例", 4)).toMatchObject({ games: 12, start: 0, label: "定例", spec: { kind: "misses", opts: "{}", seed: 3 } });
     expect(parseJob(`misses --opts '{"beamWidth":512}' --label x`, 4)).toMatchObject({ games: 24, spec: { kind: "misses", opts: '{"beamWidth":512}', seed: 1 } });
     expect(() => parseJob("misses --trials 12", 1)).toThrow(/--label/);
@@ -126,6 +146,57 @@ describe("ジョブの行", () => {
       '{"valueNet":"data/value-net.json","beamWidth":8,"v":{"w":{"potentialNet":"data/potential-net.json"}}}',
     );
     expect(() => standIn('{"model":"@/a.json"}')).toThrow(/valueNet/);
+    // 回す前の確かめ: 語彙を読むモデル（--vocab）も、--model と同じく今の既定のモデルにする。ほかの @/ は tmp の下の名前
+    const bgv = parseJob(
+      `beam-gap --games 40 --from 1000 --chunk 20 --decks @x.txt --vocab @/r.json --ref '{"valueNet":"@/r.json","potentialNet":null}' --sample 100 --inputs @/pot-{k}.jsonl --out @/pot-{k}-rows.jsonl --est 2`,
+      5,
+    );
+    expect(checkArgv(bgv, "/t")).toEqual([
+      "beam-gap",
+      "--games",
+      "0",
+      "--from",
+      "1000",
+      "--decks",
+      "@x.txt",
+      "--vocab",
+      "data/value-net.json",
+      "--ref",
+      '{"valueNet":"data/value-net.json","potentialNet":null}',
+      "--sample",
+      "100",
+      "--out",
+      "/t/pot-0-rows.jsonl",
+      "--inputs",
+      "/t/check-5.tmp",
+    ]);
+    expect(checkArgv(parseJob(`profile --opts '{"valueNet":"@/r.json"}' --decks @x.txt`, 2), "/t")).toEqual([
+      "compare",
+      "0",
+      '{"valueNet":"data/value-net.json"}',
+      "{}",
+      "0",
+      "--decks",
+      "@x.txt",
+      "--no-ledger",
+    ]);
+    const spp = parseJob("td selfplay --model @/v0.json --potential @/v0pot.json --games 10 --start 5 --chunk 5 --out @/s-{k}.jsonl.gz --est 1", 6);
+    expect(checkArgv(spp, "/t")).toEqual([
+      "td",
+      "selfplay",
+      "--games",
+      "0",
+      "--start",
+      "5",
+      "--model",
+      "data/value-net.json",
+      "--potential",
+      "data/potential-net.json",
+      "--out",
+      "/t/check-6.tmp",
+    ]);
+    expect(jobInputs(spp)).toEqual(["@/v0.json", "@/v0pot.json"]);
+    expect(checkArgv(parseJob("td extend --model x.json --out @/a.json --est 1", 1), "/t")).toBeUndefined();
   });
 
   it("区切りは大きさをそろえ、試合番号をすき間なく覆う", () => {
@@ -320,6 +391,28 @@ const finish = () => {
 };
 if (String(first) === process.env.FAKE_HANG) setTimeout(finish, 60000); else finish();
 `;
+
+describe("worker の pid", () => {
+  it("切り離した worker は引数の回のフォルダで、--foreground は start・resume のプロセスそのもので見分ける", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "night-pid-"));
+    const sleeper = (...args: string[]) => spawn(process.execPath, ["-e", "setTimeout(() => {}, 20000)", ...args], { stdio: "ignore" });
+    const kids = [sleeper("night-main", "worker", dir), sleeper("night-main", "start", "q.txt", "--foreground"), sleeper("night-main", "start", "q.txt")];
+    try {
+      await new Promise((r) => setTimeout(r, 300));
+      const at = (i: number) => {
+        writeFileSync(join(dir, "worker.pid"), String(kids[i]!.pid));
+        return workerPid(dir);
+      };
+      expect(at(0)).toBe(kids[0]!.pid);
+      expect(at(1)).toBe(kids[1]!.pid);
+      // 回のフォルダも --foreground も無いプロセスは、pid が使い回されたもの
+      expect(at(2)).toBeNull();
+    } finally {
+      for (const k of kids) k.kill();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("区切って回す（偽物の svwb で）", () => {
   let tmp = "";
