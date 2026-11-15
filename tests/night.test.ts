@@ -121,7 +121,10 @@ describe("ジョブの行", () => {
     expect(jobInputs(tr)).toEqual(["@/net0.json", "@/s-1.jsonl.gz", "@/s-2.jsonl.gz", "@/s-3.jsonl.gz"]);
     expect(jobArgv(tr, 0, 1, "/r")).toEqual(["td", "train", "--model", "/r/net0.json", "--data", "/r/s-1.jsonl.gz,/r/s-2.jsonl.gz,/r/s-3.jsonl.gz", "--out", "/r/a.json.tmp", "--epochs", "3"]);
     expect(chunkJob(tr, 600, 60)).toHaveLength(1);
-    expect(tr.spec).toMatchObject({ impl: "ts" });
+    expect(tr.spec).toMatchObject({ impl: "rust" });
+    expect(parseJob("td train --model a.json --out @/b.json --impl ts --est 1", 1).spec).toMatchObject({ impl: "ts" });
+    expect(parseJob("td attr --model a.json --out @/b.json --est 1", 1).spec).toMatchObject({ impl: "ts" });
+    expect(parseJob("potential train --out @/p.json --est 1", 1).spec).toMatchObject({ impl: "ts" });
     const trRust = parseJob("td prune --model @/a.json --data @/s-1.jsonl.gz --impl rust --out @/ap.json --est 60", 5);
     expect(trRust.spec).toMatchObject({ kind: "node", tool: "td", impl: "rust", out: "@/ap.json" });
     expect(jobArgv(trRust, 0, 1, "/r")).toEqual(["td", "prune", "--model", "/r/a.json", "--data", "/r/s-1.jsonl.gz", "--out", "/r/ap.json.tmp"]);
@@ -571,8 +574,8 @@ describe("区切って回す（偽物の svwb で）", () => {
       [
         "td extend --model data/value-net.json --out @/net0.json --est 1",
         "td selfplay --model @/net0.json --games 10 --start 100 --chunk 4 --eps 0.1 --out @/s-{k}.jsonl.gz --est 0.1",
-        "td train --model @/net0.json --data @/s-{1..3}.jsonl.gz --out @/a.json --impl rust --est 1",
-        "td train --model data/value-net.json --data @/s-{1..3}.jsonl.gz --out @/b.json --est 1",
+        "td train --model @/net0.json --data @/s-{1..3}.jsonl.gz --out @/a.json --est 1",
+        "td train --model data/value-net.json --data @/s-{1..3}.jsonl.gz --out @/b.json --impl ts --est 1",
         `compare 6 '{"valueNet":"@/a.json"}' '{"valueNet":"@/b.json"}' 0 --label q1 --est 0.1`,
         "pick --compare q1 --pass @/a.json --fail @/b.json --out @/q2.json",
         `beam-gap --games 4 --from 1000 --chunk 2 --ref '{"beamWidth":4096,"valueNet":"@/q2.json"}' --sample 100 --inputs @/pot-{k}.jsonl --out @/pot-{k}-rows.jsonl --est 0.1`,
@@ -600,7 +603,7 @@ describe("区切って回す（偽物の svwb で）", () => {
     expect(after.find((c) => c.startsWith("td train --model data/value-net.json"))).toBe(
       `td train --model data/value-net.json --data ${f("s-1.jsonl.gz")},${f("s-2.jsonl.gz")},${f("s-3.jsonl.gz")} --out ${f("b.json")}.tmp`,
     );
-    // --impl rust の学習は svwb td train で回す（--impl は渡さない）。--impl の無い行は TypeScript のまま
+    // td train の既定は Rust 版（svwb td train。--impl は渡さない）。--impl ts の行は TypeScript 版
     expect(JSON.parse(readFileSync(f("a.json"), "utf8"))).toEqual({
       tool: "svwb",
       argv: ["td", "train", "--model", f("net0.json"), "--data", `${f("s-1.jsonl.gz")},${f("s-2.jsonl.gz")},${f("s-3.jsonl.gz")}`, "--out", `${f("a.json")}.tmp`],
