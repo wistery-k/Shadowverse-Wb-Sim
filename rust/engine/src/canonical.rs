@@ -278,11 +278,12 @@ pub fn state_canon(s: &GameState) -> String {
     let attack = match &s.attack {
         None => "-".to_string(),
         Some(a) => format!(
-            "{}:{}:{}:{}",
+            "{}:{}:{}:{}{}",
             a.attacker,
             a.defender,
             b(a.super_evolved),
-            b(a.defender_destroyed)
+            b(a.defender_destroyed),
+            if a.blasted { ":blasted" } else { "" }
         ),
     };
     let phase = match s.phase {
@@ -305,7 +306,16 @@ pub fn state_canon(s: &GameState) -> String {
         attack,
         format!(
             "S{}",
-            join(&s.stack, |f| format!("{}:{}", f.effects.len(), f.pc), ",")
+            join(
+                &s.stack,
+                |f| format!(
+                    "{}:{}{}",
+                    f.effects.len(),
+                    f.pc,
+                    if f.needs_source { "n" } else { "" }
+                ),
+                ","
+            )
         ),
         format!("Q{}", s.queue.len()),
         format!("P0 {}", player_canon(&s.players[0])),

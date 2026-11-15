@@ -589,6 +589,9 @@ pub struct Frame {
     pub effects: Effects,
     pub pc: usize,
     pub ctx: Ctx,
+    /// 処理待ちだった能力で、解決を始めるときに能力の元（場のカード・クレスト）が残っていなければ働かない
+    /// （docs/rules.md 11章「能力の元が離れたとき」。effects.rs の `run`）
+    pub needs_source: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -617,6 +620,13 @@ impl Pending {
 pub struct Queued {
     pub ability: &'static Ability,
     pub ctx: Ctx,
+    /// 破壊で処理待ちに入った能力（ラストワード・「破壊されたとき」）の並べ替えの鍵（0 は破壊で入ったものではない）。
+    /// 同じ処理で入ったものを、この鍵の順に並べ直す（effects.rs の `order_destroyed`。docs/rules.md 11章
+    /// 「ラストワードと「破壊されたとき」の並び」）。入った処理の中でしか使わないので、局面の JSON には書かない
+    pub sort_key: u32,
+    /// 誘発したときに能力の元が場かリーダーエリアにいた（ラストワード以外）。解決を始めるときに元が離れていれば働かない
+    /// （docs/rules.md 11章「能力の元が離れたとき」）
+    pub needs_source: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -625,6 +635,8 @@ pub struct AttackInProgress {
     pub defender: Iid,
     pub super_evolved: bool,
     pub defender_destroyed: bool,
+    /// ふっとばしのダメージをもう与えたか（攻撃先を破壊した能力の解決の直後に与える。docs/rules.md「ふっとばしの判定」）
+    pub blasted: bool,
 }
 
 #[derive(Debug)]

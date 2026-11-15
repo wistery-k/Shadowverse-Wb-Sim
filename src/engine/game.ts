@@ -46,11 +46,11 @@ export function resolveTurnEnd(prev: GameState): GameState {
   return (callEngine({ f: "resolveTurnEnd", state: prev }) as GameState | null) ?? prev;
 }
 
-/** カードを使うときのコスト（エンハンスが使える PP なら、エンハンスのコスト） */
+/** カードを使うときのコスト（エンハンスが使える PP なら、エンハンスのコスト。エンハンスはコストを増やす効果の影響を受けない。docs/rules.md 8章） */
 export function playCost(card: Card, pp: number, hand?: HandCard): number {
-  const cost = hand ? handCost(hand) : card.cost;
   const enhance = enhanceCost(card.text);
-  return enhance !== null && pp >= enhance && enhance > cost ? enhance : cost;
+  if (enhance !== null && pp >= enhance && enhance > card.cost) return enhance;
+  return hand ? handCost(hand) : card.cost;
 }
 
 /** フォロワー自身の状態による攻撃の可否（相手の場は見ない）。leader: リーダーにも / follower: フォロワーにだけ / none: できない */
