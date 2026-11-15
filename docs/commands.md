@@ -417,7 +417,8 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
   同じモデルのファイル（バイトまで）を書く。学び直しの流れ（`night/relearn-b.txt`）が使う引数だけを持ち、実験用の引数（`--attr`・`--cmpWeight`・`--v1Only`・`--searchTarget`・
   `--seat`・`--exclude` 等）・場のカードのネットワークを持つモデル・属性の分（`attr`）を持つモデルの間引きはエラーにする（それは TypeScript 版で）。
   データを詰めた配列で持つのでメモリが少なく、ミニバッチの中の局面ごとの計算と、重みの行ごとの更新をスレッド（`THREADS`）に分ける（スレッドの数で結果は変わらない）。
-  `npm run td -- train … --impl rust`・夜のキューの行の `--impl rust` でも呼べる。時間とメモリは docs/ai-notes.md「補正の学習を Rust に移す」
+  `npm run td -- train … --impl rust` でも呼べる。夜のキューの `td train`・`td prune` の行は 2026-11-15 からこちらが既定（`--impl ts` で TypeScript 版）。
+  時間とメモリは docs/ai-notes.md「補正の学習を Rust に移す」
 - `deep-gap`: 今の既定の AI どうしの自己対戦（`ai-play` と同じ試合）の、自分のターンの最初の局面ごとに、試合のターンと深い読み（`--deep`。既定は
   ビーム 2048（今の既定が幅 512 になる 2026-10-26 までは 512）・読み直す最初の手 8・最初の手ごとの終局面 3・相手の手札の引き直し 48・相手のターンのビーム 32。読む深さは今の既定と同じで、広く・多く読む）のターンを比べる。
   食い違った局面は、手番の側から見た決定化を `--k` 通り作って両方に打たせ、深い読みの点数（別の引き直し `--evalSeeds` 通り。引き直しごとに勝率にしてから平均する）で見た勝率の差と、
@@ -475,7 +476,7 @@ npm run td -- eval --model a.json,b.json --data d.jsonl [--cards <カード名,�
 
 自己対戦（`selfplay`）は Rust 版（`npm run svwb -- td selfplay`）で行う。各引数の意味は `scripts/td-main.ts` の先頭。
 `train`・`prune` に `--impl rust` を付けると、Rust 版（上の「svwb」の `td train`・`td prune`。同じモデルを書き、速くてメモリが少ない）を作って、`--impl` を除いた引数で回す。
-既定は TypeScript 版のまま（照らし合わせの元として残す）。
+`npm run td` の既定は TypeScript 版のまま（照らし合わせの元・実験用の引数のため。夜のキューの既定は Rust 版。[night.md](night.md)「学び直しの流れ」）。
 `extend --vocab` は語彙（入力のカード・クレストの並び）をその範囲に広げる（`scripts/vocab.ts`。今の語彙の後ろに足し、足したカードの行は 0。場のカードのネットワークの最初の層も）。
 範囲は `starter`（スターターのカードとクレスト）・`pool`（エンジンのカードの表の全部）・`@<デッキの組>`（その組のデッキのカードと、そこから出うるトークン・
 アクセラレート・結晶の姿・信仰・クレスト）。見込みのモデル（`data/potential-net.json`）も語彙だけ同じように広げる。足した行を属性の分で埋めるなら、続けて

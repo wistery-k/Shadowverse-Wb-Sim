@@ -65,8 +65,9 @@ export type JobSpec =
   /** データを作る svwb（td selfplay・beam-gap）。chunk 試合ずつ、out（{k} に区切りの番号を入れる）に書く。out が .gz なら書いた後に gzip する。
    * args はそのほかの引数（そのまま渡す。{k} は区切りの番号にする） */
   | { kind: "data"; cmd: string[]; startFlag: "--start" | "--from"; outFlag: "--out" | "--inputs"; out: string; chunk: number; args: string[] }
-  /** TypeScript の学習（npm run td・npm run potential）。out を 1 つ作る。args は --out も含めた全部。
-   * impl が rust なら、td train・td prune を Rust 版（svwb td train・prune。rust/engine/src/runner/td_train.rs）で回す（行に --impl rust） */
+  /** 学習（npm run td・npm run potential）。out を 1 つ作る。args は --out も含めた全部。
+   * impl が rust なら、td train・td prune を Rust 版（svwb td train・prune。rust/engine/src/runner/td_train.rs）で回す。
+   * td train・td prune の既定は rust（2026-11-15 から。行に --impl ts なら TypeScript 版）、ほかは ts */
   | { kind: "node"; tool: "td" | "potential"; args: string[]; out: string; impl: "ts" | "rust" }
   /** 前の compare（台帳の名前 from）の A の勝率 − 50% が 2 SE を越えたら pass、越えなければ fail のファイルを out に写す */
   | { kind: "pick"; from: string; pass: string; fail: string; out: string };
@@ -325,11 +326,14 @@ export function parseJob(line: string, index: number): Job {
       }
       const tool = kind === "potential" ? "potential" : "td";
       const label = take("--label") ?? "";
-      const implText = take("--impl") ?? "ts";
-      if (implText !== "ts" && implText !== "rust") throw new Error(`--impl は ts か rust: ${implText}`);
+      const implFlag = take("--impl");
       const sub = rest[0];
       if (sub === undefined || sub.startsWith("--")) throw new Error(`${tool} のコマンド（train 等）がありません`);
-      if (implText === "rust" && (tool !== "td" || (sub !== "train" && sub !== "prune"))) throw new Error("--impl rust は td train・td prune だけ");
+      // td train・td prune は Rust 版が既定（B の 6 万試合で TypeScript 版と同じモデルになるのを確かめた、2026-11-15）
+      const rustable = tool === "td" && (sub === "train" || sub === "prune");
+      const implText = implFlag ?? (rustable ? "rust" : "ts");
+      if (implText !== "ts" && implText !== "rust") throw new Error(`--impl は ts か rust: ${implText}`);
+      if (implText === "rust" && !rustable) throw new Error("--impl rust は td train・td prune だけ");
       const i = rest.indexOf("--out");
       const out = i < 0 ? undefined : rest[i + 1];
       if (out === undefined) throw new Error("--out で作るファイルを書きます（そのファイルがあれば済んだものとする）");
