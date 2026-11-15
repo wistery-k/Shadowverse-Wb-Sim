@@ -366,7 +366,7 @@ npm run svwb -- meta …                                  # npm run meta と同�
 npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mulligan":"sample"}'] [--b '{}'] [--decks <デッキ>,…] [--rhino]
 npm run svwb -- mulligan-data --games 6000 [--start 0] [--seed 1] [--flip 0.5] --out d.jsonl
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
-                [--sampling classic|default] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
+                [--sampling classic|default] [--potential p.json|null] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
                 [--sDefault 0] [--searchValue 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--replays r.jsonl]
 npm run svwb -- td train --model m0.json --data d0.jsonl[,d1.jsonl.gz] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001]
                 [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--imaginedWeight 1] [--ivRes 1] [--best 0] [--bestOn end,after]
@@ -409,6 +409,8 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
   （手で作った項を外した補正を、同じ自己対戦から学ぶ。docs/ai-notes.md「評価関数の手作りの項を外す」）。
   `--searchValue 1` で、ターン末の局面に探索の値の材料（`"qe"`・`"qr"`。そのターンに選んだ並びのターン末と、相手のターンを読んだ後の勝つ確率）も書く（打つ手は変わらない）。
   `td train --searchTarget` がこれを読む（docs/ai-notes.md「補正の学習の目標に探索の値を使う」）
+  `--potential <ファイル>` で、ビームの並べ替えに使う学習した見込みを組み込みの既定（`data/potential-net.json`）の代わりにそのファイルにする（`null` なら使わない。compare の `"potentialNet"` と同じ。
+  `--sampling default` だけ）。学び直しの 2 回目から、前の回で学び直した見込みで打つ用（`night/pool-r1.txt`）
   `--replays r.jsonl` で、もとの試合（介入した試合・打ち比べは除く）ごとに、デッキ・シード・行動の列も別のファイルに書く
   （下の「リプレイ検索」で読む。打つ手は変わらない。`--out` の学習用の行には行動の列が無いので、それだけではリプレイにできない）
 - `td train`・`td prune`: 補正の学習と間引きの Rust 版（`rust/engine/src/runner/td_train.rs`。2026-11-14 から）。同じデータ・同じ引数で、TypeScript 版（下の「td」）と
