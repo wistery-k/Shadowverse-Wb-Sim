@@ -663,6 +663,7 @@ fn fire_side(
             {
                 continue;
             }
+            crate::crest_tally::note(p, crest_idx, i, s.active == p);
             let mut ctx = Ctx::new(p, iid);
             ctx.event = event;
             queue(s, ability, ctx);
