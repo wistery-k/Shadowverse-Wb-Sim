@@ -353,7 +353,8 @@ npm run svwb -- profile [--games 49] [--start 0] [--opts '<設定>'] [--rhino] [
 報告には、時間の長かった手番（1 試合で長い順に 3 つ、全試合で上位 20）と、デッキ（型）ごとの勝率・仕組みを使った回数
 （アクセラレート・結晶・エンハンス・奥義・解放奥義・進化・超進化・融合・アクト・エクストラPP・攻撃、最初に進化・超進化した自分のターン、
 プレイできるカードがあって PP も残っているのにターンを終えた割合）と、クレストの能力が誘発した回数（実際の試合だけ。
-型・クレスト・能力ごとに、持った席・最初に持った自分のターン・自分のターンと相手のターンの誘発。`rust/engine/src/crest_tally.rs`）も出す。
+型・クレスト・能力ごとに、持った席・最初に持った自分のターン・自分のターンと相手のターンの誘発。`rust/engine/src/trace.rs`）も出す。
+同じ数は棋譜からも数えられる（`svwb kifu count <棋譜> --where 'deck~クキシロ' --event 'trigger crest~クキシロ own'`。[kifu.md](kifu.md)「数える」）。
 
 ## svwb（Rust 版の CLI）
 
@@ -367,6 +368,7 @@ npm run svwb -- rhino-compare …                         # npm run rhino-compar
 npm run svwb -- yardstick …                             # npm run yardstick と同じ
 npm run svwb -- profile …                               # デッキごとの 1 試合の時間（内訳は npm run profile か --features profile のビルド。上の「profile」）
 npm run svwb -- misses …                                # npm run misses と同じ（上の「misses」）
+npm run svwb -- kifu count|winrate|events <棋譜>… …     # 棋譜を打ち直して出来事を数える・勝率（docs/kifu.md「数える」）
 npm run svwb -- meta …                                  # npm run meta と同じ
 npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mulligan":"sample"}'] [--b '{}'] [--decks <デッキ>,…] [--rhino]
 npm run svwb -- mulligan-data --games 6000 [--start 0] [--seed 1] [--flip 0.5] --out d.jsonl

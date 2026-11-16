@@ -8,13 +8,21 @@
 //! - ターンの終わり: ターン終了を選んだ局面で、ターン終了時の能力だけを解決した局面（相手のターンには進めない）。
 //!   決着したターンは決着した局面
 //! - ターン終了の後、相手のターンの始めに起きたこと（ドロー・ターン開始時の能力で場に出た・離れたカード）は、相手のターンの出来事にする
+//!   （相手のターンの始めに決着したときは、最後のターンの出来事にする）
 //! - 出来事の "at" は、その出来事を起こした行動の添字（リプレイで局面 at が行動の直前）
+//! - 出来事（形は docs/kifu.md「出来事」）: 行動そのもの（play・attack・act・fuse・extraPp）、エンジンが打ち直しの間に残したこと
+//!   （trace.rs。trigger・draw・addHand・damage・heal・destroy・banish・bounce）、前後の局面の違い（enter・leave・evolve・superEvolve・
+//!   crestIn・crestOut・pp・maxPp）、ターンを終えたときの様子（turnEnd）。1 つの行動の中では、この順に並べる
+//! - 棋譜を数えるコマンド（`svwb kifu`。runner/kifu_cmd.rs）も、開発サーバーのリプレイ検索も、この出来事の列を使う
 
-use crate::data::CardIdx;
-use crate::game::{acting_player, apply_legal, create_game, is_legal, resolve_turn_end};
+use crate::data::{data, CardIdx, CrestIdx};
+use crate::game::{
+    acting_player, apply_legal, create_game, is_legal, legal_actions, resolve_turn_end,
+};
 use crate::json::Json;
 use crate::state::{card, Action, Evolve, GameState, OnBoard, Phase, PlayerIndex};
 use crate::state_json::action_to_json;
+use crate::trace::{self, Ev, Leave, Src};
 
 fn num(x: impl Into<f64>) -> Json {
     Json::Num(x.into())
@@ -26,6 +34,10 @@ fn id(c: CardIdx) -> Json {
 
 fn obj(items: Vec<(&str, Json)>) -> Json {
     Json::Obj(items.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+}
+
+fn crest_id(c: CrestIdx) -> Json {
+    Json::Str(data().crests[c as usize].id.clone())
 }
 
 fn evolve_num(e: Evolve) -> i32 {
@@ -171,6 +183,176 @@ fn board_events(prev: &GameState, next: &GameState, at: usize, out: &mut Vec<Jso
     }
 }
 
+/// 打ち直しの間にエンジンが残したこと（trace.rs）を出来事にする。p は、誘発は能力を持つプレイヤー、引いた・手札に加えたは手札の持ち主、
+/// ダメージ・回復・場を離れたは受けた側（カードの持ち主）
+fn trace_events(evs: &[Ev], at: usize, out: &mut Vec<Json>) {
+    let head = |k: &str, p: PlayerIndex| {
+        obj(vec![
+            ("k", Json::Str(k.into())),
+            ("p", num(p as u32)),
+            ("at", num(at as u32)),
+        ])
+    };
+    let target = |e: &mut Json, c: Option<CardIdx>, i: Option<i32>| {
+        e.set("c", c.map_or(Json::Str("leader".into()), id));
+        if let Some(i) = i {
+            e.set("i", num(i));
+        }
+    };
+    for ev in evs {
+        let e = match *ev {
+            Ev::Trigger {
+                p,
+                src,
+                iid,
+                ability,
+                own_turn,
+            } => {
+                let mut e = head("trigger", p);
+                match src {
+                    Src::Card(c) => e.set("c", id(c)),
+                    Src::Crest(c) => {
+                        e.set("c", crest_id(c));
+                        e.set("crest", Json::Bool(true));
+                    }
+                }
+                e.set("i", num(iid));
+                // 能力の番号は 1 から（profile の表と同じ）。ほかのカードから得た能力は無い
+                if let Some(a) = ability {
+                    e.set("ab", num(a as u32 + 1));
+                }
+                e.set("own", Json::Bool(own_turn));
+                e
+            }
+            Ev::Draw {
+                p,
+                card: c,
+                filtered,
+                burned,
+            } => {
+                let mut e = head("draw", p);
+                e.set("c", id(c));
+                if filtered {
+                    e.set("search", Json::Bool(true));
+                }
+                if burned {
+                    e.set("burned", Json::Bool(true));
+                }
+                e
+            }
+            Ev::AddHand { p, card: c, burned } => {
+                let mut e = head("addHand", p);
+                e.set("c", id(c));
+                if burned {
+                    e.set("burned", Json::Bool(true));
+                }
+                e
+            }
+            Ev::Damage {
+                p,
+                card: c,
+                iid,
+                amount,
+            } => {
+                let mut e = head("damage", p);
+                target(&mut e, c, iid);
+                e.set("n", num(amount));
+                e
+            }
+            Ev::Heal {
+                p,
+                card: c,
+                iid,
+                amount,
+            } => {
+                let mut e = head("heal", p);
+                target(&mut e, c, iid);
+                e.set("n", num(amount));
+                e
+            }
+            Ev::Left {
+                p,
+                card: c,
+                iid,
+                why,
+            } => {
+                let k = match why {
+                    Leave::Destroy => "destroy",
+                    Leave::Banish => "banish",
+                    Leave::Bounce => "bounce",
+                };
+                let mut e = head(k, p);
+                target(&mut e, Some(c), Some(iid));
+                e
+            }
+        };
+        out.push(e);
+    }
+}
+
+/// prev から next までの、クレスト（信仰を含む）の出入りと PP・PP の最大値の増減（持ち主のプレイヤーの出来事にする）
+fn side_events(prev: &GameState, next: &GameState, at: usize, out: &mut Vec<Json>) {
+    for p in 0..2 {
+        let (a, b) = (&prev.players[p], &next.players[p]);
+        for c in a.crests.iter() {
+            if !b.crests.iter().any(|x| x.iid == c.iid) {
+                let mut e = obj(vec![
+                    ("k", Json::Str("crestOut".into())),
+                    ("p", num(p as u32)),
+                    ("at", num(at as u32)),
+                ]);
+                e.set("c", crest_id(c.crest));
+                e.set("i", num(c.iid));
+                out.push(e);
+            }
+        }
+        for c in b.crests.iter() {
+            if !a.crests.iter().any(|x| x.iid == c.iid) {
+                let mut e = obj(vec![
+                    ("k", Json::Str("crestIn".into())),
+                    ("p", num(p as u32)),
+                    ("at", num(at as u32)),
+                ]);
+                e.set("c", crest_id(c.crest));
+                e.set("i", num(c.iid));
+                out.push(e);
+            }
+        }
+        for (k, d) in [("pp", b.pp - a.pp), ("maxPp", b.max_pp - a.max_pp)] {
+            if d != 0 {
+                out.push(obj(vec![
+                    ("k", Json::Str(k.into())),
+                    ("p", num(p as u32)),
+                    ("at", num(at as u32)),
+                    ("n", num(d)),
+                ]));
+            }
+        }
+    }
+}
+
+/// ターンを終えたとき（ターン終了を選ぶ直前の局面 s）の様子: 残した PP と、手札からプレイできたカード（同じカードは 1 回）
+fn turn_end_event(s: &GameState, at: usize) -> Json {
+    let p = acting_player(s);
+    let pl = &s.players[p];
+    let mut cards: Vec<CardIdx> = legal_actions(s)
+        .iter()
+        .filter_map(|a| match a {
+            Action::Play(iid) => pl.hand.iter().find(|h| h.iid == *iid).map(|h| h.card),
+            _ => None,
+        })
+        .collect();
+    cards.sort_unstable();
+    cards.dedup();
+    obj(vec![
+        ("k", Json::Str("turnEnd".into())),
+        ("p", num(p as u32)),
+        ("at", num(at as u32)),
+        ("pp", num(pl.pp)),
+        ("playable", Json::Arr(cards.into_iter().map(id).collect())),
+    ])
+}
+
 /// 作りかけのターン
 struct Turn {
     n: i32,
@@ -237,28 +419,42 @@ pub fn replay_index(decks: [&[CardIdx]; 2], seed: u32, actions: &[Action]) -> Re
                 events: std::mem::take(&mut carry),
             });
         }
+        trace::start();
         let next = apply_legal(&s, a);
+        let traced = trace::take();
         if let Some(t) = cur.as_mut() {
             let turn_end = matches!(a, Action::EndTurn) && s.pending.is_none();
             if turn_end {
-                // ターン終了時の能力までをこのターンに、相手のターンの始めの出来事を次のターンにする
+                // ターン終了時の能力までをこのターンに、相手のターンの始めの出来事を次のターンにする。
+                // エンジンが残したことは、ターン終了時の処理だけを打ったときの分（apply_legal の初めの同じ並び）で分ける
+                t.events.push(turn_end_event(&s, i));
+                trace::start();
                 let mid = resolve_turn_end(&s);
+                let n_mid = trace::take().len().min(traced.len());
                 let mid = mid.as_ref().unwrap_or(&s);
+                let (this, rest) = traced.split_at(n_mid);
+                trace_events(this, i, &mut t.events);
                 board_events(&s, mid, i, &mut t.events);
+                side_events(&s, mid, i, &mut t.events);
                 t.end = Some(snapshot(if next.phase == Phase::Ended {
                     &next
                 } else {
                     mid
                 }));
                 t.end_step = i + 1;
-                if next.turn != t.n {
-                    board_events(mid, &next, i, &mut carry);
+                let to = if next.turn != t.n {
+                    &mut carry
                 } else {
-                    board_events(mid, &next, i, &mut t.events);
-                }
+                    &mut t.events
+                };
+                trace_events(rest, i, to);
+                board_events(mid, &next, i, to);
+                side_events(mid, &next, i, to);
             } else {
                 action_events(&s, a, i, &mut t.events);
+                trace_events(&traced, i, &mut t.events);
                 board_events(&s, &next, i, &mut t.events);
+                side_events(&s, &next, i, &mut t.events);
                 if t.end.is_some() {
                     // ターン終了時の能力の選択など、ターン終了の後に同じターンの行動が続いた
                     t.end = Some(snapshot(&next));
@@ -268,7 +464,9 @@ pub fn replay_index(decks: [&[CardIdx]; 2], seed: u32, actions: &[Action]) -> Re
         }
         s = next;
     }
-    if let Some(t) = cur.take() {
+    if let Some(mut t) = cur.take() {
+        // 相手のターンの始めに決着した（山札が無くて引けなかった 等）ときの出来事は、最後のターンに入れる
+        t.events.append(&mut carry);
         turns.push(t.finish(&s, actions.len()));
     }
     Ok(obj(vec![
@@ -362,6 +560,76 @@ mod tests {
             .filter(|x| matches!(x, Action::Play(_)))
             .count();
         assert_eq!(plays, expected);
+    }
+
+    /// ターン終了の出来事は、ターン終了時の処理だけを打った分（resolve_turn_end）が、ターン終了を打った分（apply_legal）の初めと同じ並び
+    #[test]
+    fn turn_end_trace_is_a_prefix() {
+        let mut ends = 0;
+        for seed in 1..8 {
+            let (a, b, actions) = random_game(seed);
+            let mut s = create_game([&a, &b], seed);
+            for act in &actions {
+                if matches!(act, Action::EndTurn) && s.pending.is_none() {
+                    trace::start();
+                    let _ = resolve_turn_end(&s);
+                    let mid = trace::take();
+                    trace::start();
+                    let _ = apply_legal(&s, act);
+                    let all = trace::take();
+                    assert!(all.len() >= mid.len());
+                    assert_eq!(&all[..mid.len()], &mid[..]);
+                    ends += 1;
+                }
+                s = apply_legal(&s, act);
+            }
+        }
+        assert!(ends > 50);
+    }
+
+    /// リーダーへのダメージと回復の出来事を足すと、試合の初めと終わりの体力の差になる。引いたカードは山札の減りと合う
+    #[test]
+    fn damage_heal_and_draws_add_up() {
+        let mut draws_seen = 0;
+        for seed in 1..8 {
+            let (a, b, actions) = random_game(seed);
+            let idx = replay_index([&a, &b], seed, &actions).expect("打ち直せる");
+            let turns = arr(idx.get("turns").unwrap());
+            for p in 0..2 {
+                let side = |t: &Json, k: &str| arr(t.get(k).unwrap())[p].clone();
+                let hp0 = n(&side(&turns[0], "start"), "hp");
+                let hp1 = n(&side(turns.last().unwrap(), "end"), "hp");
+                let deck0 = n(&side(&turns[0], "start"), "deck");
+                let deck1 = n(&side(turns.last().unwrap(), "end"), "deck");
+                let mut dmg = 0.0;
+                let mut heal = 0.0;
+                let mut drawn = 0.0;
+                for t in turns {
+                    for e in arr(t.get("ev").unwrap()) {
+                        if n(e, "p") != p as f64 {
+                            continue;
+                        }
+                        let k = e.get("k").unwrap();
+                        let leader = e.get("c") == Some(&Json::Str("leader".into()));
+                        if *k == Json::Str("damage".into()) && leader {
+                            dmg += n(e, "n");
+                        } else if *k == Json::Str("heal".into()) && leader {
+                            heal += n(e, "n");
+                        } else if *k == Json::Str("draw".into()) {
+                            drawn += 1.0;
+                        }
+                    }
+                }
+                assert_eq!(hp0 - dmg + heal, hp1, "seed {seed} 席 {p}");
+                // 山札から手札に引いた以外で山札が減ることもある（直接召喚など）ので、引いた数は減った数以下
+                assert!(
+                    drawn <= deck0 - deck1 + 1e-9,
+                    "seed {seed} 席 {p}: {drawn} > {deck0} - {deck1}"
+                );
+                draws_seen += drawn as u32;
+            }
+        }
+        assert!(draws_seen > 50);
     }
 
     #[test]

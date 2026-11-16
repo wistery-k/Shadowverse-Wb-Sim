@@ -9,7 +9,6 @@
 
 pub mod ai;
 pub mod canonical;
-pub mod crest_tally;
 pub mod data;
 pub mod effects;
 pub mod fasthash;
@@ -25,6 +24,7 @@ pub mod runner;
 pub mod sim;
 pub mod state;
 pub mod state_json;
+pub mod trace;
 
 pub use game::{
     acting_player, apply_action, apply_in_place, apply_legal, create_game, is_legal, legal_actions,

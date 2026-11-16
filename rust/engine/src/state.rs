@@ -1066,7 +1066,14 @@ impl GameState {
 
     /// 手札に加える。上限なら墓場へ。加えたら true
     pub fn add_hand_card(&mut self, p: PlayerIndex, c: HandCard) -> bool {
-        self.add_hand_card_from(p, c, 0)
+        let card = c.card;
+        let added = self.add_hand_card_from(p, c, 0);
+        crate::trace::note(crate::trace::Ev::AddHand {
+            p,
+            card,
+            burned: !added,
+        });
+        added
     }
 
     /// add_hand_card と同じ。伏せたカードなら手札の記録に足す（deck は山札の一番上から引いたときの、引く前の山札の枚数。それ以外は 0）
@@ -1126,7 +1133,15 @@ impl GameState {
             if hint.is_some() {
                 c.drawn_by = hint;
             }
-            if self.add_hand_card_from(p, c, top) {
+            let card = c.card;
+            let added = self.add_hand_card_from(p, c, top);
+            crate::trace::note(crate::trace::Ev::Draw {
+                p,
+                card,
+                filtered: filter.is_some(),
+                burned: !added,
+            });
+            if added {
                 drawn.push(r.iid);
             }
         }
