@@ -62,13 +62,13 @@ pub const STRONG_FINGERPRINT: &str = "66a09e01";
 pub const POOL_V0_VERSION: u32 = 1;
 
 /// 新しいプールの物差し（相手 v0）どうしの決まった試合の手順のハッシュ
-pub const POOL_V0_FINGERPRINT: &str = "f1e57c93";
+pub const POOL_V0_FINGERPRINT: &str = "36d62937";
 
 /// 新しいプールの強い相手の物差し（相手 R3）の版
 pub const POOL_R3_VERSION: u32 = 1;
 
 /// 新しいプールの強い相手の物差し（相手 R3）どうしの決まった試合の手順のハッシュ
-pub const POOL_R3_FINGERPRINT: &str = "63719ebd";
+pub const POOL_R3_FINGERPRINT: &str = "7fa599f2";
 
 /// 新しいプールの物差しのデッキ（リポジトリの根からの道）。2026-11-16 の `data/pools/azvaldt/sets/rep10.txt`（代表 10 型）を、
 /// 同じ順で書き写したもの（デッキの組のファイルを書き直しても物差しは動かない）
@@ -450,11 +450,14 @@ impl Reference {
     }
 }
 
-/// 相手どうしで試合 0〜6 を席とデッキを入れ替えて 14 試合打ち、手順と勝者のハッシュを返す
+/// 相手どうしで試合 0〜（デッキの数 − 1）を席とデッキを入れ替えて打ち、手順と勝者のハッシュを返す。
+/// どのデッキも先の席に 1 回は出る（スターターは 7 デッキで 14 試合、新しいプールは代表 10 型で 20 試合）
 pub fn fingerprint_of(r: Reference) -> String {
     let decks = r.decks();
     let reference = r.options();
-    let tasks: Vec<(u32, bool)> = (0..7).flat_map(|g| [(g, false), (g, true)]).collect();
+    let tasks: Vec<(u32, bool)> = (0..decks.len() as u32)
+        .flat_map(|g| [(g, false), (g, true)])
+        .collect();
     let lines = parallel_map(
         &tasks,
         |&(g, swap), _| {
