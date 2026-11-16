@@ -112,7 +112,12 @@ export function engineData() {
         fuseAnyOne,
       };
     }),
-    crests: ENGINE_CRESTS.map((c) => ({ id: c.id, countdown: c.countdown ?? null, faith: FAITH_CREST_IDS.has(c.id) })),
+    crests: ENGINE_CRESTS.map((c) => ({
+      id: c.id,
+      name: c.name.replace(/^クレスト：/, ""),
+      countdown: c.countdown ?? null,
+      faith: FAITH_CREST_IDS.has(c.id),
+    })),
     cardAbilities: CARD_ABILITIES,
     crestAbilities: CREST_ABILITIES,
     poolCardAbilities: AZVALDT_CARD_ABILITIES,

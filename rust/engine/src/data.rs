@@ -1232,6 +1232,8 @@ impl Card {
 #[serde(deny_unknown_fields)]
 pub struct CrestData {
     pub id: String,
+    /// 名前（「クレスト：」の後。報告に出すため）
+    pub name: String,
     pub countdown: Option<i32>,
     /// 信仰（クレストではないがリーダーエリアに置く。信仰値を持つ）
     pub faith: bool,

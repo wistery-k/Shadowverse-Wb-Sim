@@ -9,6 +9,7 @@
 
 pub mod ai;
 pub mod canonical;
+pub mod crest_tally;
 pub mod data;
 pub mod effects;
 pub mod fasthash;

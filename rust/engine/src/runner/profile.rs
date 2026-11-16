@@ -1,14 +1,17 @@
 //! 対戦の速さの計測（定期的なプロファイリング）。比較用の 7 デッキの総当たりを探索 AI どうしで打ち、
 //! デッキごとの 1 試合の時間と、思考の処理ごとの時間の内訳を出す。
 //!
-//!   svwb profile [--games 49] [--start 0] [--opts '<設定JSON>'] [--rhino] [--decks <デッキ>,…|@<デッキの組>] [--check] [--log <フォルダ>] [--json 結果.json]
+//!   svwb profile [--games 49] [--start 0] [--opts '<設定JSON>'] [--rhino] [--decks <デッキ>,…|@<デッキの組>] [--only <文字列>] [--check] [--log <フォルダ>] [--json 結果.json]
 //!                [--baseline 測らないビルドの結果.json] [--report 報告.md] [--label 名前] [--record]
 //!
 //! - --check なら、手を打つたびに局面の不変条件（invariants.rs）を確かめ、破った局面を報告に並べる（1 つでもあれば終わりにエラーを返す）
 //! - 報告には、デッキ（名前の「（」の前が同じものは型にまとめる）ごとの勝率と、仕組み（アクセラレート・結晶・エンハンス・奥義・進化・
-//!   超進化・融合・アクト・エクストラPP・攻撃）を使った回数も出す。--log <フォルダ> なら、1 試合ずつ手の並びを文章で書く（試合を読むため）
+//!   超進化・融合・アクト・エクストラPP・攻撃）を使った回数と、クレストの能力が誘発した回数（crest_tally.rs）も出す。
+//!   --log <フォルダ> なら、1 試合ずつ手の並びを文章で書く（試合を読むため）
 //! - --decks なら、比較用の 7 デッキの代わりに並べたデッキで打つ（compare --decks と同じ組とシード。n デッキなら --games n² で全部の組）。
 //!   --record とは一緒に使えない（docs/profile.md の表の列は 7 デッキ）
+//! - --only なら、名前に <文字列> を含むデッキが出る試合だけを打つ（シードは同じなので、全部を打ったときのその試合と同じ。
+//!   あるデッキの席だけを手早く見るため）。--record とは一緒に使えない
 //! - 試合は compare と同じデッキの組で、試合番号ごとに席とデッキを入れ替えて 2 試合打つ（両方の席が同じ設定。
 //!   シードは compare --no-mirror と同じ）。--games 49 で 7×7 のデッキの組（同じデッキどうしも含む）を 2 回ずつ、98 試合
 //! - --opts は compare の設定と同じ形（`{}` で今の探索 AI の既定）。--rhino ならリノセウスエルフはリノセウス用 AI（rhino）で打つ
@@ -30,7 +33,8 @@ use super::{compare_decks, fixed};
 use crate::ai::rhino::RhinoAgent;
 use crate::ai::search::{SearchAgent, SearchOptions};
 use crate::ai::Agent;
-use crate::data::{CardIdx, CardType, Deck};
+use crate::crest_tally;
+use crate::data::{data, CardIdx, CardType, CrestIdx, Deck};
 use crate::game::{acting_player, apply_action, create_game, legal_actions, play_as, play_cost};
 use crate::invariants::invariant_violations;
 use crate::prof::{self, Profile, Sec};
@@ -74,7 +78,14 @@ struct GameRecord {
     idle_cards: [Vec<CardIdx>; 2],
     /// 先攻の席
     first_seat: usize,
+    /// 席ごとの、クレストの能力が誘発した回数（(クレスト, 能力の番号) → [自分のターン, 相手のターン]）
+    crest_fired: [CrestFired; 2],
+    /// 席ごとの、一度でも持ったクレストと、最初に持った自分のターン（マリガンの前後に置いた信仰は 0）
+    crest_held: [BTreeMap<CrestIdx, u32>; 2],
 }
+
+/// (クレスト, 能力の番号) → [自分のターン, 相手のターン] の誘発の回数
+type CrestFired = BTreeMap<(CrestIdx, u8), [u32; 2]>;
 
 /// 仕組みを使った回数の列（tally が数える）
 const USAGE: [&str; 13] = [
@@ -232,6 +243,8 @@ fn play_timed(
     let mut idle = [[0u32; 2]; 2];
     let mut idle_cards: [Vec<CardIdx>; 2] = Default::default();
     let mut first = [[0u32; 2]; 2];
+    let mut crest_fired: [CrestFired; 2] = Default::default();
+    let mut crest_held: [BTreeMap<CrestIdx, u32>; 2] = Default::default();
     let names = [seats[0].name.clone(), seats[1].name.clone()];
     let mut lines: Vec<String> = Vec::new();
     while s.phase != Phase::Ended {
@@ -320,7 +333,19 @@ fn play_timed(
         if prof::ENABLED {
             prof::merge(&mut profs[actor], &prof::take());
         }
+        // クレストの誘発は、実際の試合の手を打つ間だけ数える（AI の読みの中は数えない）
+        crest_tally::start();
         s = apply_action(&s, &a);
+        for f in crest_tally::take() {
+            crest_fired[f.player]
+                .entry((f.crest, f.ability))
+                .or_insert([0, 0])[usize::from(!f.own_turn)] += 1;
+        }
+        for ((held, pl), &turn) in crest_held.iter_mut().zip(&s.players).zip(&own_turns) {
+            for c in pl.crests.iter() {
+                held.entry(c.crest).or_insert(turn);
+            }
+        }
         if check && violations.len() < 5 {
             for m in invariant_violations(&s) {
                 violations.push(format!(
@@ -351,6 +376,8 @@ fn play_timed(
         idle,
         idle_cards,
         first_seat: s.first,
+        crest_fired,
+        crest_held,
     }
 }
 
@@ -426,6 +453,11 @@ struct DeckStat {
     idle_pp: u64,
     /// そのときにプレイできたカードと回数
     idle_cards: BTreeMap<CardIdx, u32>,
+    /// クレストの能力が誘発した回数（席ごとの合計。(クレスト, 能力の番号) → [自分のターン, 相手のターン,
+    /// 自分のターンの席ごとの回数の 2 乗の和]）
+    crest_fired: BTreeMap<(CrestIdx, u8), [u64; 3]>,
+    /// クレストを一度でも持った席の数と、最初に持った自分のターンの合計
+    crest_held: BTreeMap<CrestIdx, [u64; 2]>,
 }
 
 impl DeckStat {
@@ -444,6 +476,17 @@ impl DeckStat {
         self.idle_pp += r.idle[seat][1] as u64;
         for &c in &r.idle_cards[seat] {
             *self.idle_cards.entry(c).or_insert(0) += 1;
+        }
+        for (&k, n) in &r.crest_fired[seat] {
+            let e = self.crest_fired.entry(k).or_insert([0, 0, 0]);
+            e[0] += n[0] as u64;
+            e[1] += n[1] as u64;
+            e[2] += n[0] as u64 * n[0] as u64;
+        }
+        for (&c, &turn) in &r.crest_held[seat] {
+            let e = self.crest_held.entry(c).or_insert([0, 0]);
+            e[0] += 1;
+            e[1] += turn as u64;
         }
         for k in 0..2 {
             if r.first[seat][k] > 0 {
@@ -540,6 +583,8 @@ struct Summary {
     deck_order: Vec<String>,
     all: DeckStat,
     total_games: u32,
+    /// --only の文字列
+    only: Option<String>,
     /// 時間の長かった手番（全試合で長い順）
     slow: Vec<SlowDecision>,
     /// --check で不変条件を確かめたか、破った局面
@@ -580,10 +625,13 @@ fn report(sm: &Summary, date: &str, commit: &str, label: &str) -> String {
     push(
         &mut out,
         &format!(
-            "- 試合: {}（g{}〜{} の席とデッキを入れ替えた 2 試合ずつ）、並列 {}、CPU {}",
+            "- 試合: {}（g{}〜{} の席とデッキを入れ替えた 2 試合ずつ{}）、並列 {}、CPU {}",
             sm.total_games,
             sm.start,
             sm.start + sm.games - 1,
+            sm.only.as_deref().map_or(String::new(), |w| format!(
+                "のうち、名前に「{w}」を含むデッキが出る試合だけ"
+            )),
             sm.threads,
             sm.cpu
         ),
@@ -758,6 +806,59 @@ fn report(sm: &Summary, date: &str, commit: &str, label: &str) -> String {
             &mut out,
             &format!("| {name} | {} | {} |", d.idle_turns, cells.join("、")),
         );
+    }
+    push(&mut out, "");
+    push(&mut out, "## クレストの能力が誘発した回数");
+    push(&mut out, "");
+    push(
+        &mut out,
+        "実際の試合だけを数える（AI の読みの中は数えない。`crest_tally.rs`）。能力は、そのクレストの能力の定義（`src/cards/abilities/` の crests）の何番目か。誘発は、能力の条件（引いたカードのコストなど）に合って解決を待つ列に入った数で、効果の中の条件（「自分のターンなら」など）は見ないので、クレストを持つ側のターンか相手のターンかで分ける。持った席は、そのクレストを一度でも持った席の数と、その型の席に対する割合。持ったターンは、持った席で最初に持った自分のターンの平均（デッキに入れると置かれる信仰は 0）。括弧は持った席 1 つあたりの回数（自分のターンは ± 標準誤差。誘発しなかった持った席も 0 回として入れる）。",
+    );
+    push(&mut out, "");
+    push(
+        &mut out,
+        &format!(
+            "| {by} | クレスト | 能力 | 持った席 | 持ったターン | 自分のターン | 相手のターン |"
+        ),
+    );
+    push(&mut out, "| --- | --- | ---: | ---: | ---: | ---: | ---: |");
+    let mut any_crest = false;
+    for (name, d) in if sm.groups.is_empty() {
+        &sm.decks
+    } else {
+        &sm.groups
+    } {
+        for (&(c, i), n) in &d.crest_fired {
+            any_crest = true;
+            let [held, turns] = d.crest_held.get(&c).copied().unwrap_or([0, 0]);
+            let per = |x: u64| format!("{x}（{}）", fixed(x as f64 / held.max(1) as f64, 2));
+            let own = {
+                let k = held.max(1) as f64;
+                let mean = n[0] as f64 / k;
+                let var = (n[2] as f64 / k - mean * mean).max(0.0) * k / (k - 1.0).max(1.0);
+                format!(
+                    "{}（{} ± {}）",
+                    n[0],
+                    fixed(mean, 2),
+                    fixed((var / k).sqrt(), 2)
+                )
+            };
+            push(
+                &mut out,
+                &format!(
+                    "| {name} | {} | {} | {held}（{}%） | {} | {} | {} |",
+                    data().crests[c as usize].name,
+                    i + 1,
+                    fixed(held as f64 / d.seats.max(1) as f64 * 100.0, 0),
+                    fixed(turns as f64 / held.max(1) as f64, 1),
+                    own,
+                    per(n[1]),
+                ),
+            );
+        }
+    }
+    if !any_crest {
+        push(&mut out, "| （誘発なし） | | | | | | |");
     }
     if let Some(v) = &sm.check {
         push(&mut out, "");
@@ -1040,6 +1141,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut deck_list: Option<String> = None;
     let mut check = false;
     let mut log_dir: Option<String> = None;
+    let mut only: Option<String> = None;
     let mut i = 0;
     while i < argv.len() {
         let value = |i: usize| {
@@ -1061,6 +1163,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             "--label" => label = value(i)?,
             "--decks" => deck_list = Some(value(i)?),
             "--log" => log_dir = Some(value(i)?),
+            "--only" => only = Some(value(i)?),
             "--rhino" | "--record" | "--check" => {
                 match argv[i].as_str() {
                     "--rhino" => rhino = true,
@@ -1080,8 +1183,11 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     if write && label.is_empty() {
         return Err("--record には --label で名前を付けます".into());
     }
-    if write && deck_list.is_some() {
-        return Err("--record は比較用の 7 デッキだけ（--decks とは一緒に使えない）".into());
+    if write && (deck_list.is_some() || only.is_some()) {
+        return Err(
+            "--record は比較用の 7 デッキの全部の試合だけ（--decks・--only とは一緒に使えない）"
+                .into(),
+        );
     }
     let opts = compare_options(&opts_text).map_err(|e| format!("--opts: {e}"))?;
     let decks: Vec<&'static Deck> = match &deck_list {
@@ -1104,7 +1210,19 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let base = baseline.as_deref().map(read_baseline).transpose()?;
     let tasks: Vec<(u32, bool)> = (0..games)
         .flat_map(|k| [(start + k, false), (start + k, true)])
+        .filter(|&(g, swap)| {
+            only.as_deref().is_none_or(|w| {
+                let (_, seats, _) = compare_setup(&decks, g, swap, false);
+                seats.iter().any(|d| d.name.contains(w))
+            })
+        })
         .collect();
+    if tasks.is_empty() {
+        return Err(format!(
+            "--only: 名前に「{}」を含むデッキが出る試合がありません",
+            only.as_deref().unwrap_or("")
+        ));
+    }
     let threads = thread_count();
     eprintln!(
         "{} 試合（並列 {threads}{}）",
@@ -1227,6 +1345,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         deck_order: decks.iter().map(|d| d.name.clone()).collect(),
         all,
         total_games: records.len() as u32,
+        only: only.clone(),
         slow: {
             let mut v: Vec<SlowDecision> = records.iter().flat_map(|r| r.slow.clone()).collect();
             v.sort_by(|a, b| b.secs.total_cmp(&a.secs));
