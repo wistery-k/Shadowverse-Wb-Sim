@@ -576,12 +576,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                 ("refFingerprint".into(), Json::Str(fp.clone())),
                 ("refFingerprintOk".into(), Json::Bool(fingerprint_ok)),
                 ("recorded".into(), Json::Bool(write)),
-                (
-                    "kifu".into(),
-                    kifu_path
-                        .as_ref()
-                        .map_or(Json::Null, |p| Json::Str(p.clone())),
-                ),
+                ("kifu".into(), kifu::ledger_name(kifu_path.as_ref())),
             ],
             decks: decks.iter().map(|d| d.name.clone()).collect(),
             mirror,

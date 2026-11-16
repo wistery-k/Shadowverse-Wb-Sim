@@ -3,7 +3,7 @@
 対戦を打つランナーは、試合ごとの棋譜を 1 つの形で書く（2026-11-16 から）。調べ物は、専用の処理をランナーに足すのでなく、
 この棋譜を打ち直して数える形にそろえていく（審査の文書「AI の設計の審査と今後の方針」のタブ「棋譜を 1 つの形にそろえる」。段取りの 1 がここ）。
 
-- 書くのは `compare`・`yardstick`・`profile`・`td selfplay`（svwb。`npm run compare` 等も同じ）。打つ手・試合は変わらない
+- 書くのは `compare`・`yardstick`・`profile`・`td selfplay`・`survey run`（svwb。`npm run compare` 等も同じ）。打つ手・試合は変わらない
 - 本体は `rust/engine/src/runner/kifu.rs`。開発サーバーの「リプレイ検索」タブ（`docs/commands.md`「リプレイ検索」）もこの形を読む
 - 名前は「棋譜」（コマンドと引数は `kifu`。ユーザー決定 2026-11-16）。前の名前の「リプレイ」（`--replays`）も引数としては使える
 
@@ -14,12 +14,17 @@
 | 何も付けない | 環境変数 `SVWB_KIFU_DIR` のフォルダ（無ければ `~/svwb-data/kifu/`）に、下の名前で |
 | `--kifu <ファイル>`（前の名前 `--replays`） | そのファイル |
 | `--no-kifu` | 書かない |
-| 夜のキュー（`npm run night`） | 回のフォルダの `kifu/`（キューが `SVWB_KIFU_DIR` を渡す）。区切りが済むと `.jsonl.gz` にする。`--kifu`・`--no-kifu` はキューの行には書けない |
+| 夜のキュー（`npm run night`） | 回のフォルダの `kifu/`（キューが `SVWB_KIFU_DIR` を渡す）。区切りが済むと、その区切りが書いたものを `.jsonl.gz` にする（止まった survey の書きかけは、続きから回して済むまでそのまま）。`--kifu`・`--no-kifu` はキューの行には書けない |
 
-- 既定の名前は `<種類>-<回の名前>-g<最初>-<最後>-<引数の指紋>-<コミット>.jsonl`（回の名前は `--label`。無ければ飛ばす。引数の指紋は、棋譜の引数を含む
+- 既定の名前は `<種類>-<回の名前>-g<最初>-<最後>-<引数の指紋>-<コミット>.jsonl`（回の名前は `--label`。無ければ飛ばす。引数の指紋は、棋譜の引数を除いた
   引数の並びの FNV-1a）。同じ引数・同じコミットなら同じ名前で、同じ試合なので上書きする。設定だけが違う回（夜のキューの 2 つの profile 等）は指紋で分かれる
+- 手元の変更がある（コミットの末尾が `+`）回は、名前の末尾に書き始めた時刻（UTC。`-20261116T172114Z`）を足し、上書きしない（変更の中身が違う 2 回が同じ名前になるので）
 - 書いている間は `<ファイル>.tmp` に書き、全部の試合を書き終えてから名前を替える。途中で止まった回は `.tmp` のまま残る（`pack-run` は入れない）
-- 終わると、書いたファイルと試合の数を出す（`棋譜: <ファイル>（N 試合）`）。compare・yardstick は、台帳の行の `kifu` にもファイルを書く
+- `survey run` だけは、`.tmp` を使わず、そのファイルに 1 試合ずつ書き足す（調査は同じ引数で続きから回せるので）。結果の行より先に棋譜を書き、
+  開くときに書いてある試合を読んで、同じ試合番号は 2 度書かない（途中で切れた最後の行は消す）。止まった回のファイルには、そこまでの試合が入っている
+- 終わると、書いたファイルと試合の数を出す（`棋譜: <ファイル>（N 試合）`）。compare・yardstick は、台帳の行の `kifu` にファイルの名前を書く
+  （フォルダは入れない。台帳は公開のリポジトリにコミットするので。持ち帰った後は共有フォルダの `data/kifu/<回の名前>/` の下で、夜のキューの分は `.gz` が付く。
+  夜のキューが区切りの行を 1 行にまとめるときは、区切りごとの名前を試合番号の順に並べた列にする）
 - `profile` は、`--baseline` を渡した回（`npm run profile` の測るビルドの方。試合は測らないビルドと同じ）では、`--kifu` が無ければ書かない
 - 0 試合（夜のキューが設定を確かめる回）は書かない
 - 大きさは 1 試合 4〜5 KB（gzip で 0.4 KB ほど）。新しいプールの compare 1.2 万試合で 60 MB ほど（gzip で 5 MB ほど）、自己対戦 6 万試合で 300 MB ほど（gzip で 30 MB ほど）
@@ -38,16 +43,16 @@
 | --- | --- |
 | `kind` | `"replay"` |
 | `version` | 形の版。2（2026-11-16 から）。1 は前の `--replays` の行（下） |
-| `source` | 書いたランナー（`"compare"`・`"yardstick"`・`"profile"`・`"td selfplay"`） |
+| `source` | 書いたランナー（`"compare"`・`"yardstick"`・`"profile"`・`"td selfplay"`・`"survey"`） |
 | `run` | 回の名前（台帳の名前 `--label`。無ければ空） |
 | `engine` | エンジンの版（コミット。手元の変更があれば末尾に `+`。夜のキューは組み立てたときのもの。台帳の `commit` と同じ） |
 | `pool` | カードプール（`"starter"`・`"azvaldt"`。両方のデッキのカードが入るプール。ベーシックだけなら `"starter"`。どちらにも入らなければ `"mixed"`） |
 | `g` | 試合番号 |
 | `swap` | 組（同じ試合番号で席とデッキを入れ替えた 2 試合）のどちらか。組の相手は、同じ回の同じ `g` で `swap` の違う試合。自己対戦（組が無い）には無い |
 | `names` | 席ごとのデッキの名前 |
-| `agents` | 席ごとの表示名（compare は `"A <設定>"`・`"B <設定>"`、yardstick の相手は `"B <物差しの名前>"`、profile は `"profile <設定>"`、自己対戦は `"td"`・`"td-frozen"`） |
+| `agents` | 席ごとの表示名（compare は `"A <設定>"`・`"B <設定>"`、yardstick の相手は `"B <物差しの名前>"`、profile は `"profile <設定>"`、survey は `"survey <設定>"`、自己対戦は `"td"`・`"td-frozen"`） |
 | `sides` | 席ごとの側（compare・yardstick は `"A"`（測る側）・`"B"`（相手）、自己対戦の `--frozen` は `"learner"`・`"frozen"`）。比べでなければ無い |
-| `ai` | 席ごとの AI の設定。compare・profile は渡した設定の JSON（`{}` は今の既定）、yardstick の相手は `{"yardstick": <名前>, "version", "fingerprint"}`、自己対戦は `{"model", "eps", "sampling", "opp", "potential"}`（固定した側は `--frozen` の設定）、profile の `--rhino` のリノセウスエルフは `{"rhino": true}` |
+| `ai` | 席ごとの AI の設定。compare・profile・survey は渡した設定の JSON（`{}` は今の既定。何が既定かは `engine` のコミットで決まり、補正は `nets` の指紋で分かる）、yardstick の相手は `{"yardstick": <名前>, "version", "fingerprint"}`、自己対戦は `{"model", "eps", "sampling", "opp", "potential"}`（固定した側は `--frozen` の設定）、profile の `--rhino` のリノセウスエルフは `{"rhino": true}` |
 | `nets` | 席ごとの補正と見込みの指紋 `{"valueNet", "potentialNet"}`（ファイルの中身の FNV-1a。台帳の `files` と同じ。書かなければ組み立てたときの `data/value-net.json`・`data/potential-net.json` の指紋、使わなければ null）。yardstick の相手・リノセウス用 AI は null（版と指紋で見分ける） |
 | `seed` | 試合のシード |
 | `decks` | 席ごとのデッキ（カード ID の列。並び順も山札のシャッフルに効く） |

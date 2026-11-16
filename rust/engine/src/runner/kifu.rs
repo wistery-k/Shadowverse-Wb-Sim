@@ -1,4 +1,4 @@
-//! 棋譜: 対戦を打つランナー（compare・yardstick・profile・td selfplay）が試合ごとに書く、1 試合 1 行の JSON Lines（形は docs/kifu.md）。
+//! 棋譜: 対戦を打つランナー（compare・yardstick・profile・td selfplay・survey run）が試合ごとに書く、1 試合 1 行の JSON Lines（形は docs/kifu.md）。
 //!
 //! 打ち直すのに要るもの（デッキ・シード・行動の列）に、どの回のどの試合か（回の名前・試合番号・組の 2 試合のどちらか）と、
 //! 打った AI（席ごとの設定と補正の指紋）・エンジンの版（コミット）・プールを足したもの。エンジンは決定的なので、同じ版で打ち直せば同じ試合になる。
@@ -7,14 +7,15 @@
 //! - 既定で書く。書く先は `--kifu <ファイル>`（前の名前 `--replays` も使える）、無ければ環境変数 `SVWB_KIFU_DIR` のフォルダ
 //!   （無ければ `~/svwb-data/kifu`）に、種類・回の名前・試合番号の範囲・引数の指紋・コミットから決めた名前（`default_path`）。`--no-kifu` で書かない
 //! - 名前は同じ引数・同じコミットなら同じ（同じ試合なので上書きしてよい）。設定だけが違う回（夜のキューの 2 つの profile 等）は引数の指紋で分かれる。
-//!   夜のキューは区切りごとに回のフォルダの `kifu/` に書く
-//! - 書いている間は `<ファイル>.tmp` に書き、全部の試合を書き終えたら名前を替える（途中で止まった回の棋譜は `.tmp` のまま残る）
+//!   手元の変更がある（コミットの末尾が `+`）回は、中身の違う変更で同じ名前にならないように時刻を足す。夜のキューは区切りごとに回のフォルダの `kifu/` に書く
+//! - 書いている間は `<ファイル>.tmp` に書き、全部の試合を書き終えたら名前を替える（途中で止まった回の棋譜は `.tmp` のまま残る）。
+//!   途中から再開できる survey run だけは、そのファイルに 1 試合ずつ書き足す（`Appender`）
 //! - 打つ手・試合は変えない（書くだけ）
 
 use crate::canonical::fnv;
 use crate::data::{data, CardIdx, Pool};
 use crate::json::Json;
-use crate::state::{card, Action, GameState};
+use crate::state::{card, Action, GameState, PlayerIndex};
 use std::io::Write;
 
 /// 1 行の形の版（1: 2026-11-16 までの `--replays` の行。2: 回・エンジン・プール・席の AI と補正の指紋・組を足した）
@@ -121,8 +122,18 @@ pub struct Name<'a> {
     pub commit: &'a str,
 }
 
-/// 既定の棋譜の名前: `<種類>-<回の名前>-g<最初>-<最後>-<引数の指紋>-<コミット>.jsonl`（回の名前が無ければ飛ばす）
+/// 既定の棋譜の名前: `<種類>-<回の名前>-g<最初>-<最後>-<引数の指紋>-<コミット>.jsonl`（回の名前が無ければ飛ばす）。
+/// 手元の変更がある（コミットの末尾が `+`）ときは、変更の中身が違う回を上書きしないように、末尾に書き始めた時刻（UTC）を足す
 pub fn default_name(n: &Name) -> String {
+    let stamp = n.commit.ends_with('+').then(|| {
+        let (_, at, _, _) = super::ledger::context();
+        at.replace(['-', ':'], "")
+    });
+    default_name_at(n, stamp.as_deref())
+}
+
+/// `default_name` の、時刻を渡す形（stamp があれば末尾に足す）
+fn default_name_at(n: &Name, stamp: Option<&str>) -> String {
     let mut parts = vec![safe(n.kind)];
     if !n.label.is_empty() {
         parts.push(safe(n.label));
@@ -130,7 +141,22 @@ pub fn default_name(n: &Name) -> String {
     parts.push(format!("g{}-{}", n.first, n.last));
     parts.push(safe(n.key));
     parts.push(safe(n.commit));
+    if let Some(t) = stamp {
+        parts.push(safe(t));
+    }
     format!("{}.jsonl", parts.join("-"))
+}
+
+/// 台帳の行に書く棋譜の名前（ファイルの名前だけ。台帳は公開のリポジトリにコミットするので、マシンの中のフォルダは入れない。
+/// 共有フォルダでは `data/kifu/<回の名前>/` の下。夜のキューの分は `.gz` が付く）
+pub fn ledger_name(path: Option<&String>) -> Json {
+    path.map_or(Json::Null, |p| {
+        Json::Str(
+            std::path::Path::new(p)
+                .file_name()
+                .map_or_else(|| p.clone(), |f| f.to_string_lossy().into_owned()),
+        )
+    })
 }
 
 impl Target {
@@ -190,6 +216,76 @@ impl Writer {
     }
 }
 
+/// 書き足していく棋譜のファイル（survey run。途中から再開できるランナー用）。`.tmp` を使わず、そのファイルに 1 試合ずつ書き足す。
+/// 開くときに、書いてある試合の番号を読み（途中で切れた最後の行は消す）、同じ試合番号の行は 2 度書かない。
+/// ランナーは、自分の結果の行より先に棋譜を書く（棋譜を書いた後に止まっても、再開で同じ試合を打ち直し、棋譜は飛ばす。逆だと棋譜が欠ける）
+pub struct Appender {
+    path: String,
+    /// 最初に書くときに開く（打つ試合が残っていない再開では、ファイルを作らない）
+    file: Option<std::fs::File>,
+    have: std::collections::HashSet<u32>,
+}
+
+impl Appender {
+    pub fn open(path: &str) -> Result<Appender, String> {
+        if let Some(dir) = std::path::Path::new(path).parent() {
+            if !dir.as_os_str().is_empty() {
+                std::fs::create_dir_all(dir)
+                    .map_err(|e| format!("棋譜のフォルダ {} を作れません: {e}", dir.display()))?;
+            }
+        }
+        let mut have = std::collections::HashSet::new();
+        if let Ok(text) = std::fs::read_to_string(path) {
+            // 最後の改行までが書き終えた行
+            let keep = text.rfind('\n').map_or(0, |i| i + 1);
+            for l in text[..keep].lines() {
+                if let Some(g) = Json::parse(l).ok().and_then(|v| match v.get("g") {
+                    Some(Json::Num(g)) => Some(*g as u32),
+                    _ => None,
+                }) {
+                    have.insert(g);
+                }
+            }
+            if keep < text.len() {
+                std::fs::write(path, &text[..keep])
+                    .map_err(|e| format!("棋譜 {path} に書けません: {e}"))?;
+            }
+        }
+        Ok(Appender {
+            path: path.to_string(),
+            file: None,
+            have,
+        })
+    }
+
+    /// 試合 g の行を書き足す（もう書いてあれば書かない）。書いたら true
+    pub fn write(&mut self, g: u32, line: &str) -> Result<bool, String> {
+        if !self.have.insert(g) {
+            return Ok(false);
+        }
+        let err = |e: std::io::Error| format!("棋譜 {} に書けません: {e}", self.path);
+        if self.file.is_none() {
+            self.file = Some(
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&self.path)
+                    .map_err(err)?,
+            );
+        }
+        let f = self.file.as_mut().expect("開いた");
+        f.write_all(format!("{line}\n").as_bytes())
+            .and_then(|_| f.flush())
+            .map_err(err)?;
+        Ok(true)
+    }
+
+    /// ファイルの道と、書いてある試合の数
+    pub fn summary(&self) -> (&str, usize) {
+        (&self.path, self.have.len())
+    }
+}
+
 /// 回（1 回の実行）で同じもの
 pub struct RunInfo {
     /// 書いたランナー（"compare"・"yardstick"・"profile"・"td selfplay"）
@@ -224,6 +320,24 @@ pub struct Seat {
     pub nets: Json,
 }
 
+/// 試合の終わり（棋譜に書く分）。局面そのものはスレッドをまたいで渡せないので、要る値だけを持つ
+#[derive(Clone, Copy, Debug)]
+pub struct End {
+    pub first: PlayerIndex,
+    pub winner: Option<PlayerIndex>,
+    pub turns: i32,
+}
+
+impl End {
+    pub fn of(s: &GameState) -> End {
+        End {
+            first: s.first,
+            winner: s.winner,
+            turns: s.turn,
+        }
+    }
+}
+
 /// 1 試合
 pub struct Game<'a> {
     /// 試合番号
@@ -234,7 +348,8 @@ pub struct Game<'a> {
     pub seats: [&'a Seat; 2],
     pub decks: [&'a [CardIdx]; 2],
     pub seed: u32,
-    pub end: &'a GameState,
+    /// 終わった局面の先攻・勝者・ターン（`End::of`）
+    pub end: End,
     pub actions: &'a [Action],
 }
 
@@ -327,6 +442,18 @@ pub fn compare_seat(side: &str, opts_text: &str) -> Seat {
     }
 }
 
+/// 両方の席が同じ設定の回（profile・survey run）の席: 表示名は `<ランナー> <設定>`、側は無い
+pub fn same_seat(runner: &str, opts_text: &str) -> Seat {
+    let ai = Json::parse(opts_text).unwrap_or_else(|_| Json::Str(opts_text.to_string()));
+    let nets = nets_of(&ai);
+    Seat {
+        side: None,
+        agent: format!("{runner} {opts_text}"),
+        ai,
+        nets,
+    }
+}
+
 /// 1 試合の行
 pub fn line(run: &RunInfo, game: &Game) -> String {
     let s = |x: &str| Json::Str(x.to_string());
@@ -385,7 +512,7 @@ pub fn line(run: &RunInfo, game: &Game) -> String {
             "winner".into(),
             game.end.winner.map_or(Json::Null, |w| num(w as f64)),
         ),
-        ("turns".into(), num(game.end.turn as f64)),
+        ("turns".into(), num(game.end.turns as f64)),
         (
             "actions".into(),
             Json::Arr(
@@ -479,11 +606,11 @@ mod tests {
             first: 0,
             last: 99,
             key: "0123abcd",
-            commit: "abc1234+",
+            commit: "abc1234",
         };
         assert_eq!(
             default_name(&n),
-            "compare-新しいプール_R3_x-g0-99-0123abcd-abc1234+.jsonl"
+            "compare-新しいプール_R3_x-g0-99-0123abcd-abc1234.jsonl"
         );
         let n = Name {
             kind: "selfplay",
@@ -494,8 +621,23 @@ mod tests {
         };
         assert_eq!(
             default_name(&n),
-            "selfplay-g7200000-7202999-0123abcd-abc1234+.jsonl"
+            "selfplay-g7200000-7202999-0123abcd-abc1234.jsonl"
         );
+        // 手元の変更がある回は、時刻を足して上書きしない
+        let dirty = Name {
+            commit: "abc1234+",
+            ..n
+        };
+        assert_eq!(
+            default_name_at(&dirty, Some("20261116T172114Z")),
+            "selfplay-g7200000-7202999-0123abcd-abc1234+-20261116T172114Z.jsonl"
+        );
+        assert!(default_name(&dirty).starts_with("selfplay-g7200000-7202999-0123abcd-abc1234+-20"));
+        assert_eq!(
+            ledger_name(Some(&"/home/x/svwb-data/kifu/a.jsonl".to_string())),
+            Json::Str("a.jsonl".into())
+        );
+        assert_eq!(ledger_name(None), Json::Null);
         // 設定だけが違う引数は指紋が違う
         assert_ne!(
             args_key(&["profile", "--opts", "{}"]),
@@ -516,6 +658,27 @@ mod tests {
         assert_eq!((p.as_str(), n), (path.as_str(), 1));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{}\n");
         assert!(!std::path::Path::new(&format!("{path}.tmp")).exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn appender_skips_written_games_and_cut_lines() {
+        let dir = std::env::temp_dir().join(format!("svwb-kifu-app-{}", std::process::id()));
+        let path = dir.join("s.jsonl").to_string_lossy().to_string();
+        let mut a = Appender::open(&path).unwrap();
+        assert!(a.write(3, "{\"g\":3}").unwrap());
+        assert!(!a.write(3, "{\"g\":3}").unwrap());
+        drop(a);
+        // 途中で切れた行（止まったとき）は開くときに消す
+        std::fs::write(&path, "{\"g\":3}\n{\"g\":4,\"x\"").unwrap();
+        let mut a = Appender::open(&path).unwrap();
+        assert!(!a.write(3, "{\"g\":3}").unwrap());
+        assert!(a.write(4, "{\"g\":4}").unwrap());
+        assert_eq!(a.summary().1, 2);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "{\"g\":3}\n{\"g\":4}\n"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

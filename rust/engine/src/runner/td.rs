@@ -1012,7 +1012,7 @@ fn play_one(
                 seats: [seat(0), seat(1)],
                 decks: [&pair[0].cards, &pair[1].cards],
                 seed,
-                end: &base.state,
+                end: kifu::End::of(&base.state),
                 actions: &base.actions,
             },
         )

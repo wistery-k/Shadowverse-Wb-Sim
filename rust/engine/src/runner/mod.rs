@@ -3,7 +3,7 @@
 //! 試合の組み方・シード・画面への出力・書き出すファイル（JSON Lines）は TypeScript 版と同じにしてある。
 //! td selfplay の書き出したファイルは、そのまま `npm run td -- train` に渡せる。
 //! 試合は CPU のコア数だけのスレッドで並列に行う（環境変数 THREADS で変えられる）。
-//! 対戦を打つランナー（compare・yardstick・profile・td selfplay）は、既定で試合ごとの棋譜を書く（kifu.rs。形は docs/kifu.md）。
+//! 対戦を打つランナー（compare・yardstick・profile・td selfplay・survey run）は、既定で試合ごとの棋譜を書く（kifu.rs。形は docs/kifu.md）。
 
 pub mod beam_gap;
 pub mod compare;

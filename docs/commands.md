@@ -381,7 +381,7 @@ npm run svwb -- deep-gap rollout --in gap.jsonl[,…] --out roll.jsonl [--top 20
 npm run svwb -- deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 30] [--only <内訳の一部>] [--skipDecks <デッキ>,…] [--sort gap|rollout] [--listOnly 1]
 npm run svwb -- survey run --out 結果.jsonl --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8] [--decks <デッキ>,…|@<デッキの組>]
 npm run svwb -- survey report 結果.jsonl… [--label 名前] [--no-ledger] [--top 20] [--states <フォルダ>]
-npm run svwb -- survey recheck 結果.jsonl… --out 打ち直し.jsonl [--m 32] [--peek 1] [--batch 16]
+npm run svwb -- survey recheck 結果.jsonl… --out 打ち直し.jsonl [--m 32] [--peek 1] [--batch 16]   # run は棋譜も書く（--kifu k.jsonl | --no-kifu）
 npm run svwb -- review run --record <記録.json> --points <局面.jsonl> --out <結果.jsonl> [--m 32] [--confirm 96] [--flag 10] [--opts '<JSON>'] [--all 0|1] [--seat 0|1] [--batch 4]
 npm run svwb -- review zero --out <結果.jsonl> --games a-b --decks <デッキ>,…|@<デッキの組> [--rate 0.3] [--m 32] [--confirm 96] [--flag 10] [--opts '<JSON>'] [--batch 2]
 npm run svwb -- review report <結果.jsonl> [--out <報告.md>]
@@ -579,7 +579,7 @@ zcat /mnt/project-files/data/selfplay/<名前>/f0.jsonl.gz | head -c 500
 （公開サイトには出さない。画面のモジュールは `vite build` で空のものに置き換わる）。リプレイからは、その局面の打ち比べ・AI の考え・
 「サンドボックスで開く」が使える。
 
-- **読める記録**: 棋譜（compare・yardstick・profile・td selfplay が既定で書く JSON Lines。1 行 1 試合。形は [kifu.md](kifu.md)。前の `--replays` の行も）、
+- **読める記録**: 棋譜（compare・yardstick・profile・td selfplay・survey run が既定で書く JSON Lines。1 行 1 試合。形は [kifu.md](kifu.md)。前の `--replays` の行も）、
   `rhino-compare --record` の `.json`、`npm run game -- … --json` の `.json`。gzip（`.gz`）のままでも読める。
   試合はエンジンで打ち直すので、記録したときとエンジンの版（カードの能力など）が違うと、打てない手のある試合は読めず、勝者が変わった試合は印が付く
 - **手元のフォルダ**: 開発サーバーが環境変数 `SVWB_REPLAY_DIRS`（区切りは Linux・macOS は `:`、Windows は `;`）のフォルダの下を探して一覧に出す。

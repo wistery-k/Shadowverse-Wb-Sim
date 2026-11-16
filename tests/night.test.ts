@@ -13,7 +13,10 @@ import {
   combineRows,
   estimate,
   expandBraces,
+  gzipKifu,
   jobInputs,
+  kifuDir,
+  kifuSnapshot,
   jobProducts,
   main,
   parseJob,
@@ -316,6 +319,35 @@ describe("区切りの行をまとめる", () => {
       const se = seKind === "pairs" ? Math.sqrt(v / m) : Math.sqrt((p * (1 - p)) / whole.n);
       expect(c.se).toBeCloseTo(se, 6);
       expect(c.at).toBe("2026-11-11T00:00:00Z");
+    }
+  });
+
+  it("区切りごとの棋譜の名前は、試合番号の順の列にする（無ければ null）", () => {
+    const row = (first: number, kifu: string | null) => ({ ...chunkRow(first, 30, "pairs"), kifu });
+    expect(combineRows([row(30, "b.jsonl"), row(0, "a.jsonl"), row(60, null)], "compare 90", "n1").kifu).toEqual(["a.jsonl", "b.jsonl"]);
+    expect(combineRows([row(0, null)], "compare 30", "n1").kifu).toBeNull();
+  });
+});
+
+describe("棋譜の gzip", () => {
+  it("区切りの前と同じままのファイル（止まった survey の書きかけ）は gzip しない", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "night-kifu-"));
+    try {
+      const k = kifuDir(dir);
+      mkdirSync(k, { recursive: true });
+      writeFileSync(join(k, "survey-g0-9.jsonl"), '{"g":0}\n');
+      writeFileSync(join(k, "x.jsonl.tmp"), "{}\n");
+      const before = kifuSnapshot(dir);
+      writeFileSync(join(k, "compare-g0-9.jsonl"), '{"g":1}\n');
+      expect(await gzipKifu(dir, before)).toEqual(["compare-g0-9.jsonl.gz"]);
+      expect(readdirSync(k).sort()).toEqual(["compare-g0-9.jsonl.gz", "survey-g0-9.jsonl", "x.jsonl.tmp"]);
+      // 続きから回した survey が書き足すと、その区切りの後に gzip する
+      const before2 = kifuSnapshot(dir);
+      writeFileSync(join(k, "survey-g0-9.jsonl"), '{"g":0}\n{"g":1}\n');
+      expect(await gzipKifu(dir, before2)).toEqual(["survey-g0-9.jsonl.gz"]);
+      expect(gunzipSync(readFileSync(join(k, "survey-g0-9.jsonl.gz"))).toString()).toBe('{"g":0}\n{"g":1}\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

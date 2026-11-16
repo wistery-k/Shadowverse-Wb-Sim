@@ -166,7 +166,7 @@ profile --games 49
 | `ledger.jsonl` | 区切りごとの台帳の行（svwb が `SVWB_LEDGER` に書く） |
 | `done/`・`chunks/`・`failed.json` | 済んだ区切りの印・区切りごとの svwb の出力・失敗したジョブ |
 | `speed-<番号>.md`・`.json` | profile の報告 |
-| `kifu/` | compare・yardstick・profile・td selfplay の棋譜（[kifu.md](kifu.md)）。キューが svwb に `SVWB_KIFU_DIR` で渡し、区切りごとに引数から決まる名前で書く（区切りを回し直すと上書き）。区切りが済むと `.jsonl.gz` にする |
+| `kifu/` | compare・yardstick・profile・td selfplay・survey の棋譜（[kifu.md](kifu.md)）。キューが svwb に `SVWB_KIFU_DIR` で渡し、区切りごとに引数から決まる名前で書く（区切りを回し直すと上書き。survey は続きから書き足す）。区切りが済むと、その区切りが書いたものを `.jsonl.gz` にする（止まった survey の書きかけは、続きから回して済むまでそのまま） |
 | `survey-<番号>.jsonl`・`.md`・`-states/` | survey の局面ごとの結果（全部の区切りが足す）・`finish` が出す報告・問題集に足す候補の局面 |
 | `ledger-jobs.jsonl`・`summary.md`・`merged.json` | `finish` がまとめた行・まとめの表・台帳に足した区切り |
 | `bin/svwb`・`bin/td/`・`bin/potential/` | 回す svwb の写しと、td・potential のビルド結果（`pack-run` には入らない） |

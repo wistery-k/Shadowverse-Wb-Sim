@@ -37,6 +37,7 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { availableParallelism, homedir, hostname, tmpdir } from "node:os";
@@ -1053,8 +1054,11 @@ export function combineRows(rows: RunRow[], cmd: string, queue: string): RunRow 
     se = Math.sqrt((p * (1 - p)) / n);
   }
   const seconds = sorted.reduce((s, r) => s + r.seconds, 0);
+  // 棋譜は区切りごとに 1 つのファイル（kifu.rs の名前。共有フォルダでは data/kifu/<回の名前>/ の下に .gz が付いて置かれる）。試合番号の順に並べる
+  const kifu = sorted.flatMap((r) => (typeof r.kifu === "string" ? [r.kifu] : Array.isArray(r.kifu) ? r.kifu : []));
   return {
     ...first,
+    kifu: kifu.length > 0 ? kifu : null,
     date: last.date,
     at: last.at,
     g: [first.g[0], last.g[1]],
@@ -1246,13 +1250,32 @@ export function kifuDir(dir: string): string {
   return join(dir, "kifu");
 }
 
-/** 棋譜の置き場の書き終えた .jsonl を gzip して .jsonl.gz にする（区切りが済んだ後。書きかけは svwb が .tmp に書くので触らない） */
-export async function gzipKifu(dir: string): Promise<string[]> {
+/** 棋譜の置き場の .jsonl ごとの様子（inode・大きさ・更新時刻）。区切りの前に取り、その区切りが書いたものだけを gzip するため */
+export function kifuSnapshot(dir: string): Map<string, string> {
+  const kdir = kifuDir(dir);
+  const out = new Map<string, string>();
+  if (!existsSync(kdir)) return out;
+  for (const f of readdirSync(kdir)) {
+    if (!f.endsWith(".jsonl")) continue;
+    const st = statSync(join(kdir, f));
+    out.set(f, `${st.ino}:${st.size}:${st.mtimeMs}`);
+  }
+  return out;
+}
+
+/**
+ * 棋譜の置き場の、区切りが書いた .jsonl を gzip して .jsonl.gz にする（区切りが済んだ後）。書きかけは svwb が .tmp に書くので触らない。
+ * before（区切りの前の kifuSnapshot）と同じままのファイルは触らない: survey run は .tmp を使わずに書き足していくので、
+ * 止まった区切りの書きかけの棋譜を、ほかの区切りが済んだときに gzip しないように（その区切りを続きから回すと、同じファイルに書き足す）
+ */
+export async function gzipKifu(dir: string, before: Map<string, string> = new Map()): Promise<string[]> {
   const kdir = kifuDir(dir);
   if (!existsSync(kdir)) return [];
+  const now = kifuSnapshot(dir);
   const done: string[] = [];
   for (const f of readdirSync(kdir)) {
     if (!f.endsWith(".jsonl")) continue;
+    if (before.has(f) && before.get(f) === now.get(f)) continue;
     const src = join(kdir, f);
     const gz = `${src}.gz`;
     await pipeline(createReadStream(src), createGzip(), createWriteStream(`${gz}.tmp`));
@@ -1289,6 +1312,7 @@ function runChunk(plan: Plan, session: Session, dir: string, c: Chunk, ctl: Work
       ? [process.execPath, [join(dir, "bin", "run-bundle.mjs"), join(dir, "bin", s.tool, `${s.tool}-main.mjs`), ...argv.slice(1)]]
       : [plan.bin, argv];
   const out = openSync(`${logFile}.tmp`, "w");
+  const kifuBefore = kifuSnapshot(dir);
   return new Promise((done) => {
     const child = spawn(cmd, args, {
       cwd: plan.repo,
@@ -1300,7 +1324,7 @@ function runChunk(plan: Plan, session: Session, dir: string, c: Chunk, ctl: Work
         SVWB_COMMIT: plan.commit,
         SVWB_BRANCH: plan.branch,
         SVWB_MACHINE: session.machine,
-        // 棋譜（rust/engine/src/runner/kifu.rs）は回のフォルダの kifu/ に、引数から決まる名前で書く（区切りを回し直すと上書きする）
+        // 棋譜（rust/engine/src/runner/kifu.rs）は回のフォルダの kifu/ に、引数から決まる名前で書く（区切りを回し直すと上書きする。survey は続きから書き足す）
         SVWB_KIFU_DIR: kifuDir(dir),
       },
     });
@@ -1324,7 +1348,7 @@ function runChunk(plan: Plan, session: Session, dir: string, c: Chunk, ctl: Work
       if (code === 0) {
         try {
           await finishProducts(job, c, dir);
-          await gzipKifu(dir);
+          await gzipKifu(dir, kifuBefore);
         } catch (e) {
           why = (e as Error).message;
           code = null;

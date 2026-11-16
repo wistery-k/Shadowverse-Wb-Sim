@@ -386,7 +386,7 @@ fn play_timed(
                 seats: [seat(seats[0]), seat(seats[1])],
                 decks: [&seats[0].cards, &seats[1].cards],
                 seed,
-                end: &s,
+                end: kifu::End::of(&s),
                 actions: &played,
             },
         )
@@ -1286,9 +1286,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         }),
     };
     let mut writer = kifu_path.as_deref().map(kifu::Writer::create).transpose()?;
-    let mut search_seat = kifu::compare_seat("A", &opts_text);
-    search_seat.side = None;
-    search_seat.agent = format!("profile {opts_text}");
+    let search_seat = kifu::same_seat("profile", &opts_text);
     let rhino_seat = Seat {
         side: None,
         agent: "rhino".into(),

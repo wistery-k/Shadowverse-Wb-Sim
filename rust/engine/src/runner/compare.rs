@@ -157,7 +157,7 @@ pub fn play_compare_game_with(
                 seats: seat_ai,
                 decks: [&seats[0].cards, &seats[1].cards],
                 seed,
-                end: &end,
+                end: kifu::End::of(&end),
                 actions: &log,
             },
         )
@@ -421,12 +421,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                         crate::json::Json::Str(involving_words.join(","))
                     }),
                 ),
-                (
-                    "kifu".into(),
-                    kifu_path.as_ref().map_or(crate::json::Json::Null, |p| {
-                        crate::json::Json::Str(p.clone())
-                    }),
-                ),
+                ("kifu".into(), kifu::ledger_name(kifu_path.as_ref())),
             ],
             decks: decks.iter().map(|d| d.name.clone()).collect(),
             mirror,
