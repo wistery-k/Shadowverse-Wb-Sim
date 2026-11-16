@@ -197,7 +197,7 @@ export function parseJob(line: string, index: number): Job {
   switch (kind) {
     case "compare": {
       refuse(["--no-ledger"], "結果は台帳から集める");
-      refuse(["--replays"], "区切りごとにファイルが替わる");
+      refuse(["--kifu", "--replays", "--no-kifu"], "棋譜はキューが回のフォルダの kifu/ に書く");
       const label = take("--label");
       if (!label) throw new Error("--label で台帳の名前を付けます（区切りの結果を後で足し合わせるため）");
       const noMirror = flag("--no-mirror");
@@ -310,6 +310,7 @@ export function parseJob(line: string, index: number): Job {
         const startFlag = selfplay ? "--start" : "--from";
         const outFlag = selfplay ? "--out" : "--inputs";
         refuse(["--positions", "--refFrom"], "キューではデータを作るときだけ");
+        refuse(["--kifu", "--replays", "--no-kifu"], "棋譜はキューが回のフォルダの kifu/ に書く");
         const label = take("--label") ?? "";
         const gamesText = take("--games");
         if (gamesText === null) throw new Error("--games で試合数を書きます");
@@ -1240,6 +1241,29 @@ async function finishProducts(job: Job, c: Chunk, dir: string): Promise<void> {
   }
 }
 
+/** 回のフォルダの棋譜の置き場 */
+export function kifuDir(dir: string): string {
+  return join(dir, "kifu");
+}
+
+/** 棋譜の置き場の書き終えた .jsonl を gzip して .jsonl.gz にする（区切りが済んだ後。書きかけは svwb が .tmp に書くので触らない） */
+export async function gzipKifu(dir: string): Promise<string[]> {
+  const kdir = kifuDir(dir);
+  if (!existsSync(kdir)) return [];
+  const done: string[] = [];
+  for (const f of readdirSync(kdir)) {
+    if (!f.endsWith(".jsonl")) continue;
+    const src = join(kdir, f);
+    const gz = `${src}.gz`;
+    await pipeline(createReadStream(src), createGzip(), createWriteStream(`${gz}.tmp`));
+    fsyncFile(`${gz}.tmp`);
+    renameSync(`${gz}.tmp`, gz);
+    rmSync(src, { force: true });
+    done.push(`${f}.gz`);
+  }
+  return done;
+}
+
 /** 区切りを 1 つ回す。終わりの状態（0 なら済んだ）と秒 */
 function runChunk(plan: Plan, session: Session, dir: string, c: Chunk, ctl: WorkerControl): Promise<{ code: number | null; seconds: number; why: string }> {
   const job = plan.jobs[c.job - 1];
@@ -1276,6 +1300,8 @@ function runChunk(plan: Plan, session: Session, dir: string, c: Chunk, ctl: Work
         SVWB_COMMIT: plan.commit,
         SVWB_BRANCH: plan.branch,
         SVWB_MACHINE: session.machine,
+        // 棋譜（rust/engine/src/runner/kifu.rs）は回のフォルダの kifu/ に、引数から決まる名前で書く（区切りを回し直すと上書きする）
+        SVWB_KIFU_DIR: kifuDir(dir),
       },
     });
     let why = "";
@@ -1298,6 +1324,7 @@ function runChunk(plan: Plan, session: Session, dir: string, c: Chunk, ctl: Work
       if (code === 0) {
         try {
           await finishProducts(job, c, dir);
+          await gzipKifu(dir);
         } catch (e) {
           why = (e as Error).message;
           code = null;
@@ -1879,7 +1906,7 @@ export function cmdFinish(a: Args): number {
     }
   }
   if (a.opts.has("--pack")) {
-    run("npm", ["run", "-s", "pack-run", "--", dir, "--name", plan.name, "--note", `夜のキュー ${plan.name}（${plan.commit}）`, "--only", "logs", "--force"]);
+    run("npm", ["run", "-s", "pack-run", "--", dir, "--name", plan.name, "--note", `夜のキュー ${plan.name}（${plan.commit}）`, "--only", "logs,kifu", "--force"]);
   }
   return 0;
 }

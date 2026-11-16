@@ -20,6 +20,9 @@ describe("まとめ方（scripts/pack-run-main.ts）", () => {
     expect(classify("m1.json", '{"kind":"potential-net","version":1,"vocab":[]}')).toBe("models");
     expect(classify("sim.json", '{"games":[]}')).toBe("logs");
     expect(classify("f0.log", '"samples": 1')).toBe("logs");
+    // 棋譜（rust/engine/src/runner/kifu.rs。docs/kifu.md）
+    expect(classify("compare-x-g0-9-1a2b3c4d-abc1234.jsonl.gz", '{"kind":"replay","version":2,"seed":1,"decks":[[],[]],"actions":[]}\n')).toBe("kifu");
+    expect(classify("k.log", '{"kind":"replay"}')).toBe("logs");
   });
 
   it(".jsonl は gzip して入れ、もう .gz のものはそのまま入れる", () => {
@@ -28,6 +31,7 @@ describe("まとめ方（scripts/pack-run-main.ts）", () => {
     expect(destination("models", "r9", "rfp.json")).toEqual({ path: "data/models/r9/rfp.json", gzip: false });
     expect(destination("logs", "r9", "rc.jsonl")).toEqual({ path: "logs/r9/rc.jsonl.gz", gzip: true });
     expect(destination("logs", "r9", "rf.log")).toEqual({ path: "logs/r9/rf.log", gzip: false });
+    expect(destination("kifu", "r9", "k.jsonl.gz")).toEqual({ path: "data/kifu/r9/k.jsonl.gz", gzip: false });
   });
 
   it("上限まで順に詰め、1 つで上限を超えるファイルはそれだけで 1 個にする", () => {
@@ -168,6 +172,24 @@ describe("npm run pack-run", () => {
     expect(await main([src, "--name", "b", "--out", out, "--include", "f*"])).toBe(0);
     const b = execFileSync("tar", ["-tzf", join(out, "b.tar.gz")], { encoding: "utf8" }).trim().split("\n").sort();
     expect(b).toEqual(["data/selfplay/b/f0.jsonl.gz", "data/selfplay/b/f1.jsonl.gz", "logs/b/MANIFEST.md", "logs/b/f0.log"]);
+  });
+
+  it("棋譜は data/kifu/ に入れ、夜のキューの回のフォルダの kifu/ の下も入れる（書きかけの .tmp は入れない）", async () => {
+    const line = (g: number) => JSON.stringify({ kind: "replay", version: 2, source: "compare", g, seed: g, decks: [[], []], winner: 0, actions: [] });
+    mkdirSync(join(src, "kifu"));
+    writeFileSync(join(src, "kifu", "compare-r-g0-1-aaaa0000-abc1234.jsonl.gz"), gzipSync(`${line(0)}\n${line(1)}\n`));
+    writeFileSync(join(src, "kifu", "yardstick-r-g0-0-bbbb0000-abc1234.jsonl"), `${line(5)}\n`);
+    writeFileSync(join(src, "kifu", "compare-r-g2-3-aaaa0000-abc1234.jsonl.tmp"), line(2));
+    writeFileSync(join(src, "top.jsonl"), `${line(9)}\n`);
+    expect(await main([src, "--name", "q", "--out", out, "--only", "logs,kifu"])).toBe(0);
+    const x = extract(join(out, "q.tar.gz"));
+    expect(gunzipSync(readFileSync(join(x, "data/kifu/q/compare-r-g0-1-aaaa0000-abc1234.jsonl.gz"))).toString("utf8")).toBe(`${line(0)}\n${line(1)}\n`);
+    expect(gunzipSync(readFileSync(join(x, "data/kifu/q/yardstick-r-g0-0-bbbb0000-abc1234.jsonl.gz"))).toString("utf8")).toBe(`${line(5)}\n`);
+    expect(gunzipSync(readFileSync(join(x, "data/kifu/q/top.jsonl.gz"))).toString("utf8")).toBe(`${line(9)}\n`);
+    expect(existsSync(join(x, "data/selfplay"))).toBe(false);
+    const m = readFileSync(join(x, "logs/q/MANIFEST.md"), "utf8");
+    expect(m).toContain("| kifu/yardstick-r-g0-0-bbbb0000-abc1234.jsonl | 棋譜 | data/kifu/q/yardstick-r-g0-0-bbbb0000-abc1234.jsonl.gz |");
+    expect(m).toContain("- kifu/compare-r-g2-3-aaaa0000-abc1234.jsonl.tmp: 書きかけ（.tmp）");
   });
 
   it("間違った引数・名前・フォルダはエラーにする", async () => {

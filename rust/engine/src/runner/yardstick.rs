@@ -4,7 +4,7 @@
 //! - 強い相手の物差し（`strong`）: 2026-10-22 の既定の探索 AI（補正 s2b・相手のターンを幅 16 で読む）を凍結したもの。
 //!   補正は `yardstick/strong-1-net.json`（data/value-net.json の写し）から読む
 //!
-//!   svwb yardstick [--ref classic|strong] [--opts '<設定JSON>'] [--games 1000] [--start 0] [--label 名前] [--record] [--no-ledger]
+//!   svwb yardstick [--ref classic|strong] [--opts '<設定JSON>'] [--games 1000] [--start 0] [--label 名前] [--record] [--no-ledger] [--kifu <ファイル> | --no-kifu]
 //!   svwb yardstick fingerprint [--ref classic|strong]
 //!
 //! 試合の組み方とシードは compare と同じ（同じデッキの組で席とデッキを入れ替えて 2 試合ずつ。--games 1000 で 2000 試合）。
@@ -12,6 +12,7 @@
 //! 弱い相手は表を前と比べられるよう、組の 2 試合を別のシードで打つ（compare の --no-mirror）。
 //! --opts は compare の設定と同じ形（`{}` で今の探索 AI の既定）。--record で `docs/yardstick.md` のその相手の表に 1 行足す。
 //! --record の有無にかかわらず、回すたびに実験の台帳 `docs/ledger.jsonl` に 1 行足す（runner/ledger.rs。--no-ledger で書かない）。
+//! 試合ごとの棋譜も既定で書く（compare と同じ。runner/kifu.rs。測る側が A、相手が B）。
 //!
 //! 相手の設定（`reference_options`・`strong_reference_options`）は、探索 AI の既定や SEARCH_WEIGHTS を変えても動かないよう、設定と重みをここに書き写してある。
 //! 2026-11-10 に消した実験の設定（`tree`・`nextLethal` 等）は、どちらの相手でも使わない値だったので、ここからも消した（指紋は同じ。docs/removed.md）。
@@ -20,7 +21,8 @@
 //! 指紋が変わったら、AI の変更が相手に漏れたのなら漏れた分をここに書き写して元に戻す。
 //! ルールの修正などで戻せないなら版（`VERSION`・`STRONG_VERSION`）を上げて指紋を書き直し、表を新しく始める（違う版の行どうしは比べない）。
 
-use super::compare::{compare_pair, compare_seed, pair_stats, play_compare_game};
+use super::compare::{compare_pair, compare_seed, pair_stats, play_compare_game_with};
+use super::kifu;
 use super::ledger;
 use super::options::{compare_options, model_eval};
 use super::parallel::parallel_map;
@@ -399,6 +401,9 @@ fn record(r: Reference, row: &str, decks: &[String]) -> Result<(), String> {
 }
 
 pub fn main(argv: &[String]) -> Result<(), String> {
+    let mut argv = argv.to_vec();
+    let kifu_target = kifu::take_args(&mut argv)?;
+    let argv = &argv[..];
     let mut r = Reference::Classic;
     let mut opts_text = "{}".to_string();
     let mut games = 1000u32;
@@ -477,16 +482,48 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         .flat_map(|k| [(start + k, false), (start + k, true)])
         .collect();
     let t0 = Instant::now();
+    // 棋譜（測る側が A、相手が B。相手は物差しの名前・版・指紋で書く）
+    let run = kifu::RunInfo::now("yardstick", &label);
+    let key = kifu::args_key(argv);
+    let kifu_path = kifu_target.path(&kifu::Name {
+        kind: "yardstick",
+        label: &label,
+        first: start,
+        last: start + games - 1,
+        key: &key,
+        commit: &run.engine,
+    });
+    let mut writer = kifu_path.as_deref().map(kifu::Writer::create).transpose()?;
+    let mut ref_seat = kifu::compare_seat("B", "{}");
+    ref_seat.agent = format!("B {}", r.title());
+    ref_seat.ai = crate::json::Json::Obj(vec![
+        ("yardstick".into(), crate::json::Json::Str(r.title())),
+        ("version".into(), crate::json::Json::Num(r.version() as f64)),
+        ("fingerprint".into(), crate::json::Json::Str(fp.clone())),
+    ]);
+    ref_seat.nets = crate::json::Json::Null;
+    let seats = [kifu::compare_seat("A", &opts_text), ref_seat];
+    let kifu_run = writer.as_ref().map(|_| (&run, &seats));
     let results = parallel_map(
         &tasks,
-        |&(g, swap), _| play_compare_game(&subject, &reference, &decks, g, swap, mirror),
-        |done, total, _, _| {
+        |&(g, swap), _| {
+            play_compare_game_with(&subject, &reference, &decks, g, swap, mirror, kifu_run)
+        },
+        |done, total, r, _| {
+            if let (Some(w), Some(line)) = (writer.as_mut(), r.2.as_ref()) {
+                w.write(line);
+            }
             if done % 200 == 0 || done == total {
                 eprint!("\r{done}/{total}");
             }
         },
     );
     eprintln!();
+    let results: Vec<(String, bool)> = results.into_iter().map(|(d, w, _)| (d, w)).collect();
+    if let Some(w) = writer {
+        let (p, n) = w.finish()?;
+        println!("棋譜: {p}（{n} 試合）");
+    }
     let n = results.len();
     let mut wins = 0;
     let mut per_deck = Tally::default();
@@ -539,6 +576,12 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                 ("refFingerprint".into(), Json::Str(fp.clone())),
                 ("refFingerprintOk".into(), Json::Bool(fingerprint_ok)),
                 ("recorded".into(), Json::Bool(write)),
+                (
+                    "kifu".into(),
+                    kifu_path
+                        .as_ref()
+                        .map_or(Json::Null, |p| Json::Str(p.clone())),
+                ),
             ],
             decks: decks.iter().map(|d| d.name.clone()).collect(),
             mirror,

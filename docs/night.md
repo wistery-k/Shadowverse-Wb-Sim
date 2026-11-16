@@ -48,7 +48,7 @@ npm run night -- list
 | `--allow-dirty` | なし | コミットしていない変更があっても始める（試すとき用。ふつうは push してから回す） |
 | `stop --now` | なし | 回している区切りをすぐ止める（その区切りは次の `resume` で回し直す）。付けなければ、回している区切りが終わってから止まる |
 | `finish --commit` | なし | 足した台帳（`docs/ledger.jsonl`）だけをコミットする。push はしない |
-| `finish --pack` | なし | 回のフォルダを `pack-run --only logs` でまとめる（`~/svwb-upload/<名前>.tar.gz`。共有フォルダに上げる用） |
+| `finish --pack` | なし | 回のフォルダを `pack-run --only logs,kifu` でまとめる（`~/svwb-upload/<名前>.tar.gz`。共有フォルダに上げる用。棋譜は `data/kifu/<名前>/` に入る） |
 
 回は `~/svwb-data/night/<名前>/` に置く（環境変数 `SVWB_NIGHT_DIR` か `--root` で替えられる）。名前を省くと、`status`・`finish` は最後の回、
 `stop` は動いている回、`resume` は済んでいない最後の回を選ぶ。
@@ -79,7 +79,7 @@ profile --games 49
   `svwb survey report` で 1 行を足す（報告は `survey-<番号>.md`、問題集に足す候補の局面は `survey-<番号>-states/`）。`--out` は使えない
 - `--label` は compare・yardstick・misses・survey に要る（区切りの結果を後で足し合わせ、台帳を引くため）。比べの案ごとに付ける
 - 試合番号（シード）の範囲は、前の回と重ならないように選ぶ（同じ試合を 2 回数えない。`npm run ledger -- runs --grep <名前>` で前の範囲を見る）
-- キューでは使えない引数: `--no-ledger`（結果は台帳から集める）・`--replays`（区切りごとにファイルが替わる）・`yardstick --record`
+- キューでは使えない引数: `--no-ledger`（結果は台帳から集める）・`--kifu`・`--replays`・`--no-kifu`（棋譜はキューが回のフォルダの `kifu/` に書く。下の「回のフォルダ」）・`yardstick --record`
   （物差しの表に足すのは、終わった後に足し合わせた数字で）・`profile --json/--report/--baseline/--record`（キューが回のフォルダに書く）
 - `--est <秒>`: 1 試合の見込みの秒（回すマシン・スレッド数で）。キューだけが読む。読み方を大きく変える設定（深い読み等）で、台帳にまだ回が無いときに。
   `td`・`potential` は全体の秒
@@ -166,6 +166,7 @@ profile --games 49
 | `ledger.jsonl` | 区切りごとの台帳の行（svwb が `SVWB_LEDGER` に書く） |
 | `done/`・`chunks/`・`failed.json` | 済んだ区切りの印・区切りごとの svwb の出力・失敗したジョブ |
 | `speed-<番号>.md`・`.json` | profile の報告 |
+| `kifu/` | compare・yardstick・profile・td selfplay の棋譜（[kifu.md](kifu.md)）。キューが svwb に `SVWB_KIFU_DIR` で渡し、区切りごとに引数から決まる名前で書く（区切りを回し直すと上書き）。区切りが済むと `.jsonl.gz` にする |
 | `survey-<番号>.jsonl`・`.md`・`-states/` | survey の局面ごとの結果（全部の区切りが足す）・`finish` が出す報告・問題集に足す候補の局面 |
 | `ledger-jobs.jsonl`・`summary.md`・`merged.json` | `finish` がまとめた行・まとめの表・台帳に足した区切り |
 | `bin/svwb`・`bin/td/`・`bin/potential/` | 回す svwb の写しと、td・potential のビルド結果（`pack-run` には入らない） |

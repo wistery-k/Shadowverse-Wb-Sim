@@ -43,7 +43,7 @@
 | `npm run svwb` | Rust 版の CLI（下） | `rust/engine/src/main.rs` |
 | `npm run td` | TD 学習のモデルの作成・学習・分析（下） | `scripts/td-main.ts` |
 | `npm run potential` | ターン途中の見込みのネットワーク（`potentialNet`）と、木の探索の案 A' の下限と上限のネットワーク（`tree.lazy`）を学ぶ（下） | `scripts/potential-main.ts` |
-| `npm run pack-run` | PC で回した 1 回分の出力（自己対戦・モデル・ログ）を、共有フォルダに上げる `.tar.gz` にまとめる（下） | `scripts/pack-run-main.ts` |
+| `npm run pack-run` | PC で回した 1 回分の出力（自己対戦・モデル・棋譜・ログ）を、共有フォルダに上げる `.tar.gz` にまとめる（下） | `scripts/pack-run-main.ts` |
 | `npm run review` | 試合の記録の検討: 勝敗まで入れたプロの試合の記録で、プロの手番ごとにプロの並びと今の AI の並びを打ち比べる（`docs/match-record.md`「検討（段階 4）」。開発のコマンドだけ） | `scripts/review-main.ts`・`rust/engine/src/runner/review.rs` |
 | `npm run ledger` | 実験の台帳（`docs/ledger.jsonl`）を表にする・採否の行を足す（下） | `scripts/ledger-main.ts` |
 | `npm run night` | 夜のキュー: ジョブを並べたファイルを 5〜10 分の区切りで回し、朝の時刻に止まり、続きから再開する（下） | `scripts/night-main.ts` |
@@ -127,13 +127,13 @@ npm run diverge -- --a <記録のディレクトリ A> --b <記録のディレ�
 ## compare
 
 ```sh
-npm run compare -- [試合数 28] ['<A の設定>' '{}'] ['<B の設定>' '{}'] [最初の試合番号 0] [B のデッキ] [--no-mirror] [--decks <デッキ>,…|@<デッキの組>] [--replays 記録.jsonl]
-                   [--with <デッキ> | --without <デッキ> | --involving <文字列>,…] [--label 名前] [--no-ledger]
+npm run compare -- [試合数 28] ['<A の設定>' '{}'] ['<B の設定>' '{}'] [最初の試合番号 0] [B のデッキ] [--no-mirror] [--decks <デッキ>,…|@<デッキの組>]
+                   [--with <デッキ> | --without <デッキ> | --involving <文字列>,…] [--label 名前] [--no-ledger] [--kifu 棋譜.jsonl | --no-kifu]
 ```
 
 引数は名前なしで、この順に書く。1 試合番号ごとに席とデッキを入れ替えて 2 試合打つので、試合数 105 なら 210 試合。
 A の勝率と、A のデッキごとの勝率を出す。5 番目にデッキ名を書くと、B がそのデッキの試合だけ行う。設定の JSON は下の「探索 AI の設定」。
-`--replays` で、試合ごとのデッキ・シード・行動の列を JSON Lines で書く（下の「リプレイ検索」で読む。打つ手は変わらない）。
+試合ごとの棋譜（デッキ・シード・行動の列と、回・席の AI・エンジンの版）を既定で `~/svwb-data/kifu/` に書く（[kifu.md](kifu.md)。`--kifu <ファイル>` で書く先を、`--no-kifu` で書かない。前の名前の `--replays` も使える。打つ手は変わらない）。
 `--decks` は、比較用の 7 デッキの代わりに並べたデッキ（デフォルトデッキの名前・キーか、デッキのテキストファイル）で打つ。`@<ファイル>` はデッキの組のファイル
 （1 行に 1 つ。`data/pools/azvaldt/sets/rep10.txt`・`all84.txt`。上の `deck-sets`）に並べたデッキ。n 個なら試合番号 n² ごとに全部の組（同じデッキどうしも）を 1 回ずつ回る
 （7 個なら今までと同じ組とシード）。違う大会の同じ名前のデッキは、名前の括弧に大会を足して見分ける（例: 「海賊R（CR・ps26-27-09b）」）。
@@ -371,7 +371,7 @@ npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mul
 npm run svwb -- mulligan-data --games 6000 [--start 0] [--seed 1] [--flip 0.5] --out d.jsonl
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
                 [--sampling classic|default] [--potential p.json|null] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
-                [--sDefault 0] [--searchValue 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--replays r.jsonl]
+                [--sDefault 0] [--searchValue 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--kifu k.jsonl | --no-kifu]
 npm run svwb -- td train --model m0.json --data d0.jsonl[,d1.jsonl.gz] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001]
                 [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--imaginedWeight 1] [--ivRes 1] [--best 0] [--bestOn end,after]
                 [--base default|zero|search] [--excludeDecks <デッキ>,…|--onlyDecks <デッキ>,…] [--dropInputs <入力>,…]
@@ -415,7 +415,7 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
   `td train --searchTarget` がこれを読む（docs/ai-notes.md「補正の学習の目標に探索の値を使う」）
   `--potential <ファイル>` で、ビームの並べ替えに使う学習した見込みを組み込みの既定（`data/potential-net.json`）の代わりにそのファイルにする（`null` なら使わない。compare の `"potentialNet"` と同じ。
   `--sampling default` だけ）。学び直しの 2 回目から、前の回で学び直した見込みで打つ用（`night/pool-r1.txt`）
-  `--replays r.jsonl` で、もとの試合（介入した試合・打ち比べは除く）ごとに、デッキ・シード・行動の列も別のファイルに書く
+  もとの試合（介入した試合・打ち比べは除く）ごとの棋譜も既定で書く（[kifu.md](kifu.md)。`--kifu k.jsonl` で書く先を、`--no-kifu` で書かない。前の名前の `--replays` も使える）
   （下の「リプレイ検索」で読む。打つ手は変わらない。`--out` の学習用の行には行動の列が無いので、それだけではリプレイにできない）
 - `td train`・`td prune`: 補正の学習と間引きの Rust 版（`rust/engine/src/runner/td_train.rs`。2026-11-14 から）。同じデータ・同じ引数で、TypeScript 版（下の「td」）と
   同じモデルのファイル（バイトまで）を書く。学び直しの流れ（`night/relearn-b.txt`）が使う引数だけを持ち、実験用の引数（`--attr`・`--cmpWeight`・`--v1Only`・`--searchTarget`・
@@ -514,7 +514,7 @@ npm run svwb -- beam-gap --positions pos1.jsonl --refFrom rows1.jsonl --variants
 ## pack-run（PC で回した結果をクラウドから見られるようにする）
 
 ```sh
-npm run pack-run -- <フォルダ> [--name 名前] [--note 'メモ'] [--out ~/svwb-upload] [--only selfplay,models,logs]
+npm run pack-run -- <フォルダ> [--name 名前] [--note 'メモ'] [--out ~/svwb-upload] [--only selfplay,models,logs,kifu]
                     [--include 'f*,rf*'] [--exclude 'r*'] [--max-mb 0] [--force]
 npm run pack-run -- ~/td-royal --name royal-9 --note 'ロイヤル対策 9 回目（rf.sh）' --include 'f*,rf*'
 ```
@@ -533,10 +533,11 @@ PC で回した 1 回分の出力（フォルダの中のファイル）を、1 
 |---|---|---|
 | 自己対戦 | `td selfplay` の `.jsonl`（1 行目に `"samples"` があるもの） | `data/selfplay/<名前>/`（1 ファイルずつ gzip して `.jsonl.gz`） |
 | モデル | 学習した補正（`"kind":"td-value-net"` で始まる `.json`） | `data/models/<名前>/` |
+| 棋譜 | 1 行目が `{"kind":"replay"` の `.jsonl`（[kifu.md](kifu.md)）と、フォルダの中の `kifu/` の下のファイル（夜のキューの回のフォルダ） | `data/kifu/<名前>/`（gzip して `.jsonl.gz`） |
 | ログ等 | それ以外（`.log`・`.sh`・`.txt`、`--out` で書いた試合ごとの結果の `.jsonl`（gzip する）など） | `logs/<名前>/` |
 | 一覧 | メモ、まとめた日時・元のフォルダ・その時の commit、ファイルごとの元の大きさ・行数・更新日時・sha256、入れなかったファイル | `logs/<名前>/MANIFEST.md` |
 
-`.done`・`.tmp`・`.` で始まるファイルと、サブフォルダ（の中）は入れない（一覧の「入れなかったもの」に出る）。
+`.done`・`.tmp`・`.` で始まるファイルと、サブフォルダ（の中。`kifu/` だけは中のファイルを入れる）は入れない（一覧の「入れなかったもの」に出る）。
 
 | 引数 | 既定 | 意味 |
 |---|---|---|
@@ -544,7 +545,7 @@ PC で回した 1 回分の出力（フォルダの中のファイル）を、1 
 | `--name 名前` | フォルダ名と日付（例: `td-royal-20261024`） | まとめの名前。アーカイブのファイル名と、共有フォルダの中のフォルダ名になる（空白・`/` 等は使えない） |
 | `--note 'メモ'` | なし | 一覧（MANIFEST.md）の先頭に書く。何の実験か（例: `ロイヤル対策 9 回目（rf.sh）`） |
 | `--out フォルダ` | `~/svwb-upload` | アーカイブを書く場所 |
-| `--only 種類,…` | 全部 | 入れる種類（`selfplay`・`models`・`logs`）。例: `--only models,logs` でログとモデルだけ（小さい） |
+| `--only 種類,…` | 全部 | 入れる種類（`selfplay`・`models`・`logs`・`kifu`）。例: `--only models,logs` でログとモデルだけ（小さい） |
 | `--include パターン,…` | 全部 | ファイル名がどれかに当たるものだけ入れる（`*` と `?` が使える。シェルに展開されないよう `'` で囲む） |
 | `--exclude パターン,…` | なし | ファイル名がどれかに当たるものを入れない（例: 前に上げた自己対戦 `--exclude 'r*,d*'`） |
 | `--max-mb N` | 0（分けない） | 1 つのアーカイブをおよそ N MB までにして、いくつかに分ける（`<名前>-1of3.tar.gz` …）。どれも単独で展開でき、どれにも同じ一覧が入る |
@@ -578,7 +579,7 @@ zcat /mnt/project-files/data/selfplay/<名前>/f0.jsonl.gz | head -c 500
 （公開サイトには出さない。画面のモジュールは `vite build` で空のものに置き換わる）。リプレイからは、その局面の打ち比べ・AI の考え・
 「サンドボックスで開く」が使える。
 
-- **読める記録**: `td selfplay --replays`・`compare --replays` の JSON Lines（1 行 1 試合。形は `rust/engine/src/runner/mod.rs` の `ReplayRecord`）、
+- **読める記録**: 棋譜（compare・yardstick・profile・td selfplay が既定で書く JSON Lines。1 行 1 試合。形は [kifu.md](kifu.md)。前の `--replays` の行も）、
   `rhino-compare --record` の `.json`、`npm run game -- … --json` の `.json`。gzip（`.gz`）のままでも読める。
   試合はエンジンで打ち直すので、記録したときとエンジンの版（カードの能力など）が違うと、打てない手のある試合は読めず、勝者が変わった試合は印が付く
 - **手元のフォルダ**: 開発サーバーが環境変数 `SVWB_REPLAY_DIRS`（区切りは Linux・macOS は `:`、Windows は `;`）のフォルダの下を探して一覧に出す。
@@ -592,9 +593,9 @@ zcat /mnt/project-files/data/selfplay/<名前>/f0.jsonl.gz | head -c 500
   そのターンに起きたこと）で打ち直して持ち、検索のたびに全部の Worker で探す。条件の意味は `src/replays/query.ts`
 
 ```sh
-npm run svwb -- td selfplay --model data/value-net.json --games 200 --out ~/svwb-data/sp1/d.jsonl --replays ~/svwb-data/sp1/r.jsonl
-npm run compare -- 50 '{}' '{"beamWidth":32}' 0 --replays ~/svwb-data/cmp1/r.jsonl
-npm run dev   # 「リプレイ検索」タブで ~/svwb-data の下の r.jsonl を選んで読み込む
+npm run svwb -- td selfplay --model data/value-net.json --games 200 --out ~/svwb-data/sp1/d.jsonl   # 棋譜は ~/svwb-data/kifu/ に
+npm run compare -- 50 '{}' '{"beamWidth":32}' 0 --kifu ~/svwb-data/cmp1/k.jsonl
+npm run dev   # 「リプレイ検索」タブで ~/svwb-data の下の棋譜を選んで読み込む
 ```
 
 ## cloud/gcp.sh（クラウドの Spot VM で回す）

@@ -77,6 +77,11 @@ describe("ジョブの行", () => {
     expect(() => parseJob("misses --label x --no-ledger", 1)).toThrow(/--no-ledger/);
     expect(() => parseJob("compare 100 '{}' '{}'", 1)).toThrow(/--label/);
     expect(() => parseJob("compare 100 '{}' '{}' --label x --no-ledger", 1)).toThrow(/--no-ledger/);
+    // 棋譜はキューが回のフォルダの kifu/ に書く
+    expect(() => parseJob("compare 100 '{}' '{}' --label x --kifu a.jsonl", 1)).toThrow(/kifu/);
+    expect(() => parseJob("compare 100 '{}' '{}' --label x --replays a.jsonl", 1)).toThrow(/kifu/);
+    expect(() => parseJob("compare 100 '{}' '{}' --label x --no-kifu", 1)).toThrow(/kifu/);
+    expect(() => parseJob("td selfplay --model m.json --games 10 --chunk 5 --out @/s-{k}.jsonl --est 1 --kifu k.jsonl", 1)).toThrow(/kifu/);
     expect(() => parseJob("yardstick --label x --record", 1)).toThrow(/--record/);
     expect(() => parseJob("compare 100 '{beam}' '{}' --label x", 1)).toThrow(/JSON/);
     const s = parseJob("svwb survey run --games 1000-1799 --label 調査 --confirm 64", 5);
@@ -382,6 +387,13 @@ if (count === 0) process.exit(0);
 if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, shellLine(argv) + "\\n");
 if (String(first) === process.env.FAKE_FAIL) { console.error("わざと失敗"); process.exit(3); }
 const finish = () => {
+  // 棋譜（本物の svwb と同じく、SVWB_KIFU_DIR の下に .tmp で書いてから名前を替える）
+  if (process.env.SVWB_KIFU_DIR) {
+    fs.mkdirSync(process.env.SVWB_KIFU_DIR, { recursive: true });
+    const k = path.join(process.env.SVWB_KIFU_DIR, kind + "-g" + first + "-" + (first + count - 1) + ".jsonl");
+    fs.writeFileSync(k + ".tmp", JSON.stringify({ kind: "replay", version: 2, g: first }) + "\\n");
+    fs.renameSync(k + ".tmp", k);
+  }
   const pairs = [0, 0, 0]; let wins = 0;
   for (let g = first; g < first + count; g++) { const w = process.env.FAKE_WIN ? 2 : (g * 7) % 3; pairs[w]++; wins += w; }
   const n = 2 * count;
@@ -467,6 +479,14 @@ describe("区切って回す（偽物の svwb で）", () => {
     expect(calls()[4]).toBe(`misses run --opts '{}' --trials 4 --seed 1 --label '問題集'`);
     expect(readStatus(dir())).toMatchObject({ state: "done" });
     expect(existsSync(join(dir(), "speed-3.md"))).toBe(true);
+    // 棋譜は回のフォルダの kifu/ に区切りごとに書かれ、区切りが済むと gzip される
+    expect(readdirSync(join(dir(), "kifu")).sort()).toEqual([
+      "compare-g0-49.jsonl.gz",
+      "compare-g100-149.jsonl.gz",
+      "compare-g50-99.jsonl.gz",
+      "yardstick-g10-49.jsonl.gz",
+    ]);
+    expect(gunzipSync(readFileSync(join(dir(), "kifu", "compare-g50-99.jsonl.gz"))).toString()).toBe('{"kind":"replay","version":2,"g":50}\n');
     const target = join(tmp, "ledger.jsonl");
     writeFileSync(target, "");
     expect(await main(["finish", "n1", "--root", root, "--ledger", target])).toBe(0);

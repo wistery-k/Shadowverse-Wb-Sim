@@ -7,6 +7,7 @@
 // アーカイブの中は共有フォルダと同じ形にする（そのまま /mnt/project-files/ に展開できる）:
 //   data/selfplay/<名前>/  td selfplay の自己対戦（.jsonl は 1 ファイルずつ gzip して .jsonl.gz にする）
 //   data/models/<名前>/    学習した補正（"kind":"td-value-net" の .json）と見込みのネットワーク（"kind":"potential-net"）
+//   data/kifu/<名前>/      棋譜（"kind":"replay" の .jsonl。docs/kifu.md）。フォルダの中の kifu/ の下のファイルも入れる（夜のキューの回のフォルダ）
 //   logs/<名前>/           それ以外（.log・.sh・.txt・他の .jsonl（gzip する）など）と、中身の一覧 MANIFEST.md
 // tar は自前で書く（ustar。名前が長いか ASCII 以外を含むときは PAX の path を付ける）。外部のコマンドは git だけ（無くてもよい）。
 
@@ -19,11 +20,14 @@ import { basename, join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
 
-export type Kind = "selfplay" | "models" | "logs";
-export const KINDS: readonly Kind[] = ["selfplay", "models", "logs"];
-const KIND_LABEL: Record<Kind, string> = { selfplay: "自己対戦", models: "モデル", logs: "ログ等" };
+export type Kind = "selfplay" | "models" | "logs" | "kifu";
+export const KINDS: readonly Kind[] = ["selfplay", "models", "logs", "kifu"];
+const KIND_LABEL: Record<Kind, string> = { selfplay: "自己対戦", models: "モデル", logs: "ログ等", kifu: "棋譜" };
 
-const USAGE = `使い方: npm run pack-run -- <フォルダ> [--name 名前] [--note 'メモ'] [--out ~/svwb-upload] [--only selfplay,models,logs]
+/** 中も入れるフォルダ（夜のキューの回のフォルダの棋譜の置き場） */
+export const KIFU_SUBDIR = "kifu";
+
+const USAGE = `使い方: npm run pack-run -- <フォルダ> [--name 名前] [--note 'メモ'] [--out ~/svwb-upload] [--only selfplay,models,logs,kifu]
                      [--include 'f*,rf*'] [--exclude 'r*'] [--max-mb 0] [--force]
 （docs/commands.md の「pack-run」）`;
 
@@ -107,13 +111,15 @@ export function classify(file: string, head: string): Kind {
   const firstLine = head.split("\n", 1)[0] ?? "";
   // svwb td selfplay は先頭の行に入力の並び（{"tdLayout": …}）を書く（2026-11-13 から）
   if (base.endsWith(".jsonl") && (/"samples"\s*:/.test(firstLine) || /^\s*\{\s*"tdLayout"\s*:/.test(firstLine))) return "selfplay";
+  // 棋譜（rust/engine/src/runner/kifu.rs）は 1 行目が {"kind":"replay", …}
+  if (base.endsWith(".jsonl") && /^\s*\{\s*"kind"\s*:\s*"replay"/.test(firstLine)) return "kifu";
   if (base.endsWith(".json") && /^\s*\{\s*"kind"\s*:\s*"(td-value-net|potential-net)"/.test(head)) return "models";
   return "logs";
 }
 
 /** アーカイブの中のパスと、gzip して入れるか（.jsonl だけ。もう .gz のものはそのまま） */
 export function destination(kind: Kind, name: string, file: string): { path: string; gzip: boolean } {
-  const dir = kind === "selfplay" ? `data/selfplay/${name}` : kind === "models" ? `data/models/${name}` : `logs/${name}`;
+  const dir = kind === "selfplay" ? `data/selfplay/${name}` : kind === "models" ? `data/models/${name}` : kind === "kifu" ? `data/kifu/${name}` : `logs/${name}`;
   const gzip = file.endsWith(".jsonl");
   return { path: `${dir}/${file}${gzip ? ".gz" : ""}`, gzip };
 }
@@ -326,7 +332,10 @@ function gitInfo(): string {
 const cell = (s: string): string => s.replace(/\|/g, "\\|");
 
 interface Entry {
+  /** フォルダからの道（kifu/ の下なら kifu/<名前>） */
   file: string;
+  /** 元のファイル */
+  src: string;
   kind: Kind;
   path: string;
   gzip: boolean;
@@ -418,10 +427,17 @@ export async function main(argv: string[]): Promise<number> {
   const include = args.include.map(globToRegExp);
   const exclude = args.exclude.map(globToRegExp);
   const skipped: Skipped[] = [];
-  const picked: { file: string; kind: Kind; size: number; mtimeMs: number }[] = [];
-  const files = readdirSync(args.dir).sort((a, b) => a.localeCompare(b, "ja", { numeric: true }));
-  for (const file of files) {
-    const full = join(args.dir, file);
+  const picked: { file: string; src: string; kind: Kind; size: number; mtimeMs: number }[] = [];
+  const sorted = (d: string): string[] => readdirSync(d).sort((a, b) => a.localeCompare(b, "ja", { numeric: true }));
+  // 1 段目のファイルと、kifu/ の下のファイル（file はフォルダからの道。名前の条件はファイルの名前に当てる）
+  const files: { file: string; base: string; full: string }[] = [];
+  for (const f of sorted(args.dir)) {
+    const full = join(args.dir, f);
+    if (f === KIFU_SUBDIR && statSync(full, { throwIfNoEntry: false })?.isDirectory()) {
+      for (const g of sorted(full)) files.push({ file: `${f}/${g}`, base: g, full: join(full, g) });
+    } else files.push({ file: f, base: f, full });
+  }
+  for (const { file, base, full } of files) {
     const st = statSync(full, { throwIfNoEntry: false });
     if (st === undefined) continue;
     if (st.isDirectory()) {
@@ -429,32 +445,32 @@ export async function main(argv: string[]): Promise<number> {
       continue;
     }
     if (!st.isFile()) continue;
-    const reason = sameDir && ours(file) ? "前のまとめ" : skipReason(file);
+    const reason = sameDir && ours(file) ? "前のまとめ" : skipReason(base);
     if (reason !== null) {
       skipped.push({ file, reason });
       continue;
     }
-    if (include.length > 0 && !include.some((r) => r.test(file))) {
+    if (include.length > 0 && !include.some((r) => r.test(base))) {
       skipped.push({ file, reason: "--include に当たらない" });
       continue;
     }
-    if (exclude.some((r) => r.test(file))) {
+    if (exclude.some((r) => r.test(base))) {
       skipped.push({ file, reason: "--exclude に当たった" });
       continue;
     }
-    const kind = classify(file, await readHead(full));
+    const kind = classify(base, await readHead(full));
     if (!args.only.includes(kind)) {
       skipped.push({ file, reason: `--only に無い種類（${KIND_LABEL[kind]}）` });
       continue;
     }
-    picked.push({ file, kind, size: st.size, mtimeMs: st.mtimeMs });
+    picked.push({ file, src: full, kind, size: st.size, mtimeMs: st.mtimeMs });
   }
   if (picked.length === 0) {
     console.error(`入れるファイルが無い: ${args.dir}`);
     return 1;
   }
   // 小さいもの（ログ・モデル）を先に入れる（分けるとき 1 個目に揃う）
-  const order: Record<Kind, number> = { logs: 0, models: 1, selfplay: 2 };
+  const order: Record<Kind, number> = { logs: 0, models: 1, kifu: 2, selfplay: 3 };
   picked.sort((a, b) => order[a.kind] - order[b.kind]);
 
   // 前のまとめと名前がぶつからないか
@@ -477,9 +493,9 @@ export async function main(argv: string[]): Promise<number> {
   try {
     const entries: Entry[] = [];
     for (const p of picked) {
-      const { path, gzip } = destination(p.kind, name, p.file);
+      const { path, gzip } = destination(p.kind, name, basename(p.src));
       const tmp = gzip ? join(tmpDir, `${entries.length}.gz`) : null;
-      const d = await digest(join(args.dir, p.file), p.size, tmp);
+      const d = await digest(p.src, p.size, tmp);
       const isJsonl = p.file.endsWith(".jsonl");
       entries.push({ ...p, path, gzip, sha256: d.sha256, lines: isJsonl ? d.lines : null, packedSize: d.packedSize, tmp, part: 0 });
       console.log(`  ${p.file}（${KIND_LABEL[p.kind]}）${formatBytes(p.size)}${gzip ? ` → ${formatBytes(d.packedSize)}` : ""}${isJsonl ? `、${d.lines} 行` : ""}`);
@@ -506,7 +522,7 @@ export async function main(argv: string[]): Promise<number> {
         if (e.part !== part) continue;
         const mtime = Math.floor(e.mtimeMs / 1000);
         if (e.tmp !== null) await w.addFile(e.path, e.tmp, e.packedSize, mtime);
-        else await w.addFile(e.path, join(args.dir, e.file), e.size, mtime);
+        else await w.addFile(e.path, e.src, e.size, mtime);
       }
       await w.finish();
     }

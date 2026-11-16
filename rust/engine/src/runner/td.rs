@@ -1,6 +1,6 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--searchValue 0] [--sampling classic|default] [--potential p.json|null] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--replays r0.jsonl] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--searchValue 0] [--sampling classic|default] [--potential p.json|null] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--kifu k.jsonl | --no-kifu] --out d0.jsonl
 //!
 //! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・既定の幅（今は 256）、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
 //! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
@@ -69,13 +69,15 @@
 //! `npm run td -- train --base default` で、S の代わりにこれを出発点の評価にして補正を学ぶ（手で作った項を外した補正を、同じ自己対戦から学ぶ。
 //! docs/ai-notes.md「評価関数の手作りの項を外す」）
 //!
-//! --replays <ファイル> なら、もとの試合（介入した試合と打ち比べは除く）ごとに、デッキ・シード・行動の列を JSON Lines で書く
-//! （1 行の形は runner/mod.rs の ReplayRecord。npm run dev の「リプレイ検索」タブで読む）。打つ手は変わらない。
+//! もとの試合（介入した試合と打ち比べは除く）ごとの棋譜（デッキ・シード・行動の列と、回・席の AI・エンジンの版。runner/kifu.rs、
+//! 形は docs/kifu.md）を既定で書く。書く先は --kifu <ファイル>（前の名前 --replays も使える）か、既定のフォルダ（`~/svwb-data/kifu`、
+//! 夜のキューは回のフォルダの kifu/）。--no-kifu で書かない。打つ手は変わらない。
 //!
 //! --check 1 なら、各局面にモデルの補正の値（評価の点数の単位）も書く（"z"）。`npm run td -- check` で、学習側（scripts/valueNet.ts）が
 //! "x" と "b" から出す補正が探索の補正と同じかを確かめる（場のカードのネットワークを変えたとき用）。
 
 use super::deck_compare::{read_deck, read_deck_list};
+use super::kifu::{self, RunInfo, Seat};
 use super::options::{compare_options, model_eval};
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
@@ -90,6 +92,7 @@ use crate::ai::Rng;
 use crate::data::{data, CardIdx, Deck};
 use crate::game::{acting_player, apply_action, create_game, legal_actions, resolve_turn_end};
 use crate::jsnum::{js_num, round_precision};
+use crate::json::Json;
 use crate::sim::MatchRng;
 use crate::state::{
     next_random, opponent, Action, Evolve, GameState, Iid, OnBoard, Phase, PlayerIndex, EP, MAX_PP,
@@ -150,8 +153,8 @@ struct Model {
     search_value: bool,
     /// 固定した相手の設定（--frozen）。あれば、学ぶ側でない席はこの設定で打つ
     frozen: Option<SearchOptions>,
-    /// もとの試合（介入していない試合）の行動の列も書く（--replays。リプレイ検索用。打つ手は変わらない）
-    replays: bool,
+    /// もとの試合（介入していない試合）の棋譜も書く（runner/kifu.rs。回と、学ぶ側・固定した側の席。打つ手は変わらない）
+    kifu: Option<Arc<(RunInfo, [Seat; 2])>>,
 }
 
 fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Model, String> {
@@ -193,7 +196,7 @@ fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Mo
         imagined: 0,
         search_value: false,
         frozen: None,
-        replays: false,
+        kifu: None,
     })
 }
 
@@ -213,7 +216,7 @@ struct Summary {
     groups: usize,
     /// 学ぶ側の席（--frozen のときだけ）
     learner: Option<PlayerIndex>,
-    /// もとの試合のリプレイの 1 行（--replays のときだけ）
+    /// もとの試合の棋譜の 1 行（棋譜を書くときだけ）
     replay: Option<String>,
 }
 
@@ -485,7 +488,7 @@ struct Played {
     branch: Option<(GameState, usize)>,
     /// 介入する局面で、そのターンの始めに引いた手札の iid（1 ターン目は手札のすべて）
     drawn: Vec<Iid>,
-    /// 打った行動の列（m.replays のときだけ。もとの試合なら最初の局面から打ち直せる）
+    /// 打った行動の列（棋譜を書くときだけ。もとの試合なら最初の局面から打ち直せる）
     actions: Vec<Action>,
 }
 
@@ -640,7 +643,7 @@ fn play_out(
             }
         }
         state = apply_action(&state, &action);
-        if m.replays {
+        if m.kifu.is_some() {
             log.push(action);
         }
     }
@@ -993,23 +996,26 @@ fn play_one(
             res_ivs += 1;
         }
     }
-    // もとの試合のリプレイ（--replays）。介入した試合は途中の局面を書き換えているので、行動の列だけでは打ち直せない（書かない）
-    let replay = m.replays.then(|| {
-        let agent = |p: PlayerIndex| match learner {
-            Some(l) if l != p => "td-frozen",
-            _ => "td",
+    // もとの試合の棋譜。介入した試合は途中の局面を書き換えているので、行動の列だけでは打ち直せない（書かない）
+    let replay = m.kifu.as_ref().map(|k| {
+        let (run, [td, frozen]) = &**k;
+        let seat = |p: PlayerIndex| match learner {
+            Some(l) if l != p => frozen,
+            _ => td,
         };
-        super::ReplayRecord {
-            source: "td selfplay",
-            g,
-            names: [&names[0], &names[1]],
-            agents: [agent(0), agent(1)],
-            decks: [&pair[0].cards, &pair[1].cards],
-            seed,
-            end: &base.state,
-            actions: &base.actions,
-        }
-        .line()
+        kifu::line(
+            run,
+            &kifu::Game {
+                g,
+                swap: None,
+                names: [&names[0], &names[1]],
+                seats: [seat(0), seat(1)],
+                decks: [&pair[0].cards, &pair[1].cards],
+                seed,
+                end: &base.state,
+                actions: &base.actions,
+            },
+        )
     });
     Summary {
         line,
@@ -1179,12 +1185,64 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     // 入力を足したモデルで作った自己対戦から、足す前の並びのモデルも学べる（docs/value-net.md「自己対戦のデータ」）
     writeln!(file, "{{\"tdLayout\":{}}}", net.layout_json())
         .map_err(|e| format!("{out} に書けません: {e}"))?;
-    // リプレイ検索用の行動の列（--replays）
-    let replays_path = arg(args, "replays");
-    let mut replays_file = replays_path
-        .map(|p| std::fs::File::create(p).map_err(|e| format!("{p} に書けません: {e}")))
-        .transpose()?;
-    m.replays = replays_file.is_some();
+    // 棋譜（--kifu・前の名前 --replays、--no-kifu で書かない。無ければ既定のフォルダ）。0 試合なら書かない
+    let run = RunInfo::now("td selfplay", "");
+    let key = kifu::args_key(
+        &args
+            .iter()
+            .flat_map(|(k, v)| [k.as_str(), v.as_str()])
+            .collect::<Vec<_>>(),
+    );
+    let kifu_path = kifu::target_of_pairs(args)?
+        .path(&kifu::Name {
+            kind: "selfplay",
+            label: "",
+            first: start as u32,
+            last: (start + games).max(1.0) as u32 - 1,
+            key: &key,
+            commit: &run.engine,
+        })
+        .filter(|_| games > 0.0);
+    let mut kifu_file = kifu_path.as_deref().map(kifu::Writer::create).transpose()?;
+    if kifu_file.is_some() {
+        // 学ぶ側（--frozen が無ければ両方の席）と固定した側の席
+        let potential_file = match arg(args, "potential") {
+            _ if classic => None,
+            None => Some(""),
+            Some("null") => None,
+            Some(p) => Some(p),
+        };
+        let mut ai = vec![
+            ("model".to_string(), Json::Str(model_path.to_string())),
+            ("eps".to_string(), Json::Num(eps)),
+            (
+                "sampling".to_string(),
+                Json::Str(if classic { "classic" } else { "default" }.into()),
+            ),
+            (
+                "opp".to_string(),
+                Json::Str(if opp_beam { "beam" } else { "greedy" }.into()),
+            ),
+        ];
+        if let Some(p) = arg(args, "potential") {
+            ai.push(("potential".into(), Json::Str(p.into())));
+        }
+        let td_seat = Seat {
+            side: m.frozen.as_ref().map(|_| "learner".to_string()),
+            agent: "td".into(),
+            ai: Json::Obj(ai),
+            nets: kifu::nets_from(Some(model_path), potential_file),
+        };
+        let frozen_seat = match arg(args, "frozen") {
+            Some(text) => {
+                let mut s = kifu::compare_seat("frozen", text);
+                s.agent = "td-frozen".into();
+                s
+            }
+            None => td_seat.clone(),
+        };
+        m.kifu = Some(Arc::new((run, [td_seat, frozen_seat])));
+    }
     let t0 = Instant::now();
     let tasks: Vec<u32> = (0..games as u32).map(|k| start as u32 + k).collect();
     let mut summaries = parallel_map(
@@ -1204,10 +1262,8 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
         },
         |done, total, r, _| {
             writeln!(file, "{}", r.line).unwrap_or_else(|e| panic!("{out} に書けません: {e}"));
-            if let (Some(f), Some(line)) = (replays_file.as_mut(), r.replay.as_ref()) {
-                writeln!(f, "{line}").unwrap_or_else(|e| {
-                    panic!("{} に書けません: {e}", replays_path.unwrap_or_default())
-                });
+            if let (Some(w), Some(line)) = (kifu_file.as_mut(), r.replay.as_ref()) {
+                w.write(line);
             }
             if done % 100 == 0 || done == total {
                 println!(
@@ -1220,6 +1276,10 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     for r in &mut summaries {
         r.line = String::new();
         r.replay = None;
+    }
+    if let Some(w) = kifu_file {
+        let (p, n) = w.finish()?;
+        println!("棋譜: {p}（{n} 試合）");
     }
     let n = summaries.len();
     let samples: usize = summaries.iter().map(|r| r.samples).sum();
@@ -1271,7 +1331,14 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
 }
 
 pub fn main(argv: &[String]) -> Result<(), String> {
-    let args = parse_args(argv.get(1..).unwrap_or(&[]))?;
+    // --no-kifu だけは値を取らない（棋譜を書かない）
+    let mut rest: Vec<String> = argv.get(1..).unwrap_or(&[]).to_vec();
+    let no_kifu = rest.iter().any(|a| a == "--no-kifu");
+    rest.retain(|a| a != "--no-kifu");
+    let mut args = parse_args(&rest)?;
+    if no_kifu {
+        args.push(("no-kifu".into(), "1".into()));
+    }
     match argv.first().map(|s| s.as_str()) {
         Some("selfplay") => selfplay(&args),
         Some("train") => super::td_train::train(&args),
