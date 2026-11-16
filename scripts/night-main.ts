@@ -54,14 +54,19 @@ const HARD_GRACE = 15 * 60;
 
 // ---------------------------------------------------------------- ジョブのファイル
 
+/** 物差しの相手（svwb yardstick --ref。rust/engine/src/runner/yardstick.rs） */
+export const YARDSTICK_REFS = ["classic", "strong", "pool-v0", "pool-r3"] as const;
+export type YardstickRef = (typeof YARDSTICK_REFS)[number];
+const isYardstickRef = (x: string): x is YardstickRef => (YARDSTICK_REFS as readonly string[]).includes(x);
+
 export type JobSpec =
   | { kind: "compare"; a: string; b: string; vs: string | null; noMirror: boolean; decks: string | null; with: string | null; without: string | null }
-  | { kind: "yardstick"; ref: "classic" | "strong"; opts: string }
+  | { kind: "yardstick"; ref: YardstickRef; opts: string }
   | { kind: "profile"; opts: string; rhino: boolean; decks: string | null }
   /** 見落とし問題集（docs/misses.md）。games は 1 問を打つ回数（--trials） */
   | { kind: "misses"; opts: string; seed: number }
-  /** 候補の打ち比べ調査（docs/survey.md）。games は自己対戦の試合の数（1 つの番号で 1 試合） */
-  | { kind: "survey"; rate: number; m: number; extra: number; confirm: number; flag: number; batch: number }
+  /** 候補の打ち比べ調査（docs/survey.md）。games は自己対戦の試合の数（1 つの番号で 1 試合）。opts は AI の設定（--opts）、decks は --decks */
+  | { kind: "survey"; rate: number; m: number; extra: number; confirm: number; flag: number; batch: number; opts: string; decks: string | null }
   /** データを作る svwb（td selfplay・beam-gap）。chunk 試合ずつ、out（{k} に区切りの番号を入れる）に書く。out が .gz なら書いた後に gzip する。
    * args はそのほかの引数（そのまま渡す。{k} は区切りの番号にする） */
   | { kind: "data"; cmd: string[]; startFlag: "--start" | "--from"; outFlag: "--out" | "--inputs"; out: string; chunk: number; args: string[] }
@@ -225,7 +230,7 @@ export function parseJob(line: string, index: number): Job {
       const label = take("--label");
       if (!label) throw new Error("--label で台帳の名前を付けます（区切りの結果を後で足し合わせるため）");
       const ref = take("--ref") ?? "classic";
-      if (ref !== "classic" && ref !== "strong") throw new Error(`--ref は classic か strong: ${ref}`);
+      if (!isYardstickRef(ref)) throw new Error(`--ref は ${YARDSTICK_REFS.join("・")} のどれか: ${ref}`);
       const opts = jsonObject(take("--opts") ?? "{}", "--opts");
       const games = intOf(take("--games") ?? "1000", "--games", 1);
       const start = intOf(take("--start") ?? "0", "--start", 0);
@@ -295,9 +300,11 @@ export function parseJob(line: string, index: number): Job {
       const confirm = num("--confirm", 96, (x) => Number.isInteger(x) && x >= 0, "0 以上の整数");
       const flagPts = num("--flag", 10, (x) => x >= 0, "0 以上の数");
       const batch = num("--batch", 8, (x) => Number.isInteger(x) && x >= 1, "1 以上の整数");
+      const opts = jsonObject(take("--opts") ?? "{}", "--opts");
+      const decks = take("--decks");
       noUnknown();
       if (rest.length > 0) throw new Error(`知らない引数: ${rest.join(" ")}`);
-      return { index, line: text, label, games, start, est, spec: { kind, rate, m, extra, confirm, flag: flagPts, batch } };
+      return { index, line: text, label, games, start, est, spec: { kind, rate, m, extra, confirm, flag: flagPts, batch, opts, decks } };
     }
     case "beam-gap":
     case "td":
@@ -395,7 +402,7 @@ export function jobInputs(job: Job): string[] {
   const words =
     s.kind === "compare"
       ? [s.a, s.b]
-      : s.kind === "yardstick" || s.kind === "profile" || s.kind === "misses"
+      : s.kind === "yardstick" || s.kind === "profile" || s.kind === "misses" || s.kind === "survey"
         ? [s.opts]
         : s.kind === "data"
           ? s.args.filter((a) => !a.includes("{k}"))
@@ -520,6 +527,8 @@ function jobArgvRaw(job: Job, first: number, count: number, dir: string): string
         String(s.flag),
         "--batch",
         String(s.batch),
+        ...(s.opts === "{}" ? [] : ["--opts", s.opts]),
+        ...(s.decks === null ? [] : ["--decks", s.decks]),
       ];
   }
 }
@@ -538,7 +547,7 @@ export function unitsOf(job: Job, count: number): number {
 /** 試合を打たないジョブ（td・potential・pick。区切りは 1 つで、見込みは全体の秒） */
 const isStep = (job: Job): boolean => job.spec.kind === "node" || job.spec.kind === "pick";
 
-/** survey の既定（docs/survey.md）と違う設定だけを並べる */
+/** survey の既定（docs/survey.md）と違う設定だけを並べる（AI の設定とデッキは含めない） */
 function surveyOpts(s: Extract<JobSpec, { kind: "survey" }>): string {
   const def = { rate: 0.1, m: 32, extra: 4, confirm: 96, flag: 10 };
   return (Object.keys(def) as (keyof typeof def)[])
@@ -547,13 +556,18 @@ function surveyOpts(s: Extract<JobSpec, { kind: "survey" }>): string {
     .join(" ");
 }
 
+/** survey の AI の設定とデッキ（表に出す） */
+function surveyAi(s: Extract<JobSpec, { kind: "survey" }>): string {
+  return `${s.opts === "{}" ? "" : ` ${s.opts}`}${s.decks === null ? "" : ` --decks ${s.decks}`}`;
+}
+
 /** ジョブの短い名前（表に出す） */
 export function jobTitle(job: Job): string {
   const s = job.spec;
   if (s.kind === "compare") return `compare A ${s.a} 対 B ${s.b}${s.vs ? `（B は ${s.vs}）` : ""}${s.noMirror ? "（鏡なし）" : ""}${s.with ? `（${s.with} の絡む組だけ）` : ""}${s.without ? `（${s.without} の絡まない組だけ）` : ""}`;
   if (s.kind === "yardstick") return `yardstick ${s.ref}${s.opts === "{}" ? "" : ` ${s.opts}`}`;
   if (s.kind === "misses") return `misses（見落とし問題集）${s.opts === "{}" ? "" : ` ${s.opts}`}`;
-  if (s.kind === "survey") return `survey（候補の打ち比べ）${surveyOpts(s) === "" ? "" : ` ${surveyOpts(s)}`}`;
+  if (s.kind === "survey") return `survey（候補の打ち比べ）${surveyOpts(s) === "" ? "" : ` ${surveyOpts(s)}`}${surveyAi(s)}`;
   if (s.kind === "data") return `${s.cmd.join(" ")} → ${s.out}`;
   if (s.kind === "node") return `${s.tool} ${s.args[0] ?? ""}${s.impl === "rust" ? "（Rust）" : ""} → ${s.out}`;
   if (s.kind === "pick") return `pick（${s.from} が線を越えたら ${s.pass}、越えなければ ${s.fail}）→ ${s.out}`;
@@ -562,18 +576,28 @@ export function jobTitle(job: Job): string {
 
 // ---------------------------------------------------------------- 見積もりと区切り
 
-type SpeedKey = "compare" | "classic" | "strong" | "profile" | "misses" | "survey";
+type SpeedKey = "compare" | YardstickRef | "profile" | "misses" | "survey";
 
 /** 決めておいた速さ（1 試合あたりのスレッド秒 = 1 試合の秒 × 並列数。今の既定の探索 AI で）。台帳に同じ比べ・同じマシンの回が無いときに使う。
  * misses は全部の問を 1 回ずつ解く秒（10 問のとき。問が増えればその分かかる） */
 export const SPEEDS: Record<string, { threads: number; note: string; ts: Record<SpeedKey, number> }> = {
   // ユーザーの PC（Core i7-14700F、28 スレッド。Docker の svwb-docker）。compare は 3200 試合 5 分ほど、物差しは docs/yardstick.md の「（PC）」の行。
   // misses・survey は測っていないので、クラウド環境の値に compare の比（2.6 / 2.0）を掛けた
-  "svwb-docker": { threads: 28, note: "PC の決めておいた値", ts: { compare: 2.6, classic: 1.3, strong: 2.7, profile: 2.6, misses: 5.9, survey: 860 } },
+  // 新しいプールの物差し（pool-v0・pool-r3）は、段階 4 の R3 の compare（84 個のデッキ、R3 対 R2）の 0.176 秒/試合（2026-11-16）から
+  "svwb-docker": {
+    threads: 28,
+    note: "PC の決めておいた値",
+    ts: { compare: 2.6, classic: 1.3, strong: 2.7, "pool-v0": 4.9, "pool-r3": 4.9, profile: 2.6, misses: 5.9, survey: 860 },
+  },
   // Claude のクラウド環境（4 スレッド）で 2026-11-10 に測った値（compare 0.50・弱い相手 0.21・強い相手 0.44 秒/試合、各 56 試合。
   // misses は 10 問 × 24 回が 27 秒。survey は 2026-11-11 の試し 2（10 試合・15 局面、読み直しを打ち切った候補を入れた後）で 1 局面 328 秒、局面の割合 0.1 で 1 試合 2.0 局面として）。
   // ほかのマシンもこれで見積もる
-  default: { threads: 4, note: "クラウド環境の決めておいた値", ts: { compare: 2.0, classic: 0.85, strong: 1.8, profile: 2.0, misses: 4.5, survey: 660 } },
+  // 新しいプールの物差しは 2026-11-16 に測った値（R3 の補正どうし、代表 10 型の 40 試合で 0.72 秒/試合）
+  default: {
+    threads: 4,
+    note: "クラウド環境の決めておいた値",
+    ts: { compare: 2.0, classic: 0.85, strong: 1.8, "pool-v0": 2.9, "pool-r3": 2.9, profile: 2.0, misses: 4.5, survey: 660 },
+  },
 };
 
 export interface Estimate {
@@ -635,7 +659,7 @@ export function estimate(job: Job, runs: RunRow[], machine: string, threads: num
   const key: SpeedKey = s.kind === "yardstick" ? s.ref : s.kind;
   if (s.kind === "survey") {
     // 決めておいた値は既定の設定（docs/survey.md）のもの。局面の割合には比べて、ほかの設定の違いは見ない
-    const other = surveyOpts({ ...s, rate: 0.1 }) !== "";
+    const other = surveyOpts({ ...s, rate: 0.1 }) !== "" || surveyAi(s) !== "";
     return { perGame: (sp.ts.survey * (s.rate / 0.1)) / threads, source: `${sp.note}${other ? "（局面の割合のほかの設定の違いは見ていない）" : ""}` };
   }
   const plain =
@@ -1502,8 +1526,12 @@ export function standIn(text: string): string {
  * 前のジョブが作るファイル（@/）は、モデル（--model・--vocab・--potential と設定の JSON）なら今の既定のモデルに、ほかは tmp の下の名前にする */
 export function checkArgv(job: Job, tmp: string): string[] | undefined {
   const s = job.spec;
-  // survey の設定は数だけで、ジョブの行を読むときに確かめた
-  if (s.kind === "survey" || s.kind === "node" || s.kind === "pick") return undefined;
+  // survey の設定の数は、ジョブの行を読むときに確かめた。AI の設定とデッキは 0 試合の compare で読む
+  if (s.kind === "survey") {
+    if (s.opts === "{}" && s.decks === null) return undefined;
+    return ["compare", "0", standIn(s.opts), "{}", "0", ...(s.decks === null ? [] : ["--decks", s.decks]), "--no-ledger"];
+  }
+  if (s.kind === "node" || s.kind === "pick") return undefined;
   if (s.kind === "data") {
     const standInFor = (prev: string | undefined): string | undefined =>
       prev === "--model" || prev === "--vocab" ? STAND_INS.valueNet : prev === "--potential" ? STAND_INS.potentialNet : undefined;

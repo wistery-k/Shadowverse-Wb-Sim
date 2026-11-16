@@ -1,9 +1,10 @@
 //! 候補の打ち比べ調査（2026-11-11。審査の文書「AI の設計の審査と今後の方針」課題点 3「先にやること」、docs/survey.md）。
 //!
 //!   svwb survey run --out 結果.jsonl --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8] [--decks <デッキ>,…|@<デッキの組>]
+//!                   [--opts '<設定>']
 //!   svwb survey report 結果.jsonl… [--label 名前] [--no-ledger] [--top 20] [--states <フォルダ>]
 //!
-//! **run**: 今の既定の AI どうしの自己対戦（試合 g のデッキ・席・シードは `svwb ai-play`・`deep-gap` と同じ。`--decks` なら、並べたデッキで
+//! **run**: 今の既定の AI（`--opts` なら、その設定の AI。compare の A・B と同じ形。新しいプールの補正で打つ用）どうしの自己対戦（試合 g のデッキ・席・シードは `svwb ai-play`・`deep-gap` と同じ。`--decks` なら、並べたデッキで
 //! compare と同じ組（n デッキなら試合番号 n² ごとに全部の組。先の席が A）、シードは同じ。デフォルトデッキと違うデッキのマリガンは compare と同じ）を打ち、
 //! 両方の席の自分のターンの最初の局面から、試合番号と手の番号で決まる乱数で `--rate` の割合を無作為に選ぶ（差の大きさでは選ばない）。
 //! 選んだ局面ごとに:
@@ -13,7 +14,8 @@
 //!    （`SearchAgent::survey_plans`）
 //! 2. 候補ごとに、同じ乱数で `--m` 回最後まで打つ（r 回目は、手番の側から見た決定化と AI の乱数がどの候補でも同じ）。
 //!    候補は、AI がその並びを選んだものとして打つ: 最初の手を打ち、次の判断からは局面が予想どおりなら並びの続きを打つ
-//!    （並びは最初の引く手・ランダムな手まで。その先と、並びを打ち終えた後は AI が考え直す）。続きは両方の席とも今の既定の AI
+//!    （並びは最初の引く手・ランダムな手まで。その先と、並びを打ち終えた後は AI が考え直す）。続きは両方の席とも今の既定の AI（`--opts` ならその AI。
+//!    候補を作る AI も同じ）
 //! 3. 二段目（確かめ）: 一段目で、AI の選んだ候補との勝率の差が最も大きい候補の差が `--flag` ポイント以上なら、
 //!    その候補と AI の選んだ候補だけを、一段目と重ならない乱数でさらに `--confirm` 回打つ。大きなミスの判定は二段目の回だけで行う
 //!    （一段目で差の大きいものを選んだ偏りが入らない）
@@ -37,6 +39,7 @@ use super::deep_gap::{
 use super::fixed;
 use super::human_plan::{is_start_of_turn, mean_se, mix, parse_range, round2, step_text};
 use super::ledger;
+use super::options::compare_options;
 use super::parallel::{parallel_map, thread_count};
 use crate::ai::determinize::determinize;
 use crate::ai::exact_lethal::reset_exact_lethal_cache;
@@ -72,6 +75,10 @@ struct Cfg {
     extra: usize,
     confirm: u32,
     flag: f64,
+    /// 自己対戦・候補を作る・続きを打つ AI の設定（--opts。既定は `{}`）
+    opts: SearchOptions,
+    /// --opts の文字列（試合の行に書く）
+    opts_text: String,
 }
 
 /// 試合のデッキの名前
@@ -97,24 +104,22 @@ struct GameRec {
     sec: f64,
 }
 
-/// 試合 g の自己対戦（今の既定の AI どうし。list が無ければ svwb ai-play と同じ試合、あれば並べたデッキで compare と同じ組）
-fn play_game(g: u32, list: Option<&[&'static Deck]>) -> GameRec {
+/// 試合 g の自己対戦（設定 o の AI どうし。list が無ければ svwb ai-play と同じ試合、あれば並べたデッキで compare と同じ組）
+fn play_game(g: u32, list: Option<&[&'static Deck]>, o: &SearchOptions) -> GameRec {
     let t = Instant::now();
     let (decks, seed, names, opts) = match list {
         None => {
             let (decks, seed) = ai_game_setup(g, false);
             let names = [deck_name(&decks[0]), deck_name(&decks[1])];
-            let o = SearchOptions::default();
-            (decks, seed, names, [o.clone(), o])
+            (decks, seed, names, [o.clone(), o.clone()])
         }
         Some(list) => {
             let (a, b) = compare_pair(list, g, false);
-            let o = SearchOptions::default();
             (
                 [a.cards.clone(), b.cards.clone()],
                 g * 7 + 1,
                 [a.name.clone(), b.name.clone()],
-                [deck_options(&o, a), deck_options(&o, b)],
+                [deck_options(o, a), deck_options(o, b)],
             )
         }
     };
@@ -258,7 +263,7 @@ fn prepare(recs: &[GameRec], rec_i: usize, i: usize, p: PlayerIndex, cfg: &Cfg) 
     let legal = legal_actions(&s);
     reset_lethal();
     reset_exact_lethal_cache();
-    let agent = SearchAgent::new(SearchOptions::default());
+    let agent = SearchAgent::new(cfg.opts.clone());
     let survey = if legal.len() <= 1 {
         None
     } else {
@@ -311,11 +316,13 @@ pub(crate) fn playout(
     seed: u32,
     r: u32,
 ) -> char {
-    playout_with(start, p, plan, seed, r, false)
+    playout_ends(start, p, plan, seed, r, false, false, None).result
 }
 
-/// playout の、相手の手札を実際のまま（山札の中身と順番、乱数の状態は作り直す）にもできる形（`survey recheck`）
+/// playout の、両方の席の AI を設定 o で打ち、相手の手札を実際のまま（山札の中身と順番、乱数の状態は作り直す）にもできる形
+/// （`survey run --opts`・`survey recheck`）
 fn playout_with(
+    o: &SearchOptions,
     start: &GameState,
     p: PlayerIndex,
     plan: &[Action],
@@ -323,7 +330,7 @@ fn playout_with(
     r: u32,
     peek_opp_hand: bool,
 ) -> char {
-    playout_ends(start, p, plan, seed, r, peek_opp_hand, false, None).result
+    playout_ends_with(o, start, p, plan, seed, r, peek_opp_hand, false, None).result
 }
 
 /// 打ち進めた 1 回の結果と、いつ終わったか
@@ -579,7 +586,11 @@ fn best_alt(w: &[Vec<char>], ai: usize) -> Option<(usize, f64)> {
 
 /// 1 試合分の行を作る（局面を選び、候補を作り、一段目・二段目を打つ）
 fn run_batch(games: &[u32], cfg: &Cfg, list: Option<&[&'static Deck]>) -> Vec<Value> {
-    let recs: Vec<GameRec> = parallel_map(games, |&g, _| play_game(g, list), |_, _, _, _| {});
+    let recs: Vec<GameRec> = parallel_map(
+        games,
+        |&g, _| play_game(g, list, &cfg.opts),
+        |_, _, _, _| {},
+    );
     let mut picks: Vec<(usize, usize, PlayerIndex)> = Vec::new();
     for (k, rec) in recs.iter().enumerate() {
         for &(i, p) in &rec.starts {
@@ -614,7 +625,7 @@ fn run_batch(games: &[u32], cfg: &Cfg, list: Option<&[&'static Deck]>) -> Vec<Va
             let (s, _) = rebuild(&recs[rec], i);
             let out = plans[k]
                 .iter()
-                .map(|pl| playout(&s, p, pl, seed, r))
+                .map(|pl| playout_with(&cfg.opts, &s, p, pl, seed, r, false))
                 .collect();
             (out, t.elapsed().as_secs_f64())
         },
@@ -655,8 +666,8 @@ fn run_batch(games: &[u32], cfg: &Cfg, list: Option<&[&'static Deck]>) -> Vec<Va
             let t = Instant::now();
             let (rec, i, p, seed) = meta[k];
             let (s, _) = rebuild(&recs[rec], i);
-            let a = playout(&s, p, &plans[k][ais[k]], seed, r);
-            let b = playout(&s, p, &plans[k][c], seed, r);
+            let a = playout_with(&cfg.opts, &s, p, &plans[k][ais[k]], seed, r, false);
+            let b = playout_with(&cfg.opts, &s, p, &plans[k][c], seed, r, false);
             ([a, b], t.elapsed().as_secs_f64())
         },
         |_, _, _, _| {},
@@ -703,6 +714,7 @@ fn run_batch(games: &[u32], cfg: &Cfg, list: Option<&[&'static Deck]>) -> Vec<Va
             "sampled": picks.iter().filter(|x| recs[x.0].g == rec.g).count(),
             "winner": rec.winner, "actions": rec.actions.len(), "sec": round2(rec.sec),
             "rate": cfg.rate, "m": cfg.m, "extra": cfg.extra, "confirm": cfg.confirm, "flag": cfg.flag,
+            "opts": cfg.opts_text,
             "commit": commit, "machine": ledger::machine(), "threads": thread_count(),
         }));
     }
@@ -729,7 +741,7 @@ fn run(argv: &[String]) -> Result<(), String> {
     check_flags(
         &flags,
         &[
-            "out", "games", "rate", "m", "extra", "confirm", "flag", "batch", "decks",
+            "out", "games", "rate", "m", "extra", "confirm", "flag", "batch", "decks", "opts",
         ],
     )?;
     let list: Option<Vec<&'static Deck>> = flag(&flags, "decks")
@@ -749,12 +761,15 @@ fn run(argv: &[String]) -> Result<(), String> {
     if a < 0 || b < a {
         return Err("--games は 0 以上の a-b（a ≤ b）".into());
     }
+    let opts_text = flag(&flags, "opts").unwrap_or("{}").to_string();
     let cfg = Cfg {
         rate: float_flag(&flags, "rate", 0.1)?.min(1.0),
         m: num_flag(&flags, "m", 32)?.max(2),
         extra: num_flag(&flags, "extra", 4)? as usize,
         confirm: num_flag(&flags, "confirm", 96)?,
         flag: float_flag(&flags, "flag", 10.0)?,
+        opts: compare_options(&opts_text).map_err(|e| format!("--opts: {e}"))?,
+        opts_text,
     };
     let batch = num_flag(&flags, "batch", 8)?.max(1) as usize;
     let mut done: HashSet<u64> = HashSet::new();
@@ -979,6 +994,7 @@ fn report(argv: &[String]) -> Result<(), String> {
     if n_games == 0 {
         return Err("試合の行がありません".into());
     }
+    let opts_text = run_opts(&games)?;
     let turn_starts: u64 = games
         .values()
         .map(|g| strs_u(&g["turnStarts"]).iter().sum::<u64>())
@@ -1103,6 +1119,9 @@ fn report(argv: &[String]) -> Result<(), String> {
         per_kind(CUT),
         per_kind(EXTRA)
     ));
+    if opts_text != "{}" {
+        line(format!("AI の設定（--opts）: `{opts_text}`"));
+    }
     line(String::new());
     line("## 打ち比べで選び直す得".into());
     line(String::new());
@@ -1343,7 +1362,10 @@ fn report(argv: &[String]) -> Result<(), String> {
         ledger::append_survey(
             &label,
             vec![
-                ("a".into(), Json::Obj(Vec::new())),
+                (
+                    "a".into(),
+                    Json::parse(&opts_text).unwrap_or_else(|_| Json::Str(opts_text.clone())),
+                ),
                 (
                     "g".into(),
                     Json::Arr(vec![num(first_game as f64), num(last_game as f64)]),
@@ -1608,6 +1630,22 @@ fn plan_kind(r: &PosRow, c: usize) -> &'static str {
 
 const RECHECK_TAG: u32 = 0x5245_4348;
 
+/// 試合の行に書いた AI の設定（`--opts`。無ければ `{}`）。違う設定の行が混ざっていれば断る（同じ調査として足し合わせない）
+fn run_opts(games: &BTreeMap<u64, Value>) -> Result<String, String> {
+    let set: std::collections::BTreeSet<String> = games
+        .values()
+        .map(|g| g["opts"].as_str().unwrap_or("{}").to_string())
+        .collect();
+    match set.len() {
+        0 => Ok("{}".into()),
+        1 => Ok(set.into_iter().next().unwrap_or_default()),
+        _ => Err(format!(
+            "違う AI の設定（--opts）で打った試合が混ざっています: {}",
+            set.into_iter().collect::<Vec<_>>().join(" と ")
+        )),
+    }
+}
+
 /// svwb survey recheck: 二段目に回した局面を、相手の手札を実際のまま（`--peek 0` なら今までどおり引き直す）で、
 /// AI の選んだ候補と替える候補を `--m` 回ずつ打ち直す（2026-11-12、本番の後に足した確かめ。docs/survey.md）。
 /// 打ち比べは相手の手札を引き直した世界で測るので、実際の手札でも差が残るかを見る
@@ -1640,6 +1678,9 @@ fn recheck(argv: &[String]) -> Result<(), String> {
         .filter(|((g, _), _)| games.contains_key(g))
         .map(|(_, v)| pos_row(v))
         .collect();
+    // 打ち直す AI は、調査を打った AI（試合の行の opts。2026-11-16 より前の行には無く、今の既定）
+    let opts_text = run_opts(&games)?;
+    let opts = compare_options(&opts_text).map_err(|e| format!("試合の行の opts: {e}"))?;
     let turn_starts: u64 = games
         .values()
         .map(|g| strs_u(&g["turnStarts"]).iter().sum::<u64>())
@@ -1704,7 +1745,7 @@ fn recheck(argv: &[String]) -> Result<(), String> {
             |&(k, w, t), _| {
                 let (s, p, plans, seed) = &items[k];
                 match Json::parse(s).and_then(|j| state_from_json(&j)) {
-                    Ok(start) => playout_with(&start, *p, &plans[w], *seed, t, peek),
+                    Ok(start) => playout_with(&opts, &start, *p, &plans[w], *seed, t, peek),
                     Err(_) => 'x',
                 }
             },
@@ -1925,7 +1966,7 @@ mod tests {
     fn pick_keeps_the_ai_move_unless_a_candidate_clears_the_line() {
         use crate::ai::search::PickByPlayout;
         use crate::ai::Agent;
-        let rec = play_game(3, None);
+        let rec = play_game(3, None, &SearchOptions::default());
         let with = |threshold: f64| SearchOptions {
             pick: Some(PickByPlayout {
                 m: 2,
@@ -2020,7 +2061,7 @@ mod tests {
     /// 打ち切った候補は、読み直した候補にも足した候補にも重ならない
     #[test]
     fn cut_candidates_cover_what_the_ai_started_to_read() {
-        let rec = play_game(3, None);
+        let rec = play_game(3, None, &SearchOptions::default());
         let mut cuts = 0;
         for &(i, _) in rec.starts.iter().take(16) {
             let (s, rng) = rebuild(&rec, i);
@@ -2069,7 +2110,7 @@ mod tests {
     /// 同じ乱数の続きは同じ結果になる
     #[test]
     fn prepares_candidates_from_a_self_play_position() {
-        let rec = play_game(3, None);
+        let rec = play_game(3, None, &SearchOptions::default());
         let cfg = Cfg {
             rate: 1.0,
             m: 2,
