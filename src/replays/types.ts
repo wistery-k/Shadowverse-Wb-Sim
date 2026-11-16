@@ -5,7 +5,7 @@ import type { ClassId } from "../cards";
 import type { Action, PlayerIndex } from "../engine";
 
 /**
- * 1 試合の記録。--replays の 1 行（rust/engine/src/runner/mod.rs の ReplayRecord）と、
+ * 1 試合の記録。棋譜の 1 行（rust/engine/src/runner/kifu.rs、形は docs/kifu.md。前の --replays の行も）と、
  * npm run game --json・rhino-compare --record の記録（seed・agents・decks・winner・actions）を読める
  */
 export interface ReplayRecord {

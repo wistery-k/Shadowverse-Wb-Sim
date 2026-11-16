@@ -59,7 +59,7 @@ AI は今までどおり、自分から見た決定化で考える（相手の�
 
 | 元 | 引数 | 中身 |
 | --- | --- | --- |
-| 記録した試合 | `--replay <ファイル>` | `npm run game -- --json` の出力、`compare --replays`・`rhino-compare --record` の 1 行、人間の対戦記録（`human-compare`。1 つの JSON でも JSON Lines でもよい）。JSON Lines は `--line N`（1 から）か `--key subject/deck/g/seat`（人間の記録）で選ぶ |
+| 記録した試合 | `--replay <ファイル>` | `npm run game -- --json` の出力、棋譜（[kifu.md](kifu.md)。`compare` 等が既定で書く）・`rhino-compare --record` の 1 行、人間の対戦記録（`human-compare`。1 つの JSON でも JSON Lines でもよい）。JSON Lines は `--line N`（1 から）か `--key subject/deck/g/seat`（人間の記録）で選ぶ |
 | 今の AI で打ち直す試合 | `--seed S --decks A,B [--agents a,b]` | `npm run game` と同じ試合を今の AI で打つ（AI を変えると流れが変わる。打ち直した行動の列は問に残す） |
 | 手で作った局面 | `--two-turn <名前>` | `svwb two-turn show` の局面 |
 | 局面のファイル | `--state <ファイル>` | サンドボックス（`npm run dev`）の書き出し（`{"format":"svwb-sandbox","state":…}`）か、状態の JSON そのもの |

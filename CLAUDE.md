@@ -54,7 +54,8 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
      2. Google Cloud（`cloud/gcp.sh` の Spot VM など）は、所要時間や費用にかかわらず、使うたびにユーザーの承認を得てから使う。PC より速いことは承認なしで使う理由にならない。2026-11-08 から当分使わないことにして課金を外した（`cloud/README.md`「今は使っていない」）
      3. 十分速く終わるもの（小さく試す・短い確かめなど）は、Claude のクラウド環境（スレッド自身の環境。4 スレッドほどで、PC の 28 スレッドより何倍も遅い）で回してよい
      - どこで回すときも、回す前に変更を作業ブランチに push し、所要時間を見積もる。見積もりが 1 時間以上なら、回す前にユーザーに確かめる（PC の夜のキューは、1 晩分をまとめて 1 回）
-   - ユーザーの PC で回した自己対戦・モデル・ログは、`npm run pack-run` でまとめたものを共有フォルダ（`/mnt/project-files/`）の `data/selfplay/<名前>/`・`data/models/<名前>/`・`logs/<名前>/` に展開して置く。各回の中身は `logs/<名前>/MANIFEST.md`（`docs/commands.md`「pack-run」）
+   - 対戦を打つランナー（compare・yardstick・profile・td selfplay・survey run）は、既定で試合ごとの棋譜を書く（`docs/kifu.md`。夜のキューは回のフォルダの `kifu/`）。調べ物は、ランナーに専用の処理を足さず、棋譜を打ち直して数える形にそろえていく（ユーザーの依頼 2026-11-16）
+   - ユーザーの PC で回した自己対戦・モデル・棋譜・ログは、`npm run pack-run` でまとめたものを共有フォルダ（`/mnt/project-files/`）の `data/selfplay/<名前>/`・`data/models/<名前>/`・`data/kifu/<名前>/`・`logs/<名前>/` に展開して置く。各回の中身は `logs/<名前>/MANIFEST.md`（`docs/commands.md`「pack-run」）
    - ユーザーの PC の Docker コンテナ（`docker/remote-control`）で回すときは、自己対戦・モデル・ログ・`pack-run` の出力を `~/svwb-data/<名前>/` の下に置く（ホストの同じ場所に見える。`/workspace` と `~/svwb-data` 以外はコンテナを作り直すと消える）
 
 ## ルールの扱い

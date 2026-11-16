@@ -2,7 +2,7 @@
 //! デッキごとの 1 試合の時間と、思考の処理ごとの時間の内訳を出す。
 //!
 //!   svwb profile [--games 49] [--start 0] [--opts '<設定JSON>'] [--rhino] [--decks <デッキ>,…|@<デッキの組>] [--only <文字列>] [--check] [--log <フォルダ>] [--json 結果.json]
-//!                [--baseline 測らないビルドの結果.json] [--report 報告.md] [--label 名前] [--record]
+//!                [--baseline 測らないビルドの結果.json] [--report 報告.md] [--label 名前] [--record] [--kifu <ファイル> | --no-kifu]
 //!
 //! - --check なら、手を打つたびに局面の不変条件（invariants.rs）を確かめ、破った局面を報告に並べる（1 つでもあれば終わりにエラーを返す）
 //! - 報告には、デッキ（名前の「（」の前が同じものは型にまとめる）ごとの勝率と、仕組み（アクセラレート・結晶・エンハンス・奥義・進化・
@@ -21,11 +21,14 @@
 //!   （同じ試合になったかも確かめる）。npm run profile（scripts/profile.mjs）が両方を続けて回す
 //! - --record で docs/profile.md の表に 1 行足す（--label で名前を付ける）
 //! - 時間は試合を打ったスレッドの経過時間。並列数（THREADS）・CPU で変わるので、比べるときは同じ環境の行どうしで比べる
+//! - 試合ごとの棋譜も既定で書く（compare と同じ。runner/kifu.rs）。--baseline を渡した回（npm run profile の測るビルドの方。
+//!   試合は測らないビルドと同じ）は、--kifu を渡さなければ書かない
 
 use super::compare::{compare_setup, deck_options};
 use super::deck_compare::read_deck_list;
 use super::deep_gap::describe;
 use super::human_plan::step_text;
+use super::kifu::{self, RunInfo, Seat};
 use super::options::compare_options;
 use super::parallel::{parallel_map, thread_count};
 use super::yardstick::{command_line, commit_label_excluding, short_name};
@@ -82,6 +85,8 @@ struct GameRecord {
     crest_fired: [CrestFired; 2],
     /// 席ごとの、一度でも持ったクレストと、最初に持った自分のターン（マリガンの前後に置いた信仰は 0）
     crest_held: [BTreeMap<CrestIdx, u32>; 2],
+    /// 棋譜の 1 行（棋譜を書くときだけ）
+    kifu: Option<String>,
 }
 
 /// (クレスト, 能力の番号) → [自分のターン, 相手のターン] の誘発の回数
@@ -212,7 +217,9 @@ fn make_agent(opts: &SearchOptions, deck: &Deck, rhino: bool) -> Box<dyn Agent> 
     }
 }
 
-/// 試合番号 g（swap で席とデッキを入れ替えた方）を打って時間を測る（sim::play_match と同じ手順・乱数の使い方）
+/// 試合番号 g（swap で席とデッキを入れ替えた方）を打って時間を測る（sim::play_match と同じ手順・乱数の使い方）。
+/// kifu（回と、探索 AI・リノセウス用 AI の席）があれば棋譜の 1 行も作る
+#[allow(clippy::too_many_arguments)]
 fn play_timed(
     opts: &SearchOptions,
     rhino: bool,
@@ -221,6 +228,7 @@ fn play_timed(
     swap: bool,
     check: bool,
     log: bool,
+    kifu: Option<(&RunInfo, &[Seat; 2])>,
 ) -> GameRecord {
     let (_, seats, seed) = compare_setup(decks, g, swap, false);
     let mut agents = [
@@ -247,6 +255,7 @@ fn play_timed(
     let mut crest_held: [BTreeMap<CrestIdx, u32>; 2] = Default::default();
     let names = [seats[0].name.clone(), seats[1].name.clone()];
     let mut lines: Vec<String> = Vec::new();
+    let mut played: Vec<Action> = Vec::new();
     while s.phase != Phase::Ended {
         actions += 1;
         assert!(
@@ -336,6 +345,9 @@ fn play_timed(
         // クレストの誘発は、実際の試合の手を打つ間だけ数える（AI の読みの中は数えない）
         crest_tally::start();
         s = apply_action(&s, &a);
+        if kifu.is_some() {
+            played.push(a.clone());
+        }
         for f in crest_tally::take() {
             crest_fired[f.player]
                 .entry((f.crest, f.ability))
@@ -356,7 +368,31 @@ fn play_timed(
             }
         }
     }
+    let kifu = kifu.map(|(run, [search, rhino_seat])| {
+        let seat = |d: &Deck| {
+            if rhino && d.name == "リノセウスエルフ" {
+                rhino_seat
+            } else {
+                search
+            }
+        };
+        let seed = compare_setup(decks, g, swap, false).2;
+        kifu::line(
+            run,
+            &kifu::Game {
+                g,
+                swap: Some(swap),
+                names: [&seats[0].name, &seats[1].name],
+                seats: [seat(seats[0]), seat(seats[1])],
+                decks: [&seats[0].cards, &seats[1].cards],
+                seed,
+                end: kifu::End::of(&s),
+                actions: &played,
+            },
+        )
+    });
     GameRecord {
+        kifu,
         g,
         swap,
         decks: [seats[0].name.clone(), seats[1].name.clone()],
@@ -1129,6 +1165,9 @@ fn record_row(sm: &Summary, date: &str, commit: &str, label: &str) -> String {
 }
 
 pub fn main(argv: &[String]) -> Result<(), String> {
+    let mut argv = argv.to_vec();
+    let kifu_target = kifu::take_args(&mut argv)?;
+    let argv = &argv[..];
     let mut opts_text = "{}".to_string();
     let mut games = 49u32;
     let mut start = 0u32;
@@ -1233,17 +1272,58 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             ""
         }
     );
+    // 棋譜（両方の席が同じ設定。--rhino ならリノセウスエルフの席はリノセウス用 AI）。--baseline の回は、--kifu が無ければ書かない
+    let run = RunInfo::now("profile", &label);
+    let kifu_path = match (&kifu_target, &baseline) {
+        (kifu::Target::Default, Some(_)) => None,
+        (t, _) => t.path(&kifu::Name {
+            kind: "profile",
+            label: &label,
+            first: start,
+            last: start + games - 1,
+            key: &kifu::args_key(argv),
+            commit: &run.engine,
+        }),
+    };
+    let mut writer = kifu_path.as_deref().map(kifu::Writer::create).transpose()?;
+    let search_seat = kifu::same_seat("profile", &opts_text);
+    let rhino_seat = Seat {
+        side: None,
+        agent: "rhino".into(),
+        ai: crate::json::Json::Obj(vec![("rhino".into(), crate::json::Json::Bool(true))]),
+        nets: crate::json::Json::Null,
+    };
+    let seats = [search_seat, rhino_seat];
+    let kifu_run = writer.as_ref().map(|_| (&run, &seats));
     let t0 = Instant::now();
     let records = parallel_map(
         &tasks,
-        |&(g, swap), _| play_timed(&opts, rhino, &decks, g, swap, check, log_dir.is_some()),
-        |done, total, _, _| {
+        |&(g, swap), _| {
+            play_timed(
+                &opts,
+                rhino,
+                &decks,
+                g,
+                swap,
+                check,
+                log_dir.is_some(),
+                kifu_run,
+            )
+        },
+        |done, total, r, _| {
+            if let (Some(w), Some(line)) = (writer.as_mut(), r.kifu.as_ref()) {
+                w.write(line);
+            }
             if done % 10 == 0 || done == total {
                 eprint!("\r{done}/{total}");
             }
         },
     );
     eprintln!("（{} 秒）", fixed(t0.elapsed().as_secs_f64(), 1));
+    if let Some(w) = writer {
+        let (p, n) = w.finish()?;
+        eprintln!("棋譜: {p}（{n} 試合）");
+    }
     if let Some(dir) = &log_dir {
         std::fs::create_dir_all(dir).map_err(|e| format!("{dir} を作れません: {e}"))?;
         for r in &records {

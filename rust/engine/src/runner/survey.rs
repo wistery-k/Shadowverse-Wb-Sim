@@ -38,6 +38,7 @@ use super::deep_gap::{
 };
 use super::fixed;
 use super::human_plan::{is_start_of_turn, mean_se, mix, parse_range, round2, step_text};
+use super::kifu::{self, RunInfo, Seat};
 use super::ledger;
 use super::options::compare_options;
 use super::parallel::{parallel_map, thread_count};
@@ -101,6 +102,8 @@ struct GameRec {
     /// 自分のターンの最初の局面（手の番号と席）
     starts: Vec<(usize, PlayerIndex)>,
     winner: Option<PlayerIndex>,
+    /// 終わり（棋譜の先攻・勝者・ターン）
+    end: kifu::End,
     sec: f64,
 }
 
@@ -155,6 +158,7 @@ fn play_game(g: u32, list: Option<&[&'static Deck]>, o: &SearchOptions) -> GameR
         actions,
         starts,
         winner: end.winner,
+        end: kifu::End::of(&end),
         sec: t.elapsed().as_secs_f64(),
     }
 }
@@ -584,8 +588,13 @@ fn best_alt(w: &[Vec<char>], ai: usize) -> Option<(usize, f64)> {
     best
 }
 
-/// 1 試合分の行を作る（局面を選び、候補を作り、一段目・二段目を打つ）
-fn run_batch(games: &[u32], cfg: &Cfg, list: Option<&[&'static Deck]>) -> Vec<Value> {
+/// 1 試合分の行を作る（局面を選び、候補を作り、一段目・二段目を打つ）。kifu を渡すと、試合ごとの棋譜の行（試合番号と行）も返す
+fn run_batch(
+    games: &[u32],
+    cfg: &Cfg,
+    list: Option<&[&'static Deck]>,
+    kifu: Option<(&RunInfo, &[Seat; 2])>,
+) -> (Vec<Value>, Vec<(u32, String)>) {
     let recs: Vec<GameRec> = parallel_map(
         games,
         |&g, _| play_game(g, list, &cfg.opts),
@@ -718,7 +727,27 @@ fn run_batch(games: &[u32], cfg: &Cfg, list: Option<&[&'static Deck]>) -> Vec<Va
             "commit": commit, "machine": ledger::machine(), "threads": thread_count(),
         }));
     }
-    rows
+    let lines = kifu.map_or_else(Vec::new, |(run, seats)| {
+        recs.iter()
+            .map(|rec| {
+                let line = kifu::line(
+                    run,
+                    &kifu::Game {
+                        g: rec.g,
+                        swap: None,
+                        names: [&rec.names[0], &rec.names[1]],
+                        seats: [&seats[0], &seats[1]],
+                        decks: [&rec.decks[0], &rec.decks[1]],
+                        seed: rec.seed,
+                        end: rec.end,
+                        actions: &rec.actions,
+                    },
+                );
+                (rec.g, line)
+            })
+            .collect()
+    });
+    (rows, lines)
 }
 
 pub(crate) fn float_flag(flags: &[(String, String)], k: &str, def: f64) -> Result<f64, String> {
@@ -734,7 +763,10 @@ pub(crate) fn float_flag(flags: &[(String, String)], k: &str, def: f64) -> Resul
 
 /// svwb survey run
 fn run(argv: &[String]) -> Result<(), String> {
-    let (flags, rest) = parse_flags(argv)?;
+    // 棋譜（--kifu <ファイル>、--no-kifu で書かない。無ければ既定のフォルダ。docs/kifu.md）。再開できるように 1 試合ずつ書き足す
+    let mut argv = argv.to_vec();
+    let kifu_target = kifu::take_args(&mut argv)?;
+    let (flags, rest) = parse_flags(&argv)?;
     if !rest.is_empty() {
         return Err(format!("不明な引数: {}", rest.join(" ")));
     }
@@ -802,6 +834,28 @@ fn run(argv: &[String]) -> Result<(), String> {
         thread_count()
     );
     let mut file = open_append(out)?;
+    let run_info = RunInfo::now("survey", "");
+    let key = kifu::args_key(
+        &["survey".to_string(), "run".to_string()]
+            .into_iter()
+            .chain(argv.iter().cloned())
+            .collect::<Vec<_>>(),
+    );
+    let mut kifu_file = kifu_target
+        .path(&kifu::Name {
+            kind: "survey",
+            label: "",
+            first: a as u32,
+            last: b as u32,
+            key: &key,
+            commit: &run_info.engine,
+        })
+        .map(|p| kifu::Appender::open(&p))
+        .transpose()?;
+    // 両方の席とも --opts の AI（棋譜の ai・nets はその設定と補正の指紋）
+    let seat = kifu::same_seat("survey", &cfg.opts_text);
+    let seats = [seat.clone(), seat];
+    let kifu_run = kifu_file.as_ref().map(|_| (&run_info, &seats));
     let t0 = Instant::now();
     let mut positions = 0;
     // まとめる試合の数をそろえる（17 試合を 8・8・1 でなく 6・6・5 に。端の小さなまとまりでスレッドが余らないように）
@@ -810,7 +864,13 @@ fn run(argv: &[String]) -> Result<(), String> {
         .div_ceil(games.len().div_ceil(batch).max(1))
         .max(1);
     for (n, chunk) in games.chunks(size).enumerate() {
-        let rows = run_batch(chunk, &cfg, list.as_deref());
+        let (rows, lines) = run_batch(chunk, &cfg, list.as_deref(), kifu_run);
+        // 棋譜を結果の行より先に書く（間で止まっても、再開でその試合を打ち直し、棋譜は 2 度書かない）
+        if let Some(k) = kifu_file.as_mut() {
+            for (g, l) in &lines {
+                k.write(*g, l)?;
+            }
+        }
         positions += rows.iter().filter(|v| v["game"] != json!(true)).count();
         let text: String = rows.iter().map(|v| format!("{v}\n")).collect();
         file.write_all(text.as_bytes())
@@ -833,6 +893,10 @@ fn run(argv: &[String]) -> Result<(), String> {
         games.len(),
         fixed(t0.elapsed().as_secs_f64(), 0)
     );
+    if let Some(k) = &kifu_file {
+        let (p, n) = k.summary();
+        println!("棋譜: {p}（{n} 試合）");
+    }
     Ok(())
 }
 

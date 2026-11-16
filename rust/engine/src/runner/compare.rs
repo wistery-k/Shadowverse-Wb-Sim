@@ -1,7 +1,7 @@
 //! 探索 AI の設定 A と B を対戦させる（TypeScript 版 scripts/compare-main.ts。npm run compare と同じ試合・同じ出力）。
 //!
-//!   svwb compare <試合数> '<Aの設定JSON>' '<Bの設定JSON>' [最初の試合番号] [Bのデッキ名] [--no-mirror] [--decks <デッキ>,…|@<デッキの組>] [--replays <ファイル>]
-//!                [--with <デッキ名> | --without <デッキ名> | --involving <文字列>,…] [--label <名前>] [--no-ledger]
+//!   svwb compare <試合数> '<Aの設定JSON>' '<Bの設定JSON>' [最初の試合番号] [Bのデッキ名] [--no-mirror] [--decks <デッキ>,…|@<デッキの組>]
+//!                [--with <デッキ名> | --without <デッキ名> | --involving <文字列>,…] [--label <名前>] [--no-ledger] [--kifu <ファイル> | --no-kifu]
 //!
 //! 同じデッキの組で席とデッキを入れ替えて 2 試合ずつ行い、A の勝率とデッキごとの A の勝率を出す。
 //! 2 試合の組ごとの A の勝ち数（2・1・0）の数と、組のばらつきから求めた標準誤差も出す。
@@ -13,8 +13,9 @@
 //! 補正どうしを比べる用。デッキが n 個なら、試合番号 n² ごとに全部の組を回る（compare_pair。7 個なら今までと同じ組とシード）
 //! （docs/ai-notes.md「カードの重みを属性とカードごとの残りに分ける」）。デフォルトデッキと違うデッキのマリガンは、
 //! 返し方ごとに引き直しを試して選ぶ（td selfplay と同じ。マリガンのモデルはデフォルトデッキしか知らない）。
-//! `--replays` なら、試合ごとにデッキ・シード・行動の列を JSON Lines で書く（1 行の形は runner/mod.rs の ReplayRecord。
-//! npm run dev の「リプレイ検索」タブで読む）。打つ手は変わらない。
+//! 試合ごとの棋譜（デッキ・シード・行動の列と、回・席の AI・エンジンの版。runner/kifu.rs、形は docs/kifu.md）を既定で書く。
+//! 書く先は `--kifu <ファイル>`（前の名前 `--replays` も使える）か、既定のフォルダ（`~/svwb-data/kifu`、夜のキューは回のフォルダの kifu/）。
+//! `--no-kifu` で書かない。打つ手は変わらない。
 //! 回すたびに、結果を実験の台帳 `docs/ledger.jsonl` に 1 行足す（runner/ledger.rs。`--label <名前>` で名前を付け、`--no-ledger` で書かない）。
 //! 試合数 0 なら設定とデッキを読むだけで終わる。
 //! `--with <デッキ名>` なら、そのデッキの絡む組（A か B のどちらかがそのデッキ。7 デッキなら 49 組のうち 13 組）だけを打つ。試合番号 k は
@@ -25,6 +26,7 @@
 //! 同じ試合番号の範囲を全部打ったときのその組と同じ試合になる（回した compare のうち、ある型の絡む組だけの A の勝率を出す用）。
 
 use super::deck_compare::read_deck_list;
+use super::kifu::{self, RunInfo, Seat};
 use super::ledger;
 use super::options::compare_options;
 use super::parallel::parallel_map;
@@ -112,7 +114,7 @@ pub fn deck_options(o: &SearchOptions, d: &Deck) -> SearchOptions {
     o
 }
 
-/// play_compare_game と同じ試合。labels（A・B の名前）があれば、リプレイ検索用の 1 行（ReplayRecord）も返す
+/// play_compare_game と同じ試合。kifu（回と、A・B の席）があれば、棋譜の 1 行（runner/kifu.rs）も返す
 pub fn play_compare_game_with(
     a: &SearchOptions,
     b: &SearchOptions,
@@ -120,7 +122,7 @@ pub fn play_compare_game_with(
     g: u32,
     swap: bool,
     mirror: bool,
-    labels: Option<[&str; 2]>,
+    kifu: Option<(&RunInfo, &[Seat; 2])>,
 ) -> (String, bool, Option<String>) {
     let (a_seat, seats, seed) = compare_setup(decks, g, swap, mirror);
     let mut a = SearchAgent::new(deck_options(a, seats[a_seat]));
@@ -136,7 +138,7 @@ pub fn play_compare_game_with(
         [&seats[0].cards, &seats[1].cards],
         seed,
         |_, a| {
-            if labels.is_some() {
+            if kifu.is_some() {
                 log.push(a.clone());
             }
         },
@@ -144,19 +146,21 @@ pub fn play_compare_game_with(
     let winner = end
         .winner
         .unwrap_or_else(|| panic!("勝者がいません（試合 {g}）"));
-    let replay = labels.map(|[la, lb]| {
-        let agents = if a_seat == 0 { [la, lb] } else { [lb, la] };
-        super::ReplayRecord {
-            source: "compare",
-            g,
-            names: [&seats[0].name, &seats[1].name],
-            agents,
-            decks: [&seats[0].cards, &seats[1].cards],
-            seed,
-            end: &end,
-            actions: &log,
-        }
-        .line()
+    let replay = kifu.map(|(run, [sa, sb])| {
+        let seat_ai = if a_seat == 0 { [sa, sb] } else { [sb, sa] };
+        kifu::line(
+            run,
+            &kifu::Game {
+                g,
+                swap: Some(swap),
+                names: [&seats[0].name, &seats[1].name],
+                seats: seat_ai,
+                decks: [&seats[0].cards, &seats[1].cards],
+                seed,
+                end: kifu::End::of(&end),
+                actions: &log,
+            },
+        )
     });
     (seats[a_seat].name.clone(), winner == a_seat, replay)
 }
@@ -214,16 +218,8 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     // 実験の台帳（docs/ledger.jsonl。runner/ledger.rs）: --label で名前を付ける、--no-ledger で書かない
     let no_ledger = ledger::take_no_ledger(&mut argv);
     let label = ledger::take_value(&mut argv, "--label")?.unwrap_or_default();
-    // リプレイ検索用に、試合ごとのデッキ・シード・行動の列を書くファイル（--replays）
-    let mut replays_path = None;
-    if let Some(i) = argv.iter().position(|s| s == "--replays") {
-        replays_path = Some(
-            argv.get(i + 1)
-                .ok_or("--replays の後に書き出すファイルを渡します")?
-                .clone(),
-        );
-        argv.drain(i..i + 2);
-    }
+    // 棋譜（--kifu <ファイル>・前の名前 --replays、--no-kifu で書かない。無ければ既定のフォルダ）
+    let kifu_target = kifu::take_args(&mut argv)?;
     // --with: そのデッキの絡む組だけを打つ。--without: 絡まない組だけを打つ
     let with = ledger::take_value(&mut argv, "--with")?;
     let without = ledger::take_value(&mut argv, "--without")?;
@@ -338,28 +334,35 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         println!("試合がありません（設定とデッキは読めました）");
         return Ok(());
     }
-    let mut replays = replays_path
-        .as_ref()
-        .map(|p| std::fs::File::create(p).map_err(|e| format!("{p} に書けません: {e}")))
-        .transpose()?;
-    let la = format!("A {a_text}");
-    let lb = format!("B {b_text}");
-    let labels = replays.as_ref().map(|_| [la.as_str(), lb.as_str()]);
+    let run = RunInfo::now("compare", &label);
+    let key = kifu::args_key(&full_argv);
+    let kifu_path = kifu_target.path(&kifu::Name {
+        kind: "compare",
+        label: &label,
+        first: start,
+        last: start + games - 1,
+        key: &key,
+        commit: &run.engine,
+    });
+    let mut writer = kifu_path.as_deref().map(kifu::Writer::create).transpose()?;
+    let seats = [
+        kifu::compare_seat("A", a_text),
+        kifu::compare_seat("B", b_text),
+    ];
+    let kifu_run = writer.as_ref().map(|_| (&run, &seats));
     let results = parallel_map(
         &tasks,
-        |&(g, swap), _| play_compare_game_with(&a, &b, &decks, g, swap, mirror, labels),
+        |&(g, swap), _| play_compare_game_with(&a, &b, &decks, g, swap, mirror, kifu_run),
         |_, _, r, _| {
-            if let (Some(f), Some(line)) = (replays.as_mut(), r.2.as_ref()) {
-                use std::io::Write;
-                writeln!(f, "{line}").unwrap_or_else(|e| {
-                    panic!(
-                        "{} に書けません: {e}",
-                        replays_path.as_deref().unwrap_or("")
-                    )
-                });
+            if let (Some(w), Some(line)) = (writer.as_mut(), r.2.as_ref()) {
+                w.write(line);
             }
         },
     );
+    if let Some(w) = writer {
+        let (p, n) = w.finish()?;
+        println!("棋譜: {p}（{n} 試合）");
+    }
     let n = results.len();
     let mut wins = 0;
     let mut per_deck = Tally::default();
@@ -418,12 +421,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                         crate::json::Json::Str(involving_words.join(","))
                     }),
                 ),
-                (
-                    "replays".into(),
-                    replays_path.as_ref().map_or(crate::json::Json::Null, |p| {
-                        crate::json::Json::Str(p.clone())
-                    }),
-                ),
+                ("kifu".into(), kifu::ledger_name(kifu_path.as_ref())),
             ],
             decks: decks.iter().map(|d| d.name.clone()).collect(),
             mirror,
@@ -519,51 +517,55 @@ mod tests {
         assert_ne!(x.1, y.1);
     }
 
-    /// --replays の行（デッキ・シード・行動の列）から打ち直すと、同じ勝者になる
+    /// 棋譜の行（デッキ・シード・行動の列）から打ち直すと、同じ勝者になる。席ごとの側・設定・組も書く
     #[test]
-    fn replay_line_replays_the_same_game() {
+    fn kifu_line_replays_the_same_game() {
         use crate::json::Json;
         let decks = compare_decks();
-        let o = super::super::options::compare_options(r#"{"beamWidth":8}"#).unwrap();
+        let text = r#"{"beamWidth":8}"#;
+        let o = super::super::options::compare_options(text).unwrap();
+        let run = RunInfo {
+            source: "compare".into(),
+            run: "試し".into(),
+            engine: "abc1234".into(),
+        };
+        let seats = [kifu::compare_seat("A", text), kifu::compare_seat("B", text)];
         let (_, a_won, line) =
-            play_compare_game_with(&o, &o, &decks, 3, true, true, Some(["A", "B"]));
-        let v = Json::parse(&line.expect("リプレイの行")).unwrap();
-        let ids = |d: &Json| -> Vec<crate::data::CardIdx> {
-            let Json::Arr(xs) = d else {
-                panic!("デッキ")
-            };
-            xs.iter()
-                .map(|x| match x {
-                    Json::Str(id) => data().card_by_id[id.as_str()],
-                    _ => panic!("カードID"),
-                })
-                .collect()
-        };
-        let Some(Json::Arr(ds)) = v.get("decks") else {
-            panic!("decks")
-        };
-        let Some(Json::Arr(acts)) = v.get("actions") else {
-            panic!("actions")
-        };
-        let acts: Vec<_> = acts
-            .iter()
-            .map(|a| crate::state_json::action_from_json(a).unwrap())
-            .collect();
-        let Some(Json::Num(seed)) = v.get("seed") else {
-            panic!("seed")
-        };
-        let (d0, d1) = (ids(&ds[0]), ids(&ds[1]));
-        let idx = crate::replay_index::replay_index([&d0, &d1], *seed as u32, &acts).unwrap();
+            play_compare_game_with(&o, &o, &decks, 3, true, true, Some((&run, &seats)));
+        let v = Json::parse(&line.expect("棋譜の行")).unwrap();
+        let r = kifu::parse_replay(&v).unwrap();
+        let idx = crate::replay_index::replay_index([&r.decks[0], &r.decks[1]], r.seed, &r.actions)
+            .unwrap();
         assert_eq!(idx.get("winner"), v.get("winner"));
+        assert_eq!(idx.get("first"), v.get("first"));
         // A の席（席とデッキを入れ替えた方）
         let (a_seat, _, _) = compare_setup(&decks, 3, true, true);
+        let Some(Json::Arr(sides)) = v.get("sides") else {
+            panic!("sides")
+        };
+        assert_eq!(sides[a_seat], Json::Str("A".into()));
+        assert_eq!(sides[1 - a_seat], Json::Str("B".into()));
         let Some(Json::Arr(agents)) = v.get("agents") else {
             panic!("agents")
         };
-        assert_eq!(agents[a_seat], Json::Str("A".into()));
+        assert_eq!(agents[a_seat], Json::Str(format!("A {text}")));
         assert_eq!(
             v.get("winner"),
             Some(&Json::Num(if a_won { a_seat } else { 1 - a_seat } as f64))
         );
+        for (k, want) in [
+            ("version", Json::Num(2.0)),
+            ("run", Json::Str("試し".into())),
+            ("engine", Json::Str("abc1234".into())),
+            ("pool", Json::Str("starter".into())),
+            ("g", Json::Num(3.0)),
+            ("swap", Json::Bool(true)),
+        ] {
+            assert_eq!(v.get(k), Some(&want), "{k}");
+        }
+        let Some(Json::Arr(ai)) = v.get("ai") else {
+            panic!("ai")
+        };
+        assert_eq!(ai[a_seat].get("beamWidth"), Some(&Json::Num(8.0)));
     }
 }
