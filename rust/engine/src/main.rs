@@ -167,7 +167,7 @@ fn main() {
             cmd @ ("compare" | "rhino-compare" | "deck-compare" | "mulligan-compare"
             | "mulligan-data" | "td" | "yardstick" | "human-plan-value" | "meta"
             | "deep-gap" | "profile" | "two-turn" | "defer-playout" | "beam-gap" | "misses"
-            | "survey" | "review"),
+            | "survey" | "review" | "kifu"),
         ) => {
             let rest = &args[1..];
             let r = match cmd {
@@ -187,6 +187,7 @@ fn main() {
                 "misses" => runner::misses::main(rest),
                 "survey" => runner::survey::main(rest),
                 "review" => runner::review::main(rest),
+                "kifu" => runner::kifu_cmd::main(rest),
                 _ => runner::td::main(rest),
             };
             if let Err(e) = r {
@@ -195,7 +196,7 @@ fn main() {
             }
         }
         _ => {
-            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | mulligan-data … | td selfplay … | yardstick … | human-plan-value … | deep-gap … | two-turn … | defer-playout … | beam-gap … | profile … | misses … | survey … | review …（rust/README.md）");
+            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | mulligan-data … | td selfplay … | yardstick … | human-plan-value … | deep-gap … | two-turn … | defer-playout … | beam-gap … | profile … | misses … | survey … | review … | kifu count|winrate|events …（rust/README.md）");
             std::process::exit(2);
         }
     }

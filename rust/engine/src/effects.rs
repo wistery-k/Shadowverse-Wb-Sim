@@ -5,6 +5,7 @@ use crate::data::*;
 use crate::game::handle_internal;
 use crate::state::*;
 use crate::state_json::card_shows_x;
+use crate::trace::{self, Ev, Src};
 
 // ---- 対象 ----
 
@@ -518,7 +519,24 @@ pub fn needs_source(s: &GameState, ability: &Ability, source: Iid) -> bool {
     !matches!(ability.trigger, Trigger::LastWords) && source_present(s, source)
 }
 
-fn queue(s: &mut GameState, ability: &'static Ability, ctx: Ctx) {
+/// 誘発した能力を解決を待つ列に入れる（src は能力の元。棋譜の打ち直しの出来事に残す。trace.rs）
+fn queue(s: &mut GameState, ability: &'static Ability, ctx: Ctx, src: Src) {
+    if trace::on() {
+        let list: &[Ability] = match src {
+            Src::Card(c) => &abilities_of(c).abilities,
+            Src::Crest(c) => crest_abilities_of(c),
+        };
+        trace::note(Ev::Trigger {
+            p: ctx.controller,
+            src,
+            iid: ctx.source,
+            ability: list
+                .iter()
+                .position(|x| std::ptr::eq(x, ability))
+                .map(|i| i as u8),
+            own_turn: s.active == ctx.controller,
+        });
+    }
     if s.queue.capacity() == 0 {
         SPARE.with(|b| std::mem::swap(&mut s.queue, &mut b.borrow_mut().1));
     }
@@ -663,10 +681,9 @@ fn fire_side(
             {
                 continue;
             }
-            crate::crest_tally::note(p, crest_idx, i, s.active == p);
             let mut ctx = Ctx::new(p, iid);
             ctx.event = event;
-            queue(s, ability, ctx);
+            queue(s, ability, ctx, Src::Crest(crest_idx));
         }
     }
     let board_perm = order_perm(s.players[p].board.iter().map(|c| c.order));
@@ -706,7 +723,7 @@ fn fire_side(
                 ctx.source_attack = c.attack_value();
             }
             ctx.event = event;
-            queue(s, ability, ctx);
+            queue(s, ability, ctx, Src::Card(cid));
         }
     }
 }
@@ -727,7 +744,7 @@ fn fire_hand_abilities(s: &mut GameState, p: PlayerIndex, hi: usize, on: On) {
         if ability.trigger.on() == on {
             let mut ctx = Ctx::new(p, iid);
             ctx.source_x = x;
-            queue(s, ability, ctx);
+            queue(s, ability, ctx, Src::Card(cid));
         }
     }
 }
@@ -798,13 +815,14 @@ pub fn enter_board(s: &mut GameState, p: PlayerIndex, mut c: OnBoard) -> bool {
         };
         entered_at_enter = Some(n);
     }
+    let cid = c.card;
     s.players[p].board.make_mut().push(c);
     for a in enter {
         let mut ctx = Ctx::new(p, iid);
         if let Some(n) = entered_at_enter {
             ctx.set_var(data().var_entered_at_enter, n);
         }
-        queue(s, a, ctx);
+        queue(s, a, ctx, Src::Card(cid));
     }
     fire_side(s, p, On::AllyEnter, |s, t, src| match t {
         Trigger::AllyEnter { filter }
@@ -869,6 +887,16 @@ pub fn leave_board(s: &mut GameState, iid: Iid, mut reason: LeaveReason) {
         .position(|c| c.iid == iid)
         .unwrap();
     let c = s.players[p].board.make_mut().remove(idx);
+    trace::note(Ev::Left {
+        p,
+        card: c.card,
+        iid,
+        why: match reason {
+            LeaveReason::Destroy => trace::Leave::Destroy,
+            LeaveReason::Banish => trace::Leave::Banish,
+            LeaveReason::Bounce => trace::Leave::Bounce,
+        },
+    });
 
     match reason {
         LeaveReason::Destroy => {
@@ -889,7 +917,7 @@ pub fn leave_board(s: &mut GameState, iid: Iid, mut reason: LeaveReason) {
             for a in board_abilities_on(&c, On::LastWords) {
                 let mut ctx = Ctx::new(p, c.iid);
                 ctx.source_attack = if c.is_follower { c.attack_value() } else { 0 };
-                queue(s, a, ctx);
+                queue(s, a, ctx, Src::Card(c.card));
             }
         }
         LeaveReason::Bounce => {
@@ -980,6 +1008,14 @@ pub fn damage_follower(s: &mut GameState, iid: Iid, amount: i32) -> i32 {
         _ => amount,
     };
     f.defense -= amount;
+    if amount > 0 {
+        trace::note(Ev::Damage {
+            p,
+            card: Some(f.card),
+            iid: Some(iid),
+            amount,
+        });
+    }
     amount
 }
 
@@ -994,6 +1030,12 @@ pub fn damage_leader(s: &mut GameState, p: PlayerIndex, amount: i32) -> i32 {
         return 0;
     }
     pl.leader_hp -= amount;
+    trace::note(Ev::Damage {
+        p,
+        card: None,
+        iid: None,
+        amount,
+    });
     amount
 }
 
@@ -1015,6 +1057,12 @@ pub fn heal_leader(s: &mut GameState, p: PlayerIndex, amount: i32) {
     let pl = &mut s.players[p];
     let healed = pl.leader_max_hp.min(pl.leader_hp + amount) - pl.leader_hp;
     pl.leader_hp += healed.max(0);
+    trace::note(Ev::Heal {
+        p,
+        card: None,
+        iid: None,
+        amount: healed.max(0),
+    });
     fire_side(s, p, On::LeaderHealed, |_, t, _| {
         if matches!(t, Trigger::LeaderHealed) {
             Some(None)
@@ -1048,8 +1096,9 @@ pub fn evolve_follower(s: &mut GameState, p: PlayerIndex, iid: Iid, kind: Evolve
     f.defense += bonus;
     f.max_defense += bonus;
     let evolved = board_abilities_on(f, On::Evolved);
+    let cid = f.card;
     for a in evolved {
-        queue(s, a, Ctx::new(p, iid));
+        queue(s, a, Ctx::new(p, iid), Src::Card(cid));
     }
     // このバトル中に自分のフォロワーが進化した回数（数えるプレイヤーだけ）
     if let Some(n) = s.players[p].evolved_count.as_mut() {
@@ -1240,7 +1289,7 @@ pub fn direct_summon(s: &mut GameState, p: PlayerIndex) {
         if enter_board(s, p, b) {
             let n = enter_abilities.len();
             for a in enter_abilities {
-                queue(s, a, Ctx::new(p, bid));
+                queue(s, a, Ctx::new(p, bid), Src::Card(c));
             }
             // 「これが【直接召喚】されたとき」は、場に出たことに反応する能力より先（ユーザーが実機で確かめた 2026-11-14。
             // docs/rules.md 12章「直接召喚」）
@@ -1804,9 +1853,16 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                 } else if let Some((q, i)) = s.find_follower(id) {
                     // フォロワーの回復は体力の最大値まで
                     let f = &mut s.players[q].board.make_mut()[i];
+                    let before = f.defense;
                     f.defense = (f.defense + amount.max(0))
                         .min(f.max_defense)
                         .max(f.defense);
+                    trace::note(Ev::Heal {
+                        p: q,
+                        card: Some(f.card),
+                        iid: Some(id),
+                        amount: f.defense - before,
+                    });
                 }
             }
         }
@@ -2110,7 +2166,7 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                     s.players[q].hidden_discards.make_mut().push(h.card);
                 }
                 for a in on_discarded {
-                    queue(s, a, Ctx::new(q, h.iid));
+                    queue(s, a, Ctx::new(q, h.iid), Src::Card(h.card));
                 }
             }
         }

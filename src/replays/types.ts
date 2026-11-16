@@ -53,11 +53,35 @@ export interface SideSnap {
   board: BoardSnap[];
 }
 
-export type TurnEventKind = "play" | "attack" | "act" | "fuse" | "extraPp" | "enter" | "leave" | "evolve" | "superEvolve";
+export type TurnEventKind =
+  | "play"
+  | "attack"
+  | "act"
+  | "fuse"
+  | "extraPp"
+  | "enter"
+  | "leave"
+  | "evolve"
+  | "superEvolve"
+  // 打ち直しの間にエンジンが残したこと（2026-11-16 から。docs/kifu.md「出来事」）
+  | "trigger"
+  | "draw"
+  | "addHand"
+  | "damage"
+  | "heal"
+  | "destroy"
+  | "banish"
+  | "bounce"
+  | "crestIn"
+  | "crestOut"
+  | "pp"
+  | "maxPp"
+  | "turnEnd";
 
 /**
- * ターンに起きたこと。p は行動したプレイヤー（enter・leave・evolve・superEvolve は場のカードの持ち主）、
- * at はその出来事を起こした行動の添字。attack の t は攻撃先のカードID か "leader"
+ * ターンに起きたこと。p は行動したプレイヤー（enter・leave・evolve・superEvolve は場のカードの持ち主。
+ * 誘発は能力を持つ側、引いた・手札に加えたは手札の持ち主、ダメージ・回復・場を離れたは受けた側）、
+ * at はその出来事を起こした行動の添字。attack の t は攻撃先のカードID か "leader"。damage・heal の c はカードID か "leader"
  */
 export interface TurnEvent {
   k: TurnEventKind;
@@ -69,6 +93,18 @@ export interface TurnEvent {
   ti?: number;
   /** 融合の素材 */
   m?: string[];
+  /** trigger: クレストの能力か・能力の番号（1〜）・その持ち主のターンか */
+  crest?: boolean;
+  ab?: number;
+  own?: boolean;
+  /** draw: 条件を付けて引いた（サーチ）・draw・addHand: 手札があふれて消えた */
+  search?: boolean;
+  burned?: boolean;
+  /** damage・heal の量、pp・maxPp の増減 */
+  n?: number;
+  /** turnEnd: 残した PP と、手札からプレイできたカード */
+  pp?: number;
+  playable?: string[];
 }
 
 export interface TurnIndex {

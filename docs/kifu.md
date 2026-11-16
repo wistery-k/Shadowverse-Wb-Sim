@@ -1,7 +1,8 @@
 # 棋譜
 
 対戦を打つランナーは、試合ごとの棋譜を 1 つの形で書く（2026-11-16 から）。調べ物は、専用の処理をランナーに足すのでなく、
-この棋譜を打ち直して数える形にそろえていく（審査の文書「AI の設計の審査と今後の方針」のタブ「棋譜を 1 つの形にそろえる」。段取りの 1 がここ）。
+この棋譜を打ち直して数える形にそろえていく（審査の文書「AI の設計の審査と今後の方針」のタブ「棋譜を 1 つの形にそろえる」。
+段取り 1 は「どこに書くか」〜「1 行の形」、段取り 2 は「出来事」と「数える」）。
 
 - 書くのは `compare`・`yardstick`・`profile`・`td selfplay`・`survey run`（svwb。`npm run compare` 等も同じ）。打つ手・試合は変わらない
 - 本体は `rust/engine/src/runner/kifu.rs`。開発サーバーの「リプレイ検索」タブ（`docs/commands.md`「リプレイ検索」）もこの形を読む
@@ -67,3 +68,85 @@
 
 前の形（版 1。2026-11-16 までの `compare --replays`・`td selfplay --replays`）は `kind`・`version`・`source`・`g`・`names`・`agents`・`seed`・`decks`・`winner`・`turns`・`actions`
 だけ。リプレイ検索はどちらも読む。
+
+## 出来事
+
+`replay_index`（`rust/engine/src/replay_index.rs`）は、棋譜を打ち直して、ターンごとの始めと終わりの様子と、そのターンに起きたこと（出来事）の列にする。
+下の `svwb kifu` とリプレイ検索はこれを読む。出来事は `{"k": 種類, "p": プレイヤー, "at": 起こした行動の添字, …}` で、起きた順に並ぶ。
+ターン終了の行動で起きたことは、ターンの終わりに起きたこと（終了時の能力など）を終えたターンに、次のターンの始めに起きたこと（ドロー・PP・開始時の能力など）を次のターンに入れる。
+
+| 種類 | p | ほかの項目 | いつ |
+| --- | --- | --- | --- |
+| `play` | 行動した側 | `c`・`i` | 手札からプレイした |
+| `attack` | 行動した側 | `c`・`i`・`t`（攻撃先のカード ID か `"leader"`）・`ti` | 攻撃した |
+| `act`・`fuse`・`extraPp` | 行動した側 | `c`・`i`（`fuse` は素材の `m` も） | アクト・融合・エクストラPP を使った |
+| `enter`・`leave`・`evolve`・`superEvolve` | 場のカードの持ち主 | `c`・`i` | 場に出た・場から離れた・進化した・超進化した（行動の前と後の場の差） |
+| `trigger` | 能力を持つ側 | `c`（カードかクレストの ID）・`i`・`crest`（クレストなら true）・`ab`（能力の番号。1 から。profile の表と同じ）・`own`（その持ち主のターンか） | 能力が誘発した（誘発待ちの列 `state.queue` に入った。クレストの能力・ラストワード・場に出たとき・ターンの開始と終了・自分がプレイしたとき・引いたとき等。プレイや行動でそのまま解決するファンファーレ・スペル・進化・アクト・融合・攻撃と交戦のときの能力は入らない。それは `play`・`evolve` 等で数える） |
+| `draw` | 手札の持ち主 | `c`・`search`（条件を付けて山札から引いた）・`burned`（手札があふれて墓場に行った） | 山札から引いた |
+| `addHand` | 手札の持ち主 | `c`・`burned` | 引く以外で手札に加えた（作って加える・場から手札に戻す等） |
+| `damage`・`heal` | 受けた側 | `c`（カード ID か `"leader"`）・`i`（カードのとき）・`n`（量） | ダメージを受けた（0 は入れない）・回復した |
+| `destroy`・`banish`・`bounce` | カードの持ち主 | `c`・`i` | 場から離れた理由（破壊・消滅・手札に戻った） |
+| `crestIn`・`crestOut` | 持ち主 | `c`・`i` | クレスト（信仰を含む）を持った・無くなった |
+| `pp`・`maxPp` | 持ち主 | `n`（増減） | PP・PP の最大値が変わった |
+| `turnEnd` | ターンを終えた側 | `pp`（残した PP）・`playable`（そのとき手札からプレイできたカード。同じカードは 1 回） | ターンを終えた（ターン終了を選ぶ直前の局面） |
+
+`trigger` から `bounce` までは、エンジンが打ち直しの間に残したもの（`rust/engine/src/trace.rs`。試合は変えない。前の profile のクレストの数え方 `crest_tally.rs` はこれに替えて消した）。
+どの出来事を足しても、打つ手・試合は変わらない。
+
+## 数える（svwb kifu）
+
+```sh
+svwb kifu count <棋譜>… --event '<種類>[|<種類>…] [<条件>…]' [--where '<条件>,…'] [--per seat|game|turn] [--by <分け方>,…]
+svwb kifu winrate <棋譜>… [--where '<条件>,…'] [--by <分け方>,…]
+svwb kifu events <棋譜>… [--where '<条件>,…'] [--event '…'] [--out 出来事.jsonl]
+```
+
+- 棋譜は、ファイルかフォルダ（中の `.jsonl`・`.jsonl.gz` を全部。`.tmp` は読まない）。何個並べてもよい。`npm run svwb -- kifu …` でも同じ
+- **席を単位にする**: 1 試合は 2 席で、`--where` は席ごとに、その席から見て調べる。条件は「,」で区切り（全部に合う席だけ）、値は「|」で並べる（どれかに合えばよい）
+- `count`: 合った席の、その席が `p` の出来事を数える（`damage` なら受けた数、`trigger` ならその席の能力の誘発）。`--per seat`（既定）は席ごと、
+  `--per game` は試合ごと（合った席を足す。分け方は合った最初の席から見る）、`--per turn` はその席の自分のターンごと。
+  表は、数・1 つあたり（平均 ± 標準誤差）・1 回以上あった数と割合・あったものだけの平均・最初にあった自分のターンの平均
+- `winrate`: 合った席の勝率（引き分けは負け）。打ち直さないので速い。誤差は、同じ棋譜の同じ試合番号（席とデッキを入れ替えた組）をまとまりにした誤差で、
+  compare の組の誤差と同じ値になる。組が 2 勝・1 勝・0 勝の数も出す
+- `events`: 合った出来事を 1 行ずつ JSON で出す（試合・ターン・席の項目と、カードの名前 `name` を足す）。表にない数え方は、これを `jq` 等で数える
+- `count`・`events` は試合を打ち直すので、エンジンの版（`engine`）が違うと打てない手で止まるか、勝者が変わることがある。そういう試合は数えず、その数と版を出す
+
+席の条件（`--where`）:
+
+| 条件 | 意味 |
+| --- | --- |
+| `deck`・`arch` | 自分のデッキの名前・型（名前の「（」の前） |
+| `opp`・`oppArch` | 相手のデッキの名前・型 |
+| `pair` | どちらかの席のデッキ（`pair~クキシロB` で、クキシロB の絡む組。`!~` は両方の席が合わないもの） |
+| `side`・`agent`・`run`・`source`・`engine`・`pool` | 棋譜の行の項目（`side=A` で compare の測る側） |
+| `g`・`seat`・`swap` | 試合番号（`g=0-999` で範囲）・席（0・1）・組のどちらか（0・1） |
+| `first`・`second`・`won`・`lost`・`draw` | 先攻・後攻・勝った・負けた・引き分け（値を付けない） |
+
+出来事の条件（`--event` の種類の後に空白で並べる）:
+
+| 条件 | 意味 |
+| --- | --- |
+| `card`・`target` | カード（`c`）・攻撃先（`t`）の ID か名前 |
+| `crest` | クレストの能力の誘発・クレストの出入り（値を付けなければクレストのものだけ、`crest~クキシロ` で名前も） |
+| `own`・`opp` | その席の自分のターン・相手のターンに起きた |
+| `search`・`burned` | 上の表の同じ名前の項目が true |
+| `turn`・`tc` | 全体のターン番号・その手番のプレイヤーの何ターン目か |
+| `n`・`pp`・`ab`・`playable`・`i` | 数の項目（`playable` は数。`playable>0 pp>0` で、プレイできるカードと PP を残してターンを終えた） |
+
+文字の条件は `~`（含む）・`!~`（含まない）・`=`・`!=`、数の条件は `=`・`!=`・`>=`・`<=`・`>`・`<`。分け方（`--by`）は
+`deck`・`arch`・`opp`・`oppArch`・`side`・`agent`・`first`（先攻・後攻）・`result`（勝ち・負け・引き分け）・`seat`・`run`・`source`・`engine`・`pool`・`file`。
+
+例（2026-11-16 の合格の確かめ。棋譜は共有フォルダの `data/kifu/kukishiro-check/`、中身は `logs/kukishiro-check/MANIFEST.md`）:
+
+```sh
+# クキシロのクレストが自分のターンに誘発した回数（補正ごと）。前の profile の表と同じ数（v0 10.3・R1 12.1・R2 11.3・R3 10.3）
+svwb kifu count data/kifu/kukishiro-check --where 'deck~クキシロ,source=profile' --event 'trigger crest~クキシロ own' --by agent
+# R3 対 R2 の、アグロNi・クキシロB の絡む組の勝率（台帳の行と同じ 49.11% ± 0.90）と、クキシロB だけ（47.89% ± 2.54）
+svwb kifu winrate data/kifu/kukishiro-check/compare-r3-r2-involving.jsonl.gz --where side=A
+svwb kifu winrate data/kifu/kukishiro-check/compare-r3-r2-involving.jsonl.gz --where 'side=A,pair~クキシロB'
+# クキシロのクレストを持った席の割合と、持った席の勝率
+svwb kifu count data/kifu/kukishiro-check --where 'deck~クキシロ' --event 'crestIn crest~クキシロ' --by agent
+svwb kifu count data/kifu/kukishiro-check --where 'deck~クキシロ' --event 'turnEnd pp>0 playable>0' --per turn
+```
+
+本体は `rust/engine/src/runner/kifu_cmd.rs`。

@@ -6,7 +6,7 @@
 //!
 //! - --check なら、手を打つたびに局面の不変条件（invariants.rs）を確かめ、破った局面を報告に並べる（1 つでもあれば終わりにエラーを返す）
 //! - 報告には、デッキ（名前の「（」の前が同じものは型にまとめる）ごとの勝率と、仕組み（アクセラレート・結晶・エンハンス・奥義・進化・
-//!   超進化・融合・アクト・エクストラPP・攻撃）を使った回数と、クレストの能力が誘発した回数（crest_tally.rs）も出す。
+//!   超進化・融合・アクト・エクストラPP・攻撃）を使った回数と、クレストの能力が誘発した回数（trace.rs）も出す。
 //!   --log <フォルダ> なら、1 試合ずつ手の並びを文章で書く（試合を読むため）
 //! - --decks なら、比較用の 7 デッキの代わりに並べたデッキで打つ（compare --decks と同じ組とシード。n デッキなら --games n² で全部の組）。
 //!   --record とは一緒に使えない（docs/profile.md の表の列は 7 デッキ）
@@ -36,13 +36,13 @@ use super::{compare_decks, fixed};
 use crate::ai::rhino::RhinoAgent;
 use crate::ai::search::{SearchAgent, SearchOptions};
 use crate::ai::Agent;
-use crate::crest_tally;
 use crate::data::{data, CardIdx, CardType, CrestIdx, Deck};
 use crate::game::{acting_player, apply_action, create_game, legal_actions, play_as, play_cost};
 use crate::invariants::invariant_violations;
 use crate::prof::{self, Profile, Sec};
 use crate::sim::MatchRng;
 use crate::state::{card, Action, GameState, Phase, PlayerIndex};
+use crate::trace::{self, Ev, Src};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -342,16 +342,23 @@ fn play_timed(
         if prof::ENABLED {
             prof::merge(&mut profs[actor], &prof::take());
         }
-        // クレストの誘発は、実際の試合の手を打つ間だけ数える（AI の読みの中は数えない）
-        crest_tally::start();
+        // クレストの誘発は、実際の試合の手を打つ間だけ数える（AI の読みの中は数えない。trace.rs）
+        trace::start();
         s = apply_action(&s, &a);
         if kifu.is_some() {
             played.push(a.clone());
         }
-        for f in crest_tally::take() {
-            crest_fired[f.player]
-                .entry((f.crest, f.ability))
-                .or_insert([0, 0])[usize::from(!f.own_turn)] += 1;
+        for e in trace::take() {
+            if let Ev::Trigger {
+                p,
+                src: Src::Crest(c),
+                ability: Some(i),
+                own_turn,
+                ..
+            } = e
+            {
+                crest_fired[p].entry((c, i)).or_insert([0, 0])[usize::from(!own_turn)] += 1;
+            }
         }
         for ((held, pl), &turn) in crest_held.iter_mut().zip(&s.players).zip(&own_turns) {
             for c in pl.crests.iter() {
@@ -848,7 +855,7 @@ fn report(sm: &Summary, date: &str, commit: &str, label: &str) -> String {
     push(&mut out, "");
     push(
         &mut out,
-        "実際の試合だけを数える（AI の読みの中は数えない。`crest_tally.rs`）。能力は、そのクレストの能力の定義（`src/cards/abilities/` の crests）の何番目か。誘発は、能力の条件（引いたカードのコストなど）に合って解決を待つ列に入った数で、効果の中の条件（「自分のターンなら」など）は見ないので、クレストを持つ側のターンか相手のターンかで分ける。持った席は、そのクレストを一度でも持った席の数と、その型の席に対する割合。持ったターンは、持った席で最初に持った自分のターンの平均（デッキに入れると置かれる信仰は 0）。括弧は持った席 1 つあたりの回数（自分のターンは ± 標準誤差。誘発しなかった持った席も 0 回として入れる）。",
+        "実際の試合だけを数える（AI の読みの中は数えない。`trace.rs`）。能力は、そのクレストの能力の定義（`src/cards/abilities/` の crests）の何番目か。誘発は、能力の条件（引いたカードのコストなど）に合って解決を待つ列に入った数で、効果の中の条件（「自分のターンなら」など）は見ないので、クレストを持つ側のターンか相手のターンかで分ける。持った席は、そのクレストを一度でも持った席の数と、その型の席に対する割合。持ったターンは、持った席で最初に持った自分のターンの平均（デッキに入れると置かれる信仰は 0）。括弧は持った席 1 つあたりの回数（自分のターンは ± 標準誤差。誘発しなかった持った席も 0 回として入れる）。",
     );
     push(&mut out, "");
     push(
