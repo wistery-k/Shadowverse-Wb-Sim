@@ -2117,6 +2117,8 @@ mod tests {
             extra: 4,
             confirm: 0,
             flag: 10.0,
+            opts: SearchOptions::default(),
+            opts_text: "{}".into(),
         };
         let recs = [rec];
         let (i, p) = *recs[0]
