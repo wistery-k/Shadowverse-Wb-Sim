@@ -74,13 +74,14 @@
 `replay_index`（`rust/engine/src/replay_index.rs`）は、棋譜を打ち直して、ターンごとの始めと終わりの様子と、そのターンに起きたこと（出来事）の列にする。
 下の `svwb kifu` とリプレイ検索はこれを読む。出来事は `{"k": 種類, "p": プレイヤー, "at": 起こした行動の添字, …}` で、起きた順に並ぶ。
 ターン終了の行動で起きたことは、ターンの終わりに起きたこと（終了時の能力など）を終えたターンに、次のターンの始めに起きたこと（ドロー・PP・開始時の能力など）を次のターンに入れる。
+最初のターンの前に起きたこと（始めから持っているクレスト。デッキに入れると置かれる信仰など。とマリガンの間のこと）は `pre` に入れる（`svwb kifu` は、手番の無いターン 0 として数える）。
 
 | 種類 | p | ほかの項目 | いつ |
 | --- | --- | --- | --- |
-| `play` | 行動した側 | `c`・`i` | 手札からプレイした |
+| `play` | 行動した側 | `c`・`i`・`mode`（`"accelerate"`・`"crystal"`・`"enhance"`。アクセラレート・結晶はプレイしたときの姿が違うもの（`as` がその姿のカード）、エンハンスはエンハンスのコストを払ったもの）・`ougi`（【奥義】を持つカードを奥義ゲージ 10 以上でプレイしたら 1、15 以上なら 2（解放奥義）。効果が奥義の条件を見るかによらない） | 手札からプレイした |
 | `attack` | 行動した側 | `c`・`i`・`t`（攻撃先のカード ID か `"leader"`）・`ti` | 攻撃した |
 | `act`・`fuse`・`extraPp` | 行動した側 | `c`・`i`（`fuse` は素材の `m` も） | アクト・融合・エクストラPP を使った |
-| `enter`・`leave`・`evolve`・`superEvolve` | 場のカードの持ち主 | `c`・`i` | 場に出た・場から離れた・進化した・超進化した（行動の前と後の場の差） |
+| `enter`・`leave`・`evolve`・`superEvolve` | 場のカードの持ち主 | `c`・`i`（進化ポイント・超進化ポイントを使った進化は `ep` が true） | 場に出た・場から離れた・進化した・超進化した（行動の前と後の場の差。進化ポイントを使った進化は行動そのものから） |
 | `trigger` | 能力を持つ側 | `c`（カードかクレストの ID）・`i`・`crest`（クレストなら true）・`ab`（能力の番号。1 から。profile の表と同じ）・`own`（その持ち主のターンか） | 能力が誘発した（誘発待ちの列 `state.queue` に入った。クレストの能力・ラストワード・場に出たとき・ターンの開始と終了・自分がプレイしたとき・引いたとき等。プレイや行動でそのまま解決するファンファーレ・スペル・進化・アクト・融合・攻撃と交戦のときの能力は入らない。それは `play`・`evolve` 等で数える） |
 | `draw` | 手札の持ち主 | `c`・`search`（条件を付けて山札から引いた）・`burned`（手札があふれて墓場に行った） | 山札から引いた |
 | `addHand` | 手札の持ち主 | `c`・`burned` | 引く以外で手札に加えた（作って加える・場から手札に戻す等） |
@@ -126,12 +127,13 @@ svwb kifu events <棋譜>… [--where '<条件>,…'] [--event '…'] [--out 出
 
 | 条件 | 意味 |
 | --- | --- |
-| `card`・`target` | カード（`c`）・攻撃先（`t`）の ID か名前 |
+| `card`・`target`・`as` | カード（`c`）・攻撃先（`t`。リーダーは `leader`）・プレイしたときの姿（`as`）の ID か名前 |
+| `mode` | プレイの仕方（`mode=accelerate`・`crystal`・`enhance`） |
 | `crest` | クレストの能力の誘発・クレストの出入り（値を付けなければクレストのものだけ、`crest~クキシロ` で名前も） |
 | `own`・`opp` | その席の自分のターン・相手のターンに起きた |
-| `search`・`burned` | 上の表の同じ名前の項目が true |
+| `search`・`burned`・`ep` | 上の表の同じ名前の項目が true |
 | `turn`・`tc` | 全体のターン番号・その手番のプレイヤーの何ターン目か |
-| `n`・`pp`・`ab`・`playable`・`i` | 数の項目（`playable` は数。`playable>0 pp>0` で、プレイできるカードと PP を残してターンを終えた） |
+| `n`・`pp`・`ab`・`playable`・`i`・`ougi` | 数の項目（`playable` は数。`playable>0 pp>0` で、プレイできるカードと PP を残してターンを終えた） |
 
 文字の条件は `~`（含む）・`!~`（含まない）・`=`・`!=`、数の条件は `=`・`!=`・`>=`・`<=`・`>`・`<`。分け方（`--by`）は
 `deck`・`arch`・`opp`・`oppArch`・`side`・`agent`・`first`（先攻・後攻）・`result`（勝ち・負け・引き分け）・`seat`・`run`・`source`・`engine`・`pool`・`file`。
@@ -150,3 +152,18 @@ svwb kifu count data/kifu/kukishiro-check --where 'deck~クキシロ' --event 't
 ```
 
 本体は `rust/engine/src/runner/kifu_cmd.rs`。
+
+`svwb profile` の報告の「仕組みを使った回数」「PP を残して終えた」「クレストの能力が誘発した回数」も、打った試合をこの出来事の列にして、
+同じ書き方の出来事で数える（2026-11-16 から。`rust/engine/src/runner/profile.rs` の `USAGE`）:
+
+| 列 | 出来事 |
+| --- | --- |
+| プレイ・アクセラレート・結晶・エンハンス | `play`・`play mode=accelerate`・`play mode=crystal`・`play mode=enhance` |
+| 奥義・解放奥義 | `play ougi=1`・`play ougi=2` |
+| 進化・超進化（と最初のターン） | `evolve ep`・`superEvolve ep` |
+| 融合・アクト・エクストラPP | `fuse`・`act`・`extraPp` |
+| リーダー・フォロワーへの攻撃 | `attack target=leader`・`attack target!=leader` |
+| PP を残して終えた（とプレイできたカード） | `turnEnd pp>0 playable>0` |
+| クレストの誘発・持った席 | `trigger crest`（`ab`・`own` で分ける）・`crestIn crest` |
+
+compare の `--involving`（ある型の絡む組だけを打つ）は消した。全部の組を打った回の棋譜を `svwb kifu winrate --where 'side=A,pair~<型>'` で絞る（同じ試合番号は同じ試合なので、同じ数になる）。

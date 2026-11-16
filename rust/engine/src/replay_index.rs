@@ -10,17 +10,19 @@
 //! - ターン終了の後、相手のターンの始めに起きたこと（ドロー・ターン開始時の能力で場に出た・離れたカード）は、相手のターンの出来事にする
 //!   （相手のターンの始めに決着したときは、最後のターンの出来事にする）
 //! - 出来事の "at" は、その出来事を起こした行動の添字（リプレイで局面 at が行動の直前）
-//! - 出来事（形は docs/kifu.md「出来事」）: 行動そのもの（play・attack・act・fuse・extraPp）、エンジンが打ち直しの間に残したこと
+//! - 出来事（形は docs/kifu.md「出来事」）: 行動そのもの（play・attack・act・fuse・extraPp と、進化ポイントを使った evolve・superEvolve）、エンジンが打ち直しの間に残したこと
 //!   （trace.rs。trigger・draw・addHand・damage・heal・destroy・banish・bounce）、前後の局面の違い（enter・leave・evolve・superEvolve・
 //!   crestIn・crestOut・pp・maxPp）、ターンを終えたときの様子（turnEnd）。1 つの行動の中では、この順に並べる
-//! - 棋譜を数えるコマンド（`svwb kifu`。runner/kifu_cmd.rs）も、開発サーバーのリプレイ検索も、この出来事の列を使う
+//! - 最初のターンの前（始めから持っているクレストと、マリガンの間）に起きたことは "pre" に入れる
+//! - 棋譜を数えるコマンド（`svwb kifu`。runner/kifu_cmd.rs）も、profile の仕組みの表も、開発サーバーのリプレイ検索も、この出来事の列を使う
 
-use crate::data::{data, CardIdx, CrestIdx};
+use crate::data::{data, CardIdx, CardType, CrestIdx};
 use crate::game::{
-    acting_player, apply_legal, create_game, is_legal, legal_actions, resolve_turn_end,
+    acting_player, apply_legal, create_game, is_legal, legal_actions, play_as, play_cost,
+    resolve_turn_end,
 };
 use crate::json::Json;
-use crate::state::{card, Action, Evolve, GameState, OnBoard, Phase, PlayerIndex};
+use crate::state::{card, Action, Evolve, GameState, Iid, OnBoard, Phase, PlayerIndex};
 use crate::state_json::action_to_json;
 use crate::trace::{self, Ev, Leave, Src};
 
@@ -111,7 +113,35 @@ fn action_events(prev: &GameState, a: &Action, at: usize, out: &mut Vec<Json>) {
     match a {
         Action::Play(iid) => {
             if let Some(h) = prev.hand_card(*iid) {
-                out.push(event("play", actor, at, h.card, *iid));
+                let mut e = event("play", actor, at, h.card, *iid);
+                let pl = &prev.players[actor];
+                let c = card(h.card);
+                // プレイの仕方: アクセラレート・結晶はプレイしたときの姿が違うもの、エンハンスはエンハンスのコストを払ったもの
+                match play_as(h, pl.pp) {
+                    Some(f) if f != h.card => {
+                        e.set("as", id(f));
+                        let mode = if card(f).ctype == CardType::Spell {
+                            "accelerate"
+                        } else {
+                            "crystal"
+                        };
+                        e.set("mode", Json::Str(mode.into()));
+                    }
+                    _ if c.enhance.is_some_and(|x| play_cost(c, pl.pp, Some(h)) == x) => {
+                        e.set("mode", Json::Str("enhance".into()))
+                    }
+                    _ => {}
+                }
+                // 【奥義】を持つカードを、奥義ゲージ 10 以上（1。奥義）・15 以上（2。解放奥義）でプレイした（効果が奥義の条件を見るかによらない）
+                if c.ougi {
+                    let gauge = pl.turn_count + h.ougi;
+                    if gauge >= 15 {
+                        e.set("ougi", num(2));
+                    } else if gauge >= 10 {
+                        e.set("ougi", num(1));
+                    }
+                }
+                out.push(e);
             }
         }
         Action::Attack { attacker, target } => {
@@ -152,12 +182,40 @@ fn action_events(prev: &GameState, a: &Action, at: usize, out: &mut Vec<Json>) {
             ("p", num(actor as u32)),
             ("at", num(at as u32)),
         ])),
+        // 進化ポイント・超進化ポイントを使った進化（ep）。効果で進化したものは、場の違い（board_events）で ep を付けずに出す
+        Action::Evolve(iid) | Action::SuperEvolve(iid) => {
+            if let Some(c) = prev.board_card(*iid) {
+                let kind = if matches!(a, Action::SuperEvolve(_)) {
+                    "superEvolve"
+                } else {
+                    "evolve"
+                };
+                let mut e = event(kind, actor, at, c.card, *iid);
+                e.set("ep", Json::Bool(true));
+                out.push(e);
+            }
+        }
         _ => {}
     }
 }
 
-/// prev から next までに場で起きたこと（場に出た・場から離れた・進化した。持ち主のプレイヤーの出来事にする）
-fn board_events(prev: &GameState, next: &GameState, at: usize, out: &mut Vec<Json>) {
+/// 行動 a で進化させたフォロワー（場の違いの進化は action_events が出したので、board_events では出さない）
+fn evolved_by(a: &Action) -> Option<Iid> {
+    match a {
+        Action::Evolve(iid) | Action::SuperEvolve(iid) => Some(*iid),
+        _ => None,
+    }
+}
+
+/// prev から next までに場で起きたこと（場に出た・場から離れた・進化した。持ち主のプレイヤーの出来事にする）。
+/// skip は行動で進化させたフォロワー（その進化は action_events が出した）
+fn board_events(
+    prev: &GameState,
+    next: &GameState,
+    at: usize,
+    skip: Option<Iid>,
+    out: &mut Vec<Json>,
+) {
     for p in 0..2 {
         let before = &prev.players[p].board;
         let after = &next.players[p].board;
@@ -169,7 +227,11 @@ fn board_events(prev: &GameState, next: &GameState, at: usize, out: &mut Vec<Jso
         for c in after.iter() {
             match before.iter().find(|x| x.iid == c.iid) {
                 None => out.push(event("enter", p, at, c.card, c.iid)),
-                Some(b) if c.is_follower && evolve_num(c.evolve) > evolve_num(b.evolve) => {
+                Some(b)
+                    if c.is_follower
+                        && evolve_num(c.evolve) > evolve_num(b.evolve)
+                        && skip != Some(c.iid) =>
+                {
                     let kind = if c.evolve == Evolve::SuperEvolved {
                         "superEvolve"
                     } else {
@@ -387,6 +449,20 @@ impl Turn {
 /// 試合を打ち直して、ターンごとのまとめを作る。打てない行動があれば（エンジンの版が違う等）その添字を書いたエラー
 pub fn replay_index(decks: [&[CardIdx]; 2], seed: u32, actions: &[Action]) -> Result<Json, String> {
     let mut s = create_game(decks, seed);
+    // 最初のターンの前に起きたこと: 始めから持っているクレスト（デッキに入れると置かれる信仰）と、マリガンの間に起きたこと
+    let mut pre: Vec<Json> = Vec::new();
+    for p in 0..2 {
+        for c in s.players[p].crests.iter() {
+            let mut e = obj(vec![
+                ("k", Json::Str("crestIn".into())),
+                ("p", num(p as u32)),
+                ("at", num(0)),
+            ]);
+            e.set("c", crest_id(c.crest));
+            e.set("i", num(c.iid));
+            pre.push(e);
+        }
+    }
     let mut turns: Vec<Json> = Vec::new();
     let mut cur: Option<Turn> = None;
     // ターン終了の後、相手のターンの始めに起きたこと（次のターンの出来事にする）
@@ -434,7 +510,7 @@ pub fn replay_index(decks: [&[CardIdx]; 2], seed: u32, actions: &[Action]) -> Re
                 let mid = mid.as_ref().unwrap_or(&s);
                 let (this, rest) = traced.split_at(n_mid);
                 trace_events(this, i, &mut t.events);
-                board_events(&s, mid, i, &mut t.events);
+                board_events(&s, mid, i, None, &mut t.events);
                 side_events(&s, mid, i, &mut t.events);
                 t.end = Some(snapshot(if next.phase == Phase::Ended {
                     &next
@@ -448,19 +524,19 @@ pub fn replay_index(decks: [&[CardIdx]; 2], seed: u32, actions: &[Action]) -> Re
                     &mut t.events
                 };
                 trace_events(rest, i, to);
-                board_events(mid, &next, i, to);
+                board_events(mid, &next, i, None, to);
                 side_events(mid, &next, i, to);
             } else {
-                action_events(&s, a, i, &mut t.events);
-                trace_events(&traced, i, &mut t.events);
-                board_events(&s, &next, i, &mut t.events);
-                side_events(&s, &next, i, &mut t.events);
+                step_events(&s, &next, a, i, &traced, &mut t.events);
                 if t.end.is_some() {
                     // ターン終了時の能力の選択など、ターン終了の後に同じターンの行動が続いた
                     t.end = Some(snapshot(&next));
                     t.end_step = i + 1;
                 }
             }
+        } else {
+            // 最初のターンの前（マリガン）
+            step_events(&s, &next, a, i, &traced, &mut pre);
         }
         s = next;
     }
@@ -474,8 +550,24 @@ pub fn replay_index(decks: [&[CardIdx]; 2], seed: u32, actions: &[Action]) -> Re
         ("winner", s.winner.map_or(Json::Null, |w| num(w as u32))),
         ("ended", Json::Bool(s.phase == Phase::Ended)),
         ("steps", num(actions.len() as u32)),
+        ("pre", Json::Arr(pre)),
         ("turns", Json::Arr(turns)),
     ]))
+}
+
+/// ターン終了でない行動 a（局面 s から next）の出来事を、行動・エンジンが残したこと・局面の違いの順に out に足す
+fn step_events(
+    s: &GameState,
+    next: &GameState,
+    a: &Action,
+    at: usize,
+    traced: &[Ev],
+    out: &mut Vec<Json>,
+) {
+    action_events(s, a, at, out);
+    trace_events(traced, at, out);
+    board_events(s, next, at, evolved_by(a), out);
+    side_events(s, next, at, out);
 }
 
 #[cfg(test)]
@@ -560,6 +652,42 @@ mod tests {
             .filter(|x| matches!(x, Action::Play(_)))
             .count();
         assert_eq!(plays, expected);
+    }
+
+    /// 進化ポイント・超進化ポイントを使った進化（ep）は、進化・超進化の行動と同じ数で、同じフォロワー
+    #[test]
+    fn evolves_with_points_match_the_actions() {
+        let mut seen = 0;
+        for seed in 1..8 {
+            let (a, b, actions) = random_game(seed);
+            let idx = replay_index([&a, &b], seed, &actions).expect("打ち直せる");
+            let mut got: Vec<(String, f64, f64)> = Vec::new();
+            for t in arr(idx.get("turns").unwrap()) {
+                for e in arr(t.get("ev").unwrap()) {
+                    if e.get("ep") == Some(&Json::Bool(true)) {
+                        let k = match e.get("k") {
+                            Some(Json::Str(k)) => k.clone(),
+                            _ => panic!("k が無い"),
+                        };
+                        got.push((k, n(e, "at"), n(e, "i")));
+                    }
+                }
+            }
+            let expected: Vec<(String, f64, f64)> = actions
+                .iter()
+                .enumerate()
+                .filter_map(|(at, x)| match x {
+                    Action::Evolve(i) => Some(("evolve".to_string(), at as f64, *i as f64)),
+                    Action::SuperEvolve(i) => {
+                        Some(("superEvolve".to_string(), at as f64, *i as f64))
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(got, expected, "seed {seed}");
+            seen += got.len();
+        }
+        assert!(seen > 0, "進化した試合がありません");
     }
 
     /// ターン終了の出来事は、ターン終了時の処理だけを打った分（resolve_turn_end）が、ターン終了を打った分（apply_legal）の初めと同じ並び

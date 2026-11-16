@@ -6,7 +6,8 @@
 //!
 //! - --check なら、手を打つたびに局面の不変条件（invariants.rs）を確かめ、破った局面を報告に並べる（1 つでもあれば終わりにエラーを返す）
 //! - 報告には、デッキ（名前の「（」の前が同じものは型にまとめる）ごとの勝率と、仕組み（アクセラレート・結晶・エンハンス・奥義・進化・
-//!   超進化・融合・アクト・エクストラPP・攻撃）を使った回数と、クレストの能力が誘発した回数（trace.rs）も出す。
+//!   超進化・融合・アクト・エクストラPP・攻撃）を使った回数と、クレストの能力が誘発した回数も出す。これらは、打った試合を棋譜と同じ
+//!   出来事の列（kifu_cmd::replayed）にして、`svwb kifu count` と同じ書き方の出来事（USAGE 等）で数える（docs/kifu.md「数える」）。
 //!   --log <フォルダ> なら、1 試合ずつ手の並びを文章で書く（試合を読むため）
 //! - --decks なら、比較用の 7 デッキの代わりに並べたデッキで打つ（compare --decks と同じ組とシード。n デッキなら --games n² で全部の組）。
 //!   --record とは一緒に使えない（docs/profile.md の表の列は 7 デッキ）
@@ -29,6 +30,7 @@ use super::deck_compare::read_deck_list;
 use super::deep_gap::describe;
 use super::human_plan::step_text;
 use super::kifu::{self, RunInfo, Seat};
+use super::kifu_cmd::{event_ok, num_field, parse_event, replayed, seat_events, str_of, EventSpec};
 use super::options::compare_options;
 use super::parallel::{parallel_map, thread_count};
 use super::yardstick::{command_line, commit_label_excluding, short_name};
@@ -36,15 +38,16 @@ use super::{compare_decks, fixed};
 use crate::ai::rhino::RhinoAgent;
 use crate::ai::search::{SearchAgent, SearchOptions};
 use crate::ai::Agent;
-use crate::data::{data, CardIdx, CardType, CrestIdx, Deck};
-use crate::game::{acting_player, apply_action, create_game, legal_actions, play_as, play_cost};
+use crate::data::{data, CardIdx, CrestIdx, Deck};
+use crate::game::{acting_player, apply_action, create_game, legal_actions};
 use crate::invariants::invariant_violations;
+use crate::json::Json;
 use crate::prof::{self, Profile, Sec};
 use crate::sim::MatchRng;
-use crate::state::{card, Action, GameState, Phase, PlayerIndex};
-use crate::trace::{self, Ev, Src};
+use crate::state::{card, Action, Phase};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 use std::time::Instant;
 
 /// 1 試合の記録
@@ -92,67 +95,110 @@ struct GameRecord {
 /// (クレスト, 能力の番号) → [自分のターン, 相手のターン] の誘発の回数
 type CrestFired = BTreeMap<(CrestIdx, u8), [u32; 2]>;
 
-/// 仕組みを使った回数の列（tally が数える）
-const USAGE: [&str; 13] = [
-    "プレイ",
-    "アクセラレート",
-    "結晶",
-    "エンハンス",
-    "奥義",
-    "解放奥義",
-    "進化",
-    "超進化",
-    "融合",
-    "アクト",
-    "エクストラPP",
-    "リーダーへの攻撃",
-    "フォロワーへの攻撃",
+/// 仕組みを使った回数の列と、数える出来事（棋譜を打ち直した出来事の列。`svwb kifu count --event` と同じ書き方。docs/kifu.md「数える」）。
+/// アクセラレート・結晶はプレイしたときの姿が違うもの、エンハンスはエンハンスのコストを払ったもの、奥義・解放奥義は【奥義】を持つカードを
+/// 奥義ゲージ 10 以上・15 以上でプレイしたもの（効果が奥義の条件を見るかによらない）、進化・超進化は進化ポイント・超進化ポイントを使ったもの
+const USAGE: [(&str, &str); 13] = [
+    ("プレイ", "play"),
+    ("アクセラレート", "play mode=accelerate"),
+    ("結晶", "play mode=crystal"),
+    ("エンハンス", "play mode=enhance"),
+    ("奥義", "play ougi=1"),
+    ("解放奥義", "play ougi=2"),
+    ("進化", "evolve ep"),
+    ("超進化", "superEvolve ep"),
+    ("融合", "fuse"),
+    ("アクト", "act"),
+    ("エクストラPP", "extraPp"),
+    ("リーダーへの攻撃", "attack target=leader"),
+    ("フォロワーへの攻撃", "attack target!=leader"),
 ];
 
-/// 手 a を打つ前の局面 s で、席 p が使った仕組みを数える。アクセラレート・結晶はプレイしたときの姿が違うもの、エンハンスは
-/// エンハンスのコストを払ったもの、奥義・解放奥義は【奥義】を持つカードを奥義ゲージ 10 以上・15 以上でプレイしたもの
-/// （効果が奥義の条件を見るかによらない）
-fn tally(u: &mut [u32; USAGE.len()], s: &GameState, a: &Action, p: PlayerIndex) {
-    let pl = &s.players[p];
-    let col = |name: &str| USAGE.iter().position(|x| *x == name).expect("列");
-    match a {
-        Action::Play(iid) => {
-            u[col("プレイ")] += 1;
-            let Some(h) = pl.hand.iter().find(|h| h.iid == *iid) else {
-                return;
-            };
-            let c = card(h.card);
-            match play_as(h, pl.pp) {
-                Some(f) if f != h.card => {
-                    u[col(if card(f).ctype == CardType::Spell {
-                        "アクセラレート"
-                    } else {
-                        "結晶"
-                    })] += 1
-                }
-                _ if c.enhance.is_some_and(|e| play_cost(c, pl.pp, Some(h)) == e) => {
-                    u[col("エンハンス")] += 1
-                }
-                _ => {}
-            }
-            if c.ougi {
-                let gauge = pl.turn_count + h.ougi;
-                if gauge >= 15 {
-                    u[col("解放奥義")] += 1;
-                } else if gauge >= 10 {
-                    u[col("奥義")] += 1;
-                }
+/// 最初に進化・超進化した自分のターン、PP を残して終えたターン、クレストの誘発・持ったクレストの出来事
+const FIRST: [&str; 2] = ["evolve ep", "superEvolve ep"];
+const IDLE: &str = "turnEnd pp>0 playable>0";
+const CREST_FIRED: &str = "trigger crest";
+const CREST_HELD: &str = "crestIn crest";
+
+/// 上の出来事を読んだもの
+struct Specs {
+    usage: Vec<EventSpec>,
+    first: Vec<EventSpec>,
+    idle: EventSpec,
+    fired: EventSpec,
+    held: EventSpec,
+}
+
+fn specs() -> &'static Specs {
+    static SPECS: OnceLock<Specs> = OnceLock::new();
+    SPECS.get_or_init(|| {
+        let one = |x: &str| parse_event(x).expect("profile の出来事の書き方");
+        Specs {
+            usage: USAGE.iter().map(|(_, x)| one(x)).collect(),
+            first: FIRST.iter().map(|x| one(x)).collect(),
+            idle: one(IDLE),
+            fired: one(CREST_FIRED),
+            held: one(CREST_HELD),
+        }
+    })
+}
+
+/// 1 席分の、出来事から数えたこと
+#[derive(Default)]
+struct SeatStats {
+    usage: [u32; USAGE.len()],
+    first: [u32; 2],
+    idle: [u32; 2],
+    idle_cards: Vec<CardIdx>,
+    crest_fired: CrestFired,
+    crest_held: BTreeMap<CrestIdx, u32>,
+}
+
+/// 打ち直した試合の出来事の列（kifu_cmd::replayed）から、席 seat の仕組み・最初の進化・PP を残して終えたターン・クレストを数える
+fn seat_stats(idx: &Json, seat: usize) -> Result<SeatStats, String> {
+    let sp = specs();
+    let mut st = SeatStats::default();
+    seat_events(idx, seat, |t, e, own_tc| {
+        for (n, spec) in st.usage.iter_mut().zip(&sp.usage) {
+            *n += u32::from(event_ok(spec, e, t)?);
+        }
+        for (k, spec) in sp.first.iter().enumerate() {
+            if st.first[k] == 0 && event_ok(spec, e, t)? {
+                st.first[k] = own_tc;
             }
         }
-        Action::Evolve(_) => u[col("進化")] += 1,
-        Action::SuperEvolve(_) => u[col("超進化")] += 1,
-        Action::Fuse { .. } => u[col("融合")] += 1,
-        Action::Act(_) => u[col("アクト")] += 1,
-        Action::ExtraPp => u[col("エクストラPP")] += 1,
-        Action::Attack { target: None, .. } => u[col("リーダーへの攻撃")] += 1,
-        Action::Attack { .. } => u[col("フォロワーへの攻撃")] += 1,
-        _ => {}
-    }
+        if event_ok(&sp.idle, e, t)? {
+            st.idle[0] += 1;
+            st.idle[1] += num_field(e, "pp").unwrap_or(0.0) as u32;
+            if let Some(Json::Arr(cs)) = e.get("playable") {
+                st.idle_cards.extend(
+                    cs.iter()
+                        .filter_map(|c| data().card_by_id.get(&str_of(Some(c))).copied()),
+                );
+            }
+        }
+        let crest = || {
+            let id = str_of(e.get("c"));
+            data()
+                .crests
+                .iter()
+                .position(|c| c.id == id)
+                .map(|i| i as CrestIdx)
+        };
+        if event_ok(&sp.fired, e, t)? {
+            if let (Some(c), Some(ab)) = (crest(), num_field(e, "ab")) {
+                let own = e.get("own") == Some(&Json::Bool(true));
+                st.crest_fired.entry((c, ab as u8 - 1)).or_insert([0, 0])[usize::from(!own)] += 1;
+            }
+        }
+        if event_ok(&sp.held, e, t)? {
+            if let Some(c) = crest() {
+                st.crest_held.entry(c).or_insert(own_tc);
+            }
+        }
+        Ok(())
+    })?;
+    Ok(st)
 }
 
 /// デッキの型（名前の「（」の前。デッキの組のファイルの名前は「型（大会）」）
@@ -247,12 +293,6 @@ fn play_timed(
     let mut last_turn = [-1i32; 2];
     let mut slow: Vec<SlowDecision> = Vec::new();
     let mut violations: Vec<String> = Vec::new();
-    let mut usage = [[0u32; USAGE.len()]; 2];
-    let mut idle = [[0u32; 2]; 2];
-    let mut idle_cards: [Vec<CardIdx>; 2] = Default::default();
-    let mut first = [[0u32; 2]; 2];
-    let mut crest_fired: [CrestFired; 2] = Default::default();
-    let mut crest_held: [BTreeMap<CrestIdx, u32>; 2] = Default::default();
     let names = [seats[0].name.clone(), seats[1].name.clone()];
     let mut lines: Vec<String> = Vec::new();
     let mut played: Vec<Action> = Vec::new();
@@ -295,31 +335,6 @@ fn play_timed(
                 }
             ));
         }
-        tally(&mut usage[actor], &s, &a, actor);
-        let pp = s.players[actor].pp;
-        if a == Action::EndTurn && pp > 0 && legal.iter().any(|x| matches!(x, Action::Play(_))) {
-            idle[actor][0] += 1;
-            idle[actor][1] += pp as u32;
-            let pl = &s.players[actor];
-            let mut cs: Vec<CardIdx> = legal
-                .iter()
-                .filter_map(|x| match x {
-                    Action::Play(iid) => pl.hand.iter().find(|h| h.iid == *iid).map(|h| h.card),
-                    _ => None,
-                })
-                .collect();
-            cs.sort_unstable();
-            cs.dedup();
-            idle_cards[actor].extend(cs);
-        }
-        let evolved = match a {
-            Action::Evolve(_) => Some(0),
-            Action::SuperEvolve(_) => Some(1),
-            _ => None,
-        };
-        if let Some(k) = evolved.filter(|&k| first[actor][k] == 0) {
-            first[actor][k] = own_turns[actor];
-        }
         if slow.len() < SLOW_PER_GAME || slow.last().is_some_and(|x| x.secs < secs) {
             let pl = &s.players[actor];
             slow.push(SlowDecision {
@@ -342,29 +357,8 @@ fn play_timed(
         if prof::ENABLED {
             prof::merge(&mut profs[actor], &prof::take());
         }
-        // クレストの誘発は、実際の試合の手を打つ間だけ数える（AI の読みの中は数えない。trace.rs）
-        trace::start();
         s = apply_action(&s, &a);
-        if kifu.is_some() {
-            played.push(a.clone());
-        }
-        for e in trace::take() {
-            if let Ev::Trigger {
-                p,
-                src: Src::Crest(c),
-                ability: Some(i),
-                own_turn,
-                ..
-            } = e
-            {
-                crest_fired[p].entry((c, i)).or_insert([0, 0])[usize::from(!own_turn)] += 1;
-            }
-        }
-        for ((held, pl), &turn) in crest_held.iter_mut().zip(&s.players).zip(&own_turns) {
-            for c in pl.crests.iter() {
-                held.entry(c.crest).or_insert(turn);
-            }
-        }
+        played.push(a.clone());
         if check && violations.len() < 5 {
             for m in invariant_violations(&s) {
                 violations.push(format!(
@@ -375,6 +369,13 @@ fn play_timed(
             }
         }
     }
+    let secs = t0.elapsed().as_secs_f64();
+    // 仕組み・PP を残して終えたターン・クレストは、打った手の列を打ち直した出来事から数える（棋譜を数える svwb kifu と同じ）
+    let idx = replayed([&seats[0].cards, &seats[1].cards], seed, &played)
+        .unwrap_or_else(|e| panic!("打った試合を打ち直せません（g{g}）: {e}"));
+    let [st0, st1] = [0, 1].map(|p| {
+        seat_stats(&idx, p).unwrap_or_else(|e| panic!("出来事を数えられません（g{g}）: {e}"))
+    });
     let kifu = kifu.map(|(run, [search, rhino_seat])| {
         let seat = |d: &Deck| {
             if rhino && d.name == "リノセウスエルフ" {
@@ -383,7 +384,6 @@ fn play_timed(
                 search
             }
         };
-        let seed = compare_setup(decks, g, swap, false).2;
         kifu::line(
             run,
             &kifu::Game {
@@ -406,21 +406,21 @@ fn play_timed(
         turns: s.turn,
         actions,
         winner: s.winner,
-        secs: t0.elapsed().as_secs_f64(),
+        secs,
         think,
         decisions,
         prof: profs,
         own_turns,
         slow,
         violations,
-        usage,
-        first,
+        usage: [st0.usage, st1.usage],
+        first: [st0.first, st1.first],
         log: lines,
-        idle,
-        idle_cards,
+        idle: [st0.idle, st1.idle],
+        idle_cards: [st0.idle_cards, st1.idle_cards],
         first_seat: s.first,
-        crest_fired,
-        crest_held,
+        crest_fired: [st0.crest_fired, st1.crest_fired],
+        crest_held: [st0.crest_held, st1.crest_held],
     }
 }
 
@@ -768,7 +768,7 @@ fn report(sm: &Summary, date: &str, commit: &str, label: &str) -> String {
     push(&mut out, "");
     push(
         &mut out,
-        "1 席（1 試合で片方の側）あたりの回数。勝率は引き分けを負けと数える。アクセラレート・結晶はその姿でプレイした数、エンハンスはエンハンスのコストを払ってプレイした数、奥義・解放奥義は【奥義】を持つカードを奥義ゲージ 10 以上・15 以上（解放奥義の分は奥義に数えない）でプレイした数。最初の進化・超進化は、した席での自分のターンの平均（括弧はした席の割合）。PP を残して終えたは、手札にプレイできるカードがあり PP も残っているのにターンを終えた割合（自分のターンに対する）と、そのとき残した PP の平均。",
+        "1 席（1 試合で片方の側）あたりの回数。勝率は引き分けを負けと数える。アクセラレート・結晶はその姿でプレイした数、エンハンスはエンハンスのコストを払ってプレイした数、奥義・解放奥義は【奥義】を持つカードを奥義ゲージ 10 以上・15 以上（解放奥義の分は奥義に数えない）でプレイした数。進化・超進化は進化ポイント・超進化ポイントを使った数（効果で進化したものは数えない）。どの列も、打った試合の出来事の列から数える（`svwb kifu count` と同じ書き方の出来事。docs/kifu.md「数える」）。最初の進化・超進化は、した席での自分のターンの平均（括弧はした席の割合）。PP を残して終えたは、手札にプレイできるカードがあり PP も残っているのにターンを終えた割合（自分のターンに対する）と、そのとき残した PP の平均。",
     );
     push(&mut out, "");
     let by = if sm.groups.is_empty() {
@@ -777,7 +777,7 @@ fn report(sm: &Summary, date: &str, commit: &str, label: &str) -> String {
         "型"
     };
     let mut head = vec![by.to_string(), "勝率".into(), "ターン/試合".into()];
-    head.extend(USAGE.iter().map(|x| x.to_string()));
+    head.extend(USAGE.iter().map(|(x, _)| x.to_string()));
     head.push("最初の進化".into());
     head.push("最初の超進化".into());
     head.push("PP を残して終えた".into());
@@ -855,7 +855,7 @@ fn report(sm: &Summary, date: &str, commit: &str, label: &str) -> String {
     push(&mut out, "");
     push(
         &mut out,
-        "実際の試合だけを数える（AI の読みの中は数えない。`trace.rs`）。能力は、そのクレストの能力の定義（`src/cards/abilities/` の crests）の何番目か。誘発は、能力の条件（引いたカードのコストなど）に合って解決を待つ列に入った数で、効果の中の条件（「自分のターンなら」など）は見ないので、クレストを持つ側のターンか相手のターンかで分ける。持った席は、そのクレストを一度でも持った席の数と、その型の席に対する割合。持ったターンは、持った席で最初に持った自分のターンの平均（デッキに入れると置かれる信仰は 0）。括弧は持った席 1 つあたりの回数（自分のターンは ± 標準誤差。誘発しなかった持った席も 0 回として入れる）。",
+        "実際の試合だけを数える（打った試合を出来事の列にして `trigger crest`・`crestIn crest` を数える。AI の読みの中は数えない。docs/kifu.md「数える」）。能力は、そのクレストの能力の定義（`src/cards/abilities/` の crests）の何番目か。誘発は、能力の条件（引いたカードのコストなど）に合って解決を待つ列に入った数で、効果の中の条件（「自分のターンなら」など）は見ないので、クレストを持つ側のターンか相手のターンかで分ける。持った席は、そのクレストを一度でも持った席の数と、その型の席に対する割合。持ったターンは、持った席で最初に持った自分のターンの平均（デッキに入れると置かれる信仰は 0）。括弧は持った席 1 つあたりの回数（自分のターンは ± 標準誤差。誘発しなかった持った席も 0 回として入れる）。",
     );
     push(&mut out, "");
     push(
