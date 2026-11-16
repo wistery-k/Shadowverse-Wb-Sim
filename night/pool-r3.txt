@@ -1,0 +1,43 @@
+# 段階 4 の本番: 新しいプール（プロのデッキ 84 個）で補正と見込みを学び直す 3 回目（R3）。計画は共有フォルダの notes/pool-stage4-main-plan.md と docs/STATE.md。
+# R2（night/pool-r2.txt、PC で 2026-11-16 01:33〜10:03）を写し、出発の補正を R2 のものにしたもの。R2 は S2 の線を越え、差が +2 以上だった（R2 対 R1 57.59% ± 0.40、1.2 万試合）。
+# 回す前に決めた問い・線・試合数は計画のもの（S2 と同じ形: R3 対 R2 の 1.2 万試合。差 − 2 SE > 0 なら R3 を採る。差が +2 以上ならもう 1 回（R4）、+2 未満なら学び直しはそこで止めて S3 へ。
+#   R4 まで行ったら、線に関わらず止めて見直す）。変えるなら回す前に審査とユーザーに。
+#
+# R2 との違い: 0. の 2 行を R2 のフォルダに、自己対戦の試合番号を 7200000 から（R1 は 7000000〜、R2 は 7100000〜7159999）、compare の名前を 新しいプール-R3 に。
+#   --est は R2 の PC の実測で直した（下）。打ち方・学び方・デッキの組・入力（あり）は R1・R2 と同じ。
+#
+# 前の回のフォルダは PC のコンテナの /home/wk/svwb-data/night/pool-r2/（台帳の 新しいプール-R2 の files に r.json・rpot.json の指紋）。
+#   td extend は語彙を替えない写し（R1 の r.json・rpot.json で、値が全部同じファイルになるのをクラウド環境で確かめた）。
+#
+# 見込み（PC、svwb-docker・28 スレッド。R2 の実測から）: night plan で 9 時間 36 分（R2 は見込み 10 時間 12 分に対して、実際は 8 時間 30 分だった）。
+#   --until +9h だと、見込みどおりなら compare の前で止まる（残りは resume で次の夜に）。R2 と同じく見込みより速ければ 1 晩で済む。--until +10h なら見込みでも 1 晩に収まる。
+#   R2 の実測（コミット 8bb327b。#262 で補正の計算が速くなった後）: 自己対戦 6 万試合 7 時間 27 分（0.447 秒/試合。見込みは 0.53）・学習（Rust 版）12 分・間引き 21 秒・
+#   beam-gap 2000 試合 11 分（0.33 秒/試合）・見込みの学習 1 分・compare 1.2 万試合 31 分（0.155 秒/試合）・profile 840 試合 2 分ずつ。
+#   R3 の自己対戦は R2 の補正で打つ。R2 の補正は R1 より 1 手の思考が 1.08 倍（profile の 1 手 45.7 対 42.3 ミリ秒、R2 のジョブ 10・11）なので、0.447 × 1.08 = 0.48 に少し足して 0.50 秒/試合。
+#   compare は 0.155 秒/試合に少し足して 0.17、beam-gap は 0.36、profile は 0.16。学習が見込み（--est）を 15 分過ぎても終わらなければ止まり、次は最初からなので、学習の --est は多めにしてある。
+# 朝: finish（PC の main でコミットしないなら --commit を付けず --ledger <ファイル> で行だけ書き出す）で compare の行を台帳に足す。
+#   モデル（@/ の *.json）・自己対戦・ログは pack-run --max-mb 300 で分けて共有フォルダへ。
+
+# 0. 出発の補正: R2 の補正と見込みを写す（R4 なら前の回のフォルダに替える）
+td extend --model /home/wk/svwb-data/night/pool-r2/r.json --out @/v0.json --est 10
+td extend --model /home/wk/svwb-data/night/pool-r2/rpot.json --out @/v0pot.json --est 10
+
+# 1. 自己対戦 6 万試合（g7200000〜7259999）。3000 試合ずつ s-1〜s-20。R1・R2 と同じ打ち方。見込みは v0 の側のもの（R2 の学び直した見込みの写し）
+td selfplay --model @/v0.json --decks @data/pools/azvaldt/sets/all84.txt --games 60000 --start 7200000 --chunk 3000 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --potential @/v0pot.json --out @/s-{k}.jsonl.gz --est 0.50
+
+# 2. 学習（R1・R2 と同じ学び方）、間引き、属性で埋める → r.json
+td train --impl rust --model @/v0.json --data @/s-{1..20}.jsonl.gz --out @/rt.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 1200
+td prune --impl rust --model @/rt.json --data @/s-{1..20}.jsonl.gz --out @/rp.json --est 90
+td attr --model @/rp.json --out @/r.json --keepA 0 --est 60
+
+# 3. 見込みを、学んだ補正の点数で学び直す（R1 と同じ。語彙は r.json から）
+beam-gap --games 2000 --from 1000 --chunk 500 --decks @data/pools/azvaldt/sets/all84.txt --vocab @/r.json --ref '{"beamWidth":4096,"potentialNet":null,"valueNet":"@/r.json"}' --variants '{"w32":{"beamWidth":32,"potentialNet":null,"valueNet":"@/r.json"}}' --sample 100 --inputs @/pot-{k}.jsonl --out @/pot-{k}-rows.jsonl --est 0.36
+potential train --data @/pot-{1..4}.jsonl --valid 2800-2999 --out @/rpot.json --est 180
+
+# 4. S2 の形: R3 対 R2（84 個のデッキの鏡の compare、1.2 万試合）。R2 の側は R2 の補正と学び直した見込み、R3 の側は R3 の補正と学び直した見込み
+compare 6000 '{"valueNet":"@/r.json","potentialNet":"@/rpot.json"}' '{"valueNet":"@/v0.json","potentialNet":"@/v0pot.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 新しいプール-R3 --est 0.17
+
+# 5. 線ではないが毎回見る数字（R1 と同じ。PP とプレイできるカードを残して終えたターンの割合: 新しいカードの行が無い補正（relearn9）29%、v0 14%、R1 12%、R2 11%、スターターのプールでは 6%）。
+#    報告は回のフォルダの speed-<ジョブの番号>.md。両方の席が同じ設定で 420 組（840 試合）
+profile --opts '{"valueNet":"@/r.json","potentialNet":"@/rpot.json"}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.16
+profile --opts '{"valueNet":"@/v0.json","potentialNet":"@/v0pot.json"}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.16
