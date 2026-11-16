@@ -3,12 +3,17 @@
 //! - 物差し（`classic`）: 学習した補正を入れる前の探索 AI（2026-10-16 の search-classic）を凍結したもの
 //! - 強い相手の物差し（`strong`）: 2026-10-22 の既定の探索 AI（補正 s2b・相手のターンを幅 16 で読む）を凍結したもの。
 //!   補正は `yardstick/strong-1-net.json`（data/value-net.json の写し）から読む
+//! - 新しいプール（前期のローテーション）の物差し（`pool-v0`・`pool-r3`。2026-11-16）: 代表 10 型のデッキ（`POOL_DECKS`。
+//!   その日の `data/pools/azvaldt/sets/rep10.txt`）で、2026-11-16 の既定の探索 AI に、新しいプールの補正と見込みを入れたものを凍結したもの。
+//!   `pool-v0` は段階 4 の出発の補正 v0（補正 B を 84 個のデッキの語彙に広げ、新しいカードの行を属性で埋めたもの。見込みは B のもの）、
+//!   `pool-r3` は段階 4 の学び直しを止めた R3 の補正と見込み。どちらもファイルを `yardstick/pool-*.json` に写して読む
 //!
-//!   svwb yardstick [--ref classic|strong] [--opts '<設定JSON>'] [--games 1000] [--start 0] [--label 名前] [--record] [--no-ledger]
-//!   svwb yardstick fingerprint [--ref classic|strong]
+//!   svwb yardstick [--ref classic|strong|pool-v0|pool-r3] [--opts '<設定JSON>'] [--games 1000] [--start 0] [--label 名前] [--record] [--no-ledger]
+//!   svwb yardstick fingerprint [--ref classic|strong|pool-v0|pool-r3]
 //!
 //! 試合の組み方とシードは compare と同じ（同じデッキの組で席とデッキを入れ替えて 2 試合ずつ。--games 1000 で 2000 試合）。
-//! 強い相手は組の 2 試合を同じシードで打つ（compare の既定の鏡。同じ AI どうしはちょうど 50%）。
+//! 新しいプールの物差しは `compare --decks`（代表 10 型）と同じ組（試合番号 100 ごとに全部の組）。
+//! 強い相手と新しいプールの物差しは組の 2 試合を同じシードで打つ（compare の既定の鏡。同じ AI どうしはちょうど 50%）。
 //! 弱い相手は表を前と比べられるよう、組の 2 試合を別のシードで打つ（compare の --no-mirror）。
 //! --opts は compare の設定と同じ形（`{}` で今の探索 AI の既定）。--record で `docs/yardstick.md` のその相手の表に 1 行足す。
 //! --record の有無にかかわらず、回すたびに実験の台帳 `docs/ledger.jsonl` に 1 行足す（runner/ledger.rs。--no-ledger で書かない）。
@@ -21,15 +26,22 @@
 //! ルールの修正などで戻せないなら版（`VERSION`・`STRONG_VERSION`）を上げて指紋を書き直し、表を新しく始める（違う版の行どうしは比べない）。
 
 use super::compare::{compare_pair, compare_seed, pair_stats, play_compare_game};
+use super::deck_compare::read_deck;
 use super::ledger;
 use super::options::{compare_options, model_eval};
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
 use crate::ai::aidata::{weights_from, Weights};
-use crate::ai::search::{MulliganMode, OpponentSearch, RolloutWeights, SearchAgent, SearchOptions};
+use crate::ai::potential::PotentialNet;
+use crate::ai::search::{
+    DrawSplit, MulliganMode, OpponentSearch, RescoreRace, RolloutWeights, SearchAgent,
+    SearchOptions,
+};
 use crate::ai::valuenet::ValueNet;
 use crate::ai::Agent;
 use crate::canonical::{action_canon, fnv};
+use crate::data::Deck;
+use crate::json::Json;
 use crate::sim::play_match;
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
@@ -45,6 +57,33 @@ pub const STRONG_VERSION: u32 = 4;
 
 /// 強い相手どうしの決まった試合の手順のハッシュ
 pub const STRONG_FINGERPRINT: &str = "66a09e01";
+
+/// 新しいプールの物差し（相手 v0）の版
+pub const POOL_V0_VERSION: u32 = 1;
+
+/// 新しいプールの物差し（相手 v0）どうしの決まった試合の手順のハッシュ
+pub const POOL_V0_FINGERPRINT: &str = "36d62937";
+
+/// 新しいプールの強い相手の物差し（相手 R3）の版
+pub const POOL_R3_VERSION: u32 = 1;
+
+/// 新しいプールの強い相手の物差し（相手 R3）どうしの決まった試合の手順のハッシュ
+pub const POOL_R3_FINGERPRINT: &str = "7fa599f2";
+
+/// 新しいプールの物差しのデッキ（リポジトリの根からの道）。2026-11-16 の `data/pools/azvaldt/sets/rep10.txt`（代表 10 型）を、
+/// 同じ順で書き写したもの（デッキの組のファイルを書き直しても物差しは動かない）
+pub const POOL_DECKS: [&str; 10] = [
+    "data/pools/azvaldt/decks/ps26-27-09b/CR_ウィッチ.txt",
+    "data/pools/azvaldt/decks/ps26-27-09b/CR_ドラゴン.txt",
+    "data/pools/azvaldt/decks/ps26-27-09b/CR_ナイトメア.txt",
+    "data/pools/azvaldt/decks/ps26-27-09b/CR_ロイヤル.txt",
+    "data/pools/azvaldt/decks/ps26-27-09b/LVH_ナイトメア.txt",
+    "data/pools/azvaldt/decks/ps26-27-09b/LVH_ビショップ.txt",
+    "data/pools/azvaldt/decks/ps26-27-09b/VL_ウィッチ.txt",
+    "data/pools/azvaldt/decks/ps26-27-09b/VL_エルフ.txt",
+    "data/pools/azvaldt/decks/ps26-27-09b/VL_ネメシス.txt",
+    "data/pools/azvaldt/decks/ps26-27-09b/ZETA_ビショップ.txt",
+];
 
 /// 相手の評価関数の重み（2026-10-16 の SEARCH_WEIGHTS を書き写したもの。2026-10-22 の SEARCH_WEIGHTS も同じなので、強い相手もこれを使う）
 const REFERENCE_WEIGHTS: &str = r#"{"myHp":0.7,"oppHp":1,"attack":1,"defense":0.8,"followerBase":1,"tempAttack":0.3,"keywords":1,"amulet":1.5,"sigil":0.5,"sigilAmulet":1.5,"countdownDecay":0.8,"jeanneSync":0,"oppBoard":1.1,"myHand":0.6,"oppHand":0.3,"ep":1.5,"sep":5,"extraPp":1,"maxPp":8,"crest":3,"graveyard":0.05,"lethalRange":10,"lethalAttack":0.3,"fusionSet":3.6,"kuonReserve":8,"evoReserve":3,"sevoReserve":6,"kerberosReserve":0,"lastWords":1,"lastWordsSummon":0.5,"handStorm":0,"boostCard":1,"boost":0.2,"boostCap":5,"hold":{"90072110":0.6,"90072120":0.6,"90073110":1.2,"90073120":1.7999999999999998,"90073130":1.7999999999999998,"90074110":4.8},"doomed":0.3,"ppLeft":0,"extraPpExpiring":0,"passive":0}"#;
@@ -193,6 +232,136 @@ pub fn strong_reference_options() -> SearchOptions {
     }
 }
 
+/// リポジトリの根からの道を、どこから回しても読める道にする
+fn repo_path(p: &str) -> String {
+    format!("{}/../../{p}", env!("CARGO_MANIFEST_DIR"))
+}
+
+/// 新しいプールの物差しの相手の補正・見込みのファイル（`yardstick/pool-<名前>-net.json`・`-potential.json`）
+pub fn pool_model_paths(name: &str) -> (String, String) {
+    let dir = format!("{}/yardstick", env!("CARGO_MANIFEST_DIR"));
+    (
+        format!("{dir}/pool-{name}-net.json"),
+        format!("{dir}/pool-{name}-potential.json"),
+    )
+}
+
+/// 新しいプールの物差しのデッキ（POOL_DECKS）
+pub fn pool_decks() -> Vec<&'static Deck> {
+    static DECKS: OnceLock<Vec<&'static Deck>> = OnceLock::new();
+    DECKS
+        .get_or_init(|| {
+            POOL_DECKS
+                .iter()
+                .map(|p| {
+                    let d = read_deck(&repo_path(p))
+                        .unwrap_or_else(|e| panic!("新しいプールの物差しのデッキ: {e}"));
+                    &*Box::leak(Box::new(d))
+                })
+                .collect()
+        })
+        .clone()
+}
+
+/// 新しいプールの物差しの相手の設定: 2026-11-16 の探索 AI の既定（SearchOptions::default()）を書き写し、
+/// 補正と見込みを凍結したファイルにしたもの（compare の `{"valueNet":"<補正>","potentialNet":"<見込み>"}` と同じ AI）。
+/// reference_options と同じく全項目を書く。思考用の乱数はその日の既定（判断ごとに作る）なので、同じ設定を測るとちょうど 50%
+pub fn pool_reference_options(name: &str) -> SearchOptions {
+    let (net_path, pot_path) = pool_model_paths(name);
+    let net = ValueNet::load(&net_path).unwrap_or_else(|e| panic!("物差しの相手の補正: {e}"));
+    let pot = PotentialNet::load(&pot_path).unwrap_or_else(|e| panic!("物差しの相手の見込み: {e}"));
+    // 補正の出発点の重み（baseWeights）で自分の評価の重みを上書きし、読みの中の相手は探索 AI の重みのまま（options.rs の apply_value_net）。
+    // その日の探索 AI の重み（SEARCH_WEIGHTS）は REFERENCE_WEIGHTS と同じ
+    let text = std::fs::read_to_string(&net_path)
+        .unwrap_or_else(|e| panic!("{net_path} を読めません: {e}"));
+    let base = Json::parse(&text)
+        .ok()
+        .and_then(|j| j.get("baseWeights").cloned())
+        .unwrap_or(Json::Obj(Vec::new()));
+    let own = match Json::parse(REFERENCE_WEIGHTS)
+        .expect("物差しの重み")
+        .spread(&base)
+        .to_value()
+    {
+        serde_json::Value::Object(m) => weights_from(m).expect("物差しの相手の重み"),
+        _ => panic!("物差しの相手の重みが読めません"),
+    };
+    let base_empty = matches!(&base, Json::Obj(items) if items.is_empty());
+    SearchOptions {
+        samples: 1,
+        beam_width: 256,
+        max_depth: 16,
+        rescore_top: 4,
+        lethal: true,
+        lethal_ward_blocked: 1.0,
+        lethal_expand_choices: true,
+        lethal_exact_states: 20_000,
+        allow: None,
+        dedup: true,
+        same_hand_once: true,
+        chain: true,
+        defer_fuse: true,
+        defer_fuse_hand: 8,
+        defer_fuse_last_words: true,
+        fuse_minimal: false,
+        fuse_one: true,
+        mulligan: MulliganMode::Turn1,
+        mulligan_samples: 50,
+        mulligan_static: true,
+        mulligan_net: true,
+        mulligan_turns: 3,
+        mulligan_rollout_beam: 0,
+        mulligan_keep: Vec::new(),
+        mulligan_opp: None,
+        mulligan_return: Vec::new(),
+        mulligan_rollout_weights: RolloutWeights::Ramp,
+        settle_trades: true,
+        dominance: true,
+        reuse_plan: true,
+        plan_candidates: 1,
+        per_first: 0,
+        potential: Some(Arc::new(pot)),
+        potential_weight: 1.0,
+        extra_eval: Some(model_eval(Arc::new(net))),
+        opp_extra_eval: None,
+        weights: Some(Arc::new(own)),
+        policy_weights: if base_empty {
+            None
+        } else {
+            Some(Arc::new(reference_weights()))
+        },
+        opponent_search: Some(OpponentSearch {
+            beam_width: 8,
+            max_depth: 8,
+            extra_eval: false,
+        }),
+        opp_hand_samples: 12,
+        opp_hand_common: true,
+        read_own_deck_apart: true,
+        peek_opp_hand: false,
+        opp_hand_boosts: false,
+        rescore_mix: 0.5,
+        rescore_race: Some(RescoreRace {
+            first: 3,
+            step: 3,
+            z: 2.0,
+            delta: 10.0,
+            reentry: Some(0.0),
+            lethal_guard: true,
+        }),
+        draw_split: Some(DrawSplit {
+            samples: 4,
+            beam_width: 8,
+            max_depth: 16,
+            root_draws: 2,
+            enumerate: true,
+        }),
+        record_reads: false,
+        sequential_rng: false,
+        pick: None,
+    }
+}
+
 /// 物差しの相手
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Reference {
@@ -200,6 +369,10 @@ pub enum Reference {
     Classic,
     /// 2026-10-22 の既定の探索 AI
     Strong,
+    /// 新しいプールの代表 10 型で、2026-11-16 の既定の探索 AI に段階 4 の出発の補正 v0 を入れたもの
+    PoolV0,
+    /// 新しいプールの代表 10 型で、2026-11-16 の既定の探索 AI に段階 4 の R3 の補正と見込みを入れたもの
+    PoolR3,
 }
 
 impl Reference {
@@ -207,7 +380,21 @@ impl Reference {
         match s {
             "classic" => Ok(Reference::Classic),
             "strong" => Ok(Reference::Strong),
-            _ => Err(format!("--ref は classic か strong: {s}")),
+            "pool-v0" => Ok(Reference::PoolV0),
+            "pool-r3" => Ok(Reference::PoolR3),
+            _ => Err(format!(
+                "--ref は classic・strong・pool-v0・pool-r3 のどれか: {s}"
+            )),
+        }
+    }
+
+    /// --ref に渡す名前（台帳の b）
+    pub fn key(self) -> &'static str {
+        match self {
+            Reference::Classic => "classic",
+            Reference::Strong => "strong",
+            Reference::PoolV0 => "pool-v0",
+            Reference::PoolR3 => "pool-r3",
         }
     }
 
@@ -215,6 +402,8 @@ impl Reference {
         match self {
             Reference::Classic => VERSION,
             Reference::Strong => STRONG_VERSION,
+            Reference::PoolV0 => POOL_V0_VERSION,
+            Reference::PoolR3 => POOL_R3_VERSION,
         }
     }
 
@@ -223,6 +412,8 @@ impl Reference {
         match self {
             Reference::Classic => FINGERPRINT,
             Reference::Strong => STRONG_FINGERPRINT,
+            Reference::PoolV0 => POOL_V0_FINGERPRINT,
+            Reference::PoolR3 => POOL_R3_FINGERPRINT,
         }
     }
 
@@ -230,12 +421,22 @@ impl Reference {
         match self {
             Reference::Classic => reference_options(),
             Reference::Strong => strong_reference_options(),
+            Reference::PoolV0 => pool_reference_options("v0"),
+            Reference::PoolR3 => pool_reference_options("r3"),
         }
     }
 
-    /// 組の 2 試合を同じシードで打つか
+    /// 試合のデッキ（スターターの物差しは比較用の 7 デッキ、新しいプールの物差しは代表 10 型）
+    pub fn decks(self) -> Vec<&'static Deck> {
+        match self {
+            Reference::Classic | Reference::Strong => compare_decks(),
+            Reference::PoolV0 | Reference::PoolR3 => pool_decks(),
+        }
+    }
+
+    /// 組の 2 試合を同じシードで打つか（弱い相手の物差しだけが、前の表と比べられるよう別のシード）
     pub fn mirror(self) -> bool {
-        self == Reference::Strong
+        self != Reference::Classic
     }
 
     /// 表の節の名前（「物差し 2」等）
@@ -243,15 +444,20 @@ impl Reference {
         match self {
             Reference::Classic => format!("物差し {VERSION}"),
             Reference::Strong => format!("強い相手の物差し {STRONG_VERSION}"),
+            Reference::PoolV0 => format!("新しいプールの物差し {POOL_V0_VERSION}"),
+            Reference::PoolR3 => format!("新しいプールの強い相手の物差し {POOL_R3_VERSION}"),
         }
     }
 }
 
-/// 相手どうしで試合 0〜6 を席とデッキを入れ替えて 14 試合打ち、手順と勝者のハッシュを返す
+/// 相手どうしで試合 0〜（デッキの数 − 1）を席とデッキを入れ替えて打ち、手順と勝者のハッシュを返す。
+/// どのデッキも先の席に 1 回は出る（スターターは 7 デッキで 14 試合、新しいプールは代表 10 型で 20 試合）
 pub fn fingerprint_of(r: Reference) -> String {
-    let decks = compare_decks();
+    let decks = r.decks();
     let reference = r.options();
-    let tasks: Vec<(u32, bool)> = (0..7).flat_map(|g| [(g, false), (g, true)]).collect();
+    let tasks: Vec<(u32, bool)> = (0..decks.len() as u32)
+        .flat_map(|g| [(g, false), (g, true)])
+        .collect();
     let lines = parallel_map(
         &tasks,
         |&(g, swap), _| {
@@ -277,7 +483,7 @@ pub fn fingerprint() -> String {
     fingerprint_of(Reference::Classic)
 }
 
-/// 表の列に使うデッキの短い名前
+/// 表の列に使うデッキの短い名前（スターターはクラス、ファイルのデッキは名前の後ろの「（チーム）」を除いた型）
 pub(crate) fn short_name(deck: &str) -> &str {
     const CLASSES: [&str; 7] = [
         "エルフ",
@@ -292,7 +498,7 @@ pub(crate) fn short_name(deck: &str) -> &str {
         .iter()
         .find(|c| deck.ends_with(*c))
         .copied()
-        .unwrap_or(deck)
+        .unwrap_or_else(|| deck.split('（').next().unwrap_or(deck))
 }
 
 fn doc_path() -> String {
@@ -454,10 +660,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         return Err("--record には --label で名前を付けます".into());
     }
     let subject = compare_options(&opts_text).map_err(|e| format!("--opts: {e}"))?;
-    let decks = compare_decks();
-    if decks.len() != 7 {
-        return Err("比較用のデッキは 7 つの想定です".into());
-    }
+    let decks = r.decks();
     let fp = fingerprint_of(r);
     let fingerprint_ok = fp == r.recorded();
     if !fingerprint_ok {
@@ -530,10 +733,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                 .collect(),
             label: label.clone(),
             a: opts_text.clone(),
-            b: match r {
-                Reference::Classic => "classic".into(),
-                Reference::Strong => "strong".into(),
-            },
+            b: r.key().into(),
             extra: vec![
                 ("refVersion".into(), Json::Num(r.version() as f64)),
                 ("refFingerprint".into(), Json::Str(fp.clone())),

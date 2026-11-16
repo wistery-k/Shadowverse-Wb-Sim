@@ -90,6 +90,16 @@ describe("ジョブの行", () => {
     expect(() => parseJob("survey --games 0-9 --label x --out a.jsonl", 1)).toThrow(/--out/);
     expect(() => parseJob("survey --games 0-9 --label x --rate 2", 1)).toThrow(/--rate/);
     expect(() => parseJob("survey --games 0-9 --start 3 --label x", 1)).toThrow(/--start/);
+    // 新しいプールの調査: AI の設定とデッキを svwb survey run に渡す（@/ は回のフォルダ）
+    const sp = parseJob(`survey --games 0-9 --label p --opts '{"valueNet":"@/r.json"}' --decks @data/pools/azvaldt/sets/rep10.txt`, 4);
+    expect(sp.spec).toMatchObject({ kind: "survey", opts: '{"valueNet":"@/r.json"}', decks: "@data/pools/azvaldt/sets/rep10.txt" });
+    expect(jobArgv(sp, 0, 10, "/r").slice(-4)).toEqual(["--opts", '{"valueNet":"/r/r.json"}', "--decks", "@data/pools/azvaldt/sets/rep10.txt"]);
+    expect(jobInputs(sp)).toEqual(["@/r.json"]);
+    expect(checkArgv(sp, "/t")).toEqual(["compare", "0", '{"valueNet":"data/value-net.json"}', "{}", "0", "--decks", "@data/pools/azvaldt/sets/rep10.txt", "--no-ledger"]);
+    expect(checkArgv(s, "/t")).toBeUndefined();
+    // 新しいプールの物差し
+    expect(parseJob("yardstick --ref pool-r3 --label p", 1).spec).toMatchObject({ kind: "yardstick", ref: "pool-r3" });
+    expect(() => parseJob("yardstick --ref pool-r9 --label p", 1)).toThrow(/pool-v0/);
     expect(() => parseJob("rhino-compare --games 10", 1)).toThrow(/compare・yardstick・profile/);
     const w = parseJob("compare 100 '{}' '{}' 0 --with ミッドレンジナイトメア --label x", 6);
     expect(w.spec).toMatchObject({ kind: "compare", with: "ミッドレンジナイトメア" });
