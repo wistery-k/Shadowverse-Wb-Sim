@@ -23,3 +23,16 @@ fn strong_yardstick_reference_unchanged() {
         "強い相手の物差し {STRONG_VERSION} の相手の手が変わりました（src/runner/yardstick.rs の先頭の説明を見る）"
     );
 }
+
+#[test]
+fn pool_yardstick_references_unchanged() {
+    for r in [Reference::PoolV0, Reference::PoolR3] {
+        let f = fingerprint_of(r);
+        assert_eq!(
+            f,
+            r.recorded(),
+            "{} の相手の手が変わりました（src/runner/yardstick.rs の先頭の説明を見る）",
+            r.title()
+        );
+    }
+}

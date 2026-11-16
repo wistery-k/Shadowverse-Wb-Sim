@@ -137,7 +137,7 @@ export interface SurveyRow {
   commit: string;
   branch: string;
   label: string;
-  /** AI の設定（今は今の既定 {} だけ） */
+  /** AI の設定（survey run の --opts。2026-11-16 より前は今の既定 {} だけ） */
   a: unknown;
   /** 最初と最後の試合番号 */
   g: [number, number];

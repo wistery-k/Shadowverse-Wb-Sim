@@ -256,13 +256,14 @@ AI は deck-compare と同じ（どちらの側も今の既定）。
 ## yardstick
 
 ```sh
-npm run yardstick -- [--ref classic|strong] [--opts '<設定>'] [--games 1000] [--start 0] [--label 名前] [--record] [--no-ledger]
-npm run yardstick -- fingerprint [--ref classic|strong]
+npm run yardstick -- [--ref classic|strong|pool-v0|pool-r3] [--opts '<設定>'] [--games 1000] [--start 0] [--label 名前] [--record] [--no-ledger]
+npm run yardstick -- fingerprint [--ref classic|strong|pool-v0|pool-r3]
 ```
 
 固定した相手（凍結した探索 AI）との勝率。`--games 1000` で 2000 試合。相手は `--ref` で選ぶ:
 `classic`（既定。学習した補正なしの 2026-10-16 の探索 AI。組の 2 試合は `compare --no-mirror` と同じく別のシード）と
 `strong`（2026-10-22 の既定の探索 AI。組の 2 試合は `compare` の既定と同じく同じシードで、その日の既定の AI はちょうど 50%）。
+`pool-v0`・`pool-r3` は新しいプールの物差し（代表 10 型のデッキで、2026-11-16 の既定の探索 AI に段階 4 の v0・R3 の補正と見込みを入れたもの。鏡。[yardstick.md](yardstick.md)「新しいプールの物差し」）。
 `--record` で `docs/yardstick.md` のその相手の表に 1 行足す（`--label` が要る）。`fingerprint` は相手が変わっていないかの確認用。
 `--record` の有無にかかわらず、回すたびに実験の台帳 `docs/ledger.jsonl` に 1 行足す（`--no-ledger` で書かない）。
 
