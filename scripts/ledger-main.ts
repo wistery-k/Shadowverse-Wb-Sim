@@ -41,6 +41,8 @@ export interface RunRow {
   with?: string | null;
   /** compare --without: そのデッキの絡まない組だけ */
   without?: string | null;
+  /** compare --involving: 名前にどれかの文字列（カンマ区切り）を含むデッキの絡む組だけ（試合番号はそのまま） */
+  involving?: string | null;
   refVersion?: number;
   decks: string[];
   mirror: boolean;
@@ -335,7 +337,7 @@ const optsText = (x: unknown): string => (isStr(x) ? x : JSON.stringify(x));
 /** B の表示（yardstick は相手の名前と版） */
 function bText(r: RunRow): string {
   if (r.kind === "yardstick") return `物差し ${optsText(r.b)}${r.refVersion !== undefined ? ` ${r.refVersion}` : ""}`;
-  return optsText(r.b) + (r.vs ? `（B は ${r.vs} のみ）` : "") + (r.with ? `（${r.with} の絡む組だけ）` : "") + (r.without ? `（${r.without} の絡まない組だけ）` : "");
+  return optsText(r.b) + (r.vs ? `（B は ${r.vs} のみ）` : "") + (r.with ? `（${r.with} の絡む組だけ）` : "") + (r.without ? `（${r.without} の絡まない組だけ）` : "") + (r.involving ? `（名前に ${r.involving} を含むデッキの絡む組だけ）` : "");
 }
 
 /** 足し合わせてよい回の組（種類・両方の設定・デッキ・鏡・絞り込み・相手の版、any でなければコミットも同じ） */
@@ -349,6 +351,7 @@ export function groupKey(r: RunRow, anyCommit: boolean): string {
     r.vs ?? "",
     r.with ?? "",
     r.without ?? "",
+    r.involving ?? "",
     r.refVersion ?? "",
     anyCommit ? "" : r.commit,
   ].join("\u0001");
