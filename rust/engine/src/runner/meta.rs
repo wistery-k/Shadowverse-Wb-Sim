@@ -3,7 +3,7 @@
 //!   svwb meta init --out 環境.json [--decks <デッキ>,…] [--usage class|uniform]
 //!   svwb meta round --state 環境.json [--out 次.json] [--classes witch,bishop] [--games 30] [--draw 1]
 //!                   [--stages 150:10,450:3] [--confirm 1200] [--zmin 2] [--eta 1] [--minUsage 0.02]
-//!                   [--pool <カード>,…] [--net 補正.json] [--report 記録.md] [--jsonl 試合.jsonl] [--cache 途中.txt]
+//!                   [--pool <カード>,…] [--net 補正.json] [--report 記録.md] [--jsonl 試合.jsonl] [--cache 途中.txt] [--kifu 棋譜.jsonl]
 //!   svwb meta export --state 環境.json --dir <フォルダ> [--top 1]
 //!   svwb meta show --state 環境.json
 //!
@@ -30,6 +30,10 @@
 //!   - 回りのまとめを `--report` に（Markdown で）書き足し、試合ごとの結果を `--jsonl` に書き足す
 //!   - `--cache` なら打った試合の結果を 1 試合ずつそのファイルに書き足し、次に同じファイルで回すときはその試合を打たずに使う
 //!     （回りの途中で止めても続きから回る。結果は止めないときと同じ。クラウドの Spot VM で止められたとき用）
+//!   - `--kifu` なら、打った試合を棋譜（docs/kifu.md）に書く（付けたときだけ。他のランナーと違い、既定では書かない）。
+//!     回の名前は「回り<n> <段>」（段は matrix・s1・s2…・confirm）。ふるいと確かめの試合は、案を試す側が側 A で、
+//!     案（variants）は「元のデッキ」か入れ替え（`-1 カード,+2 カード`）。総当たりの試合は側も案も無い。
+//!     引いた瞬間に抜く介入は棋譜に入らない（本の試合だけ）。`--cache` とは一緒に使えない（途中の結果から使った試合は手が無い）
 //! - **export:** 環境のデッキをテキストファイル（`<key>.txt`）に書き出し、カンマで並べたパスを出す（td selfplay `--decks` に渡す。補正の学び直し用）。
 //!   `--top 1` なら、クラスごとに使用率が一番のデッキだけ（クラスの順。compare `--decks` に渡す）
 //! - **show:** 環境のデッキ・使用率・入れ替えの履歴を出す
@@ -38,6 +42,7 @@ use super::deck_compare::{
     apply_changes, changes_label, check_deck, deck_class, find_card, find_deck, load_deck,
     subject_agent, Entry, MAX_COPIES, RHINO_DECK,
 };
+use super::kifu::{self, RunInfo, Seat};
 use super::options::model_eval;
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since};
@@ -47,12 +52,13 @@ use crate::ai::valuenet::ValueNet;
 use crate::ai::{Agent, Rng};
 use crate::data::{data, CardIdx, ClassId, Pool};
 use crate::game::{acting_player, apply_action, create_game, legal_actions};
+use crate::json::Json;
 use crate::sim::MatchRng;
-use crate::state::{card, GameState, Iid, Phase, PlayerIndex};
+use crate::state::{card, Action, GameState, Iid, Phase, PlayerIndex};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 /// シードの基準（compare・deck-compare・td selfplay の試合と重ならないように大きくする）
@@ -479,6 +485,17 @@ fn play_game(
     seed: u32,
     draw_turns: [Option<i32>; 2],
 ) -> GameOut {
+    play_logged(make, decks, seed, draw_turns, None).0
+}
+
+/// play_game の、本の試合の手を log に書き足し、終わりの局面の先攻・勝者・ターンも返す版（棋譜に書く）
+fn play_logged(
+    make: MakeAgent,
+    decks: [&[CardIdx]; 2],
+    seed: u32,
+    draw_turns: [Option<i32>; 2],
+    mut log: Option<&mut Vec<Action>>,
+) -> (GameOut, kifu::End) {
     reset_exact_lethal_cache();
     let mut agents = [make(0), make(1)];
     let mut s = create_game(decks, seed);
@@ -524,7 +541,11 @@ fn play_game(
         }
         let a = rng.choose(&mut *agents[actor], &s, &legal);
         s = apply_action(&s, &a);
+        if let Some(log) = log.as_deref_mut() {
+            log.push(a);
+        }
     }
+    let end = kifu::End::of(&s);
     let winner = s
         .winner
         .unwrap_or_else(|| panic!("勝者がいません（シード {seed}）"));
@@ -543,7 +564,88 @@ fn play_game(
             value: i32::from(winner == p) - i32::from(w == p),
         });
     }
-    GameOut { winner, drawn }
+    (GameOut { winner, drawn }, end)
+}
+
+/// 棋譜（`--kifu`）。回りの全部の段の試合を 1 つのファイルに書く（書く順は試合の終わった順）
+struct MetaKifu {
+    writer: Mutex<kifu::Writer>,
+    round: u32,
+    net_path: Option<String>,
+    /// 補正と見込みの指紋（どの席も同じ）
+    nets: Json,
+}
+
+impl MetaKifu {
+    fn create(path: &str, round: u32, net_path: Option<&str>) -> Result<MetaKifu, String> {
+        Ok(MetaKifu {
+            writer: Mutex::new(kifu::Writer::create(path)?),
+            round,
+            net_path: net_path.map(String::from),
+            nets: kifu::nets_from(Some(net_path.unwrap_or("")), Some("")),
+        })
+    }
+
+    /// 段の回（回の名前は「回り<n> <段>」）
+    fn run(&self, phase: &str) -> RunInfo {
+        RunInfo::now("meta round", &format!("回り{} {phase}", self.round))
+    }
+
+    /// 席の AI（deck-compare の席と同じ形。どちらの席も今の既定か --net の補正）
+    fn seat(&self, side: Option<&str>, e: &Entry, variant: Option<String>) -> Seat {
+        let agent = if e.rhino { "rhino" } else { "search" };
+        let mut ai = vec![("agent".to_string(), Json::Str(agent.into()))];
+        if let Some(p) = &self.net_path {
+            ai.push(("net".into(), Json::Str(p.clone())));
+        }
+        Seat {
+            side: side.map(String::from),
+            agent: side.map_or_else(|| agent.to_string(), |s| format!("{s} {agent}")),
+            ai: Json::Obj(ai),
+            nets: self.nets.clone(),
+            variant,
+        }
+    }
+
+    /// 1 試合を書く（席の順に、名前・席・デッキ）
+    #[allow(clippy::too_many_arguments)]
+    fn write(
+        &self,
+        run: &RunInfo,
+        g: u32,
+        names: [&str; 2],
+        seats: [&Seat; 2],
+        decks: [&[CardIdx]; 2],
+        seed: u32,
+        end: kifu::End,
+        actions: &[Action],
+    ) {
+        let line = kifu::line(
+            run,
+            &kifu::Game {
+                g,
+                // 組は無い（席ごとにシードが違う）
+                swap: None,
+                names,
+                seats,
+                decks,
+                seed,
+                end,
+                actions,
+            },
+        );
+        self.writer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .write(&line);
+    }
+
+    fn finish(self) -> Result<(), String> {
+        let w = self.writer.into_inner().unwrap_or_else(|e| e.into_inner());
+        let (path, n) = w.finish()?;
+        eprintln!("棋譜: {path}（{n} 試合）");
+        Ok(())
+    }
 }
 
 fn seed_of(g: u32, seat: usize) -> u32 {
@@ -738,7 +840,30 @@ fn play_block(
     what: &str,
     jsonl: &mut Vec<String>,
     round: u32,
+    kifu: Option<&MetaKifu>,
 ) -> Vec<Vec<Vec<bool>>> {
+    // 棋譜の回と席（案を試す側が A、環境のデッキが B）
+    let kifu = kifu.map(|k| {
+        let subjects: Vec<Vec<Seat>> = plans
+            .iter()
+            .map(|p| {
+                p.entries
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| {
+                        let v = if i == 0 {
+                            "元のデッキ".to_string()
+                        } else {
+                            changes_label(&p.changes[i])
+                        };
+                        k.seat(Some("A"), e, Some(v))
+                    })
+                    .collect()
+            })
+            .collect();
+        let opps: Vec<Seat> = field.iter().map(|e| k.seat(Some("B"), e, None)).collect();
+        (k, k.run(what), subjects, opps)
+    });
     let mut tasks: Vec<SieveTask> = Vec::new();
     for (pi, p) in plans.iter().enumerate() {
         for entry in std::iter::once(0).chain(p.alive.iter().copied()) {
@@ -776,7 +901,22 @@ fn play_block(
             } else {
                 [&opp.cards, &me.cards]
             };
-            play_game(&make, decks, seed_of(g0 + t.k as u32, t.seat), [None, None])
+            let (g, seed) = (g0 + t.k as u32, seed_of(g0 + t.k as u32, t.seat));
+            let Some((k, run, subjects, opps)) = &kifu else {
+                return play_game(&make, decks, seed, [None, None]);
+            };
+            let mut log = Vec::new();
+            let (out, end) = play_logged(&make, decks, seed, [None, None], Some(&mut log));
+            // 名前は環境のデッキの名前（案はその入れ替えを variants に）
+            let me_name = plans[t.plan].entries[0].label.as_str();
+            let (me_seat, opp_seat) = (&subjects[t.plan][t.entry], &opps[opp_of[t.k]]);
+            let (names, seats) = if t.seat == 0 {
+                ([me_name, opp.label.as_str()], [me_seat, opp_seat])
+            } else {
+                ([opp.label.as_str(), me_name], [opp_seat, me_seat])
+            };
+            k.write(run, g, names, seats, decks, seed, end, &log);
+            out
         },
         |done, total, r, i| {
             if !done_before.contains_key(&tasks[i].key) {
@@ -1031,7 +1171,7 @@ fn export(a: &Args) -> Result<(), String> {
 fn round(a: &Args) -> Result<(), String> {
     a.check(&[
         "state", "out", "classes", "games", "draw", "stages", "confirm", "zmin", "eta", "minUsage",
-        "pool", "net", "report", "jsonl", "cache",
+        "pool", "net", "report", "jsonl", "cache", "kifu",
     ])?;
     let state_path = a.need("state")?;
     let out_path = a.get("out").unwrap_or(state_path).to_string();
@@ -1065,8 +1205,18 @@ fn round(a: &Args) -> Result<(), String> {
         }
     };
     let net = net.as_ref();
+    if a.get("kifu").is_some() && a.get("cache").is_some() {
+        return Err(
+            "--kifu と --cache は一緒に使えません（途中の結果から使った試合は手が無く、棋譜に書けません）"
+                .into(),
+        );
+    }
     let mut cache = GameCache::open(a.get("cache"))?;
     let round = st.round + 1;
+    let kifu = a
+        .get("kifu")
+        .map(|p| MetaKifu::create(p, round, net_path.as_deref()))
+        .transpose()?;
     let g_start = st.next_g;
     let mut g_next = g_start;
     let mut jsonl: Vec<String> = Vec::new();
@@ -1147,6 +1297,11 @@ fn round(a: &Args) -> Result<(), String> {
         let t0 = Instant::now();
         let step = (tasks.len() / 10).max(1);
         let (done_before, file) = (&cache.done, &mut cache.file);
+        // 棋譜の回と席（総当たりは側も案も無い）
+        let kifu_m = kifu.as_ref().map(|k| {
+            let seats: Vec<Seat> = field.iter().map(|e| k.seat(None, e, None)).collect();
+            (k, k.run("matrix"), seats)
+        });
         let results = parallel_map(
             &tasks,
             |t, _| {
@@ -1163,7 +1318,20 @@ fn round(a: &Args) -> Result<(), String> {
                 } else {
                     [&y.cards, &x.cards]
                 };
-                play_game(&make, decks, seed_of(t.g, t.seat), t.turns)
+                let seed = seed_of(t.g, t.seat);
+                let Some((k, run, seats)) = &kifu_m else {
+                    return play_game(&make, decks, seed, t.turns);
+                };
+                let mut log = Vec::new();
+                let (out, end) = play_logged(&make, decks, seed, t.turns, Some(&mut log));
+                let (sa, sb) = (&seats[t.a], &seats[t.b]);
+                let (names, seats) = if t.seat == 0 {
+                    ([x.label.as_str(), y.label.as_str()], [sa, sb])
+                } else {
+                    ([y.label.as_str(), x.label.as_str()], [sb, sa])
+                };
+                k.write(run, t.g, names, seats, decks, seed, end, &log);
+                out
             },
             |done, total, r, i| {
                 if !done_before.contains_key(&tasks[i].key) {
@@ -1396,6 +1564,7 @@ fn round(a: &Args) -> Result<(), String> {
             &what,
             &mut jsonl,
             round,
+            kifu.as_ref(),
         );
         for (p, w) in plans.iter_mut().zip(&wins) {
             let alive = p.alive.clone();
@@ -1425,6 +1594,7 @@ fn round(a: &Args) -> Result<(), String> {
             "confirm",
             &mut jsonl,
             round,
+            kifu.as_ref(),
         );
         for (p, w) in plans.iter_mut().zip(&wins) {
             let alive = p.alive.clone();
@@ -1573,6 +1743,9 @@ fn round(a: &Args) -> Result<(), String> {
         g_next - 1,
         fixed(seconds_since(t_round) / 60.0, 1)
     ));
+    if let Some(k) = kifu {
+        k.finish()?;
+    }
     write_state(&out_path, &st)?;
     print!("{rep}");
     if let Some(path) = a.get("report") {
@@ -1829,5 +2002,36 @@ mod tests {
             assert!(plain.drawn.is_empty());
         }
         assert!(seen_turns >= 12, "{seen_turns}");
+    }
+
+    #[test]
+    fn logged_actions_replay_the_main_game() {
+        // 介入しても、棋譜に書く手は本の試合のもの（デッキとシードから打ち直すと同じ勝者・ターン）
+        let decks = [
+            find_deck("スペルウィッチ").unwrap(),
+            find_deck("AFネメシス").unwrap(),
+        ];
+        let make = |_: PlayerIndex| -> Box<dyn Agent> { Box::new(RandomAgent) };
+        for g in 0..6 {
+            let seed = seed_of(g, 1);
+            let mut log = Vec::new();
+            let (out, end) = play_logged(
+                &make,
+                [&decks[0].cards, &decks[1].cards],
+                seed,
+                [Some(2), Some(1)],
+                Some(&mut log),
+            );
+            let mut s = create_game([&decks[0].cards, &decks[1].cards], seed);
+            for a in &log {
+                s = apply_action(&s, a);
+            }
+            assert_eq!(s.phase, Phase::Ended);
+            assert_eq!(s.winner, Some(out.winner));
+            assert_eq!(
+                (end.first, end.winner, end.turns),
+                (s.first, s.winner, s.turn)
+            );
+        }
     }
 }

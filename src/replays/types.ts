@@ -5,8 +5,8 @@ import type { ClassId } from "../cards";
 import type { Action, PlayerIndex } from "../engine";
 
 /**
- * 1 試合の記録。棋譜の 1 行（rust/engine/src/runner/kifu.rs、形は docs/kifu.md。前の --replays の行も）と、
- * npm run game --json・rhino-compare --record の記録（seed・agents・decks・winner・actions）を読める
+ * 1 試合の記録。棋譜の 1 行（rust/engine/src/runner/kifu.rs、形は docs/kifu.md。前の --replays の行も。npm run game --json も同じ形）と、
+ * 前の形の記録（2026-11-17 までの npm run game --json・rhino-compare --record。seed・agents・decks・winner・actions）を読める
  */
 export interface ReplayRecord {
   seed: number;
@@ -23,6 +23,12 @@ export interface ReplayRecord {
   source?: string;
   /** ランナーの試合番号 */
   g?: number;
+  /** 組（同じ試合番号で席とデッキを入れ替えた 2 試合）のどちらか */
+  swap?: boolean;
+  /** 席ごとの側（compare 等の "A"・"B"。無い席は null） */
+  sides?: [string | null, string | null];
+  /** 席ごとの AI の設定（棋譜の ai。形はランナーごと。docs/kifu.md） */
+  ai?: [unknown, unknown];
 }
 
 // ---- rust/engine/src/replay_index.rs が返すターンごとのまとめ（形を変えたら両方を直す） ----

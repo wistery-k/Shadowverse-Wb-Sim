@@ -6,7 +6,7 @@
 //!   svwb bench [games]         速さの計測（ランダムな試合の 1 手と、局面ごとに全ての合法手を試す 1 手）
 //!   svwb ai-play [games] [start] [search|rhino|rhino-lethal] AI どうしの試合を打って時間を測る
 //!   svwb compare <games> '<A>' '<B>' [start] [vsDeck] [--no-mirror]  探索 AI の設定どうしの勝率（npm run compare と同じ）
-//!   svwb rhino-compare [--subject …] [--games …] [--opts …] [--out …]  デッキ専用の AI の勝率（npm run rhino-compare と同じ）
+//!   svwb rhino-compare [--subject …] [--games …] [--opts …]  デッキ専用の AI の勝率（npm run rhino-compare と同じ）
 //!   svwb deck-compare --deck <デッキ> [--variant '<変更>']… [--add <カード>] [--file <デッキ>]… [--vs <デッキ>] [--games 50]  デッキのカードを入れ替えた案を元のデッキと比べる
 //!   svwb meta init|round|export|show …  環境（デッキと使用率）のアジャスト合戦を 1 回りずつ回す（runner/meta.rs）
 //!   svwb mulligan-compare [--games 50] [--a …] [--b …]  マリガンの設定どうしを同じシードの試合で打ち比べる
@@ -15,7 +15,7 @@
 //!   svwb td selfplay --model m.json --games N [--start S] [--eps 0.1] --out d.jsonl  TD 学習の自己対戦
 //!   svwb deep-gap play|rollout|report …  自己対戦の局面で今の AI の手と深い読みの手を比べ、差の大きい局面を集める（runner/deep_gap.rs）
 //!   svwb two-turn show|run|report …  2 ターン以上の計画が効きそうな手作りの局面で、候補のターンごとに今の AI の点数・2 ターン先まで読んだ点数・最後まで打った勝率を比べる（runner/two_turn.rs）
-//!   svwb defer-playout --dir <記録> --opts …  融合を回す版の記録で、回した融合をその場でした場合と最後まで打ち比べる（runner/defer_playout.rs）
+//!   svwb defer-playout --kifu <棋譜>… | --dir <記録> --opts …  融合を回す版の棋譜で、回した融合をその場でした場合と最後まで打ち比べる（runner/defer_playout.rs）
 //!   svwb beam-gap [--games 50] [--ref …] [--variants …] [--sample k --nodes …]  自分のターンのビームが広いビームの最善にどれだけ届くかを、幅・並べ替えごとに測る（runner/beam_gap.rs）
 //!   svwb yardstick [--opts …] [--games 1000] [--label …] [--record]  固定した相手との勝率（強さの物差し。docs/yardstick.md）
 //!   svwb profile [--games 49] [--opts …] [--json …] [--baseline …] [--report …]  デッキごとの 1 試合の時間と処理ごとの内訳（docs/profile.md。内訳は --features profile のビルドだけ）
@@ -196,7 +196,7 @@ fn main() {
             }
         }
         _ => {
-            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | mulligan-data … | td selfplay … | yardstick … | human-plan-value … | deep-gap … | two-turn … | defer-playout … | beam-gap … | profile … | misses … | survey … | review … | kifu count|winrate|events …（rust/README.md）");
+            eprintln!("使い方: svwb golden [write] | dump <game> <step> | bench [games] | ai-play [games] | compare … | rhino-compare … | deck-compare … | meta … | mulligan-compare … | mulligan-data … | td selfplay … | yardstick … | human-plan-value … | deep-gap … | two-turn … | defer-playout … | beam-gap … | profile … | misses … | survey … | review … | kifu count|winrate|events|seats …（rust/README.md）");
             std::process::exit(2);
         }
     }

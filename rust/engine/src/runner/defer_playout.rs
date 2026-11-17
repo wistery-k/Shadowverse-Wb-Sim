@@ -1,9 +1,10 @@
 //! 回した融合を、その場でした場合と最後まで打ち比べる（2026-10-29）。
 //!
-//!   svwb defer-playout --dir <記録のディレクトリ> --opts '<回す版の設定>' [--cont '<分かれ目の後の自分の設定>'] [--seeds 8] [--seedBase 0] [--out 結果.jsonl]
+//!   svwb defer-playout --kifu <棋譜>… --opts '<回す版の設定>' [--cont '<分かれ目の後の自分の設定>'] [--seeds 8] [--seedBase 0] [--out 結果.jsonl]
 //!
-//! `svwb rhino-compare --subject af --record <ディレクトリ>` で書いた、融合を回す版（`deferFuse`）の試合を打ち直し、
-//! AF ネメシスの側（ファイル名の席）がターン終了を打った局面ごとに、`--opts` から `deferFuse` だけを外した AI に同じ局面から打たせる。
+//! `svwb rhino-compare --subject af` で書いた、融合を回す版（`deferFuse`）の試合の棋譜（runner/kifu.rs。ファイルかフォルダ、`.jsonl.gz` も）を打ち直し、
+//! AF ネメシスの側（棋譜の `sides` が A の席）がターン終了を打った局面ごとに、`--opts` から `deferFuse` だけを外した AI に同じ局面から打たせる。
+//! 2026-11-16 までの `rhino-compare --record <ディレクトリ>` の 1 試合 1 ファイルは `--dir <ディレクトリ>` で読む（席はファイル名から）。
 //! その AI がターン終了まで融合だけを打つなら、それが回した融合。「そのままターンを終える（回す）」と「その融合をしてからターンを終える」の
 //! 2 つの筋を、同じ乱数（相手の手札・山札の並べ直しと AI の乱数）で `--seeds` 通り最後まで打ち、勝ち数を比べる。
 //! 分かれ目の後は、自分を `--cont`（既定は `--opts`）、相手を今の既定の探索 AI で打つ。
@@ -99,14 +100,16 @@ fn playout(
     (s.winner == Some(p), all)
 }
 
-/// 1 試合の記録の、回した局面ごとの結果（JSON 行とまとめ用）
-fn run_file(
-    path: &std::path::Path,
-    my: &SearchOptions,
-    cont: &SearchOptions,
-    seeds: u32,
-    base: u32,
-) -> Result<Vec<(String, Row)>, String> {
+/// 打ち直す試合 1 つ: 名前（`<相手デッキ>-g<g>-s<席>`。前の --record のファイル名と同じ形）、AF ネメシスの席、相手デッキ、試合の JSON
+struct Game {
+    file: String,
+    p: PlayerIndex,
+    deck_name: String,
+    g: Json,
+}
+
+/// 前の `rhino-compare --record` の 1 試合 1 ファイル（席と相手デッキはファイル名から）
+fn game_of_file(path: &std::path::Path) -> Result<Game, String> {
     let file = path
         .file_name()
         .and_then(|f| f.to_str())
@@ -119,7 +122,59 @@ fn run_file(
         .ok_or("ファイル名に席がありません")?;
     let deck_name = file.split("-g").next().unwrap_or("").to_string();
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let g = Json::parse(&text)?;
+    Ok(Game {
+        file: file.trim_end_matches(".json").to_string(),
+        p,
+        deck_name,
+        g: Json::parse(&text)?,
+    })
+}
+
+/// 棋譜の 1 行（AF ネメシスの席は `sides` が A の席。rhino-compare の棋譜）
+fn game_of_kifu(v: Json) -> Result<Game, String> {
+    let sides = match v.get("sides") {
+        Some(Json::Arr(xs)) => xs.clone(),
+        _ => return Err("棋譜の行に sides がありません（rhino-compare の棋譜を渡します）".into()),
+    };
+    let p = sides
+        .iter()
+        .position(|x| *x == Json::Str("A".into()))
+        .ok_or("棋譜の行に A の席がありません")?;
+    let name = |k: usize| match v.get("names") {
+        Some(Json::Arr(xs)) => match xs.get(k) {
+            Some(Json::Str(n)) => n.clone(),
+            _ => String::new(),
+        },
+        _ => String::new(),
+    };
+    let g = match v.get("g") {
+        Some(Json::Num(x)) => *x as u32,
+        _ => 0,
+    };
+    let deck_name = name(1 - p);
+    Ok(Game {
+        file: format!("{deck_name}-g{g}-s{p}"),
+        p,
+        deck_name,
+        g: v,
+    })
+}
+
+/// 1 試合の、回した局面ごとの結果（JSON 行とまとめ用）
+fn run_game(
+    game: &Game,
+    my: &SearchOptions,
+    cont: &SearchOptions,
+    seeds: u32,
+    base: u32,
+) -> Result<Vec<(String, Row)>, String> {
+    let Game {
+        file,
+        p,
+        deck_name,
+        g,
+    } = game;
+    let (p, deck_name) = (*p, deck_name.clone());
     let seed = match g.get("seed") {
         Some(Json::Num(x)) => *x as u32,
         _ => return Err("seed がありません".into()),
@@ -318,6 +373,7 @@ fn print_line(name: &str, xs: &[f64]) {
 
 pub fn main(argv: &[String]) -> Result<(), String> {
     let mut dir = String::new();
+    let mut kifu: Vec<String> = Vec::new();
     let mut out_path = String::new();
     let mut opts = "{}".to_string();
     let mut cont_opts = String::new();
@@ -327,6 +383,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     while k + 1 < argv.len() {
         match argv[k].as_str() {
             "--dir" => dir = argv[k + 1].clone(),
+            "--kifu" => kifu.push(argv[k + 1].clone()),
             "--out" => out_path = argv[k + 1].clone(),
             "--opts" => opts = argv[k + 1].clone(),
             "--cont" => cont_opts = argv[k + 1].clone(),
@@ -336,8 +393,8 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         }
         k += 2;
     }
-    if dir.is_empty() || seeds == 0 {
-        return Err("--dir と 1 以上の --seeds が要ります".into());
+    if dir.is_empty() == kifu.is_empty() || seeds == 0 {
+        return Err("--kifu <棋譜>（か前の --dir <記録のディレクトリ>）のどちらかと、1 以上の --seeds が要ります".into());
     }
     let my = compare_options(&opts)?;
     let cont = if cont_opts.is_empty() {
@@ -345,12 +402,26 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     } else {
         compare_options(&cont_opts)?
     };
-    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
-        .map_err(|e| e.to_string())?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "json"))
-        .collect();
-    files.sort();
+    let games: Vec<Game> = if kifu.is_empty() {
+        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+            .map_err(|e| e.to_string())?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|x| x == "json"))
+            .collect();
+        files.sort();
+        files
+            .iter()
+            .map(|f| game_of_file(f))
+            .collect::<Result<_, _>>()?
+    } else {
+        let mut gs: Vec<Game> = super::kifu_cmd::read_kifu(&kifu)?
+            .into_iter()
+            .map(game_of_kifu)
+            .collect::<Result<_, _>>()?;
+        // 前の --record のファイル名の順（相手デッキ・試合番号・席）と同じに並べる
+        gs.sort_by(|a, b| a.file.cmp(&b.file));
+        gs
+    };
     let t0 = std::time::Instant::now();
     let mut w = if out_path.is_empty() {
         None
@@ -358,8 +429,8 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         Some(std::fs::File::create(&out_path).map_err(|e| e.to_string())?)
     };
     let results = parallel_map(
-        &files,
-        |f, _| run_file(f, &my, &cont, seeds, base),
+        &games,
+        |g, _| run_game(g, &my, &cont, seeds, base),
         |done, total, r: &Result<Vec<(String, Row)>, String>, _| {
             if let (Some(w), Ok(rows)) = (w.as_mut(), r) {
                 for (line, _) in rows {
@@ -379,21 +450,14 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let played: Vec<&Row> = rows.iter().filter(|r| !r.other).collect();
     println!(
         "{} 試合、回した局面 {}（融合以外の手を打つ局面 {}）、乱数 {seeds} 通り、並べ直した局面で融合を打てなかった {} 回",
-        files.len(),
+        games.len(),
         played.len(),
         rows.len() - played.len(),
         played.iter().map(|r| r.illegal).sum::<u32>()
     );
     print_line("全部", &played.iter().map(|r| diff(r)).collect::<Vec<_>>());
     // 試合ごとの合計（回した局面の無い試合も 0 として数える）
-    let mut per_game: BTreeMap<String, f64> = files
-        .iter()
-        .filter_map(|f| {
-            f.file_name()
-                .and_then(|x| x.to_str())
-                .map(|x| (x.to_string(), 0.0))
-        })
-        .collect();
+    let mut per_game: BTreeMap<String, f64> = games.iter().map(|g| (g.file.clone(), 0.0)).collect();
     for r in &played {
         *per_game.entry(r.file.clone()).or_default() += diff(r);
     }

@@ -1299,6 +1299,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         agent: "rhino".into(),
         ai: crate::json::Json::Obj(vec![("rhino".into(), crate::json::Json::Bool(true))]),
         nets: crate::json::Json::Null,
+        variant: None,
     };
     let seats = [search_seat, rhino_seat];
     let kifu_run = writer.as_ref().map(|_| (&run, &seats));

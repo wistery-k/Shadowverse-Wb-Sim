@@ -20,7 +20,7 @@
   "commit": "2b63f19eb97a61e68227416a908405ab6c0cbe03",
   "dirty": false,
   "createdAt": "2026-11-14T08:32:01.429Z",
-  "updatedAt": "2026-11-14T09:15:44.889Z"
+  "updatedAt": "2026-11-17T05:36:38.000Z"
  },
  "decks": [
   [
@@ -566,7 +566,7 @@
     ]
    ],
    "rng": 259690721,
-   "outcome": "DFM（エルフ）の場から: 根差の刺客 2/2（左から 4 枚目）"
+   "outcome": "DFM（エルフ）の場から: 根差の刺客 2/2（場の古いほうから 4 枚目）"
   },
   {
    "kind": "action",
@@ -741,14 +741,10 @@
    "outcome": "VL（ビショップ）の場に: 汚濁の聖水 CD 3"
   },
   {
-   "kind": "mark",
-   "note": "ホーリーファルコンと聖水の出てくる順番が逆"
-  },
-  {
    "kind": "action",
    "action": {
     "type": "attack",
-    "attacker": 88,
+    "attacker": 89,
     "target": "leader"
    }
   },
@@ -1028,7 +1024,7 @@
    "kind": "action",
    "action": {
     "type": "act",
-    "iid": 89
+    "iid": 88
    },
    "draws": [
     [],
@@ -10788,7 +10784,7 @@
   },
   {
    "turn": 15,
-   "step": 67,
+   "step": 66,
    "state": {
     "phase": "main",
     "players": [
@@ -11495,13 +11491,25 @@
        },
        {
         "iid": 88,
+        "cardId": "10661210",
+        "keywords": [],
+        "tempKeywords": [],
+        "granted": [],
+        "order": 29,
+        "kind": "amulet",
+        "countdown": 3,
+        "sigils": null,
+        "actedThisTurn": false
+       },
+       {
+        "iid": 89,
         "cardId": "90061110",
         "keywords": [
          "storm"
         ],
         "tempKeywords": [],
         "granted": [],
-        "order": 29,
+        "order": 30,
         "kind": "follower",
         "attack": 2,
         "defense": 2,
@@ -11514,18 +11522,6 @@
         "cannotAttackUntil": null,
         "x": null,
         "usedOncePerTurn": {}
-       },
-       {
-        "iid": 89,
-        "cardId": "10661210",
-        "keywords": [],
-        "tempKeywords": [],
-        "granted": [],
-        "order": 30,
-        "kind": "amulet",
-        "countdown": 3,
-        "sigils": null,
-        "actedThisTurn": false
        }
       ],
       "crests": [
@@ -11576,7 +11572,7 @@
   },
   {
    "turn": 16,
-   "step": 78,
+   "step": 77,
    "state": {
     "phase": "main",
     "players": [
@@ -12266,12 +12262,12 @@
       ],
       "board": [
        {
-        "iid": 89,
+        "iid": 88,
         "cardId": "10661210",
         "keywords": [],
         "tempKeywords": [],
         "granted": [],
-        "order": 30,
+        "order": 29,
         "kind": "amulet",
         "countdown": 2,
         "sigils": null,
@@ -12330,7 +12326,7 @@
   },
   {
    "turn": 17,
-   "step": 86,
+   "step": 85,
    "state": {
     "phase": "main",
     "players": [
@@ -12923,12 +12919,12 @@
       ],
       "board": [
        {
-        "iid": 89,
+        "iid": 88,
         "cardId": "10661210",
         "keywords": [],
         "tempKeywords": [],
         "granted": [],
-        "order": 30,
+        "order": 29,
         "kind": "amulet",
         "countdown": 2,
         "sigils": null,
@@ -13034,7 +13030,7 @@
   },
   {
    "turn": 18,
-   "step": 96,
+   "step": 95,
    "state": {
     "phase": "main",
     "players": [
@@ -13618,12 +13614,12 @@
       ],
       "board": [
        {
-        "iid": 89,
+        "iid": 88,
         "cardId": "10661210",
         "keywords": [],
         "tempKeywords": [],
         "granted": [],
-        "order": 30,
+        "order": 29,
         "kind": "amulet",
         "countdown": 1,
         "sigils": null,
@@ -13707,7 +13703,7 @@
   },
   {
    "turn": 19,
-   "step": 103,
+   "step": 102,
    "state": {
     "phase": "main",
     "players": [
@@ -14349,7 +14345,7 @@
   },
   {
    "turn": 20,
-   "step": 110,
+   "step": 109,
    "state": {
     "phase": "main",
     "players": [
@@ -15009,7 +15005,7 @@
   },
   {
    "turn": 21,
-   "step": 127,
+   "step": 126,
    "state": {
     "phase": "main",
     "players": [
