@@ -65,8 +65,8 @@ fn kifu_files(inputs: &[String]) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
-/// ファイルの中身（.gz は gzip -dc で展開する）
-fn read_text(path: &str) -> Result<String, String> {
+/// ファイルの中身（.gz は gzip -dc で展開する。misses add --replay も使う）
+pub fn read_text(path: &str) -> Result<String, String> {
     if path.ends_with(".gz") {
         let out = std::process::Command::new("gzip")
             .args(["-dc", path])
@@ -101,6 +101,14 @@ fn read_lines(files: &[String]) -> Result<Vec<Line>, String> {
         return Err("棋譜の行（{\"kind\":\"replay\", …}）がありません".into());
     }
     Ok(out)
+}
+
+/// 渡したファイル・フォルダの棋譜の行を全部読む（ほかのランナーが棋譜を読む口。defer-playout 等）
+pub fn read_kifu(inputs: &[String]) -> Result<Vec<Json>, String> {
+    read_lines(&kifu_files(inputs)?)?
+        .iter()
+        .map(|l| Json::parse(&l.text))
+        .collect()
 }
 
 /// 1 試合の、席に関わらないこと

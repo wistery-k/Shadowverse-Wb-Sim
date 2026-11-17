@@ -7,6 +7,9 @@
 - 書くのは `compare`・`yardstick`・`profile`・`td selfplay`・`survey run`（svwb。`npm run compare` 等も同じ）と、
   `rhino-compare`・`deck-compare`・`review zero`・`deep-gap play`・`beam-gap`（自己対戦を打つ回。2026-11-17 から。段取り 4 の案 1）。打つ手・試合は変わらない
 - 本体は `rust/engine/src/runner/kifu.rs`。開発サーバーの「リプレイ検索」タブ（`docs/commands.md`「リプレイ検索」）もこの形を読む
+- 1 試合を調べる道具も棋譜を読む（2026-11-17 から。段取り 4 の案 2）: `npm run think-at -- --json <棋譜> --line N`・`npm run diverge -- --a <棋譜> --b <棋譜>`・
+  `svwb defer-playout --kifu <棋譜>`・`npm run misses -- add --replay <棋譜> --line N`（どれも `.jsonl.gz` のままでよい）。
+  `npm run game -- … --json` もこの形の 1 行を書く（`source` は `"game"`。エンジンの版・プール・補正の指紋は無い）。1 試合 1 ファイルを書く `rhino-compare --record` は消した
 - 名前は「棋譜」（コマンドと引数は `kifu`。ユーザー決定 2026-11-16）。前の名前の「リプレイ」（`--replays`）も引数としては使える
 
 ## どこに書くか
@@ -46,7 +49,7 @@
 | --- | --- |
 | `kind` | `"replay"` |
 | `version` | 形の版。2（2026-11-16 から）。1 は前の `--replays` の行（下） |
-| `source` | 書いたランナー（`"compare"`・`"yardstick"`・`"profile"`・`"td selfplay"`・`"survey"`・`"rhino-compare"`・`"deck-compare"`・`"review zero"`・`"deep-gap"`・`"beam-gap"`） |
+| `source` | 書いたランナー（`"compare"`・`"yardstick"`・`"profile"`・`"td selfplay"`・`"survey"`・`"rhino-compare"`・`"deck-compare"`・`"review zero"`・`"deep-gap"`・`"beam-gap"`・`"game"`（`npm run game --json`）） |
 | `run` | 回の名前（台帳の名前 `--label`。無ければ空） |
 | `engine` | エンジンの版（コミット。手元の変更があれば末尾に `+`。夜のキューは組み立てたときのもの。台帳の `commit` と同じ） |
 | `pool` | カードプール（`"starter"`・`"azvaldt"`。両方のデッキのカードが入るプール。ベーシックだけなら `"starter"`。どちらにも入らなければ `"mixed"`） |

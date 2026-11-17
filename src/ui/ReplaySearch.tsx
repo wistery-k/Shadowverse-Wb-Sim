@@ -234,8 +234,8 @@ export function ReplaySearch({ onSandbox }: Props) {
         <section class="panel">
           <h2>データ</h2>
           <p class="muted">
-            自己対戦の <code>--replays</code>（<code>npm run svwb -- td selfplay … --replays r.jsonl</code>・<code>npm run compare -- … --replays r.jsonl</code>）、
-            <code>rhino-compare --record</code>、<code>npm run game -- … --json</code> で書いた試合の記録を読みます。
+            対戦を打つランナー（<code>compare</code>・<code>td selfplay</code> 等）が既定で書く棋譜（<code>~/svwb-data/kifu/</code>。<code>.jsonl.gz</code> も）と、
+            <code>npm run game -- … --json</code> で書いた試合の記録を読みます（前の <code>--replays</code>・<code>rhino-compare --record</code> の記録も）。
             探すフォルダは環境変数 <code>SVWB_REPLAY_DIRS</code>（無ければ <code>~/svwb-data</code> とリポジトリの <code>replays/</code>）。
           </p>
           {listError && <p class="problems">{listError}</p>}

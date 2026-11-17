@@ -91,36 +91,38 @@ npm run game -- --seed S --p0 AI --p0-deck デッキ --p1 AI --p1-deck デッキ
 | `--p0` / `--p1` | 席 0（表示は P1）と席 1（P2）の AI（必須）。先攻はシードで決まる |
 | `--p0-deck` / `--p1-deck` | デッキ（必須）。デフォルトデッキの名前か、`ID*枚数,ID*枚数,…` のカードIDの列 |
 | `--quiet` | 行動の列を表示せず、結果だけ出す |
-| `--json ファイル` | シード・AI・デッキ・勝者・行動の列を書き出す |
+| `--json ファイル` | 試合を、ランナーの棋譜と同じ形の 1 行で書き出す（[kifu.md](kifu.md)。`source` は `"game"`。エンジンの版・プール・補正の指紋は無い）。`svwb kifu`・`think-at`・`misses add --replay`・リプレイ検索がそのまま読む |
 
 リプレイ画面の「再現に必要な情報」に、この形のコマンドが出る。
 
 ## think-at
 
 ```sh
-npm run think-at -- --json 試合.json --at N [--agent AI] [--rng 1,2,3]
+npm run think-at -- --json 試合のファイル --at N [--line 行 | --g 試合番号 [--swap 0|1]] [--agent AI] [--rng 1,2,3]
 ```
 
-`npm run game -- … --json 試合.json` で書き出した試合の、N 手目の行動の前の局面（`game` の表示の N 番目の手を打つ前）で、AI の考え（リプレイ画面の「AI の考え」と同じもの）を出す。
+記録した試合（棋譜の 1 行か、`npm run game -- … --json 試合.json` で書き出した試合）の、N 手目の行動の前の局面（`game` の表示の N 番目の手を打つ前）で、AI の考え（リプレイ画面の「AI の考え」と同じもの）を出す。
 最初の手ごとに、選ぶときの値・相手のターンを読み直した点数・ターン末の点数（それぞれ手で作った評価 eval と学習した補正 extra の内訳）と、ターン末までの並びを出す。
 AI はその場で考え直すので、試合の中で前の手で決めた並びを使い回した手とは違うことがある。
 
 | 引数 | 意味 |
 |---|---|
-| `--json ファイル` | `game --json` の出力（必須） |
+| `--json ファイル` | 棋譜（`.jsonl`・`.jsonl.gz`。[kifu.md](kifu.md)）か `game --json` の出力（前の形と、2026-11-17 までの `rhino-compare --record` の 1 ファイルも）（必須） |
+| `--line 行`・`--g 試合番号`・`--swap 0\|1` | 何試合もあるファイルで、どの試合か（行番号は 1 から。合う試合が 1 つでなければ候補を出す） |
 | `--at N` | 何手目の前の局面か（必須） |
-| `--agent AI` | 考える AI（既定はその席で打った AI） |
+| `--agent AI` | 考える AI（既定はその席で打った AI。棋譜の `agents`・`ai` から名前が分かるとき（`rhino-compare`・`deck-compare`・設定が `{}` の席）だけ。分からなければ渡す） |
 | `--rng 1,2,3` | AI の乱数（並べた数だけ考える。既定 1） |
 
 ## diverge
 
 ```sh
-npm run diverge -- --a <記録のディレクトリ A> --b <記録のディレクトリ B> [--file <ファイル名>] [--turns 1] [--skipFuse true]
+npm run diverge -- --a <棋譜 A> --b <棋譜 B> [--g 試合番号] [--turns 1] [--skipFuse true]
 ```
 
-同じ試合（同じシード・デッキ）を 2 つの設定で打った記録（`rhino-compare --record`）を、ファイル名で組にして、最初に手が分かれた局面（手番のプレイヤーの手札・場、相手の場）と、
-そこから `--turns` ターン分（手番の交代の数）の A・B の手を出す。設定を変えて勝敗が変わった試合を見るのに使う（docs/ai-notes.md「使わない融合を次のターン以降に回す」）。
-1 つの試合だけ見るなら `--file アマリアロイヤル-g0-s0.json` 等。記録は `npm run think-at -- --json` にもそのまま渡せる
+同じ試合（同じシード・デッキ）を 2 つの設定で打った棋譜（`rhino-compare` 等。[kifu.md](kifu.md)）を、試合番号・組・シード・デッキで組にして、最初に手が分かれた局面（手番のプレイヤーの手札・場、相手の場）と、
+そこから `--turns` ターン分（手番の交代の数）の A・B の手を出す。比べるデッキの席は、棋譜の `sides` が A の席。設定を変えて勝敗が変わった試合を見るのに使う（docs/ai-notes.md「使わない融合を次のターン以降に回す」）。
+1 つの試合番号だけ見るなら `--g 0` 等。棋譜は `npm run think-at -- --json <棋譜> --line N` にもそのまま渡せる。
+2026-11-17 までの `rhino-compare --record` のディレクトリも渡せる（同じファイル名で組にする。`--file アマリアロイヤル-g0-s0.json` で 1 つだけ）
 `--skipFuse true` なら、手ではなくターンの終わりの局面（両方の体力・EP・SEP・場・山札の枚数と、相手の手札。比べるデッキの手札の中身は除く）を比べ、最初に違ったターンの初めの両方の局面と手を出す。
 融合を回すか（`deferFuse` 等）だけを変えた設定どうしで、融合の後の手が分かれたところを見るのに使う
 
@@ -150,7 +152,7 @@ A の勝率と、A のデッキごとの勝率を出す。5 番目にデッキ�
 ## rhino-compare（af-compare・spellwitch-compare・bishop-compare・dragon-compare・nightmare-compare・royal-compare）
 
 ```sh
-npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …] [--opts '<設定>'] [--opp search-classic|search] [--out 結果.jsonl] [--matches 試合.jsonl] [--record ディレクトリ]
+npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …] [--opts '<設定>'] [--opp search-classic|search] [--out 結果.jsonl] [--matches 試合.jsonl]
                          [--kifu 棋譜.jsonl | --no-kifu]
 ```
 
@@ -164,8 +166,7 @@ npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …
 | `--opts JSON` | `{}` | 比べるデッキの AI の設定（`search-classic` では使わない）。下の「探索 AI の設定」に加え、リノセウス用 AI の `"potential"`（数）と `"holds"`（`{"mystery":…, "rhino":…, "extraPp":…}`） |
 | `--out ファイル` | なし | 試合ごとの結果を JSON Lines で書き出す |
 | `--matches ファイル` | なし | 「人間との比較」タブで保存した試合（JSON Lines）と同じ試合だけ打ち、人間の勝敗と並べる。人間の相手が `--opp` と同じ試合だけを使う（`search-classic` なら相手が物差しの試合、`search` なら最新版の試合） |
-| `--record ディレクトリ` | なし | 試合ごとに、`npm run game` の `--json` と同じ形（`seed`・`agents`・`decks`・`winner`・`actions`）を `<ディレクトリ>/<相手デッキ>-g<試合番号>-s<席>.json` に書く（`npm run diverge`・`npm run think-at` で調べる） |
-| `--kifu ファイル`・`--no-kifu` | 既定のフォルダに書く | 試合ごとの棋譜（[kifu.md](kifu.md)。比べるデッキの席が A、相手が B）。勝ち負けは `svwb kifu winrate <棋譜> --where side=A --by opp` でも引ける |
+| `--kifu ファイル`・`--no-kifu` | 既定のフォルダに書く | 試合ごとの棋譜（[kifu.md](kifu.md)。比べるデッキの席が A、相手が B）。勝ち負けは `svwb kifu winrate <棋譜> --where side=A --by opp` でも引ける。`npm run diverge`・`npm run think-at`・`svwb defer-playout --kifu` にそのまま渡せる（2026-11-17 までの、1 試合 1 ファイルを書く `--record` はこれに替えて消した） |
 
 勝率のほかに、比べるデッキがカードを引く手（自分の山札が減る手）を打った回数と、そのうちの後ドロー（ターンの最初の局面から打てたのに、ほかの手の後で打った）の回数を出す
 （docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）。`af` では融合のまわりの数（融合の回数、作ったカードを手札に残して終えた回数、ターン終了時の手札のコア、
@@ -397,7 +398,7 @@ npm run svwb -- two-turn show [--only <局面>,…] [--sandbox <フォルダ>]
 npm run svwb -- two-turn run --out tt.jsonl [--only <局面>,…] [--m 64] [--reads 4] [--twos 2] [--nextBeam 256] [--seed 1] [--opts '<設定の JSON>']
 npm run svwb -- two-turn report tt.jsonl… [--only <局面>,…]
 npm run svwb -- two-turn trace --only <局面> --cand <候補> [--r 0] [--seed 1] [--opts '<設定の JSON>']
-npm run svwb -- defer-playout --dir <記録のディレクトリ> --opts '<回す版の設定>' [--cont '<設定>'] [--seeds 8] [--seedBase 0] [--out 結果.jsonl]
+npm run svwb -- defer-playout --kifu <棋譜> --opts '<回す版の設定>' [--cont '<設定>'] [--seeds 8] [--seedBase 0] [--out 結果.jsonl]   # 前の --dir <記録のディレクトリ> も
 npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth":4096,"potentialNet":null}'] [--variants '{"名前":{設定},…}'] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl] [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl] [--inputs 学習のデータ.jsonl] [--vocab 語彙.json] [--decks <デッキ>,…|@<デッキの組>]   # 自己対戦を打つ回は棋譜も書く
 ```
 
@@ -452,7 +453,7 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
   AI の点数・読み直し・次の自分のターン末（幅 `--nextBeam`）・2 ターン読み・次のターンのリーサル・最後まで打った勝ち負けを 1 行ずつ追記する（済んだものは飛ばす）。
   `report` は今の AI との対の差を Markdown で出す。`trace` は 1 通りの候補のターンと、その後の試合を全部出す。`--opts` は候補のターンを打つ AI の設定（compare の設定と同じ形）。
   docs/ai-notes.md「2 ターン以上の計画が効きそうな局面を手で作って比べる」
-- `defer-playout`: 融合を回す版（`deferFuse`）で `rhino-compare --subject af --record <ディレクトリ>` で書いた試合を打ち直し、AFネメシスの側がターン終了を打った局面ごとに、
+- `defer-playout`: 融合を回す版（`deferFuse`）で `rhino-compare --subject af` が書いた棋譜（`--kifu`。2026-11-17 までの `--record <ディレクトリ>` は `--dir`）の試合を打ち直し、AFネメシスの側（棋譜の `sides` が A の席）がターン終了を打った局面ごとに、
   `--opts` から `deferFuse` だけを外した AI に同じ局面から打たせる。ターン終了まで融合だけを打つなら、それが回した融合。「そのままターンを終える」と「その融合をしてから終える」を、
   同じ乱数（相手の手札・山札の並べ直しと AI の乱数）で `--seeds` 通り最後まで打ち、勝ち数を比べる。分かれ目の後は自分を `--cont`（既定は `--opts`）、相手を今の既定の探索 AI で打つ。
   `--seedBase` を変えると別の乱数で打つ（足し合わせる用）。局面ごとの結果を `--out` に試合が終わった順に書き、最後に、全部・試合ごとの合計・その場で作るはずだったカード・
@@ -588,7 +589,7 @@ zcat /mnt/project-files/data/selfplay/<名前>/f0.jsonl.gz | head -c 500
 「サンドボックスで開く」が使える。
 
 - **読める記録**: 棋譜（compare・yardstick・profile・td selfplay・survey run などの対戦を打つランナーが既定で書く JSON Lines。1 行 1 試合。形は [kifu.md](kifu.md)。前の `--replays` の行も）、
-  `rhino-compare --record` の `.json`、`npm run game -- … --json` の `.json`。gzip（`.gz`）のままでも読める。
+  `npm run game -- … --json` の出力、前の `rhino-compare --record` の `.json`。gzip（`.gz`）のままでも読める。
   試合はエンジンで打ち直すので、記録したときとエンジンの版（カードの能力など）が違うと、打てない手のある試合は読めず、勝者が変わった試合は印が付く
 - **手元のフォルダ**: 開発サーバーが環境変数 `SVWB_REPLAY_DIRS`（区切りは Linux・macOS は `:`、Windows は `;`）のフォルダの下を探して一覧に出す。
   無ければ `~/svwb-data` とリポジトリの `replays/`。一覧に出るのは、始めの部分が試合の記録らしいファイルだけ（自己対戦の学習用の行は出ない）。

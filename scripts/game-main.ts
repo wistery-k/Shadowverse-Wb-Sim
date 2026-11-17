@@ -3,12 +3,15 @@
 // 使い方: npm run game -- --seed <seed> --p0 <AI> --p0-deck <デッキ> --p1 <AI> --p1-deck <デッキ> [--quiet] [--json <出力.json>]
 // デッキはデフォルトデッキのキー（data/decks のファイル名）か「ID*枚数,…」（src/sim/reproduce.ts の deckArg）。
 // 行動の番号はリプレイ画面の「n 手」と同じ（n 番目の行動の後の局面が n 手目）。
+// --json は、ランナーの棋譜と同じ形の 1 行（docs/kifu.md。source は "game"。エンジンの版・プール・補正の指紋は書かない）。
+// svwb kifu・think-at・misses add --replay・リプレイ検索がそのまま読む。
 
 import { writeFileSync } from "node:fs";
 import { agentOf, AGENTS } from "../src/ai/registry";
 import { playMatch } from "../src/sim/match";
 import { parseDeckArg } from "../src/sim/reproduce";
 import { replayStates } from "../src/sim/replay";
+import { deckName } from "../src/replays/records";
 import { describeAction } from "../src/ui/describe";
 
 interface Args {
@@ -64,7 +67,21 @@ export async function main(argv: string[]): Promise<number> {
   }
   console.log(`勝者: ${names[r.winner]} / 先攻: ${names[r.final.first]} / ${r.turns} ターン / ${actions.length} 手（${elapsed.toFixed(1)}秒）`);
   if (args.json) {
-    writeFileSync(args.json, JSON.stringify({ seed, agents, decks, winner: r.winner, turns: r.turns, actions }, null, 2));
+    const line = {
+      kind: "replay",
+      version: 2,
+      source: "game",
+      names: [deckName(decks[0]), deckName(decks[1])],
+      agents,
+      ai: agents.map((agent) => ({ agent })),
+      seed,
+      decks,
+      first: r.final.first,
+      winner: r.winner,
+      turns: r.turns,
+      actions,
+    };
+    writeFileSync(args.json, `${JSON.stringify(line)}\n`);
     console.log(`${args.json} に書き出しました`);
   }
   return 0;

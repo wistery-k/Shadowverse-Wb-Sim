@@ -31,7 +31,7 @@ export function deckName(cards: readonly string[]): string {
  */
 export function toReplayRecord(v: unknown): ReplayRecord | null {
   if (!isObject(v) || !("actions" in v) || !("seed" in v) || !("decks" in v)) return null;
-  const { seed, actions, winner, agents, names, source, g } = v;
+  const { seed, actions, winner, agents, names, source, g, swap, sides, ai } = v;
   if (typeof seed !== "number" || !Number.isInteger(seed) || seed < 0) throw new Error(`seed が 0 以上の整数ではありません: ${String(seed)}`);
   const decks = pair(v.decks, isStrings);
   if (!decks) throw new Error("decks がカードIDの列 2 つではありません");
@@ -48,6 +48,11 @@ export function toReplayRecord(v: unknown): ReplayRecord | null {
   };
   if (typeof source === "string") record.source = source;
   if (typeof g === "number") record.g = g;
+  if (typeof swap === "boolean") record.swap = swap;
+  const sideOf = (x: unknown): x is string | null => x === null || typeof x === "string";
+  const sd = pair(sides, sideOf);
+  if (sd) record.sides = sd;
+  if (Array.isArray(ai) && ai.length === 2) record.ai = [ai[0], ai[1]];
   return record;
 }
 
