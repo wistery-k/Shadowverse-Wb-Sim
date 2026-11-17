@@ -316,36 +316,6 @@ pub fn resolve_turn_end(prev: &GameState) -> Option<GameState> {
     Some(s)
 }
 
-/// 手番のプレイヤーがここでターンを終えると、続く相手のターンの開始時の処理（クレスト・場の能力・カウントダウンで消えるもののラストワード）が働くか（AI 用）
-pub fn has_turn_start_trigger(s: &GameState) -> bool {
-    let next = &s.players[opponent(s.active)];
-    let starts = |a: &Ability| a.trigger.on() == On::TurnStart;
-    let last_words = |a: &Ability| a.trigger.on() == On::LastWords;
-    next.crests.iter().any(|c| {
-        let abs = crest_abilities_of(c.crest);
-        abs.iter().any(starts) || (c.countdown == Some(1) && abs.iter().any(last_words))
-    }) || next.board.iter().any(|c| {
-        c.abilities().any(starts)
-            || (!c.is_follower && c.countdown == Some(1) && c.abilities().any(last_words))
-    })
-}
-
-/// 手番のプレイヤーがここでターンを終えると、ターン終了時の処理か、続く相手のターンの開始時の処理（相手のドローを含む）で試合が終わるなら、
-/// 終わった局面（AI 用。ターン末の点数で、相手のターン開始時のクレストのダメージ等で決着する並びを見落とさないため）。
-/// resolved は prev に resolve_turn_end を当てた局面（無ければ prev）で、相手のターンの開始時に働くものが無ければ None
-pub fn ends_at_turn_start(prev: &GameState, resolved: &GameState) -> Option<GameState> {
-    if resolved.phase != Phase::Main
-        || resolved.pending.is_some()
-        || !resolved.stack.is_empty()
-        || !resolved.queue.is_empty()
-        || !has_turn_start_trigger(resolved)
-    {
-        return None;
-    }
-    let _p = crate::prof::scope(crate::prof::Sec::TurnEnd);
-    try_apply_action(prev, &Action::EndTurn).filter(|t| t.phase == Phase::Ended)
-}
-
 pub(crate) fn handle_internal(s: &mut GameState, controller: PlayerIndex, eff: FEff) {
     match eff {
         FEff::StartTurn => start_turn(s, controller),
@@ -1397,52 +1367,5 @@ mod tests {
             .map(|q| (q.ctx.source, q.ability.trigger.on()))
             .collect();
         assert_eq!(sources, vec![(iid, On::Enter), (crest_iid, On::AllyPlay)]);
-    }
-
-    /// 相手のターンの開始時に働くクレスト（クレスト：焦灰のアナテマ・バーンドナイト。自分のターン開始時、自分のリーダーに2ダメージ）で
-    /// 相手が倒れるなら、ターンを終えた先の決着した局面を返す。倒れない・開始時に働くものが無いなら None
-    #[test]
-    fn ends_at_turn_start_sees_crest_damage() {
-        let d = data();
-        let deck = d.decks[0].cards.clone();
-        let mut s = create_game([&deck, &deck], 1);
-        for _ in 0..2 {
-            let player = acting_player(&s);
-            s = apply_action(
-                &s,
-                &Action::Mulligan {
-                    player,
-                    swap: Vec::new(),
-                },
-            );
-        }
-        let p = s.active;
-        let q = opponent(p);
-        s.players[q].leader_hp = 2;
-        assert!(!has_turn_start_trigger(&s));
-        assert!(ends_at_turn_start(&s, &s).is_none());
-        let crest = d
-            .crests
-            .iter()
-            .position(|c| c.id == "10744112")
-            .expect("クレスト：焦灰のアナテマ・バーンドナイト") as CrestIdx;
-        let crest_iid = s.new_iid();
-        let order = s.next_order;
-        s.next_order += 1;
-        s.players[q].crests.make_mut().push(CrestInstance {
-            iid: crest_iid,
-            crest,
-            countdown: None,
-            order,
-            used_once: Vec::new(),
-            faith: None,
-            stacks: 0,
-        });
-        assert!(has_turn_start_trigger(&s));
-        let end = ends_at_turn_start(&s, &s).expect("相手のターン開始時に決着する");
-        assert_eq!(end.phase, Phase::Ended);
-        assert_eq!(end.winner, Some(p));
-        s.players[q].leader_hp = 3;
-        assert!(ends_at_turn_start(&s, &s).is_none());
     }
 }

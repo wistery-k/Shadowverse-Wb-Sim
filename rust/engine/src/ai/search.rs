@@ -15,7 +15,7 @@ use super::eval::{evaluate_with, EvalWeights};
 use super::exact_lethal::{search_exact_lethal, sure_lethal_options};
 use super::fusion::{excessive_fusion, last_words_to_hand, needless_material};
 use super::greedy::choose_greedy;
-use super::keys::{hand_eq_noid, state_eq, turn_order_eq, visible_eq, TurnOrderSet};
+use super::keys::{hand_eq_noid, state_eq, visible_eq, TurnOrderSet};
 use super::lethal::{
     find_lethal, search_lethal, LethalOptions, LethalSearch, DEFAULT_LETHAL_OPTIONS,
     GUARDED_LETHAL_OPTIONS,
@@ -30,8 +30,7 @@ use super::valuenet::{default_net_weights, value_net_eval, ValuePhase};
 use super::{purpose, purpose_rng, seed_of, with_purpose_rng, Agent, Rng};
 use crate::data::CardIdx;
 use crate::game::{
-    acting_player, apply_legal, ends_at_turn_start, is_legal, legal_actions, resolve_turn_end,
-    try_apply_action,
+    acting_player, apply_legal, is_legal, legal_actions, resolve_turn_end, try_apply_action,
 };
 use crate::prof::{self, Sec};
 use crate::state::*;
@@ -80,8 +79,6 @@ pub struct OpponentSearch {
     pub beam_width: usize,
     pub max_depth: usize,
     pub extra_eval: bool,
-    /// 読みの中の相手のビームで、幅を越えても最初の手ごとに残す局面の数（None なら自分のビームの per_first と同じ。前からの形）
-    pub per_first: Option<usize>,
 }
 
 /// 読み直す並びに、自分の山札から引く手かランダムな手（引くカード・ランダムの結果が決定化で決まっている手）があれば、その手の直前で区切り、
@@ -203,17 +200,6 @@ pub struct SearchOptions {
     /// 素材の条件が無く、融合したカードを見ない融合先（Card::fuse_any_one）は、素材 1 枚の融合だけを展開する。
     /// どのカードも素材にできるので、手札が多いと融合の手が数百通りになり、読みの中の相手のターンのビームが重くなる（2026-11-14、実験体W）
     pub fuse_one: bool,
-    /// ターン末の点数で、ターンを終えると続く相手のターンの開始時の処理（クレスト・場の能力・カウントダウン）で試合が終わるなら、
-    /// 終わった局面で採点する（game::ends_at_turn_start。自分のターンのビーム・組み直し・読みの中の相手のビームに効く。
-    /// 相手のターン開始時に相手のリーダーに 2 ダメージのクレストで終わる並びを、読みの中の相手が選ばなかった。2026-11-17、プロの検討の 2 戦目）
-    pub turn_start_end: bool,
-    /// drawSplit の root_draws で足す引く手の候補を広げる: 最初の手とそれに続く選択の中で引く手（陽光の耳飾りのアクトで手札を選んで引く 等）と、
-    /// 読み直す上位の最初の手ごとに、その手で始まり、上位の並びより先に引く（上位の並びが引かないなら、どこかで引く）並びのうちターン末の点数が最も高いもの。
-    /// 最初の手ごとに 1 つの並びしか読み直さないので、同じ最初の手の後に引くか出すかがターン末の点数だけで決まっていた（2026-11-17、プロの検討の 1 戦目ターン 8）
-    pub draw_candidates: bool,
-    /// drawSplit で区切って選んだ並びの、最初の引く手・ランダムな手（とその前の選択のまとまり）を並びの先頭に動かしても終わりの局面が同じなら、
-    /// それを先に打つ（引いたカードを見てから残りを考え直す。2026-11-17、プロの検討の 3 戦目ターン 20）
-    pub draw_first: bool,
     pub mulligan: MulliganMode,
     /// MulliganMode::Sample・Turn1 で、返し方ごとに引き直しを試す回数
     pub mulligan_samples: usize,
@@ -318,9 +304,6 @@ impl Default for SearchOptions {
             // 素材の条件の無い融合先は素材 1 枚だけ（スターターのカードには無いので、スターターの試合は変わらない。
             // docs/ai-notes.md「新しいプールで今の AI を調べる」）
             fuse_one: true,
-            turn_start_end: false,
-            draw_candidates: false,
-            draw_first: false,
             // 引き直した後、3 ターン目の終わりまで貪欲法で進めてから採点する
             // （docs/ai-notes.md「引き直した後に先へ進めてから採点するマリガン」。手札の形のモデルより +1.5%）
             mulligan: MulliganMode::Turn1,
@@ -355,7 +338,6 @@ impl Default for SearchOptions {
                 beam_width: 8,
                 max_depth: 8,
                 extra_eval: false,
-                per_first: None,
             }),
             opp_hand_samples: 12,
             opp_hand_common: true,
@@ -478,8 +460,6 @@ pub struct Env<'a> {
 struct Step {
     action: Action,
     prev: Option<usize>,
-    /// 引く手・ランダムな手（is_chance_step）か
-    chance: bool,
 }
 
 #[derive(Clone)]
@@ -549,38 +529,9 @@ impl<'a> Planner<'a> {
         self.env.opts
     }
 
-    fn push_step(&mut self, action: Action, prev: Option<usize>, chance: bool) -> usize {
-        self.steps.push(Step {
-            action,
-            prev,
-            chance,
-        });
+    fn push_step(&mut self, action: Action, prev: Option<usize>) -> usize {
+        self.steps.push(Step { action, prev });
         self.steps.len() - 1
-    }
-
-    /// path までの並びの、最初の引く手・ランダムな手の何手目か（0 から）と、並びの長さ
-    fn first_chance_of(&self, path: usize) -> (Option<usize>, usize) {
-        let mut cur = Some(path);
-        let mut n = 0;
-        let mut last: Option<usize> = None;
-        while let Some(i) = cur {
-            if self.steps[i].chance {
-                last = Some(n);
-            }
-            n += 1;
-            cur = self.steps[i].prev;
-        }
-        (last.map(|k| n - 1 - k), n)
-    }
-
-    /// path までの並びの、最初の手とそれに続く選択（Choose・Mode）の数
-    fn first_group_len(&self, path: usize) -> usize {
-        let acts = self.steps_actions(path);
-        1 + acts
-            .iter()
-            .skip(1)
-            .take_while(|a| matches!(a, Action::Choose(_) | Action::Mode(_)))
-            .count()
     }
 
     /// path までの並びと、各手を打った後の局面。局面は root から打ち直して作る
@@ -777,13 +728,7 @@ impl<'a> Planner<'a> {
         let settled = self.settle(s);
         let base = settled.as_ref().unwrap_or(s);
         let resolved = resolve_turn_end(base);
-        let r = resolved.as_ref().unwrap_or(base);
-        let ended = if self.opts().turn_start_end {
-            ends_at_turn_start(base, r)
-        } else {
-            None
-        };
-        let (eval, extra) = self.parts(ended.as_ref().unwrap_or(r), ValuePhase::End);
+        let (eval, extra) = self.parts(resolved.as_ref().unwrap_or(base), ValuePhase::End);
         ScoreParts { total, eval, extra }
     }
 
@@ -804,13 +749,7 @@ impl<'a> Planner<'a> {
         let settled = self.settle(s);
         let base = settled.as_ref().unwrap_or(s);
         let resolved = resolve_turn_end(base);
-        let r = resolved.as_ref().unwrap_or(base);
-        if self.opts().turn_start_end {
-            if let Some(t) = ends_at_turn_start(base, r) {
-                return self.eval_state(&t);
-            }
-        }
-        self.eval_state(r) - self.leftover(s) - self.expiring(s)
+        self.eval_state(resolved.as_ref().unwrap_or(base)) - self.leftover(s) - self.expiring(s)
     }
 
     fn score(&self, s: &GameState) -> f64 {
@@ -857,7 +796,7 @@ impl<'a> Planner<'a> {
         // a は s の合法手（expand・legal_actions の手）なので、打てるかは確かめ直さない
         debug_assert!(is_legal(s, a), "合法手でない: {a:?}");
         let next = Rc::new(apply_legal(s, a));
-        let path = self.push_step(a.clone(), prev, is_chance_step(s, &next, self.p));
+        let path = self.push_step(a.clone(), prev);
         let opts = self.opts();
         if !opts.chain || depth >= 8 || next.phase == Phase::Ended {
             out.push((next, path));
@@ -939,7 +878,7 @@ impl<'a> Planner<'a> {
                 if root_converges {
                     continue; // 合流する攻撃をしてから終える手に劣らない
                 }
-                let path = self.push_step(a, None, false);
+                let path = self.push_step(a, None);
                 let value = self.score(root);
                 terminals.push(Node {
                     state: root.clone(),
@@ -1097,7 +1036,6 @@ fn best_plan_last(
 
 /// 相手のターンまで読み直す終局面（最初の手ごとの最善のうち、ターン末の点数の上位 rescore_top と、drawSplit が足す引く手）
 fn rescore_ranked(
-    pl: &Planner,
     root: &GameState,
     p: PlayerIndex,
     opts: &SearchOptions,
@@ -1117,40 +1055,10 @@ fn rescore_ranked(
             .filter(|&i| {
                 let t = &terminals[i];
                 !matches!(t.first, Action::EndTurn)
-                    && (try_apply_action(root, &t.first)
+                    && try_apply_action(root, &t.first)
                         .is_some_and(|after| is_chance_step(root, &after, p))
-                        || (opts.draw_candidates
-                            && pl
-                                .first_chance_of(t.path)
-                                .0
-                                .is_some_and(|c| c < pl.first_group_len(t.path))))
             })
             .collect();
-        // drawCandidates: 上位の最初の手ごとに、上位の並びより先に引く並びのうち、ターン末の点数が最も高いもの
-        if opts.draw_candidates {
-            let top: Vec<usize> = ranked.clone();
-            for r in top {
-                let first = &terminals[r].first;
-                let limit = pl
-                    .first_chance_of(terminals[r].path)
-                    .0
-                    .unwrap_or(usize::MAX);
-                let mut best: Option<usize> = None;
-                for (j, t) in terminals.iter().enumerate() {
-                    if t.first != *first
-                        || best.is_some_and(|b| terminals[b].value >= t.value)
-                        || ranked.contains(&j)
-                        || more.contains(&j)
-                    {
-                        continue;
-                    }
-                    if pl.first_chance_of(t.path).0.is_some_and(|c| c < limit) {
-                        best = Some(j);
-                    }
-                }
-                more.extend(best);
-            }
-        }
         more.sort_by(|&x, &y| by_value_desc(terminals[x].value, terminals[y].value));
         more.truncate(ds.root_draws);
         ranked.extend(more);
@@ -1214,10 +1122,10 @@ pub fn plan_turn_traced(
                 (k, plan)
             })
             .collect();
-        return rekey_deferred(result, opts.defer_fuse || opts.draw_first, root);
+        return rekey_deferred(result, opts.defer_fuse, root);
     }
     let _p = prof::scope(Sec::Rescore);
-    let ranked = rescore_ranked(&pl, root, p, opts, &terminals, &best_by_first);
+    let ranked = rescore_ranked(root, p, opts, &terminals, &best_by_first);
 
     let candidates_of = |best: usize| -> Vec<usize> {
         if !opts.reuse_plan || opts.plan_candidates <= 1 {
@@ -1525,17 +1433,8 @@ pub fn plan_turn_traced(
             // drawSplit で区切ったときは、引く手までの並び（その先は引いたカードを見て考え直す）
             let mut steps = match split_at {
                 Some((c, mut steps)) if split.is_some() => {
-                    match opts
-                        .draw_first
-                        .then(|| draw_first_steps(root, &steps, c))
-                        .flatten()
-                    {
-                        Some(front) => front,
-                        None => {
-                            steps.truncate(c + 1);
-                            steps
-                        }
-                    }
+                    steps.truncate(c + 1);
+                    steps
                 }
                 _ => pl.steps_of(node.path),
             };
@@ -1614,73 +1513,7 @@ pub fn plan_turn_traced(
         tr.detail = details.into_inner();
         tr.common_seeds = common_seeds.clone();
     }
-    rekey_deferred(result, opts.defer_fuse || opts.draw_first, root)
-}
-
-/// drawFirst: 並び steps（root から、各手の後の局面つき）の最初の引く手・ランダムな手 c を含む手のまとまり（プレイ・アクト等と、
-/// c までのそれに続く選択）を、並びの終わりの局面が同じ（手札・場の順番と番号、破壊されたカードの記録の順は問わない）まま
-/// 動かせるいちばん前（手のまとまりの切れ目）に動かした並びの、そのまとまりまで（引いたカードを見て残りを考え直す）。
-/// 前に動かせない（既にいちばん前・動かすと打てない・終わりが違う）なら None
-fn draw_first_steps(root: &Rc<GameState>, steps: &Steps, c: usize) -> Option<Steps> {
-    let is_choice = |a: &Action| matches!(a, Action::Choose(_) | Action::Mode(_));
-    let mut g = c;
-    while g > 0 && is_choice(&steps[g].0) {
-        g -= 1;
-    }
-    if g == 0 || steps.iter().any(|(a, _)| matches!(a, Action::EndTurn)) {
-        return None;
-    }
-    let end = &steps.last()?.1;
-    for pos in (0..g).filter(|&k| !is_choice(&steps[k].0)) {
-        let acts: Vec<&Action> = steps[g..=c]
-            .iter()
-            .chain(&steps[pos..g])
-            .chain(&steps[c + 1..])
-            .map(|(a, _)| a)
-            .collect();
-        let mut s = if pos == 0 {
-            root.clone()
-        } else {
-            steps[pos - 1].1.clone()
-        };
-        let mut out: Steps = steps[..pos].to_vec();
-        let mut ok = true;
-        for (k, a) in acts.into_iter().enumerate() {
-            match try_apply_action(&s, a) {
-                Some(t) => s = Rc::new(t),
-                None => {
-                    ok = false;
-                    break;
-                }
-            }
-            if k <= c - g {
-                out.push((a.clone(), s.clone()));
-            }
-        }
-        if ok && same_end(&s, end) {
-            return Some(out);
-        }
-    }
-    None
-}
-
-/// 並びの終わりの局面が同じか（turn_order_eq に、破壊されたアミュレット・墓場のフォロワー・このターンに破壊されたカードの記録の順を問わないことを足したもの）
-fn same_end(a: &GameState, b: &GameState) -> bool {
-    if turn_order_eq(a, b) {
-        return true;
-    }
-    let norm = |s: &GameState| -> GameState {
-        let mut t = s.clone();
-        for pl in t.players.iter_mut() {
-            pl.destroyed_amulets.make_mut().sort_unstable();
-            pl.graveyard_followers.make_mut().sort_unstable();
-            pl.destroyed_this_turn
-                .make_mut()
-                .sort_by_key(|x| (x.card, x.attack, x.defense));
-        }
-        t
-    };
-    turn_order_eq(&norm(a), &norm(b))
+    rekey_deferred(result, opts.defer_fuse, root)
 }
 
 /// rescoreRace で先に読んだ 1 通りの引き直し
@@ -1993,7 +1826,6 @@ fn opponent_search_options(opts: &SearchOptions) -> SearchOptions {
         },
         beam_width: os.map(|o| o.beam_width).unwrap_or(opts.beam_width),
         max_depth: os.map(|o| o.max_depth).unwrap_or(opts.max_depth),
-        per_first: os.and_then(|o| o.per_first).unwrap_or(opts.per_first),
         opponent_search: None,
         potential: None,
         ..opts.clone()
@@ -2596,9 +2428,8 @@ impl SearchAgent {
         let mut prev = None;
         let mut state = root.clone();
         for a in actions {
-            let next = Rc::new(apply_legal(&state, a));
-            prev = Some(pl.push_step(a.clone(), prev, is_chance_step(&state, &next, p)));
-            state = next;
+            prev = Some(pl.push_step(a.clone(), prev));
+            state = Rc::new(apply_legal(&state, a));
         }
         let path = prev.expect("手の列が空");
         let node = Node {
@@ -2805,7 +2636,7 @@ impl SearchAgent {
             });
         }
         // 読み直しを始めたが rescoreRace が打ち切った候補（読み直す終局面のうち、選ぶときの値が無いもの）
-        for i in rescore_ranked(&pl, &root, p, opts, &terminals, &bests) {
+        for i in rescore_ranked(&root, p, opts, &terminals, &bests) {
             let t = &terminals[i];
             let read = thought
                 .candidates
