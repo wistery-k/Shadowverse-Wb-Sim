@@ -1,7 +1,7 @@
 //! デッキのカードを入れ替えた案を、元のデッキと同じ試合で比べる（デッキの最適化）。
 //!
 //!   svwb deck-compare --deck <デッキ> [--variant '<変更>']… [--add <カード>[,<カード>…]] [--file <デッキ.txt>]…
-//!                     [--vs <デッキ>[,<デッキ>…]] [--net <補正.json>] [--netSide both|subject] [--games 50] [--start 0] [--out 結果.jsonl]
+//!                     [--vs <デッキ>[,<デッキ>…]] [--net <補正.json>] [--netSide both|subject] [--games 50] [--start 0]
 //!                     [--kifu <ファイル> | --no-kifu]
 //!
 //! - 変更は「カード名-枚数」「カード名+枚数」をカンマで並べたもの（例: '知恵の輝き-1,最果ての罪・サタン+1'）。カード名の代わりにカード ID も使える。
@@ -21,7 +21,8 @@
 //!   ファイルから読んだデッキ（とその案）は、元にするモデルが無いので、返し方ごとに引き直しを試して選ぶ（`mulligan: "sample"`）
 //! - 各案の勝率と、元のデッキとの入れ替わり（案で勝ち・元で負け / 元で勝ち・案で負け）、符号検定の z を出す
 //! - 試合ごとの棋譜も既定で書く（compare と同じ。runner/kifu.rs、形は docs/kifu.md）。比べるデッキ（元のデッキと案）の席が A、相手が B で、
-//!   A の席の `variants` に案の名前（元のデッキは「元のデッキ」）を入れる。案ごとの勝率は `svwb kifu winrate <棋譜> --where side=A --by variant`。
+//!   A の席の `variants` に案の名前（元のデッキは「元のデッキ」）を入れる。案ごとの勝率は `svwb kifu winrate <棋譜> --where side=A --by variant`、
+//!   1 席 1 行の勝ち負けは `svwb kifu seats <棋譜> --where side=A`（2026-11-17 までの `--out` はこれに替えて消した）。
 //!   書く先は `--kifu <ファイル>` か既定のフォルダ（`~/svwb-data/kifu`）、`--no-kifu` で書かない。打つ手は変わらない
 //! - 同じシードでも、1 枚の入れ替えで 2〜3 割の試合の勝敗が入れ替わる（AI が自分の山札・相手の手札を並べ直して読むので、
 //!   入れ替えたカードを引く前から手が変わる）。1 ポイントの差を見分けるには 1 案 1 万試合ほど要る
@@ -540,7 +541,6 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut vs: Vec<String> = Vec::new();
     let mut games: u32 = 50;
     let mut start: u32 = 0;
-    let mut out: Option<String> = None;
     let mut net_path: Option<String> = None;
     let mut subject_only = false;
     let mut it = argv.iter();
@@ -566,7 +566,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             ),
             "--games" => games = int()?,
             "--start" => start = int()?,
-            "--out" => out = Some(v.clone()),
+            "--out" => return Err("--out は消しました。試合ごとの勝ち負けは棋譜から引きます（`svwb kifu seats <棋譜> --where side=A`・`svwb kifu winrate <棋譜> --where side=A --by variant`。docs/kifu.md）".into()),
             "--net" => net_path = Some(v.clone()),
             "--netSide" => {
                 subject_only = match v.as_str() {
@@ -752,7 +752,6 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     }
     let results: Vec<bool> = results.into_iter().map(|r| r.0).collect();
     let base: &[bool] = &results[..per_entry];
-    let mut lines: Vec<Json> = Vec::new();
     println!(
         "{}（{} 試合ずつ、g{}〜{}）  {}s/試合",
         deck.name,
@@ -788,24 +787,6 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             );
         }
         println!("  {}", tally.line());
-        for (t, &w) in ts.iter().zip(rs) {
-            lines.push(Json::Obj(vec![
-                ("deck".into(), Json::Str(deck.name.clone())),
-                ("variant".into(), Json::Str(entry.label.clone())),
-                ("opponent".into(), Json::Str(opponents[t.opp].name.clone())),
-                ("g".into(), Json::Num(t.g as f64)),
-                ("seat".into(), Json::Num(t.seat as f64)),
-                ("won".into(), Json::Bool(w)),
-            ]));
-        }
-    }
-    if let Some(out) = out {
-        let mut text = String::new();
-        for l in &lines {
-            text.push_str(&l.stringify());
-            text.push('\n');
-        }
-        std::fs::write(&out, text).map_err(|e| format!("{out} に書けません: {e}"))?;
     }
     Ok(())
 }

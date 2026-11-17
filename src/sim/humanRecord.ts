@@ -1,6 +1,7 @@
 // 人間が「人間との比較」の試合を打った記録（web で保存・書き出しする形式）
 //
-// 1 試合 1 行の JSON Lines で書き出す。subject・deck・g・seat・won は npm run rhino-compare の --out と同じ意味なので、
+// 1 試合 1 行の JSON Lines で書き出す。g・seat・won は npm run rhino-compare の棋譜を svwb kifu seats <棋譜> --where side=A で出した行と
+// 同じ意味（deck はその行の opp）なので、
 // AI の結果と試合ごとに突き合わせられる。actions は行動の列そのもので、同じ decks・seed から再生できる（src/sim/replay.ts）。
 // version 1（リノセウスエルフだけの頃）は席を elfSeat に持っていた。読むときに version 2 の形にする。
 

@@ -68,7 +68,7 @@ npm run profile                                         # デッキごとの 1 �
 
 ```sh
 npm run compare -- 105 '{}' '{"lethal":false}'                          # 探索 AI の設定どうしの勝率（組の 2 試合は同じシードの鏡。--no-mirror で前の試合）
-npm run rhino-compare -- --games 50 --opts '{"potential":0}' --out r.jsonl
+npm run rhino-compare -- --games 50 --opts '{"potential":0}'           # 試合ごとの勝ち負けは棋譜から（svwb kifu seats <棋譜> --where side=A）
 npm run af-compare -- --games 50                                         # rhino-compare --subject af
 npm run deck-compare -- --deck スペルウィッチ --variant '知恵の輝き-1,最果ての罪・サタン+1'  # デッキのカードを入れ替えた案を元のデッキと比べる
 npm run meta -- round --state 環境.json --report 記録.md  # 環境（デッキと使用率）のアジャスト合戦を 1 回り回す（init・export・show も。docs/commands.md）

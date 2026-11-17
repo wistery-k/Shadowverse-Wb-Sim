@@ -152,7 +152,7 @@ A の勝率と、A のデッキごとの勝率を出す。5 番目にデッキ�
 ## rhino-compare（af-compare・spellwitch-compare・bishop-compare・dragon-compare・nightmare-compare・royal-compare）
 
 ```sh
-npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …] [--opts '<設定>'] [--opp search-classic|search] [--out 結果.jsonl] [--matches 試合.jsonl]
+npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …] [--opts '<設定>'] [--opp search-classic|search] [--matches 試合.jsonl]
                          [--kifu 棋譜.jsonl | --no-kifu]
 ```
 
@@ -164,9 +164,8 @@ npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …
 | `--agent` | rhino は `rhino`、他は `search` | 比べるデッキの AI: `rhino`・`rhino-lethal`・`search`・`search-classic` |
 | `--opp` | `search-classic` | 相手の AI: `search-classic`（物差しと同じ手を指す）・`search`（今の既定の探索 AI） |
 | `--opts JSON` | `{}` | 比べるデッキの AI の設定（`search-classic` では使わない）。下の「探索 AI の設定」に加え、リノセウス用 AI の `"potential"`（数）と `"holds"`（`{"mystery":…, "rhino":…, "extraPp":…}`） |
-| `--out ファイル` | なし | 試合ごとの結果を JSON Lines で書き出す |
 | `--matches ファイル` | なし | 「人間との比較」タブで保存した試合（JSON Lines）と同じ試合だけ打ち、人間の勝敗と並べる。人間の相手が `--opp` と同じ試合だけを使う（`search-classic` なら相手が物差しの試合、`search` なら最新版の試合） |
-| `--kifu ファイル`・`--no-kifu` | 既定のフォルダに書く | 試合ごとの棋譜（[kifu.md](kifu.md)。比べるデッキの席が A、相手が B）。勝ち負けは `svwb kifu winrate <棋譜> --where side=A --by opp` でも引ける。`npm run diverge`・`npm run think-at`・`svwb defer-playout --kifu` にそのまま渡せる（2026-11-17 までの、1 試合 1 ファイルを書く `--record` はこれに替えて消した） |
+| `--kifu ファイル`・`--no-kifu` | 既定のフォルダに書く | 試合ごとの棋譜（[kifu.md](kifu.md)。比べるデッキの席が A、相手が B）。勝ち負けは `svwb kifu winrate <棋譜> --where side=A --by opp` でも引け、試合ごとの勝ち負けの行は `svwb kifu seats <棋譜> --where side=A`（2026-11-17 までの `--out` の行の代わり。`--out` は消した）。`npm run diverge`・`npm run think-at`・`svwb defer-playout --kifu` にそのまま渡せる（2026-11-17 までの、1 試合 1 ファイルを書く `--record` はこれに替えて消した） |
 
 勝率のほかに、比べるデッキがカードを引く手（自分の山札が減る手）を打った回数と、そのうちの後ドロー（ターンの最初の局面から打てたのに、ほかの手の後で打った）の回数を出す
 （docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）。`af` では融合のまわりの数（融合の回数、作ったカードを手札に残して終えた回数、ターン終了時の手札のコア、
@@ -177,7 +176,7 @@ npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …
 
 ```sh
 npm run deck-compare -- --deck <デッキ> [--variant '<変更>']… [--add <カード>[,<カード>…]] [--file <デッキ>]…
-                        [--vs <デッキ>[,<デッキ>…]] [--net <補正.json>] [--netSide both|subject] [--games 50] [--start 0] [--out 結果.jsonl]
+                        [--vs <デッキ>[,<デッキ>…]] [--net <補正.json>] [--netSide both|subject] [--games 50] [--start 0]
                         [--kifu 棋譜.jsonl | --no-kifu]
 npm run deck-compare -- --deck リノセウスエルフ --variant '舞い踊る妖精-2,言の葉のエルダーウィードマン+2' --vs アマリアロイヤル --games 100
 npm run deck-compare -- --deck スペルウィッチ --file my-witch.txt --file ミッドレンジナイトメア --vs アマリアロイヤル  # デッキを丸ごと比べる
@@ -185,7 +184,8 @@ npm run deck-compare -- --deck スペルウィッチ --file my-witch.txt --file 
 
 デッキのカードを入れ替えた案を、元のデッキと同じ試合で比べる（デッキの最適化）。元のデッキと各案は、比較用の 7 デッキのうち自分以外と両方の席で打つ（`--vs` で相手を絞れる）。
 AI はどちらの側も今の既定（リノセウスエルフはリノセウス用 AI、他は探索 AI）。
-試合ごとの棋譜も既定で書く（[kifu.md](kifu.md)。比べるデッキの席が A で、`variants` に案の名前。元のデッキは「元のデッキ」）。案ごとの勝率は `svwb kifu winrate <棋譜> --where side=A --by variant` でも引ける。
+試合ごとの棋譜も既定で書く（[kifu.md](kifu.md)。比べるデッキの席が A で、`variants` に案の名前。元のデッキは「元のデッキ」）。案ごとの勝率は `svwb kifu winrate <棋譜> --where side=A --by variant` でも引け、試合ごとの勝ち負けの行（案・相手・試合番号・席・勝ち）は `svwb kifu seats <棋譜> --where side=A`
+（2026-11-17 までの `--out` の行の代わり。`--out` は消した）。
 マリガンは今の既定（`mulligan: "turn1"`。引き直した後に先へ進めてから採点する）で、どのデッキでもそのまま使える。
 既定がデッキごとのモデルを使うもの（`model`・`weights`）だったときは、モデルはデッキのカードの並びで引くので、案のデッキも元のデッキのモデルでマリガンし（足したカードは役割なし・係数 0）、
 ファイルから読んだデッキ（とその案）は返し方ごとに引き直しを試して選ぶ（`mulligan: "sample"`）。
@@ -201,7 +201,6 @@ AI はどちらの側も今の既定（リノセウスエルフはリノセウ�
 | `--netSide subject` | `both` | `--net` の補正に替えるのを比べるデッキ（元のデッキと案）の側だけにする。相手は今の既定のまま |
 | `--games N` | 50 | 相手デッキ 1 つ・席 1 つあたりの試合数（1 案あたり N × 相手のデッキの数 × 2 席） |
 | `--start S` | 0 | 最初の試合番号（シードは 2000000 + 13 × 試合番号 + 席。案どうしで同じ） |
-| `--out ファイル` | なし | 試合ごとの結果（案・相手・試合番号・席・勝ち）を JSON Lines で書き出す |
 
 - 抜いたカードの位置に足したカードを置くので、同じシードなら山札の並びは入れ替えたカードの所だけが違う。それでも 1 枚の入れ替えで 2〜3 割の試合の勝敗が入れ替わる
   （AI が自分の山札・相手の手札を並べ直して読むので、引く前から手が変わる）。1 案 2400 試合（`--games 200`）で差の標準誤差は 1 ポイントほど
@@ -215,7 +214,7 @@ AI はどちらの側も今の既定（リノセウスエルフはリノセウ�
 npm run meta -- init --out 環境.json [--decks <デッキ>,…] [--usage class|uniform]
 npm run meta -- round --state 環境.json [--out 次.json] [--classes witch,bishop] [--games 30] [--draw 1]
                 [--stages 150:10,450:3] [--confirm 1200] [--zmin 2] [--eta 1] [--minUsage 0.02]
-                [--pool <カード>,…] [--net 補正.json] [--report 記録.md] [--jsonl 試合.jsonl] [--cache 途中.txt]
+                [--pool <カード>,…] [--net 補正.json] [--report 記録.md] [--jsonl 試合.jsonl] [--cache 途中.txt] [--kifu 棋譜.jsonl]
 npm run meta -- export --state 環境.json --dir <フォルダ> [--top 1]  # 環境のデッキを td selfplay --decks 用のファイルに（--top 1 ならクラスごとに一番のデッキだけ。compare --decks 用）
 npm run meta -- show --state 環境.json
 ```
@@ -251,6 +250,7 @@ AI は deck-compare と同じ（どちらの側も今の既定）。
 | `--report ファイル` | なし | 回りのまとめ（Markdown。標準出力と同じ）を書き足す |
 | `--jsonl ファイル` | なし | 試合ごとの結果（段・デッキ・案・相手・試合番号・席・勝ち・介入）を JSON Lines で書き足す |
 | `--cache ファイル` | なし | 打った試合の結果を 1 試合ずつ書き足し、次に同じファイルで回すとき、その試合を打たずに使う（回りの途中で止めても、続きから回る。結果は止めないときと同じ）。回りが終わったら消してよい |
+| `--kifu ファイル` | なし（書かない） | 打った試合の棋譜（[kifu.md](kifu.md)）。他のランナーと違い、付けたときだけ書く。回の名前（`run`）は「回り<n> <段>」（段は `matrix`・`s1`・`s2`…・`confirm`）。ふるいと確かめの試合は案を試す側が側 A で、`variants` に「元のデッキ」か入れ替え。総当たりの試合は側も案も無い。引いた瞬間に抜く介入の試合は入らない（本の試合だけ）。`--cache` とは一緒に使えない。介入の価値は `--jsonl` にしか無いので、`--jsonl` はそのまま |
 
 - 案は、クラスごとに使用率が一番のデッキについて、クラスとニュートラルの各カードを 2 枚（3 枚を超えるなら入るだけ）足し、
   引いた瞬間の価値の低いカード（2 枚以上入っているもの）を 1 枚ずつ同じ枚数抜く。1 クラス 40 案ほど

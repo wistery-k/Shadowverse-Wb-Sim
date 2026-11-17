@@ -3,10 +3,13 @@
 //!   svwb kifu count <棋譜>… --event '<種類>[|<種類>…] [<条件>…]' [--where '<条件>,…'] [--per seat|game|turn] [--by <分け方>,…]
 //!   svwb kifu winrate <棋譜>… [--where '<条件>,…'] [--by <分け方>,…]
 //!   svwb kifu events <棋譜>… [--where '<条件>,…'] [--event '…'] [--out 出来事.jsonl]
+//!   svwb kifu seats <棋譜>… [--where '<条件>,…'] [--out 席.jsonl]
 //!
 //! - 棋譜は、ファイルかフォルダ（中の `.jsonl`・`.jsonl.gz` を全部。`.tmp` は読まない）。`.gz` は `gzip -dc` で読む
 //! - count・events は試合を打ち直して出来事の列（replay_index.rs）にする。打ち直せない試合（エンジンの版が違って打てない手がある）と、
-//!   打ち直した勝者が棋譜と違う試合は数えず、その数を出す。winrate は打ち直さない（棋譜の勝者を使う）
+//!   打ち直した勝者が棋譜と違う試合は数えず、その数を出す。winrate・seats は打ち直さない（棋譜の勝者を使う）
+//! - seats は、合った席ごとに 1 行（棋譜・回・試合番号・組・席・デッキ・相手・側・AI・案・先攻・勝ち）を JSON Lines で出す。
+//!   ランナーが前に書いていた試合ごとの勝ち負けの行（rhino-compare・deck-compare の `--out`）の代わり。表にない比べ方（組ごとの入れ替わり等）は jq 等で
 //! - 席を単位にする: `--where` は席ごとに見る（その席から見た自分・相手）。条件は「,」で区切り、全部に合う席だけを数える
 //! - 勝率の誤差は、同じ棋譜の同じ試合番号（席とデッキを入れ替えた組）をまとまりにした誤差（compare の組の誤差と同じ）
 
@@ -1076,12 +1079,80 @@ fn events(argv: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// 合った席の 1 行（打ち直さない）
+fn seat_row(m: &Meta, seat: usize, files: &[String]) -> Result<Json, String> {
+    let s = |x: &str| Json::Str(x.to_string());
+    let opp = 1 - seat;
+    let mut row = vec![
+        ("file".to_string(), s(&by_value("file", m, seat, files)?)),
+        ("run".into(), s(&m.run)),
+        ("source".into(), s(&m.source)),
+        ("g".into(), Json::Num(m.g as f64)),
+    ];
+    if let Some(sw) = m.swap {
+        row.push(("swap".into(), Json::Bool(sw)));
+    }
+    row.extend([
+        ("seat".into(), Json::Num(seat as f64)),
+        ("deck".into(), s(&m.names[seat])),
+        ("opp".into(), s(&m.names[opp])),
+        ("side".into(), s(&m.sides[seat])),
+        ("agent".into(), s(&m.agents[seat])),
+    ]);
+    if !m.variants[seat].is_empty() {
+        row.push(("variant".into(), s(&m.variants[seat])));
+    }
+    row.extend([
+        (
+            "first".into(),
+            m.first.map_or(Json::Null, |f| Json::Bool(f == seat)),
+        ),
+        ("won".into(), Json::Bool(m.winner == Some(seat))),
+    ]);
+    Ok(Json::Obj(row))
+}
+
+fn seats(argv: &[String]) -> Result<(), String> {
+    let a = parse_args(argv)?;
+    a.check(&["where", "out"])?;
+    let conds = parse_where(&a.all("where"))?;
+    let files = kifu_files(&a.inputs)?;
+    let lines = read_lines(&files)?;
+    let mut sink: Box<dyn Write> = match a.one("out") {
+        Some(p) => Box::new(std::io::BufWriter::new(
+            std::fs::File::create(&p).map_err(|e| format!("{p} に書けません: {e}"))?,
+        )),
+        None => Box::new(std::io::BufWriter::new(std::io::stdout())),
+    };
+    let mut rows = 0usize;
+    for l in &lines {
+        let m = meta_of(l.file, &Json::parse(&l.text)?);
+        for seat in 0..2 {
+            let mut pass = true;
+            for c in &conds {
+                pass &= seat_ok(c, &m, seat)?;
+            }
+            if pass {
+                writeln!(sink, "{}", seat_row(&m, seat, &files)?.stringify())
+                    .map_err(|e| format!("書けません: {e}"))?;
+                rows += 1;
+            }
+        }
+    }
+    sink.flush().map_err(|e| format!("書けません: {e}"))?;
+    if let Some(p) = a.one("out") {
+        println!("{} 試合の席 {rows} 行: {p}", lines.len());
+    }
+    Ok(())
+}
+
 pub fn main(argv: &[String]) -> Result<(), String> {
     match argv.first().map(|s| s.as_str()) {
         Some("count") => count(&argv[1..]),
         Some("winrate") => winrate(&argv[1..]),
         Some("events") => events(&argv[1..]),
-        _ => Err("使い方: svwb kifu count <棋譜>… --event '<種類> [<条件>…]' [--where '<条件>,…'] [--per seat|game|turn] [--by <分け方>,…] | kifu winrate <棋譜>… [--where …] [--by …] | kifu events <棋譜>… [--where …] [--event …] [--out 出来事.jsonl]（docs/kifu.md「数える」）".into()),
+        Some("seats") => seats(&argv[1..]),
+        _ => Err("使い方: svwb kifu count <棋譜>… --event '<種類> [<条件>…]' [--where '<条件>,…'] [--per seat|game|turn] [--by <分け方>,…] | kifu winrate <棋譜>… [--where …] [--by …] | kifu events <棋譜>… [--where …] [--event …] [--out 出来事.jsonl] | kifu seats <棋譜>… [--where …] [--out 席.jsonl]（docs/kifu.md「数える」）".into()),
     }
 }
 
@@ -1109,6 +1180,21 @@ mod tests {
 
     fn ok(s: &str, seat: usize) -> bool {
         seat_ok(&parse_cond(s).unwrap(), &meta(), seat).unwrap()
+    }
+
+    /// seats の行: 席から見たデッキ・相手・側・案・先攻・勝ち（案の無い席には variant が無い）
+    #[test]
+    fn seat_rows() {
+        let files = vec!["/x/k.jsonl.gz".to_string()];
+        let r0 = seat_row(&meta(), 0, &files).unwrap();
+        assert_eq!(
+            r0.stringify(),
+            r#"{"file":"k.jsonl.gz","run":"r","source":"compare","g":5,"swap":true,"seat":0,"deck":"アグロNi（CR）","opp":"クキシロB（ZETA）","side":"B","agent":"B {}","variant":"知恵の輝き-1,最果ての罪・サタン+1","first":false,"won":true}"#
+        );
+        let r1 = seat_row(&meta(), 1, &files).unwrap();
+        assert_eq!(r1.get("variant"), None);
+        assert_eq!(r1.get("first"), Some(&Json::Bool(true)));
+        assert_eq!(r1.get("won"), Some(&Json::Bool(false)));
     }
 
     #[test]

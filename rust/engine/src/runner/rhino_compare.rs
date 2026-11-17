@@ -1,14 +1,15 @@
 //! デッキ専用の AI・探索 AI の設定を変えたときの勝率（TypeScript 版 scripts/rhino-compare-main.ts。npm run rhino-compare 等と同じ試合・同じ出力）。
 //!
 //!   svwb rhino-compare [--subject rhino|af|spellwitch|bishop|dragon|nightmare|royal] [--games 50] [--start 0]
-//!                      [--agent rhino|rhino-lethal|search|search-classic] [--opts '<設定JSON>'] [--out 結果.jsonl] [--matches 試合.jsonl]
+//!                      [--agent rhino|rhino-lethal|search|search-classic] [--opts '<設定JSON>'] [--matches 試合.jsonl]
 //!                      [--opp search-classic|search] [--kifu <ファイル> | --no-kifu]
 //!
 //! 比べるデッキ vs 他の 6 デッキ（相手は学習した補正を入れる前の探索 AI。--opp search なら今の既定の探索 AI）を、両方の席で同じシードで打つ
 //! （試合の決め方は src/sim/humanCompare.ts）。序盤のターンを全探索する "exhaustive" は TypeScript 版とともに消した。
 //! 試合ごとの棋譜を既定で書く（compare と同じ。runner/kifu.rs、形は docs/kifu.md。比べるデッキの席が A、相手が B）。
 //! 書く先は `--kifu <ファイル>` か既定のフォルダ（`~/svwb-data/kifu`）、`--no-kifu` で書かない。打つ手は変わらない。
-//! 勝ち負けは棋譜からも引ける（`svwb kifu winrate <棋譜> --where side=A --by opp`）。棋譜は npm run diverge・npm run think-at・
+//! 試合ごとの勝ち負けは棋譜から引く（`svwb kifu winrate <棋譜> --where side=A --by opp`、1 席 1 行なら `svwb kifu seats <棋譜> --where side=A`。
+//! 2026-11-17 までの `--out` はこれに替えて消した）。棋譜は npm run diverge・npm run think-at・
 //! svwb defer-playout --kifu にそのまま渡せる（2026-11-17 までの、1 試合 1 ファイルを書く `--record` はこれに替えて消した）
 
 use super::kifu::{self, RunInfo, Seat};
@@ -417,7 +418,6 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let argv = &argv[..];
     let mut games: u32 = 50;
     let mut start: u32 = 0;
-    let mut out: Option<String> = None;
     let mut agent_key: Option<String> = None;
     let mut subject = SUBJECTS[0];
     let mut matches: Option<String> = None;
@@ -433,7 +433,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         match key.as_str() {
             "--games" => games = int()?,
             "--start" => start = int()?,
-            "--out" => out = Some(v.clone()),
+            "--out" => return Err("--out は消しました。試合ごとの勝ち負けは棋譜から引きます（`svwb kifu seats <棋譜> --where side=A`・`svwb kifu winrate <棋譜> --where side=A --by opp`。docs/kifu.md）".into()),
             "--agent" => agent_key = Some(v.clone()),
             "--matches" => matches = Some(v.clone()),
             "--subject" => {
@@ -643,22 +643,6 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                 if r.won { "勝ち" } else { "負け" }
             );
         }
-    }
-    if let Some(out) = out {
-        let mut text = String::new();
-        for (t, r) in tasks.iter().zip(&results) {
-            let line = Json::Obj(vec![
-                ("subject".into(), Json::Str(subject.0.into())),
-                ("deck".into(), Json::Str(t.deck.clone())),
-                ("g".into(), Json::Num(t.g as f64)),
-                ("seat".into(), Json::Num(t.seat as f64)),
-                ("won".into(), Json::Bool(r.won)),
-                ("exactFound".into(), Json::Num(r.exact_found as f64)),
-            ]);
-            text.push_str(&line.stringify());
-            text.push('\n');
-        }
-        std::fs::write(&out, text).map_err(|e| format!("{out} に書けません: {e}"))?;
     }
     Ok(())
 }
