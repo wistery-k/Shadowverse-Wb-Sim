@@ -8,6 +8,7 @@
 //!   svwb misses show <問の名前>… [--dir misses]
 //!   svwb misses check [--dir misses]
 //!   svwb misses cover [--opts '<設定>'] [--seeds 8] [--m 128] [--extra 4] [--wide 64] [--only 名前,…] [--show] [--dir misses]
+//!   svwb misses duel <名前> [--line '<名前>=<手>']… [--m 512] [--base 1] [--no-stored] [--peek] [--opts '<設定>'] [--show N [--dump <フォルダ>]] [--dir misses]
 //!
 //! - 1 問は 1 ファイル。局面そのもの（状態の JSON）・手番・合格の条件・出どころ・ひとことの説明を持つ。
 //!   局面を seed とターンで持たないのは、AI を変えると試合の流れが変わるため
@@ -2008,7 +2009,11 @@ fn cover(argv: &[String]) -> Result<(), String> {
             };
             let seed = mix(99, u32::from_str_radix(&fnv(&p.id), 16).unwrap_or(0));
             let plan = if pass { &duel.pass } else { &duel.ai };
-            super::survey::playout(&start, p.player, plan, seed, r)
+            // 続きも候補を作る AI と同じ設定で打つ（survey run --opts と同じ）
+            super::survey::playout_ends_with(
+                &opts, &start, p.player, plan, seed, r, false, false, None,
+            )
+            .result
         },
         |_, _, _, _| {},
     );
@@ -2154,6 +2159,8 @@ fn duel(argv: &[String]) -> Result<(), String> {
     let show = int_arg(take(&mut argv, "--show")?, "--show", 0)?;
     let peek = take_flag(&mut argv, "--peek");
     let dump = take(&mut argv, "--dump")?;
+    let opts_text = take(&mut argv, "--opts")?.unwrap_or_else(|| "{}".into());
+    let opts = Agents::new(&opts_text)?.search;
     if let Some(d) = &dump {
         if show == 0 {
             return Err("--dump は --show N と一緒に使います".into());
@@ -2164,7 +2171,7 @@ fn duel(argv: &[String]) -> Result<(), String> {
     while let Some(l) = take(&mut argv, "--line")? {
         added.push(l);
     }
-    let usage = "svwb misses duel <問の名前> [--line '<名前>=<手の JSON の配列>']… [--m 512] [--base 1] [--no-stored] [--peek] [--show N [--dump <フォルダ>]]";
+    let usage = "svwb misses duel <問の名前> [--line '<名前>=<手の JSON の配列>']… [--m 512] [--base 1] [--no-stored] [--peek] [--opts '<設定>'] [--show N [--dump <フォルダ>]]";
     if argv.len() != 1 {
         return Err(usage.into());
     }
@@ -2233,7 +2240,8 @@ fn duel(argv: &[String]) -> Result<(), String> {
                 }
             };
             let mut log = PlayoutLog::default();
-            let end = super::survey::playout_ends(
+            let end = super::survey::playout_ends_with(
+                &opts,
                 &start,
                 p.player,
                 &line.steps,
@@ -2544,14 +2552,16 @@ mod tests {
         assert!((se - (0.25f64 / 24.0).sqrt() / 3.0).abs() < 1e-12);
     }
 
-    /// リポジトリの問題集は全部読め、記録のある問は打ち直すと同じ局面になる
+    /// リポジトリの問題集（採点する問・相手の手札を見せて解く問・新しいプールの問）は全部読め、記録のある問は打ち直すと同じ局面になる
     #[test]
     fn repository_problems_load() {
-        let ps = load(MISSES_DIR).expect("問題集が読めます");
-        assert!(!ps.is_empty());
-        for p in &ps {
-            if let Some(r) = replays_same(p) {
-                assert_eq!(r, Ok(true), "{}: 記録から打ち直すと同じ局面", p.id);
+        for dir in [MISSES_DIR, "misses/peek", "misses/azvaldt"] {
+            let ps = load(dir).unwrap_or_else(|e| panic!("{dir} の問題集が読めます: {e}"));
+            assert!(!ps.is_empty(), "{dir} に問があります");
+            for p in &ps {
+                if let Some(r) = replays_same(p) {
+                    assert_eq!(r, Ok(true), "{}: 記録から打ち直すと同じ局面", p.id);
+                }
             }
         }
     }
