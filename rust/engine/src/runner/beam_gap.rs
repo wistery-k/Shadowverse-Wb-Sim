@@ -4,6 +4,7 @@
 //!                 [--every 1] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl]
 //!                 [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl]
 //!                 [--inputs 学習のデータ.jsonl] [--vocab 語彙.json] [--decks <デッキ>,…|@<デッキの組>]
+//!                 [--kifu <ファイル> | --no-kifu]
 //!
 //! 今の既定どうしの自己対戦（`sim::play_ai`、比較用の 7 デッキ）の、自分のターンの最初の局面（`--every k` なら k 局面に 1 つ）を集め、
 //! 視点のプレイヤーから決定化した局面で、基準の設定（`--ref`）と比べる設定（`--variants`）のビームを 1 回ずつ打つ（相手のターンは読まない）。
@@ -16,6 +17,7 @@
 //! その先で届いた最善（伸びしろ = 届いた最善 − 終えた点数）・伸びしろの項（ai/beam_key.rs）と一緒に `--nodes` に書く。
 //!
 //! 自己対戦は時間がかかるので、`--savePositions` で集めた局面を書いておき、次からは `--positions` で読める。
+//! 自己対戦を打った回は、その試合の棋譜も既定で書く（compare と同じ。runner/kifu.rs、形は docs/kifu.md。`--positions` の回は打たないので書かない）。
 //! 基準のビームも時間がかかるので、同じ局面・同じ基準で前に書いた `--out` を `--refFrom` に渡すと、基準を打ち直さずにその結果を使う
 //! （`--sample` とは一緒に使えない）。
 //! `--inputs` なら、`--sample` で選んだ局面（段 1 以上）の見込みのネットワークの入力（ai/potential.rs）と、終えた点数・届いた最善を書く
@@ -32,6 +34,7 @@
 use super::compare::{compare_pair, compare_seed, deck_options};
 use super::deck_compare::read_deck_list;
 use super::human_plan::{is_start_of_turn, mean_se};
+use super::kifu::{self, RunInfo, Seat};
 use super::options::compare_options;
 use super::parallel::parallel_map;
 use super::{fixed, seconds_since};
@@ -45,7 +48,7 @@ use crate::ai::{Agent, Rng};
 use crate::data::{data, Deck};
 use crate::game::{acting_player, apply_legal};
 use crate::json::Json;
-use crate::sim::{ai_game_setup, play_ai, play_match};
+use crate::sim::{ai_game_setup, play_match};
 use crate::state::{Action, GameState, Phase, PlayerIndex};
 use crate::state_json::{action_to_json, state_from_json, state_to_json};
 use std::io::{BufRead, Write};
@@ -126,8 +129,13 @@ fn deck_names(g: u32, list: Option<&[&'static Deck]>) -> [String; 2] {
 }
 
 /// 試合 g を今の既定どうしで打ち、自分のターンの最初の局面を集める（every 局面に 1 つ）。list があれば並べたデッキで
-/// compare --decks と同じ組とシード
-fn collect(g: u32, every: usize, list: Option<&[&'static Deck]>) -> Vec<Position> {
+/// compare --decks と同じ組とシード。kifu（回と席）があれば、その試合の棋譜の 1 行も返す
+fn collect(
+    g: u32,
+    every: usize,
+    list: Option<&[&'static Deck]>,
+    kifu: Option<(&RunInfo, &Seat)>,
+) -> (Vec<Position>, Option<String>) {
     let names = deck_names(g, list);
     let o = SearchOptions::default();
     let pair = list.map(|l| compare_pair(l, g, false));
@@ -141,7 +149,11 @@ fn collect(g: u32, every: usize, list: Option<&[&'static Deck]>) -> Vec<Position
     let mut last_turn = -1;
     let mut n = 0usize;
     let mut out = Vec::new();
-    let visit = |s: &GameState, _: &Action| {
+    let mut log: Vec<Action> = Vec::new();
+    let visit = |s: &GameState, a: &Action| {
+        if kifu.is_some() {
+            log.push(a.clone());
+        }
         if is_start_of_turn(s) && acting_player(s) == s.active && s.turn != last_turn {
             last_turn = s.turn;
             if n.is_multiple_of(every.max(1)) {
@@ -156,21 +168,33 @@ fn collect(g: u32, every: usize, list: Option<&[&'static Deck]>) -> Vec<Position
             n += 1;
         }
     };
-    match pair {
+    let (cards, seed) = match pair {
         // compare --decks と同じシード（survey --decks と同じ。先の席が A）
-        Some((a, b)) => {
-            play_match(
-                &mut agents,
-                [&a.cards, &b.cards],
-                compare_seed(g, false, true),
-                visit,
-            );
-        }
-        None => {
-            play_ai(g, false, &mut agents, visit);
-        }
-    }
-    out
+        Some((a, b)) => (
+            [a.cards.clone(), b.cards.clone()],
+            compare_seed(g, false, true),
+        ),
+        // sim::play_ai と同じ
+        None => ai_game_setup(g, false),
+    };
+    let end = play_match(&mut agents, [&cards[0], &cards[1]], seed, visit);
+    // 棋譜（両方の席とも今の既定の AI。組は無い）
+    let line = kifu.map(|(run, seat)| {
+        kifu::line(
+            run,
+            &kifu::Game {
+                g,
+                swap: None,
+                names: [&names[0], &names[1]],
+                seats: [seat, seat],
+                decks: [&cards[0], &cards[1]],
+                seed,
+                end: kifu::End::of(&end),
+                actions: &log,
+            },
+        )
+    });
+    (out, line)
 }
 
 fn position_json(p: &Position) -> String {
@@ -385,6 +409,10 @@ fn probe_json(r: &Probe) -> Json {
 }
 
 pub fn main(argv: &[String]) -> Result<(), String> {
+    // 棋譜（--kifu <ファイル>・前の名前 --replays、--no-kifu で書かない。無ければ既定のフォルダ）。自己対戦を打つ回だけ
+    let mut argv = argv.to_vec();
+    let kifu_target = kifu::take_args(&mut argv)?;
+    let argv = &argv[..];
     let mut games = 50u32;
     let mut from = 0u32;
     let mut every = 1usize;
@@ -482,10 +510,26 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         }
         None => {
             let items: Vec<u32> = (from..from + games).collect();
+            let run = RunInfo::now("beam-gap", "");
+            let key = kifu::args_key(argv);
+            let kifu_path = kifu_target.path(&kifu::Name {
+                kind: "beam-gap",
+                label: "",
+                first: from,
+                last: from + games.max(1) - 1,
+                key: &key,
+                commit: &run.engine,
+            });
+            let mut writer = kifu_path.as_deref().map(kifu::Writer::create).transpose()?;
+            let seat = kifu::same_seat("beam-gap", "{}");
+            let kifu_run = writer.as_ref().map(|_| (&run, &seat));
             let per_game = parallel_map(
                 &items,
-                |&g, _| collect(g, every, list.as_deref()),
-                |done, total, _, _| {
+                |&g, _| collect(g, every, list.as_deref(), kifu_run),
+                |done, total, r: &(Vec<Position>, Option<String>), _| {
+                    if let (Some(w), Some(line)) = (writer.as_mut(), r.1.as_ref()) {
+                        w.write(line);
+                    }
                     if done % 10 == 0 || done == total {
                         eprintln!(
                             "自己対戦 {done}/{total} 試合 {}s",
@@ -494,7 +538,11 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                     }
                 },
             );
-            per_game.into_iter().flatten().collect()
+            if let Some(w) = writer {
+                let (p, n) = w.finish()?;
+                eprintln!("棋譜: {p}（{n} 試合）");
+            }
+            per_game.into_iter().flat_map(|r| r.0).collect()
         }
     };
     if let Some(path) = &save_path {

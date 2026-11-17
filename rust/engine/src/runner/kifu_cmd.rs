@@ -115,6 +115,8 @@ struct Meta {
     names: [String; 2],
     sides: [String; 2],
     agents: [String; 2],
+    /// 席のデッキの案の名前（deck-compare の比べるデッキの席。元のデッキは「元のデッキ」。案の無い席は空）
+    variants: [String; 2],
     /// 先攻の席（版 1 の行には無い）
     first: Option<usize>,
     winner: Option<usize>,
@@ -159,6 +161,7 @@ fn meta_of(file: usize, v: &Json) -> Meta {
         names: pair_of(v.get("names")),
         sides: pair_of(v.get("sides")),
         agents: pair_of(v.get("agents")),
+        variants: pair_of(v.get("variants")),
         first: seat_of(v.get("first")),
         winner: seat_of(v.get("winner")),
     }
@@ -303,6 +306,7 @@ fn seat_ok(c: &Cond, m: &Meta, seat: usize) -> Result<bool, String> {
         }),
         "side" => text(&m.sides[seat]),
         "agent" => text(&m.agents[seat]),
+        "variant" => text(&m.variants[seat]),
         "run" => text(&m.run),
         "source" => text(&m.source),
         "engine" => text(&m.engine),
@@ -316,7 +320,7 @@ fn seat_ok(c: &Cond, m: &Meta, seat: usize) -> Result<bool, String> {
         "lost" => flag(m.winner == Some(opp)),
         "draw" => flag(m.winner.is_none()),
         k => Err(format!(
-            "知らない席の条件: {k}（deck・arch・opp・oppArch・pair・side・agent・run・source・engine・pool・g・seat・swap・first・second・won・lost・draw）"
+            "知らない席の条件: {k}（deck・arch・opp・oppArch・pair・side・agent・variant・run・source・engine・pool・g・seat・swap・first・second・won・lost・draw）"
         )),
     }
 }
@@ -465,6 +469,7 @@ fn by_value(k: &str, m: &Meta, seat: usize, files: &[String]) -> Result<String, 
         "oppArch" => archetype(&m.names[opp]).to_string(),
         "side" => m.sides[seat].clone(),
         "agent" => m.agents[seat].clone(),
+        "variant" => m.variants[seat].clone(),
         "first" => match m.first {
             Some(f) if f == seat => "先攻".into(),
             Some(_) => "後攻".into(),
@@ -485,7 +490,7 @@ fn by_value(k: &str, m: &Meta, seat: usize, files: &[String]) -> Result<String, 
             .map_or_else(String::new, |f| f.to_string_lossy().into_owned()),
         _ => {
             return Err(format!(
-                "知らない分け方: {k}（deck・arch・opp・oppArch・side・agent・first・result・seat・run・source・engine・pool・file）"
+                "知らない分け方: {k}（deck・arch・opp・oppArch・side・agent・variant・first・result・seat・run・source・engine・pool・file）"
             ))
         }
     })
@@ -1016,8 +1021,11 @@ fn events(argv: &[String]) -> Result<(), String> {
                         ("arch".into(), Json::Str(archetype(&m.names[p]).into())),
                         ("side".into(), Json::Str(m.sides[p].clone())),
                         ("agent".into(), Json::Str(m.agents[p].clone())),
-                        ("won".into(), Json::Bool(m.winner == Some(p))),
                     ]);
+                    if !m.variants[p].is_empty() {
+                        row.push(("variant".into(), Json::Str(m.variants[p].clone())));
+                    }
+                    row.push(("won".into(), Json::Bool(m.winner == Some(p))));
                     let mut e = e.clone();
                     if let Some(Json::Str(c)) = e.get("c").cloned() {
                         e.set("name", Json::Str(name_of(&c)));
@@ -1085,6 +1093,7 @@ mod tests {
             names: ["アグロNi（CR）".into(), "クキシロB（ZETA）".into()],
             sides: ["B".into(), "A".into()],
             agents: ["B {}".into(), "A {}".into()],
+            variants: ["知恵の輝き-1,最果ての罪・サタン+1".into(), String::new()],
             first: Some(1),
             winner: Some(0),
         }
@@ -1108,6 +1117,8 @@ mod tests {
         assert!(ok("won", 0) && ok("lost", 1));
         assert!(ok("g=3-7", 0) && !ok("g>=6", 0));
         assert!(ok("swap=1", 0));
+        assert!(ok("variant~サタン", 0) && !ok("variant~サタン", 1));
+        assert!(ok("variant!~サタン", 1));
         assert!(parse_cond("deck").is_ok());
         assert!(seat_ok(&parse_cond("deck").unwrap(), &meta(), 0).is_err());
         assert!(seat_ok(&parse_cond("color=red").unwrap(), &meta(), 0).is_err());

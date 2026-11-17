@@ -151,6 +151,7 @@ A の勝率と、A のデッキごとの勝率を出す。5 番目にデッキ�
 
 ```sh
 npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …] [--opts '<設定>'] [--opp search-classic|search] [--out 結果.jsonl] [--matches 試合.jsonl] [--record ディレクトリ]
+                         [--kifu 棋譜.jsonl | --no-kifu]
 ```
 
 | 引数 | 既定 | 意味 |
@@ -164,6 +165,7 @@ npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …
 | `--out ファイル` | なし | 試合ごとの結果を JSON Lines で書き出す |
 | `--matches ファイル` | なし | 「人間との比較」タブで保存した試合（JSON Lines）と同じ試合だけ打ち、人間の勝敗と並べる。人間の相手が `--opp` と同じ試合だけを使う（`search-classic` なら相手が物差しの試合、`search` なら最新版の試合） |
 | `--record ディレクトリ` | なし | 試合ごとに、`npm run game` の `--json` と同じ形（`seed`・`agents`・`decks`・`winner`・`actions`）を `<ディレクトリ>/<相手デッキ>-g<試合番号>-s<席>.json` に書く（`npm run diverge`・`npm run think-at` で調べる） |
+| `--kifu ファイル`・`--no-kifu` | 既定のフォルダに書く | 試合ごとの棋譜（[kifu.md](kifu.md)。比べるデッキの席が A、相手が B）。勝ち負けは `svwb kifu winrate <棋譜> --where side=A --by opp` でも引ける |
 
 勝率のほかに、比べるデッキがカードを引く手（自分の山札が減る手）を打った回数と、そのうちの後ドロー（ターンの最初の局面から打てたのに、ほかの手の後で打った）の回数を出す
 （docs/ai-notes.md「引く手の直前で区切って引きを作り直す」）。`af` では融合のまわりの数（融合の回数、作ったカードを手札に残して終えた回数、ターン終了時の手札のコア、
@@ -175,12 +177,14 @@ npm run rhino-compare -- [--subject rhino] [--games 50] [--start 0] [--agent …
 ```sh
 npm run deck-compare -- --deck <デッキ> [--variant '<変更>']… [--add <カード>[,<カード>…]] [--file <デッキ>]…
                         [--vs <デッキ>[,<デッキ>…]] [--net <補正.json>] [--netSide both|subject] [--games 50] [--start 0] [--out 結果.jsonl]
+                        [--kifu 棋譜.jsonl | --no-kifu]
 npm run deck-compare -- --deck リノセウスエルフ --variant '舞い踊る妖精-2,言の葉のエルダーウィードマン+2' --vs アマリアロイヤル --games 100
 npm run deck-compare -- --deck スペルウィッチ --file my-witch.txt --file ミッドレンジナイトメア --vs アマリアロイヤル  # デッキを丸ごと比べる
 ```
 
 デッキのカードを入れ替えた案を、元のデッキと同じ試合で比べる（デッキの最適化）。元のデッキと各案は、比較用の 7 デッキのうち自分以外と両方の席で打つ（`--vs` で相手を絞れる）。
 AI はどちらの側も今の既定（リノセウスエルフはリノセウス用 AI、他は探索 AI）。
+試合ごとの棋譜も既定で書く（[kifu.md](kifu.md)。比べるデッキの席が A で、`variants` に案の名前。元のデッキは「元のデッキ」）。案ごとの勝率は `svwb kifu winrate <棋譜> --where side=A --by variant` でも引ける。
 マリガンは今の既定（`mulligan: "turn1"`。引き直した後に先へ進めてから採点する）で、どのデッキでもそのまま使える。
 既定がデッキごとのモデルを使うもの（`model`・`weights`）だったときは、モデルはデッキのカードの並びで引くので、案のデッキも元のデッキのモデルでマリガンし（足したカードは役割なし・係数 0）、
 ファイルから読んだデッキ（とその案）は返し方ごとに引き直しを試して選ぶ（`mulligan: "sample"`）。
@@ -380,21 +384,21 @@ npm run svwb -- td train --model m0.json --data d0.jsonl[,d1.jsonl.gz] --out m1.
                 [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--imaginedWeight 1] [--ivRes 1] [--best 0] [--bestOn end,after]
                 [--base default|zero|search] [--excludeDecks <デッキ>,…|--onlyDecks <デッキ>,…] [--dropInputs <入力>,…]
 npm run svwb -- td prune --model m.json --data d0.jsonl[,…] --out mp.json [--excludeDecks …|--onlyDecks …]
-npm run svwb -- deep-gap play --out gap.jsonl [--games 100] [--start 0] [--deep '<設定の JSON>'] [--k 4] [--evalSeeds 48] [--turns 1-30]
+npm run svwb -- deep-gap play --out gap.jsonl [--games 100] [--start 0] [--deep '<設定の JSON>'] [--k 4] [--evalSeeds 48] [--turns 1-30]   # 棋譜も書く（--kifu k.jsonl | --no-kifu）
 npm run svwb -- deep-gap rollout --in gap.jsonl[,…] --out roll.jsonl [--top 200] [--random 200] [--seed 1] [--m 48]
 npm run svwb -- deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 30] [--only <内訳の一部>] [--skipDecks <デッキ>,…] [--sort gap|rollout] [--listOnly 1]
 npm run svwb -- survey run --out 結果.jsonl --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8] [--decks <デッキ>,…|@<デッキの組>]
 npm run svwb -- survey report 結果.jsonl… [--label 名前] [--no-ledger] [--top 20] [--states <フォルダ>]
 npm run svwb -- survey recheck 結果.jsonl… --out 打ち直し.jsonl [--m 32] [--peek 1] [--batch 16]   # run は棋譜も書く（--kifu k.jsonl | --no-kifu）
 npm run svwb -- review run --record <記録.json> --points <局面.jsonl> --out <結果.jsonl> [--m 32] [--confirm 96] [--flag 10] [--opts '<JSON>'] [--all 0|1] [--seat 0|1] [--batch 4]
-npm run svwb -- review zero --out <結果.jsonl> --games a-b --decks <デッキ>,…|@<デッキの組> [--rate 0.3] [--m 32] [--confirm 96] [--flag 10] [--opts '<JSON>'] [--batch 2]
+npm run svwb -- review zero --out <結果.jsonl> --games a-b --decks <デッキ>,…|@<デッキの組> [--rate 0.3] [--m 32] [--confirm 96] [--flag 10] [--opts '<JSON>'] [--batch 2]   # 棋譜も書く
 npm run svwb -- review report <結果.jsonl> [--out <報告.md>]
 npm run svwb -- two-turn show [--only <局面>,…] [--sandbox <フォルダ>]
 npm run svwb -- two-turn run --out tt.jsonl [--only <局面>,…] [--m 64] [--reads 4] [--twos 2] [--nextBeam 256] [--seed 1] [--opts '<設定の JSON>']
 npm run svwb -- two-turn report tt.jsonl… [--only <局面>,…]
 npm run svwb -- two-turn trace --only <局面> --cand <候補> [--r 0] [--seed 1] [--opts '<設定の JSON>']
 npm run svwb -- defer-playout --dir <記録のディレクトリ> --opts '<回す版の設定>' [--cont '<設定>'] [--seeds 8] [--seedBase 0] [--out 結果.jsonl]
-npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth":4096,"potentialNet":null}'] [--variants '{"名前":{設定},…}'] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl] [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl] [--inputs 学習のデータ.jsonl] [--vocab 語彙.json] [--decks <デッキ>,…|@<デッキの組>]
+npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth":4096,"potentialNet":null}'] [--variants '{"名前":{設定},…}'] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl] [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl] [--inputs 学習のデータ.jsonl] [--vocab 語彙.json] [--decks <デッキ>,…|@<デッキの組>]   # 自己対戦を打つ回は棋譜も書く
 ```
 
 draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・lethal-diff は 2026-11-10 に消した（docs/removed.md。戻し方もそこに書いてある）。
@@ -583,7 +587,7 @@ zcat /mnt/project-files/data/selfplay/<名前>/f0.jsonl.gz | head -c 500
 （公開サイトには出さない。画面のモジュールは `vite build` で空のものに置き換わる）。リプレイからは、その局面の打ち比べ・AI の考え・
 「サンドボックスで開く」が使える。
 
-- **読める記録**: 棋譜（compare・yardstick・profile・td selfplay・survey run が既定で書く JSON Lines。1 行 1 試合。形は [kifu.md](kifu.md)。前の `--replays` の行も）、
+- **読める記録**: 棋譜（compare・yardstick・profile・td selfplay・survey run などの対戦を打つランナーが既定で書く JSON Lines。1 行 1 試合。形は [kifu.md](kifu.md)。前の `--replays` の行も）、
   `rhino-compare --record` の `.json`、`npm run game -- … --json` の `.json`。gzip（`.gz`）のままでも読める。
   試合はエンジンで打ち直すので、記録したときとエンジンの版（カードの能力など）が違うと、打てない手のある試合は読めず、勝者が変わった試合は印が付く
 - **手元のフォルダ**: 開発サーバーが環境変数 `SVWB_REPLAY_DIRS`（区切りは Linux・macOS は `:`、Windows は `;`）のフォルダの下を探して一覧に出す。

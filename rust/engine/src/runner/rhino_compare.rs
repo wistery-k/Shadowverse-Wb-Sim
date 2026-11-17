@@ -2,13 +2,17 @@
 //!
 //!   svwb rhino-compare [--subject rhino|af|spellwitch|bishop|dragon|nightmare|royal] [--games 50] [--start 0]
 //!                      [--agent rhino|rhino-lethal|search|search-classic] [--opts '<設定JSON>'] [--out 結果.jsonl] [--matches 試合.jsonl]
-//!                      [--opp search-classic|search] [--record ディレクトリ]
+//!                      [--opp search-classic|search] [--record ディレクトリ] [--kifu <ファイル> | --no-kifu]
 //!
 //! 比べるデッキ vs 他の 6 デッキ（相手は学習した補正を入れる前の探索 AI。--opp search なら今の既定の探索 AI）を、両方の席で同じシードで打つ
 //! （試合の決め方は src/sim/humanCompare.ts）。序盤のターンを全探索する "exhaustive" は TypeScript 版とともに消した。
 //! --record を付けると、試合ごとに npm run game の --json と同じ形（seed・agents・decks・winner・actions）を
-//! <ディレクトリ>/<相手デッキ>-g<g>-s<席>.json に書く（npm run think-at・npm run diverge で調べる）
+//! <ディレクトリ>/<相手デッキ>-g<g>-s<席>.json に書く（npm run think-at・npm run diverge で調べる）。
+//! 試合ごとの棋譜も既定で書く（compare と同じ。runner/kifu.rs、形は docs/kifu.md。比べるデッキの席が A、相手が B）。
+//! 書く先は `--kifu <ファイル>` か既定のフォルダ（`~/svwb-data/kifu`）、`--no-kifu` で書かない。打つ手は変わらない。
+//! 勝ち負けは棋譜からも引ける（`svwb kifu winrate <棋譜> --where side=A --by opp`）
 
+use super::kifu::{self, RunInfo, Seat};
 use super::options::{rhino_compare_options, rhino_options, search_options};
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
@@ -86,6 +90,8 @@ struct Outcome {
     draws: (u32, u32),
     /// 比べるデッキの融合のまわり（AfStats）
     af: AfStats,
+    /// 棋譜の 1 行（書くとき）
+    kifu: Option<String>,
 }
 
 /// 比べるデッキの融合のまわりの数（docs/ai-notes.md「使わない融合を次のターン以降に回す」）
@@ -210,6 +216,7 @@ fn play_one(
     agent_key: &str,
     opp_options: &SearchOptions,
     record: Option<&str>,
+    kifu: Option<(&RunInfo, &[Seat; 2])>,
 ) -> Outcome {
     let (subject_id, _, _, seed_base) = *subject;
     let seed = seed_base + t.g * 13 + t.seat as u32;
@@ -232,7 +239,7 @@ fn play_one(
     let mut fused: Vec<crate::state::Iid> = Vec::new();
     let mut log: Vec<Action> = Vec::new();
     let visit = |s: &GameState, act: &Action| {
-        if record.is_some() {
+        if record.is_some() || kifu.is_some() {
             log.push(act.clone());
         }
         if s.active == seat && acting_player(s) == seat && s.phase == Phase::Main {
@@ -358,6 +365,33 @@ fn play_one(
         std::fs::write(&file, game.stringify())
             .unwrap_or_else(|e| panic!("{file} に書けません: {e}"));
     }
+    // 棋譜（比べるデッキの席が A、相手が B。組は無い: 席ごとにシードが違う）
+    let kifu = kifu.map(|(run, [subject_seat, opp_seat])| {
+        let (names, seats) = if seat == 0 {
+            (
+                [me.name.as_str(), opp.name.as_str()],
+                [subject_seat, opp_seat],
+            )
+        } else {
+            (
+                [opp.name.as_str(), me.name.as_str()],
+                [opp_seat, subject_seat],
+            )
+        };
+        kifu::line(
+            run,
+            &kifu::Game {
+                g: t.g,
+                swap: None,
+                names,
+                seats,
+                decks,
+                seed,
+                end: kifu::End::of(&end),
+                actions: &log,
+            },
+        )
+    });
     Outcome {
         won: winner == seat,
         aria_turn,
@@ -366,10 +400,49 @@ fn play_one(
         exact_found: exact_lethal_counts().1,
         draws,
         af,
+        kifu,
     }
 }
 
+/// 棋譜の席: 比べるデッキの AI（A）と相手（B）。ai は AI の名前と設定（--opts）、nets は補正と見込みの指紋
+fn kifu_seats(agent_key: &str, opts_text: &str, opp_key: &str) -> [Seat; 2] {
+    let opts = Json::parse(opts_text).unwrap_or_else(|_| Json::Str(opts_text.to_string()));
+    // search-classic は補正も見込みも使わない。リノセウス用 AI の "extraEval": null は補正なし
+    let nets = |key: &str, opts: &Json| match key {
+        "search-classic" => kifu::nets_from(None, None),
+        _ => {
+            let mut n = kifu::nets_of(opts);
+            if opts.get("extraEval") == Some(&Json::Null) && opts.get("valueNet").is_none() {
+                n.set("valueNet", Json::Null);
+            }
+            n
+        }
+    };
+    let subject = Seat {
+        side: Some("A".into()),
+        agent: format!("A {agent_key} {opts_text}"),
+        ai: Json::Obj(vec![
+            ("agent".into(), Json::Str(agent_key.into())),
+            ("opts".into(), opts.clone()),
+        ]),
+        nets: nets(agent_key, &opts),
+        variant: None,
+    };
+    let opp = Seat {
+        side: Some("B".into()),
+        agent: format!("B {opp_key}"),
+        ai: Json::Obj(vec![("agent".into(), Json::Str(opp_key.into()))]),
+        nets: nets(opp_key, &Json::Obj(vec![])),
+        variant: None,
+    };
+    [subject, opp]
+}
+
 pub fn main(argv: &[String]) -> Result<(), String> {
+    // 棋譜（--kifu <ファイル>・前の名前 --replays、--no-kifu で書かない。無ければ既定のフォルダ）
+    let mut argv = argv.to_vec();
+    let kifu_target = kifu::take_args(&mut argv)?;
+    let argv = &argv[..];
     let mut games: u32 = 50;
     let mut start: u32 = 0;
     let mut out: Option<String> = None;
@@ -475,6 +548,19 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     if let Some(dir) = &record {
         std::fs::create_dir_all(dir).map_err(|e| format!("{dir} を作れません: {e}"))?;
     }
+    let run = RunInfo::now("rhino-compare", "");
+    let key = kifu::args_key(argv);
+    let kifu_path = kifu_target.path(&kifu::Name {
+        kind: "rhino-compare",
+        label: "",
+        first: tasks.iter().map(|t| t.g).min().unwrap_or(start),
+        last: tasks.iter().map(|t| t.g).max().unwrap_or(start),
+        key: &key,
+        commit: &run.engine,
+    });
+    let mut writer = kifu_path.as_deref().map(kifu::Writer::create).transpose()?;
+    let seats = kifu_seats(&agent_key, opts_text.as_deref().unwrap_or("{}"), &opp_key);
+    let kifu_run = writer.as_ref().map(|_| (&run, &seats));
     let t0 = Instant::now();
     let results = parallel_map(
         &tasks,
@@ -492,10 +578,19 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                 &agent_key,
                 &opp_options,
                 record.as_deref(),
+                kifu_run,
             )
         },
-        |_, _, _, _| {},
+        |_, _, r: &Outcome, _| {
+            if let (Some(w), Some(line)) = (writer.as_mut(), r.kifu.as_ref()) {
+                w.write(line);
+            }
+        },
     );
+    if let Some(w) = writer {
+        let (p, n) = w.finish()?;
+        println!("棋譜: {p}（{n} 試合）");
+    }
     let n = results.len();
     let mut per_deck = Tally::default();
     for (t, r) in tasks.iter().zip(&results) {
