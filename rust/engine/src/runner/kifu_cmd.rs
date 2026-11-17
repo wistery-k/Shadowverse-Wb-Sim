@@ -13,9 +13,10 @@
 use super::fixed;
 use super::kifu::parse_replay;
 use super::parallel::parallel_map;
-use crate::data::data;
+use crate::data::{data, CardIdx};
 use crate::json::Json;
 use crate::replay_index::replay_index;
+use crate::state::Action;
 use std::collections::BTreeMap;
 use std::io::Write;
 
@@ -119,7 +120,7 @@ struct Meta {
     winner: Option<usize>,
 }
 
-fn str_of(v: Option<&Json>) -> String {
+pub fn str_of(v: Option<&Json>) -> String {
     match v {
         Some(Json::Str(s)) => s.clone(),
         _ => String::new(),
@@ -331,7 +332,7 @@ fn parse_where(specs: &[String]) -> Result<Vec<Cond>, String> {
 }
 
 /// 数える出来事（--event '<種類>[|<種類>…] <条件>…'）
-struct EventSpec {
+pub struct EventSpec {
     kinds: Vec<String>,
     conds: Vec<Cond>,
 }
@@ -361,7 +362,7 @@ const EVENT_KINDS: [&str; 22] = [
     "turnEnd",
 ];
 
-fn parse_event(s: &str) -> Result<EventSpec, String> {
+pub fn parse_event(s: &str) -> Result<EventSpec, String> {
     let mut words = s.split_whitespace();
     let kinds: Vec<String> = words
         .next()
@@ -383,7 +384,7 @@ fn parse_event(s: &str) -> Result<EventSpec, String> {
     })
 }
 
-fn num_field(e: &Json, k: &str) -> Option<f64> {
+pub fn num_field(e: &Json, k: &str) -> Option<f64> {
     match e.get(k) {
         Some(Json::Num(x)) => Some(*x),
         Some(Json::Arr(xs)) => Some(xs.len() as f64),
@@ -393,7 +394,7 @@ fn num_field(e: &Json, k: &str) -> Option<f64> {
 }
 
 /// 出来事の条件。turn はその出来事のあったターン（n・p・tc）
-fn event_ok(spec: &EventSpec, e: &Json, turn: &Json) -> Result<bool, String> {
+pub fn event_ok(spec: &EventSpec, e: &Json, turn: &Json) -> Result<bool, String> {
     let k = str_of(e.get("k"));
     if !spec.kinds.contains(&k) {
         return Ok(false);
@@ -422,21 +423,26 @@ fn event_ok(spec: &EventSpec, e: &Json, turn: &Json) -> Result<bool, String> {
             "crest" if c.op == Op::Flag => is_crest,
             "crest" => is_crest && card(&str_of(e.get("c")))?,
             "target" => card(&str_of(e.get("t")))?,
+            "as" => card(&str_of(e.get("as")))?,
+            "mode" => match c.op {
+                Op::Has | Op::NotHas | Op::Eq | Op::Ne => text_ok(c, &str_of(e.get("mode"))),
+                _ => return Err("mode は文字の条件（~・!~・=・!=）で書きます".into()),
+            },
             // その出来事の持ち主のターンか（誘発は own と同じ）
             "own" | "opp" => {
                 let own = p.is_some() && p == num_field(turn, "p");
                 flag(own == (c.key == "own"))?
             }
-            "search" | "burned" => flag(e.get(&c.key) == Some(&Json::Bool(true)))?,
+            "search" | "burned" | "ep" => flag(e.get(&c.key) == Some(&Json::Bool(true)))?,
             "turn" => num_ok(c, num_field(turn, "n").unwrap_or(0.0))?,
             "tc" => num_ok(c, num_field(turn, "tc").unwrap_or(0.0))?,
-            key @ ("n" | "pp" | "ab" | "playable" | "i") => match num_field(e, key) {
+            key @ ("n" | "pp" | "ab" | "playable" | "i" | "ougi") => match num_field(e, key) {
                 Some(v) => num_ok(c, v)?,
                 None => false,
             },
             key => {
                 return Err(format!(
-                    "知らない出来事の条件: {key}（card・crest・target・own・opp・search・burned・turn・tc・n・pp・ab・playable・i）"
+                    "知らない出来事の条件: {key}（card・crest・target・as・mode・own・opp・search・burned・ep・turn・tc・n・pp・ab・playable・i・ougi）"
                 ))
             }
         };
@@ -553,7 +559,7 @@ impl Args {
 /// 打ち直した 1 試合（出来事の列のまとめ）。打ち直せなければ Err（理由）
 fn replay(v: &Json) -> Result<Json, String> {
     let r = parse_replay(v)?;
-    let idx = replay_index([&r.decks[0], &r.decks[1]], r.seed, &r.actions)?;
+    let idx = replayed([&r.decks[0], &r.decks[1]], r.seed, &r.actions)?;
     let recorded = v.get("winner");
     if recorded.is_some() && idx.get("winner") != recorded {
         return Err("打ち直した勝者が棋譜と違う（エンジンの版が違う）".into());
@@ -561,14 +567,52 @@ fn replay(v: &Json) -> Result<Json, String> {
     Ok(idx)
 }
 
-fn turns_of(idx: &Json) -> &[Json] {
+/// 試合を打ち直して出来事の列にする（replay_index）。最初のターンの前の出来事（"pre"。始めから持っているクレストやマリガン）は、
+/// 手番の無いターン 0（n・tc が 0、p が無い）として turns の先頭に入れる（own・opp には合わず、その席の自分のターンの番号は 0）
+pub fn replayed(decks: [&[CardIdx]; 2], seed: u32, actions: &[Action]) -> Result<Json, String> {
+    let mut idx = replay_index(decks, seed, actions)?;
+    if let Some(Json::Arr(pre)) = idx.get("pre").cloned() {
+        if !pre.is_empty() {
+            let mut turns = vec![Json::Obj(vec![
+                ("n".into(), Json::Num(0.0)),
+                ("tc".into(), Json::Num(0.0)),
+                ("ev".into(), Json::Arr(pre)),
+            ])];
+            turns.extend(turns_of(&idx).iter().cloned());
+            idx.set("turns", Json::Arr(turns));
+        }
+    }
+    Ok(idx)
+}
+
+/// 席 seat の出来事を順に f に渡す（出来事のあったターンと、そのときの席の自分のターンの番号。最初の自分のターンの前は 0）
+pub fn seat_events(
+    idx: &Json,
+    seat: usize,
+    mut f: impl FnMut(&Json, &Json, u32) -> Result<(), String>,
+) -> Result<(), String> {
+    let mut own_tc = 0u32;
+    for t in turns_of(idx) {
+        if num_field(t, "p") == Some(seat as f64) {
+            own_tc = num_field(t, "tc").unwrap_or(0.0) as u32;
+        }
+        for e in events_of(t) {
+            if num_field(e, "p") == Some(seat as f64) {
+                f(t, e, own_tc)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn turns_of(idx: &Json) -> &[Json] {
     match idx.get("turns") {
         Some(Json::Arr(t)) => t,
         _ => &[],
     }
 }
 
-fn events_of(turn: &Json) -> &[Json] {
+pub fn events_of(turn: &Json) -> &[Json] {
     match turn.get("ev") {
         Some(Json::Arr(e)) => e,
         _ => &[],
@@ -1089,6 +1133,19 @@ mod tests {
         assert!(!ev("trigger card!~x").unwrap() && ev("trigger card!=y").unwrap());
         assert!(ev("trigger crest=x").unwrap() && !ev("trigger crest=y").unwrap());
         assert!(ev("trigger own=1").is_err() && ev("trigger card").is_err());
+        // プレイの仕方・奥義・進化ポイント（profile の仕組みの表の出来事）
+        let play = Json::parse(
+            r#"{"k":"play","p":1,"at":4,"c":"x","mode":"accelerate","as":"y","ougi":2}"#,
+        )
+        .unwrap();
+        let ok = |spec: &str, e: &Json| event_ok(&parse_event(spec).unwrap(), e, &mine).unwrap();
+        assert!(ok("play mode=accelerate", &play) && !ok("play mode=enhance", &play));
+        assert!(ok("play ougi=2", &play) && !ok("play ougi=1", &play) && ok("play as=y", &play));
+        let plain = Json::parse(r#"{"k":"play","p":1,"at":5,"c":"x"}"#).unwrap();
+        assert!(!ok("play mode=accelerate", &plain) && !ok("play ougi>=1", &plain));
+        let evo = Json::parse(r#"{"k":"evolve","p":1,"at":6,"c":"x","i":3,"ep":true}"#).unwrap();
+        let by_effect = Json::parse(r#"{"k":"evolve","p":1,"at":6,"c":"x","i":4}"#).unwrap();
+        assert!(ok("evolve ep", &evo) && !ok("evolve ep", &by_effect));
         assert!(event_ok(
             &parse_event("play bogus=1").unwrap(),
             &Json::parse(r#"{"k":"play","p":0}"#).unwrap(),

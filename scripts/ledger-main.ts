@@ -41,7 +41,7 @@ export interface RunRow {
   with?: string | null;
   /** compare --without: そのデッキの絡まない組だけ */
   without?: string | null;
-  /** compare --involving: 名前にどれかの文字列（カンマ区切り）を含むデッキの絡む組だけ（試合番号はそのまま） */
+  /** compare --involving（2026-11-16 までの行だけ。消した）: 名前にどれかの文字列（カンマ区切り）を含むデッキの絡む組だけ（試合番号はそのまま） */
   involving?: string | null;
   /** 棋譜のファイルの名前（docs/kifu.md。フォルダは入れない。夜のキューがまとめた行は区切りごとの名前の列）。2026-11-16 までの行は replays */
   kifu?: string | string[] | null;

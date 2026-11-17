@@ -36,7 +36,7 @@ AI の実験の結果を、1 行 1 件の JSON（JSON Lines）で残す台帳。
 | `label` | `--label` の名前（無ければ空） |
 | `a`・`b` | 両方の設定（渡した JSON のまま）。yardstick の `b` は相手（`classic`・`strong`） |
 | `vs`・`kifu` | compare の B のデッキの絞り込み（5 番目の引数）と、棋譜のファイルの名前（[kifu.md](kifu.md)。フォルダは入れない（台帳は公開のリポジトリにコミットするので）。共有フォルダに持ち帰った後は `data/kifu/<回の名前>/` の下にあり、夜のキューの分は `.gz` が付く。夜のキューがまとめた行は区切りごとの名前の列。書かなければ null。yardstick にもある。2026-11-16 までの行は `--replays` のファイルの道の `replays`） |
-| `with`・`without`・`involving` | compare の組の絞り込み（`--with`・`--without` のデッキ名、`--involving` の文字列をカンマでつないだもの。無ければ null。足し合わせる組を分ける） |
+| `with`・`without`・`involving` | compare の組の絞り込み（`--with`・`--without` のデッキ名。無ければ null。足し合わせる組を分ける）。`involving` は 2026-11-16 までの行だけ（消した `--involving` の文字列をカンマでつないだもの。今は棋譜から `svwb kifu winrate` で絞る） |
 | `refVersion`・`refFingerprint`・`refFingerprintOk`・`recorded` | yardstick の相手の版・指紋・指紋が記録と合ったか・`--record` で表に足したか |
 | `files` | 設定の中のファイル（`"valueNet":"tpa.json"` 等）の中身の指紋。同じ名前で中身の違うファイルを見分ける |
 | `decks` | 使った 7 デッキ |
