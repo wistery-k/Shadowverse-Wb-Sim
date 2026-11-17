@@ -15,7 +15,7 @@
 //! - `run` は各局面を AI の乱数を変えて `--trials` 回打ち、問ごとと全体の合格率（正解率）を出し、台帳に 1 行足す（`--no-ledger` で書かない）。
 //!   設定は compare と同じ形の JSON（リノセウス用 AI の問は rhino-compare の `--opts` と同じに読む）。
 //!   局面の隠れた情報（相手の手札・山札、山札の順番、局面の乱数）は問のまま。AI は今までどおり自分から見た決定化で考えるので、見ない
-//! - `add` は記録した試合（`npm run game --json`・compare の `--replays`・人間の記録）・今の AI で打ち直す試合・手で作った局面（two-turn）・
+//! - `add` は記録した試合（ランナーの棋譜（`.jsonl.gz` も。`--line` で行を選ぶ）・`npm run game --json`・人間の記録）・今の AI で打ち直す試合・手で作った局面（two-turn）・
 //!   サンドボックスの書き出しから局面を取り出し、問のファイルを書いて、今の AI の合格率を出す（`--no-run` で出さない）
 //! - `cover` は各問を候補の打ち比べ調査（docs/survey.md）と同じ作り方の候補にして、合格の並びが候補のどこにあるかを数え、
 //!   候補に入る問は AI の選んだ並びと最後まで打ち比べる（調査がその種類のミスを拾えるかの確かめ。台帳には書かない）
@@ -880,7 +880,7 @@ struct Source {
     origin: Vec<(String, Json)>,
 }
 
-/// 記録の 1 行・1 ファイルから（`npm run game --json`・compare の `--replays`・rhino-compare の `--record`・人間の記録）
+/// 記録の 1 行・1 ファイルから（棋譜の 1 行（docs/kifu.md）・`npm run game --json`・前の rhino-compare の `--record`・人間の記録）
 fn source_from_record(v: &Json, line_text: &str) -> Result<Source, String> {
     let kind = match v.get("kind") {
         Some(Json::Str(k)) => k.as_str(),
@@ -1232,7 +1232,8 @@ fn add(argv: &[String]) -> Result<(), String> {
         let target = target
             .ok_or("--turn（そのターンの最初）か --step（その数の行動の後）で局面を決めます")?;
         let src = if let Some(f) = &replay {
-            let text = std::fs::read_to_string(f).map_err(|e| format!("{f}: {e}"))?;
+            // 棋譜の .jsonl.gz も読む
+            let text = super::kifu_cmd::read_text(f)?;
             // ファイル全体で 1 つの JSON か、JSON Lines
             let (v, line_text) = match Json::parse(&text) {
                 Ok(v) => (v, text.clone()),

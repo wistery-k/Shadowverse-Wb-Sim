@@ -1,26 +1,61 @@
-// 調べもの用: 同じ試合（同じシード・デッキ）を 2 つの設定で打った記録（svwb rhino-compare --record）を組にして、
+// 調べもの用: 同じ試合（同じシード・デッキ）を 2 つの設定で打った棋譜（svwb rhino-compare 等。docs/kifu.md）を組にして、
 // 最初に手が分かれた局面と、そこからそのターンの終わりまでの両方の手を出す
 //
-// 使い方: npm run diverge -- --a <記録のディレクトリ A> --b <記録のディレクトリ B> [--file <ファイル名>] [--turns 1] [--skipFuse true]
+// 使い方: npm run diverge -- --a <棋譜 A> --b <棋譜 B> [--g <試合番号>] [--turns 1] [--skipFuse true]
+// 棋譜は .jsonl・.jsonl.gz。同じ試合番号・組・シード・デッキの試合を組にする。比べるデッキの席は、棋譜の sides が A の席（無ければ P1）。
+// 前の形（2026-11-17 までの rhino-compare --record のディレクトリ）を渡すと、同じファイル名の試合を組にする（--file <ファイル名> で 1 つだけ。席はファイル名から）
 // --turns は、分かれたターンから何ターン分（手番の交代の数）の手を出すか
 // --skipFuse true なら、ターンの終わりの局面（比べるデッキの手札の中身は除く）を比べ、最初に違ったターンの初めの両方の局面と、そこからの両方の手を出す
 // （融合を回すかだけを変えた設定どうしで、融合の後に打つ手が分かれたところを見る）
 
-import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { cardOf, type Action, type GameState } from "../src/engine";
 import { replayStates } from "../src/sim/replay";
 import { describeAction } from "../src/ui/describe";
+import { readGames } from "./game-files";
 
 interface Game {
   seed: number;
   agents: [string, string];
   decks: [string[], string[]];
-  winner: number;
+  winner: number | null;
   actions: Action[];
 }
 
 const read = (f: string) => JSON.parse(readFileSync(f, "utf8")) as Game;
+
+/** 組にした 2 試合（見出し・比べるデッキの席） */
+interface Pair {
+  label: string;
+  seat: number;
+  ga: Game;
+  gb: Game;
+}
+
+/** 前の形: 2 つのディレクトリの同じファイル名の試合 */
+function dirPairs(a: string, b: string, only: string): Pair[] {
+  return readdirSync(a)
+    .filter((f) => f.endsWith(".json") && (!only || f === only) && existsSync(join(b, f)))
+    .sort()
+    .map((f) => ({ label: f, seat: Number(/-s(\d)\.json$/.exec(f)?.[1] ?? 0), ga: read(join(a, f)), gb: read(join(b, f)) }));
+}
+
+/** 棋譜: 同じ試合番号・組・シード・デッキの試合（g があればその試合番号だけ） */
+function kifuPairs(a: string, b: string, g: number | null): Pair[] {
+  const key = (r: { g?: number; swap?: boolean; seed: number; decks: [string[], string[]] }) => JSON.stringify([r.g ?? null, r.swap ?? null, r.seed, r.decks]);
+  const bs = new Map(readGames(b).map((x) => [key(x.record), x.record]));
+  const out: Pair[] = [];
+  for (const { record: ra } of readGames(a)) {
+    if (g !== null && ra.g !== g) continue;
+    const rb = bs.get(key(ra));
+    if (!rb) continue;
+    const seat = Math.max(0, ra.sides?.indexOf("A") ?? 0);
+    const swap = ra.swap === undefined ? "" : ra.swap ? " 入れ替え" : "";
+    out.push({ label: `g${ra.g ?? "?"}${swap} ${ra.names[0]} 対 ${ra.names[1]}`, seat, ga: ra, gb: rb });
+  }
+  return out;
+}
 
 function side(s: GameState, p: number): string {
   const pl = s.players[p]!;
@@ -68,6 +103,7 @@ export async function main(argv: string[]): Promise<number> {
   let a = "";
   let b = "";
   let only = "";
+  let g: number | null = null;
   let turns = 1;
   let skipFuse = false;
   for (let i = 0; i < argv.length; i++) {
@@ -76,17 +112,14 @@ export async function main(argv: string[]): Promise<number> {
     if (k === "--a") a = v;
     else if (k === "--b") b = v;
     else if (k === "--file") only = v;
+    else if (k === "--g") g = Number(v);
     else if (k === "--turns") turns = Number(v);
     else if (k === "--skipFuse") skipFuse = v === "true";
     else throw new Error(`不明な引数: ${k}`);
   }
-  const files = readdirSync(a)
-    .filter((f) => f.endsWith(".json") && (!only || f === only) && existsSync(join(b, f)))
-    .sort();
-  for (const f of files) {
-    const ga = read(join(a, f));
-    const gb = read(join(b, f));
-    const seat = Number(/-s(\d)\.json$/.exec(f)?.[1] ?? 0);
+  const pairs = statSync(a).isDirectory() ? dirPairs(a, b, only) : kifuPairs(a, b, g);
+  if (pairs.length === 0) console.log("組にできる試合がありません（同じ試合番号・シード・デッキの試合が両方に要ります）");
+  for (const { label: f, seat, ga, gb } of pairs) {
     if (skipFuse) {
       printTurnDiverge(f, ga, gb, seat, turns);
       continue;

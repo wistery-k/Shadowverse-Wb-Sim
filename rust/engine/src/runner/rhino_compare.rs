@@ -2,15 +2,14 @@
 //!
 //!   svwb rhino-compare [--subject rhino|af|spellwitch|bishop|dragon|nightmare|royal] [--games 50] [--start 0]
 //!                      [--agent rhino|rhino-lethal|search|search-classic] [--opts '<設定JSON>'] [--out 結果.jsonl] [--matches 試合.jsonl]
-//!                      [--opp search-classic|search] [--record ディレクトリ] [--kifu <ファイル> | --no-kifu]
+//!                      [--opp search-classic|search] [--kifu <ファイル> | --no-kifu]
 //!
 //! 比べるデッキ vs 他の 6 デッキ（相手は学習した補正を入れる前の探索 AI。--opp search なら今の既定の探索 AI）を、両方の席で同じシードで打つ
 //! （試合の決め方は src/sim/humanCompare.ts）。序盤のターンを全探索する "exhaustive" は TypeScript 版とともに消した。
-//! --record を付けると、試合ごとに npm run game の --json と同じ形（seed・agents・decks・winner・actions）を
-//! <ディレクトリ>/<相手デッキ>-g<g>-s<席>.json に書く（npm run think-at・npm run diverge で調べる）。
-//! 試合ごとの棋譜も既定で書く（compare と同じ。runner/kifu.rs、形は docs/kifu.md。比べるデッキの席が A、相手が B）。
+//! 試合ごとの棋譜を既定で書く（compare と同じ。runner/kifu.rs、形は docs/kifu.md。比べるデッキの席が A、相手が B）。
 //! 書く先は `--kifu <ファイル>` か既定のフォルダ（`~/svwb-data/kifu`）、`--no-kifu` で書かない。打つ手は変わらない。
-//! 勝ち負けは棋譜からも引ける（`svwb kifu winrate <棋譜> --where side=A --by opp`）
+//! 勝ち負けは棋譜からも引ける（`svwb kifu winrate <棋譜> --where side=A --by opp`）。棋譜は npm run diverge・npm run think-at・
+//! svwb defer-playout --kifu にそのまま渡せる（2026-11-17 までの、1 試合 1 ファイルを書く `--record` はこれに替えて消した）
 
 use super::kifu::{self, RunInfo, Seat};
 use super::options::{rhino_compare_options, rhino_options, search_options};
@@ -213,9 +212,7 @@ fn play_one(
     opp: &'static Deck,
     t: &Task,
     agent: &AgentConfig,
-    agent_key: &str,
     opp_options: &SearchOptions,
-    record: Option<&str>,
     kifu: Option<(&RunInfo, &[Seat; 2])>,
 ) -> Outcome {
     let (subject_id, _, _, seed_base) = *subject;
@@ -239,7 +236,7 @@ fn play_one(
     let mut fused: Vec<crate::state::Iid> = Vec::new();
     let mut log: Vec<Action> = Vec::new();
     let visit = |s: &GameState, act: &Action| {
-        if record.is_some() || kifu.is_some() {
+        if kifu.is_some() {
             log.push(act.clone());
         }
         if s.active == seat && acting_player(s) == seat && s.phase == Phase::Main {
@@ -340,31 +337,6 @@ fn play_one(
     let winner = end
         .winner
         .unwrap_or_else(|| panic!("勝者がいません（{} g{} 席{seat}）", t.deck, t.g));
-    if let Some(dir) = record {
-        let ids = |d: &[crate::data::CardIdx]| -> Vec<Json> {
-            d.iter().map(|&c| Json::Str(card(c).id.clone())).collect()
-        };
-        let mut agents = [Json::Str(agent_key.to_string()), Json::Str("search".into())];
-        if seat == 1 {
-            agents.swap(0, 1);
-        }
-        let game = Json::Obj(vec![
-            ("seed".into(), Json::Num(seed as f64)),
-            ("agents".into(), Json::Arr(agents.to_vec())),
-            (
-                "decks".into(),
-                Json::Arr(vec![Json::Arr(ids(decks[0])), Json::Arr(ids(decks[1]))]),
-            ),
-            ("winner".into(), Json::Num(winner as f64)),
-            (
-                "actions".into(),
-                Json::Arr(log.iter().map(crate::state_json::action_to_json).collect()),
-            ),
-        ]);
-        let file = format!("{dir}/{}-g{}-s{seat}.json", t.deck, t.g);
-        std::fs::write(&file, game.stringify())
-            .unwrap_or_else(|e| panic!("{file} に書けません: {e}"));
-    }
     // 棋譜（比べるデッキの席が A、相手が B。組は無い: 席ごとにシードが違う）
     let kifu = kifu.map(|(run, [subject_seat, opp_seat])| {
         let (names, seats) = if seat == 0 {
@@ -451,7 +423,6 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let mut matches: Option<String> = None;
     let mut opts_text: Option<String> = None;
     let mut opp_key = "search-classic".to_string();
-    let mut record: Option<String> = None;
     let mut it = argv.iter();
     while let Some(key) = it.next() {
         let v = it.next().ok_or_else(|| format!("{key} の値がありません"))?;
@@ -475,7 +446,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             }
             "--opts" => opts_text = Some(v.clone()),
             "--opp" => opp_key = v.clone(),
-            "--record" => record = Some(v.clone()),
+            "--record" => return Err("--record は消しました。棋譜（既定で書く。--kifu <ファイル>）を npm run diverge・npm run think-at・svwb defer-playout --kifu に渡します（docs/kifu.md）".into()),
             _ => return Err(format!("不明な引数: {key}")),
         }
     }
@@ -545,9 +516,6 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             return Err(format!("相手デッキがありません: {}", t.deck));
         }
     }
-    if let Some(dir) = &record {
-        std::fs::create_dir_all(dir).map_err(|e| format!("{dir} を作れません: {e}"))?;
-    }
     let run = RunInfo::now("rhino-compare", "");
     let key = kifu::args_key(argv);
     let kifu_path = kifu_target.path(&kifu::Name {
@@ -569,17 +537,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                 .iter()
                 .find(|o| o.name == t.deck)
                 .expect("相手デッキ");
-            play_one(
-                &subject,
-                me,
-                opp,
-                t,
-                &agent,
-                &agent_key,
-                &opp_options,
-                record.as_deref(),
-                kifu_run,
-            )
+            play_one(&subject, me, opp, t, &agent, &opp_options, kifu_run)
         },
         |_, _, r: &Outcome, _| {
             if let (Some(w), Some(line)) = (writer.as_mut(), r.kifu.as_ref()) {
