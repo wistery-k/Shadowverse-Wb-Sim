@@ -389,7 +389,7 @@ impl SearchOptions {
 }
 
 /// 相手のターンを読んだ後の点数がこれ以下なら、その並びは相手のターンで負ける（rescoreRace の lethal_guard）
-const DANGER: f64 = -1e5;
+pub(crate) const DANGER: f64 = -1e5;
 
 /// 並び（各手と、その手を打った後の局面）
 type Steps = Vec<(Action, Rc<GameState>)>;
@@ -420,6 +420,31 @@ pub struct PlanTrace {
     pub turn_end: Vec<(Plan, ScoreParts)>,
     /// 相手のターンを読み直した点数の内訳（読み直した最初の手だけ。plan_turn が返す並びのもの。eval・extra は読み直しの平均）
     pub reads: Vec<(Action, ScoreParts)>,
+    /// 読み直した終局面ごとの、引き直しごとの点数（調べもの用。svwb review explain。読んだ順）
+    pub detail: Vec<ReadDetail>,
+    /// 相手の手札の引き直し（oppHandCommon）の種（調べもの用）
+    pub common_seeds: Vec<u32>,
+}
+
+/// 読み直した終局面 1 つの、引き直しごとの点数（PlanTrace.detail）
+#[derive(Clone, Debug)]
+pub struct ReadDetail {
+    pub action: Action,
+    /// 終局面までの並び（ターン終了は含まない）
+    pub full: Vec<Action>,
+    /// ビームのターン末の点数
+    pub turn_end: f64,
+    /// 選ぶときに混ぜたターン末の点数（drawSplit で区切ったときは、作り直した引きごとのターン末の点数の平均）
+    pub mix_turn_end: f64,
+    /// drawSplit で区切った（並びの何手目の引く手・ランダムな手で）
+    pub split_at: Option<usize>,
+    /// 引き直しごとの (重み, 点数)。drawSplit で区切ったときは引きの順で、残った PP の分を引いたもの。
+    /// 区切らないときは oppHandCommon の種の順で、残った PP の分（offset）は引く前
+    pub reads: Vec<(f64, f64)>,
+    pub offset: f64,
+    /// 読み直した点数（reads の重み付き平均 − offset）と、選ぶときの値（ターン末の点数を混ぜたもの）
+    pub read_value: f64,
+    pub value: f64,
 }
 
 /// 探索で使う重み（評価関数の重みと、読みの中の相手のビームの重みと、相手の手番の貪欲法の重み）
@@ -1175,6 +1200,8 @@ pub fn plan_turn_traced(
     let race_reads: RefCell<Vec<(usize, Vec<RaceRead>)>> = RefCell::new(Vec::new());
     let mut result: Vec<(Action, Plan)> = Vec::new();
     let tracing = trace.is_some();
+    // 引き直しごとの点数（trace のときだけ。PlanTrace.detail）
+    let details: RefCell<Vec<ReadDetail>> = RefCell::new(Vec::new());
     let mut reads: Vec<(Action, ScoreParts)> = Vec::new();
     let rescore_node = |i: usize,
                         rng: &mut Rng,
@@ -1205,6 +1232,9 @@ pub fn plan_turn_traced(
         };
         // 選ぶときに混ぜるターン末の点数（drawSplit で区切ったときは、作り直した引きごとのターン末の点数の平均）
         let mut turn_end = node.value;
+        // 引き直しごとの (重み, 点数) と、まとめるときに引く分（trace のときだけ。PlanTrace.detail）
+        let mut detail_xs: Vec<(f64, f64)> = Vec::new();
+        let mut detail_offset = 0.0;
         let split = match (&split_at, &split_env) {
             (Some((c, steps)), Some(senv)) => {
                 let before: &GameState = if *c == 0 { root } else { &steps[*c - 1].1 };
@@ -1294,6 +1324,9 @@ pub fn plan_turn_traced(
                 }
                 if te_w > 0.0 && read_w > 0.0 {
                     turn_end = te_sum / te_w;
+                    if tracing {
+                        detail_xs = read_xs.clone();
+                    }
                     Some((average_reads(&read_xs, 0.0), reads))
                 } else {
                     None
@@ -1359,6 +1392,10 @@ pub fn plan_turn_traced(
                     add(after);
                 }
             }
+            if tracing {
+                detail_xs = xs.clone();
+                detail_offset = pl.leftover(&node.state);
+            }
             (
                 average_reads(&xs, pl.leftover(&node.state)),
                 opts.opp_hand_samples,
@@ -1371,6 +1408,23 @@ pub fn plan_turn_traced(
         } else {
             value
         };
+        if tracing {
+            details.borrow_mut().push(ReadDetail {
+                action: node.first.clone(),
+                full: pl
+                    .steps_actions(node.path)
+                    .into_iter()
+                    .filter(|a| !matches!(a, Action::EndTurn))
+                    .collect(),
+                turn_end: node.value,
+                mix_turn_end: turn_end,
+                split_at: split_at.as_ref().filter(|_| split.is_some()).map(|x| x.0),
+                reads: std::mem::take(&mut detail_xs),
+                offset: detail_offset,
+                read_value,
+                value,
+            });
+        }
         let replace = match result.iter().find(|(k, _)| *k == node.first) {
             None => true,
             Some((_, cur)) => value > cur.value,
@@ -1456,6 +1510,8 @@ pub fn plan_turn_traced(
     }
     if let Some(tr) = trace {
         tr.reads = reads;
+        tr.detail = details.into_inner();
+        tr.common_seeds = common_seeds.clone();
     }
     rekey_deferred(result, opts.defer_fuse, root)
 }
@@ -1996,6 +2052,7 @@ impl SearchAgent {
         let mut accs: Vec<Acc> = Vec::new();
         // 読み直した手の、choose_action の totals と同じ順（決定化ごとに plan_turn が返した順で、初めて出たところ）
         let mut totals: Vec<usize> = Vec::new();
+        let mut details: Vec<(Vec<ReadDetail>, Vec<u32>)> = Vec::new();
         for sample in 0..opts.samples {
             let det = Rc::new(with_purpose_rng(
                 rng,
@@ -2055,6 +2112,7 @@ impl SearchAgent {
                     totals.push(i);
                 }
             }
+            details.push((trace.detail, trace.common_seeds));
         }
         for (c, acc) in candidates.iter_mut().zip(&accs) {
             if acc.count > 0 {
@@ -2116,6 +2174,7 @@ impl SearchAgent {
             roots,
             candidates,
             chosen,
+            details,
         })
     }
 
@@ -2206,6 +2265,38 @@ impl SearchAgent {
                 read_once(&pl, &d, &mut r).0 - leftover
             })
             .collect()
+    }
+
+    /// read_values の引き直し 1 つ（種 seed）の、相手のターンを読む前の決定化した局面（調べもの用。svwb review explain。
+    /// oppHandCommon と readOwnDeckApart なら、同じ種の引き直しはどの終局面でも相手の手札が同じ）
+    pub fn read_view(&self, end: &GameState, p: PlayerIndex, seed: u32) -> GameState {
+        let env = self.env();
+        let pl = Planner {
+            env: &env,
+            p,
+            root: Rc::new(end.clone()),
+            steps: Vec::new(),
+        };
+        let settled = pl.settle(end);
+        let base = settled.as_ref().unwrap_or(end);
+        read_determinize(base, p, &mut Rng::new(seed), &self.opts)
+    }
+
+    /// read_values の引き直し 1 つ（種 seed）の、点数と、相手のターンを読んだ後の局面（調べもの用。svwb review explain）
+    pub fn read_after(&self, end: &GameState, p: PlayerIndex, seed: u32) -> (f64, GameState) {
+        let env = self.env();
+        let pl = Planner {
+            env: &env,
+            p,
+            root: Rc::new(end.clone()),
+            steps: Vec::new(),
+        };
+        let settled = pl.settle(end);
+        let base = settled.as_ref().unwrap_or(end);
+        let mut r = Rng::new(seed);
+        let d = read_determinize(base, p, &mut r, &self.opts);
+        let (v, after) = read_once(&pl, &d, &mut r);
+        (v - pl.leftover(end), after)
     }
 
     /// p のターン末の局面 end から 2 ターン先まで読んだ点数（測るための道具。runner/two_turn.rs。打つ手は変わらない）。

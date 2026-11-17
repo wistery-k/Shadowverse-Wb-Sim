@@ -394,6 +394,7 @@ npm run svwb -- survey recheck 結果.jsonl… --out 打ち直し.jsonl [--m 32]
 npm run svwb -- review run --record <記録.json> --points <局面.jsonl> --out <結果.jsonl> [--m 32] [--confirm 96] [--flag 10] [--opts '<JSON>'] [--all 0|1] [--seat 0|1] [--batch 4]
 npm run svwb -- review zero --out <結果.jsonl> --games a-b --decks <デッキ>,…|@<デッキの組> [--rate 0.3] [--m 32] [--confirm 96] [--flag 10] [--opts '<JSON>'] [--batch 2]   # 棋譜も書く
 npm run svwb -- review report <結果.jsonl> [--out <報告.md>]
+npm run svwb -- review explain --record <記録.json> --points <局面.jsonl> --turn <turns の添字> [--step <手順>] [--opts '<JSON>'] [--width 8,64] [--samples 48] [--playouts N] [--show K]   # docs/match-record.md「AI がその並びを選んだ理由を出す」
 npm run svwb -- two-turn show [--only <局面>,…] [--sandbox <フォルダ>]
 npm run svwb -- two-turn run --out tt.jsonl [--only <局面>,…] [--m 64] [--reads 4] [--twos 2] [--nextBeam 256] [--seed 1] [--opts '<設定の JSON>']
 npm run svwb -- two-turn report tt.jsonl… [--only <局面>,…]
