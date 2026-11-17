@@ -275,7 +275,7 @@ npm run misses -- add --id <問の名前> --pass '<合格の条件>' --title …
                       (--replay <記録> [--line N | --key …] | --seed S --decks A,B [--agents a,b] | --two-turn <局面> | --state <局面.json>) (--turn T | --step N)
 npm run misses -- list | show <問>… | check
 npm run misses -- cover [--opts '<設定>'] [--seeds 8] [--m 128] [--extra 4] [--wide 64] [--only 問,…] [--show]
-npm run misses -- duel <問> [--line '<名前>=<手の JSON の配列>']… [--m 512] [--base 1] [--no-stored] [--peek] [--show N [--dump <フォルダ>]]
+npm run misses -- duel <問> [--line '<名前>=<手の JSON の配列>']… [--m 512] [--base 1] [--no-stored] [--peek] [--opts '<設定>'] [--show N [--dump <フォルダ>]]
 ```
 
 見落とし問題集（`misses/*.json`）。`run` は各問の局面から AI に手番の側のターンを `--trials` 回打たせ（AI の乱数だけを変える）、問ごとと全体の合格率（正解率）を出し、
