@@ -1,4 +1,4 @@
-//! 棋譜: 対戦を打つランナー（compare・yardstick・profile・td selfplay・survey run）が試合ごとに書く、1 試合 1 行の JSON Lines（形は docs/kifu.md）。
+//! 棋譜: 対戦を打つランナー（compare・yardstick・profile・td selfplay・survey run・rhino-compare・deck-compare・review zero・deep-gap play・beam-gap）が試合ごとに書く、1 試合 1 行の JSON Lines（形は docs/kifu.md）。
 //!
 //! 打ち直すのに要るもの（デッキ・シード・行動の列）に、どの回のどの試合か（回の名前・試合番号・組の 2 試合のどちらか）と、
 //! 打った AI（席ごとの設定と補正の指紋）・エンジンの版（コミット）・プールを足したもの。エンジンは決定的なので、同じ版で打ち直せば同じ試合になる。
@@ -9,7 +9,7 @@
 //! - 名前は同じ引数・同じコミットなら同じ（同じ試合なので上書きしてよい）。設定だけが違う回（夜のキューの 2 つの profile 等）は引数の指紋で分かれる。
 //!   手元の変更がある（コミットの末尾が `+`）回は、中身の違う変更で同じ名前にならないように時刻を足す。夜のキューは区切りごとに回のフォルダの `kifu/` に書く
 //! - 書いている間は `<ファイル>.tmp` に書き、全部の試合を書き終えたら名前を替える（途中で止まった回の棋譜は `.tmp` のまま残る）。
-//!   途中から再開できる survey run だけは、そのファイルに 1 試合ずつ書き足す（`Appender`）
+//!   途中から再開できる survey run・review zero・deep-gap play は、そのファイルに 1 試合ずつ書き足す（`Appender`）
 //! - 打つ手・試合は変えない（書くだけ）
 
 use crate::canonical::fnv;
@@ -288,7 +288,7 @@ impl Appender {
 
 /// 回（1 回の実行）で同じもの
 pub struct RunInfo {
-    /// 書いたランナー（"compare"・"yardstick"・"profile"・"td selfplay"）
+    /// 書いたランナー（"compare"・"yardstick"・"profile"・"td selfplay"・"survey"・"rhino-compare"・"deck-compare"・"review zero"・"deep-gap"・"beam-gap"）
     pub source: String,
     /// 回の名前（台帳の名前 `--label`。無ければ空）
     pub run: String,
@@ -318,6 +318,8 @@ pub struct Seat {
     pub ai: Json,
     /// 補正と見込みの指紋（`nets_of`）
     pub nets: Json,
+    /// 席のデッキの案の名前（deck-compare の比べるデッキの席。元のデッキは「元のデッキ」。案を比べない席は None）
+    pub variant: Option<String>,
 }
 
 /// 試合の終わり（棋譜に書く分）。局面そのものはスレッドをまたいで渡せないので、要る値だけを持つ
@@ -439,6 +441,7 @@ pub fn compare_seat(side: &str, opts_text: &str) -> Seat {
         agent: format!("{side} {opts_text}"),
         ai,
         nets,
+        variant: None,
     }
 }
 
@@ -451,6 +454,7 @@ pub fn same_seat(runner: &str, opts_text: &str) -> Seat {
         agent: format!("{runner} {opts_text}"),
         ai,
         nets,
+        variant: None,
     }
 }
 
@@ -489,6 +493,17 @@ pub fn line(run: &RunInfo, game: &Game) -> String {
                 seats
                     .iter()
                     .map(|x| x.side.as_deref().map_or(Json::Null, s))
+                    .collect(),
+            ),
+        ));
+    }
+    if seats.iter().any(|x| x.variant.is_some()) {
+        items.push((
+            "variants".into(),
+            Json::Arr(
+                seats
+                    .iter()
+                    .map(|x| x.variant.as_deref().map_or(Json::Null, s))
                     .collect(),
             ),
         ));
@@ -713,5 +728,47 @@ mod tests {
             .collect();
         assert_eq!(pool_of([&az, &az]), "azvaldt");
         assert_eq!(pool_of([&az, &d[0].cards]), "mixed");
+    }
+
+    /// 案の名前（variants）は、どれかの席にあるときだけ書く（無い席は null）
+    #[test]
+    fn variants_only_when_a_seat_has_one() {
+        let d = &data().decks;
+        let run = RunInfo {
+            source: "deck-compare".into(),
+            run: String::new(),
+            engine: "abc".into(),
+        };
+        let plain = compare_seat("B", "{}");
+        let mut subject = compare_seat("A", "{}");
+        subject.variant = Some("元のデッキ".into());
+        let end = End {
+            first: 0,
+            winner: Some(1),
+            turns: 9,
+        };
+        let one = |seats: [&Seat; 2]| {
+            Json::parse(&line(
+                &run,
+                &Game {
+                    g: 4,
+                    swap: None,
+                    names: [&d[0].name, &d[1].name],
+                    seats,
+                    decks: [&d[0].cards, &d[1].cards],
+                    seed: 7,
+                    end,
+                    actions: &[],
+                },
+            ))
+            .unwrap()
+        };
+        let v = one([&plain, &subject]);
+        assert_eq!(
+            v.get("variants"),
+            Some(&Json::Arr(vec![Json::Null, Json::Str("元のデッキ".into())]))
+        );
+        assert_eq!(v.get("swap"), None);
+        assert_eq!(one([&plain, &plain]).get("variants"), None);
     }
 }

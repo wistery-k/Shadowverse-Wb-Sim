@@ -2,6 +2,7 @@
 //!
 //!   svwb review run --record <記録.json> --points <局面.jsonl> --out <結果.jsonl> [--m 32] [--confirm 96] [--flag 10] [--opts '<JSON>'] [--all 0|1] [--seat 0|1] [--batch 4]
 //!   svwb review zero --out <結果.jsonl> --games a-b --decks <デッキ>,…|@<デッキの組> [--rate 0.3] [--m 32] [--confirm 96] [--flag 10] [--opts '<JSON>'] [--batch 2]
+//!                    [--kifu <ファイル> | --no-kifu]
 //!   svwb review report <結果.jsonl> [--out <報告.md>]
 //!
 //! **run**: 勝敗まで入れて保存したプロの試合の記録（`--record`）と、`npm run review`（scripts/review-main.ts）が記録から作った局面（`--points`。
@@ -21,6 +22,7 @@
 //!
 //! **zero**: 道具の検査（効果 0 の確かめ）。AI どうしの試合（`--decks` の組、`--opts` の設定）を打ち、片方の席の実際の手を「記録の手」として、
 //! run と同じ手順（置き直し、区切り、打ち比べ）にかける。記録の手も考え直した手も同じ AI の手なので、差の平均は 0 で、大きな差はほとんど出ないはず。
+//! 打った試合の棋譜も既定で書く（survey run と同じく、再開できるように 1 試合ずつ書き足す。runner/kifu.rs、形は docs/kifu.md）。
 //!
 //! **report**: 結果を Markdown にする。台帳には書かない（道具の確かめの間）。
 //!
@@ -34,6 +36,7 @@ use super::deep_gap::{
 };
 use super::fixed;
 use super::human_plan::{mean_se, mix, parse_range, round2, step_text};
+use super::kifu::{self, RunInfo, Seat};
 use super::ledger;
 use super::options::compare_options;
 use super::parallel::{parallel_map, thread_count};
@@ -932,6 +935,7 @@ struct ZeroGame {
     seed: u32,
     actions: Vec<Action>,
     winner: Option<PlayerIndex>,
+    end: kifu::End,
 }
 
 fn zero_play(g: u32, list: &[&'static Deck], opts: &SearchOptions) -> ZeroGame {
@@ -954,7 +958,25 @@ fn zero_play(g: u32, list: &[&'static Deck], opts: &SearchOptions) -> ZeroGame {
         seed,
         actions,
         winner: end.winner,
+        end: kifu::End::of(&end),
     }
+}
+
+/// zero の試合の棋譜の 1 行（両方の席とも --opts の AI。組は無い）
+fn zero_kifu(z: &ZeroGame, run: &RunInfo, seat: &Seat) -> String {
+    kifu::line(
+        run,
+        &kifu::Game {
+            g: z.g,
+            swap: None,
+            names: [&z.decks[0].name, &z.decks[1].name],
+            seats: [seat, seat],
+            decks: [&z.decks[0].cards, &z.decks[1].cards],
+            seed: z.seed,
+            end: z.end,
+            actions: &z.actions,
+        },
+    )
 }
 
 /// zero の試合をターンの列にする
@@ -965,6 +987,7 @@ fn zero_turns(z: &ZeroGame) -> (Vec<Turn>, [String; 2], u32) {
         seed,
         ref actions,
         winner,
+        ..
     } = *z;
     let mut s = create_game([&a.cards, &b.cards], seed);
     let mut states = vec![s.clone()];
@@ -1001,7 +1024,10 @@ fn zero_turns(z: &ZeroGame) -> (Vec<Turn>, [String; 2], u32) {
 
 /// svwb review zero
 fn zero(argv: &[String]) -> Result<(), String> {
-    let (flags, rest) = parse_flags(argv)?;
+    // 棋譜（--kifu <ファイル>、--no-kifu で書かない。無ければ既定のフォルダ）。再開できるように 1 試合ずつ書き足す
+    let mut argv = argv.to_vec();
+    let kifu_target = kifu::take_args(&mut argv)?;
+    let (flags, rest) = parse_flags(&argv)?;
     if !rest.is_empty() {
         return Err(format!("不明な引数: {}", rest.join(" ")));
     }
@@ -1039,6 +1065,25 @@ fn zero(argv: &[String]) -> Result<(), String> {
     let games: Vec<u32> = (a as u32..=b as u32)
         .filter(|g| !done.contains(&(*g as u64)))
         .collect();
+    let run_info = RunInfo::now("review zero", "");
+    let key = kifu::args_key(
+        &["review".to_string(), "zero".to_string()]
+            .into_iter()
+            .chain(argv.iter().cloned())
+            .collect::<Vec<_>>(),
+    );
+    let mut kifu_file = kifu_target
+        .path(&kifu::Name {
+            kind: "review-zero",
+            label: "",
+            first: a as u32,
+            last: b as u32,
+            key: &key,
+            commit: &run_info.engine,
+        })
+        .map(|p| kifu::Appender::open(&p))
+        .transpose()?;
+    let seat = kifu::same_seat("review-zero", &opts_text);
     println!(
         "試合 g{a}〜{b} のうち残り {}（済み {}）、局面の割合 {rate}、一段目 {} 回・二段目 {} 回（差 {} ポイント以上）、{} スレッド",
         games.len(),
@@ -1056,6 +1101,12 @@ fn zero(argv: &[String]) -> Result<(), String> {
             |&g, _| zero_play(g, &list, &cfg.opts),
             |_, _, _, _| {},
         );
+        // 棋譜を結果の行より先に書く（間で止まっても、再開でその試合を打ち直し、棋譜は 2 度書かない）
+        if let Some(k) = kifu_file.as_mut() {
+            for z in &played {
+                k.write(z.g, &zero_kifu(z, &run_info, &seat))?;
+            }
+        }
         let mut points = Vec::new();
         for z in &played {
             let (tl, nm, seed) = zero_turns(z);
@@ -1079,6 +1130,10 @@ fn zero(argv: &[String]) -> Result<(), String> {
         "完了: 局面 {n_points}、{} 秒",
         fixed(t0.elapsed().as_secs_f64(), 0)
     );
+    if let Some(k) = &kifu_file {
+        let (p, n) = k.summary();
+        println!("棋譜: {p}（{n} 試合）");
+    }
     Ok(())
 }
 

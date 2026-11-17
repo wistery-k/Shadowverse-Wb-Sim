@@ -1,6 +1,7 @@
 //! 自己対戦の局面で、今の AI の手と、時間をかけた深い読みの手を比べ、差の大きい局面を集める（2026-10-26）。
 //!
 //!   svwb deep-gap play --out gap.jsonl [--games 100] [--start 0] [--deep '<設定の JSON>'] [--k 4] [--evalSeeds 48] [--turns 1-30]
+//!                      [--kifu <ファイル> | --no-kifu]
 //!   svwb deep-gap rollout --in gap.jsonl[,…] --out roll.jsonl [--top 200] [--random 200] [--seed 1] [--m 48]
 //!   svwb deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 30] [--only <内訳の一部>] [--skipDecks <デッキ名,…>] [--sort gap|rollout] [--listOnly 1]
 //!
@@ -31,12 +32,14 @@
 //!
 //! 出力は JSON Lines。play は試合ごとに局面の行と試合の行（`"game": true`、手の列と深い読みの設定つき）を書き、rollout は局面ごとに 1 行書く。
 //! どちらも出力に既にある試合・局面は飛ばす（同じ引数で再開できる）。試合の行の無い試合の局面の行（途中で止めたもの）は、再開のときに消す。
+//! play は打った試合の棋譜も既定で書く（survey run と同じく、再開できるように 1 試合ずつ、試合の行より先に書き足す。runner/kifu.rs、形は docs/kifu.md）。
 //! 実際の対戦の局面を入れる口は無い（自己対戦の局面だけを扱う。CLAUDE.md「ソフト打ち」）。
 
 use super::fixed;
 use super::human_plan::{
     is_start_of_turn, mean_se, mix, parse_range, pct, round2, step_text, summarize_start, win_rate,
 };
+use super::kifu::{self, RunInfo, Seat};
 use super::options::compare_options;
 use super::parallel::parallel_map;
 use crate::ai::aidata::ai_data;
@@ -440,8 +443,13 @@ fn policy_gap(
     Ok(r)
 }
 
-/// 試合 g を今の既定の AI どうしで打ち、自分のターンの最初の局面ごとに深い読みと比べた行と、最後に試合の行を返す
-fn play_game(g: u32, cfg: &PlayConfig) -> Result<Vec<Value>, String> {
+/// 試合 g を今の既定の AI どうしで打ち、自分のターンの最初の局面ごとに深い読みと比べた行と、最後に試合の行を返す。
+/// kifu（回と席）があれば、棋譜の 1 行も返す
+fn play_game(
+    g: u32,
+    cfg: &PlayConfig,
+    kifu: Option<(&RunInfo, &Seat)>,
+) -> Result<(Vec<Value>, Option<String>), String> {
     let (decks, seed) = ai_game_setup(g, false);
     let names = [deck_name_of(&decks[0]), deck_name_of(&decks[1])];
     let mut a0 = SearchAgent::new(SearchOptions::default());
@@ -578,7 +586,23 @@ fn play_game(g: u32, cfg: &PlayConfig) -> Result<Vec<Value>, String> {
         "positions": starts.len(), "deep": cfg.deep_text,
         "actions": actions.iter().map(action_value).collect::<Vec<_>>(),
     }));
-    Ok(rows)
+    // 棋譜（両方の席とも今の既定の AI。組は無い）
+    let line = kifu.map(|(run, seat)| {
+        kifu::line(
+            run,
+            &kifu::Game {
+                g,
+                swap: None,
+                names: [&names[0], &names[1]],
+                seats: [seat, seat],
+                decks: [&decks[0], &decks[1]],
+                seed,
+                end: kifu::End::of(&end),
+                actions: &actions,
+            },
+        )
+    });
+    Ok((rows, line))
 }
 
 /// (名前, 値) の列
@@ -663,7 +687,10 @@ pub(crate) fn open_append(path: &str) -> Result<std::fs::File, String> {
 
 /// svwb deep-gap play
 fn play(argv: &[String]) -> Result<(), String> {
-    let (flags, rest) = parse_flags(argv)?;
+    // 棋譜（--kifu <ファイル>、--no-kifu で書かない。無ければ既定のフォルダ）。再開できるように 1 試合ずつ書き足す
+    let mut argv = argv.to_vec();
+    let kifu_target = kifu::take_args(&mut argv)?;
+    let (flags, rest) = parse_flags(&argv)?;
     if !rest.is_empty() {
         return Err(format!("不明な引数: {}", rest.join(" ")));
     }
@@ -729,18 +756,42 @@ fn play(argv: &[String]) -> Result<(), String> {
         cfg.turns.1
     );
     let mut file = open_append(out)?;
+    let run_info = RunInfo::now("deep-gap", "");
+    let key = kifu::args_key(
+        &["deep-gap".to_string(), "play".to_string()]
+            .into_iter()
+            .chain(argv.iter().cloned())
+            .collect::<Vec<_>>(),
+    );
+    let mut kifu_file = kifu_target
+        .path(&kifu::Name {
+            kind: "deep-gap",
+            label: "",
+            first: start,
+            last: start + games.max(1) - 1,
+            key: &key,
+            commit: &run_info.engine,
+        })
+        .map(|p| kifu::Appender::open(&p))
+        .transpose()?;
+    let seat = kifu::same_seat("deep-gap", "{}");
+    let kifu_run = kifu_file.as_ref().map(|_| (&run_info, &seat));
     let t0 = Instant::now();
     let (mut positions, mut differ) = (0usize, 0usize);
     let results = parallel_map(
         &items,
         |&g, _| {
-            catch_unwind(AssertUnwindSafe(|| play_game(g, &cfg)))
+            catch_unwind(AssertUnwindSafe(|| play_game(g, &cfg, kifu_run)))
                 .unwrap_or_else(|_| Err("途中で止まりました（panic）".into()))
                 .map_err(|e| format!("試合 {g}: {e}"))
         },
-        |n, total, r, _| {
+        |n, total, r, i| {
             match r {
-                Ok(rows) => {
+                Ok((rows, line)) => {
+                    // 棋譜を試合の行より先に書く（間で止まっても、再開でその試合を打ち直し、棋譜は 2 度書かない）
+                    if let (Some(k), Some(l)) = (kifu_file.as_mut(), line) {
+                        k.write(items[i], l).unwrap_or_else(|e| panic!("{e}"));
+                    }
                     for v in rows {
                         if v["game"] != json!(true) {
                             positions += 1;
@@ -766,6 +817,10 @@ fn play(argv: &[String]) -> Result<(), String> {
         results.len(),
         fixed(t0.elapsed().as_secs_f64(), 0)
     );
+    if let Some(k) = &kifu_file {
+        let (p, n) = k.summary();
+        println!("棋譜: {p}（{n} 試合）");
+    }
     Ok(())
 }
 
@@ -1598,7 +1653,7 @@ mod tests {
     fn play_game_rows_rebuild_and_roll_out() {
         let cfg = light_config();
         let g = 3;
-        let rows = play_game(g, &cfg).unwrap();
+        let rows = play_game(g, &cfg, None).unwrap().0;
         let game = rows.last().unwrap();
         assert_eq!(game["game"], json!(true));
         assert_eq!(game["deep"], json!(cfg.deep_text));

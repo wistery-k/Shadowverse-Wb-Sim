@@ -4,7 +4,8 @@
 この棋譜を打ち直して数える形にそろえていく（審査の文書「AI の設計の審査と今後の方針」のタブ「棋譜を 1 つの形にそろえる」。
 段取り 1 は「どこに書くか」〜「1 行の形」、段取り 2 は「出来事」と「数える」）。
 
-- 書くのは `compare`・`yardstick`・`profile`・`td selfplay`・`survey run`（svwb。`npm run compare` 等も同じ）。打つ手・試合は変わらない
+- 書くのは `compare`・`yardstick`・`profile`・`td selfplay`・`survey run`（svwb。`npm run compare` 等も同じ）と、
+  `rhino-compare`・`deck-compare`・`review zero`・`deep-gap play`・`beam-gap`（自己対戦を打つ回。2026-11-17 から。段取り 4 の案 1）。打つ手・試合は変わらない
 - 本体は `rust/engine/src/runner/kifu.rs`。開発サーバーの「リプレイ検索」タブ（`docs/commands.md`「リプレイ検索」）もこの形を読む
 - 名前は「棋譜」（コマンドと引数は `kifu`。ユーザー決定 2026-11-16）。前の名前の「リプレイ」（`--replays`）も引数としては使える
 
@@ -21,8 +22,9 @@
   引数の並びの FNV-1a）。同じ引数・同じコミットなら同じ名前で、同じ試合なので上書きする。設定だけが違う回（夜のキューの 2 つの profile 等）は指紋で分かれる
 - 手元の変更がある（コミットの末尾が `+`）回は、名前の末尾に書き始めた時刻（UTC。`-20261116T172114Z`）を足し、上書きしない（変更の中身が違う 2 回が同じ名前になるので）
 - 書いている間は `<ファイル>.tmp` に書き、全部の試合を書き終えてから名前を替える。途中で止まった回は `.tmp` のまま残る（`pack-run` は入れない）
-- `survey run` だけは、`.tmp` を使わず、そのファイルに 1 試合ずつ書き足す（調査は同じ引数で続きから回せるので）。結果の行より先に棋譜を書き、
+- `survey run`・`review zero`・`deep-gap play` は、`.tmp` を使わず、そのファイルに 1 試合ずつ書き足す（同じ引数で続きから回せるので）。結果の行より先に棋譜を書き、
   開くときに書いてある試合を読んで、同じ試合番号は 2 度書かない（途中で切れた最後の行は消す）。止まった回のファイルには、そこまでの試合が入っている
+- `beam-gap` は、自己対戦を打つ回だけ書く（`--positions` で局面を読む回は打たないので書かない）
 - 終わると、書いたファイルと試合の数を出す（`棋譜: <ファイル>（N 試合）`）。compare・yardstick は、台帳の行の `kifu` にファイルの名前を書く
   （フォルダは入れない。台帳は公開のリポジトリにコミットするので。持ち帰った後は共有フォルダの `data/kifu/<回の名前>/` の下で、夜のキューの分は `.gz` が付く。
   夜のキューが区切りの行を 1 行にまとめるときは、区切りごとの名前を試合番号の順に並べた列にする）
@@ -44,16 +46,17 @@
 | --- | --- |
 | `kind` | `"replay"` |
 | `version` | 形の版。2（2026-11-16 から）。1 は前の `--replays` の行（下） |
-| `source` | 書いたランナー（`"compare"`・`"yardstick"`・`"profile"`・`"td selfplay"`・`"survey"`） |
+| `source` | 書いたランナー（`"compare"`・`"yardstick"`・`"profile"`・`"td selfplay"`・`"survey"`・`"rhino-compare"`・`"deck-compare"`・`"review zero"`・`"deep-gap"`・`"beam-gap"`） |
 | `run` | 回の名前（台帳の名前 `--label`。無ければ空） |
 | `engine` | エンジンの版（コミット。手元の変更があれば末尾に `+`。夜のキューは組み立てたときのもの。台帳の `commit` と同じ） |
 | `pool` | カードプール（`"starter"`・`"azvaldt"`。両方のデッキのカードが入るプール。ベーシックだけなら `"starter"`。どちらにも入らなければ `"mixed"`） |
 | `g` | 試合番号 |
-| `swap` | 組（同じ試合番号で席とデッキを入れ替えた 2 試合）のどちらか。組の相手は、同じ回の同じ `g` で `swap` の違う試合。自己対戦（組が無い）には無い |
+| `swap` | 組（同じ試合番号で席とデッキを入れ替えた 2 試合）のどちらか。組の相手は、同じ回の同じ `g` で `swap` の違う試合。自己対戦（組が無い）と、席ごとにシードが違う rhino-compare・deck-compare には無い |
 | `names` | 席ごとのデッキの名前 |
-| `agents` | 席ごとの表示名（compare は `"A <設定>"`・`"B <設定>"`、yardstick の相手は `"B <物差しの名前>"`、profile は `"profile <設定>"`、survey は `"survey <設定>"`、自己対戦は `"td"`・`"td-frozen"`） |
-| `sides` | 席ごとの側（compare・yardstick は `"A"`（測る側）・`"B"`（相手）、自己対戦の `--frozen` は `"learner"`・`"frozen"`）。比べでなければ無い |
-| `ai` | 席ごとの AI の設定。compare・profile・survey は渡した設定の JSON（`{}` は今の既定。何が既定かは `engine` のコミットで決まり、補正は `nets` の指紋で分かる）、yardstick の相手は `{"yardstick": <名前>, "version", "fingerprint"}`、自己対戦は `{"model", "eps", "sampling", "opp", "potential"}`（固定した側は `--frozen` の設定）、profile の `--rhino` のリノセウスエルフは `{"rhino": true}` |
+| `agents` | 席ごとの表示名（compare は `"A <設定>"`・`"B <設定>"`、yardstick の相手は `"B <物差しの名前>"`、profile は `"profile <設定>"`、survey は `"survey <設定>"`、自己対戦は `"td"`・`"td-frozen"`、rhino-compare は `"A <AI> <設定>"`・`"B <相手の AI>"`、deck-compare は `"A rhino"`・`"A search"` 等、review zero・deep-gap・beam-gap は `"<ランナー> <設定>"`） |
+| `sides` | 席ごとの側（compare・yardstick は `"A"`（測る側）・`"B"`（相手）、rhino-compare・deck-compare は `"A"`（比べるデッキ）・`"B"`（相手）、自己対戦の `--frozen` は `"learner"`・`"frozen"`）。比べでなければ無い |
+| `variants` | 席ごとのデッキの案の名前（deck-compare の比べるデッキの席。カードの入れ替えなら `"知恵の輝き-1,最果ての罪・サタン+1"` の形、元のデッキは `"元のデッキ"`。相手の席は null）。案を比べない回には無い |
+| `ai` | 席ごとの AI の設定。compare・profile・survey・review zero は渡した設定の JSON（`{}` は今の既定。何が既定かは `engine` のコミットで決まり、補正は `nets` の指紋で分かる）、yardstick の相手は `{"yardstick": <名前>, "version", "fingerprint"}`、自己対戦は `{"model", "eps", "sampling", "opp", "potential"}`（固定した側は `--frozen` の設定）、profile の `--rhino` のリノセウスエルフは `{"rhino": true}`、rhino-compare は `{"agent": <AI の名前>, "opts": <設定>}`・相手は `{"agent": "search-classic"}` 等、deck-compare は `{"agent": "rhino" か "search", "net": <--net のファイル>}`、deep-gap・beam-gap は `{}` |
 | `nets` | 席ごとの補正と見込みの指紋 `{"valueNet", "potentialNet"}`（ファイルの中身の FNV-1a。台帳の `files` と同じ。書かなければ組み立てたときの `data/value-net.json`・`data/potential-net.json` の指紋、使わなければ null）。yardstick の相手・リノセウス用 AI は null（版と指紋で見分ける） |
 | `seed` | 試合のシード |
 | `decks` | 席ごとのデッキ（カード ID の列。並び順も山札のシャッフルに効く） |
@@ -119,7 +122,7 @@ svwb kifu events <棋譜>… [--where '<条件>,…'] [--event '…'] [--out 出
 | `deck`・`arch` | 自分のデッキの名前・型（名前の「（」の前） |
 | `opp`・`oppArch` | 相手のデッキの名前・型 |
 | `pair` | どちらかの席のデッキ（`pair~クキシロB` で、クキシロB の絡む組。`!~` は両方の席が合わないもの） |
-| `side`・`agent`・`run`・`source`・`engine`・`pool` | 棋譜の行の項目（`side=A` で compare の測る側） |
+| `side`・`agent`・`variant`・`run`・`source`・`engine`・`pool` | 棋譜の行の項目（`side=A` で compare の測る側。`variant` は deck-compare の案の名前） |
 | `g`・`seat`・`swap` | 試合番号（`g=0-999` で範囲）・席（0・1）・組のどちらか（0・1） |
 | `first`・`second`・`won`・`lost`・`draw` | 先攻・後攻・勝った・負けた・引き分け（値を付けない） |
 
@@ -136,7 +139,7 @@ svwb kifu events <棋譜>… [--where '<条件>,…'] [--event '…'] [--out 出
 | `n`・`pp`・`ab`・`playable`・`i`・`ougi` | 数の項目（`playable` は数。`playable>0 pp>0` で、プレイできるカードと PP を残してターンを終えた） |
 
 文字の条件は `~`（含む）・`!~`（含まない）・`=`・`!=`、数の条件は `=`・`!=`・`>=`・`<=`・`>`・`<`。分け方（`--by`）は
-`deck`・`arch`・`opp`・`oppArch`・`side`・`agent`・`first`（先攻・後攻）・`result`（勝ち・負け・引き分け）・`seat`・`run`・`source`・`engine`・`pool`・`file`。
+`deck`・`arch`・`opp`・`oppArch`・`side`・`agent`・`variant`・`first`（先攻・後攻）・`result`（勝ち・負け・引き分け）・`seat`・`run`・`source`・`engine`・`pool`・`file`。
 
 例（2026-11-16 の合格の確かめ。棋譜は共有フォルダの `data/kifu/kukishiro-check/`、中身は `logs/kukishiro-check/MANIFEST.md`）:
 

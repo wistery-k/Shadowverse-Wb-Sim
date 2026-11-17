@@ -1232,6 +1232,7 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
             agent: "td".into(),
             ai: Json::Obj(ai),
             nets: kifu::nets_from(Some(model_path), potential_file),
+            variant: None,
         };
         let frozen_seat = match arg(args, "frozen") {
             Some(text) => {
