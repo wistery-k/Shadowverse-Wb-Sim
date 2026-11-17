@@ -37,4 +37,6 @@ pub struct Thought {
     pub candidates: Vec<ThoughtCandidate>,
     /// 選ぶ手（choose_action と同じ）
     pub chosen: Action,
+    /// 決定化ごとの、読み直した終局面の引き直しごとの点数と、相手の手札の引き直しの種（roots と同じ順。調べもの用。svwb review explain）
+    pub details: Vec<(Vec<crate::ai::search::ReadDetail>, Vec<u32>)>,
 }

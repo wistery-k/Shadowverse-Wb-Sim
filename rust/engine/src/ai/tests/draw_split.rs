@@ -123,3 +123,40 @@ fn split_value_does_not_depend_on_the_drawn_card() {
     }
     assert_eq!(value(o.clone(), &s), value(o, &t));
 }
+
+#[test]
+fn draw_first_moves_the_draw_to_the_front() {
+    // drawFirst: 引く手を前に動かしても終わりの局面が同じなら、引く手を先に打つ（引いたカードを見てから残りを考える）。
+    // ゴブリンの後に知恵の輝きを打つ並びは、知恵の輝きから打つ並びになる
+    let mut s = position(3);
+    s.players[0].pp = 3;
+    s.players[0].hand = hand_cards(&mut s, &["ゴブリン", "ゴブリン", "知恵の輝き"]).into();
+    let wisdom = Action::Play(iid_of(&s, "知恵の輝き"));
+    let legal = legal_actions(&s);
+    let read_lines = |opts: SearchOptions| -> Vec<Vec<Action>> {
+        SearchAgent::new(opts)
+            .think_with(&s, &legal, &mut Rng::new(3), Some(None))
+            .expect("考え")
+            .candidates
+            .iter()
+            .filter(|c| c.read.is_some())
+            .map(|c| c.steps.clone())
+            .collect()
+    };
+    let late = |lines: &[Vec<Action>]| {
+        lines
+            .iter()
+            .any(|l| l.iter().position(|a| *a == wisdom).is_some_and(|k| k > 0))
+    };
+    assert!(
+        late(&read_lines(split_options())),
+        "前提: 後で引く並びがある"
+    );
+    let o = SearchOptions {
+        draw_first: true,
+        ..split_options()
+    };
+    let lines = read_lines(o);
+    assert!(!late(&lines), "後で引く並びが残っている: {lines:?}");
+    assert!(lines.contains(&vec![wisdom]));
+}

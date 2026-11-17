@@ -3,6 +3,8 @@
 //!   svwb review run --record <記録.json> --points <局面.jsonl> --out <結果.jsonl> [--m 32] [--confirm 96] [--flag 10] [--opts '<JSON>'] [--all 0|1] [--seat 0|1] [--batch 4]
 //!   svwb review zero --out <結果.jsonl> --games a-b --decks <デッキ>,…|@<デッキの組> [--rate 0.3] [--m 32] [--confirm 96] [--flag 10] [--opts '<JSON>'] [--batch 2]
 //!   svwb review report <結果.jsonl> [--out <報告.md>]
+//!   svwb review explain --record <記録.json> --points <局面.jsonl> --turn <turns の添字> [--step <手順>] [--opts '<JSON>'] [--width 8,64] [--samples 48]
+//!                       [--playouts N] [--show K]
 //!
 //! **run**: 勝敗まで入れて保存したプロの試合の記録（`--record`）と、`npm run review`（scripts/review-main.ts）が記録から作った局面（`--points`。
 //! ターンごとに、保存した最初の局面と、そこから記録の手順を当てた各手順の前の局面）で、プロの手番ごとに、プロの並びと今の AI の並びを打ち比べる。
@@ -24,6 +26,11 @@
 //!
 //! **report**: 結果を Markdown にする。台帳には書かない（道具の確かめの間）。
 //!
+//! **explain**: run と同じ局面・同じ乱数で AI に考えさせ、読み直した終局面ごとの点数と引き直しごとの点数（負けを読んだ回数）、
+//! プロの並びをビームに強いて同じ乱数で読み直した点数、相手の手札の引き直しごとの手札を書き出す（調べもの用。台帳にも結果のファイルにも書かない）。
+//! --width は読みの中の相手のビームの幅を変えて負けを読む回数を、--playouts は AI の並びとプロの並びの終局面から続きを N 回ずつ打った勝ち負けとターンを出す
+//! （--show K で負けた続きを K 本まで文章で）。
+//!
 //! 局面を手で書いて渡す口は無い（run は勝敗のある記録と、記録の turns と合う局面だけを受け取る。CLAUDE.md「ソフト打ち」・試合の記録の線引き 3）。
 
 use super::compare::{compare_pair, deck_options};
@@ -38,12 +45,17 @@ use super::ledger;
 use super::options::compare_options;
 use super::parallel::{parallel_map, thread_count};
 use super::survey::{
-    actions_json, float_flag, paired, playout_ends_with, pm, texts, win_of, MISS_POINTS, MISS_Z,
+    actions_json, float_flag, paired, playout_ends_with, pm, texts, win_of, PlayoutEnd, PlayoutLog,
+    MISS_POINTS, MISS_Z,
 };
 use crate::ai::determinize::canonical_view;
 use crate::ai::exact_lethal::reset_exact_lethal_cache;
+use crate::ai::keys::turn_order_hash;
 use crate::ai::lethal::reset_lethal;
-use crate::ai::search::{is_chance_step, SearchAgent, SearchOptions};
+use crate::ai::search::{
+    is_chance_step, Allow, OpponentSearch, ReadDetail, SearchAgent, SearchOptions, DANGER,
+};
+use crate::ai::think::ThoughtCandidate;
 use crate::ai::{seed_of, Agent, Rng};
 use crate::data::Deck;
 use crate::game::{acting_player, apply_legal, create_game, legal_actions, try_apply_action};
@@ -54,6 +66,7 @@ use crate::state_json::{action_from_json, action_to_json, state_from_json, state
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
+use std::sync::Arc;
 use std::time::Instant;
 
 /// 局面ごとの乱数に混ぜる印（"REVW"）
@@ -1578,12 +1591,460 @@ fn report(argv: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+// ---------------------------------------------------------------- explain
+
+/// 読みの中の相手の幅を変えて負けを読んだ回数を数えるときの種に混ぜる印（"EXPL"）
+const EXPLAIN_TAG: u32 = 0x4558_504C;
+
+/// 引き直しごとの点数の短い表（負けは「負」、勝ちは「勝」、ほかは点数）
+fn read_marks(xs: &[(f64, f64)]) -> String {
+    xs.iter()
+        .map(|&(_, v)| {
+            if v <= DANGER {
+                "負".to_string()
+            } else if v >= -DANGER {
+                "勝".to_string()
+            } else {
+                format!("{v:.0}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn losses(xs: &[(f64, f64)]) -> usize {
+    xs.iter().filter(|&&(_, v)| v <= DANGER).count()
+}
+
+/// root から並び acts を打った局面（打てない手の前まで）
+fn play_out(root: &GameState, acts: &[Action]) -> GameState {
+    let mut t = root.clone();
+    for a in acts {
+        match try_apply_action(&t, a) {
+            Some(n) => t = n,
+            None => break,
+        }
+    }
+    t
+}
+
+/// 自分のターンのビームを、決定化した局面 root からプロの並び pro の通りに打たせる（pro を打ち終えた後は自由）。
+/// 局面は JSON の文字列で持つ（Allow はスレッドをまたげる形なので、GameState を持てない）
+fn force_plan(root: &GameState, pro: &[Action]) -> Allow {
+    let mut keys: Vec<(u32, String, Action)> = Vec::new();
+    let mut t = root.clone();
+    for a in pro {
+        if matches!(a, Action::EndTurn) {
+            break;
+        }
+        keys.push((
+            turn_order_hash(&t),
+            state_to_json(&t).stringify(),
+            a.clone(),
+        ));
+        match try_apply_action(&t, a) {
+            Some(n) => t = n,
+            None => break,
+        }
+    }
+    Arc::new(move |s: &GameState, a: &Action, _p: PlayerIndex| {
+        let h = turn_order_hash(s);
+        let mut json: Option<String> = None;
+        for (kh, kj, ka) in &keys {
+            if *kh != h {
+                continue;
+            }
+            let j = json.get_or_insert_with(|| state_to_json(s).stringify());
+            if j == kj {
+                return a == ka;
+            }
+        }
+        true
+    })
+}
+
+/// 読み直した終局面 1 つを書き出す
+fn print_detail(root: &GameState, p: PlayerIndex, d: &ReadDetail, mark: &str) {
+    let full = texts(root, &d.full, p).join("、");
+    println!(
+        "  {mark}{}: 選ぶ値 {:.1}（読み {:.1}・ターン末 {:.1}{}）、負けを読んだ {}/{}{}",
+        step_text(root, &d.action, p),
+        d.value,
+        d.read_value,
+        d.mix_turn_end,
+        if (d.mix_turn_end - d.turn_end).abs() > 1e-9 {
+            format!("。ビームのターン末 {:.1}", d.turn_end)
+        } else {
+            String::new()
+        },
+        losses(&d.reads),
+        d.reads.len(),
+        match d.split_at {
+            Some(c) => format!("、{} 手目の引く手・ランダムな手で区切った", c + 1),
+            None => String::new(),
+        }
+    );
+    println!("      並び: {full}");
+    println!("      引き直しごと: {}", read_marks(&d.reads));
+}
+
+/// svwb review explain: 記録の局面で、AI がその並びを選んだ理由を数字で出す（調べもの用。台帳には書かない）。
+/// 局面は run と同じく記録と --points から作り、AI も run と同じ乱数で考える。
+/// - 読み直した終局面ごとの、選ぶ値・読み直した点数・ターン末の点数・引き直しごとの点数（負けを読んだ回数）
+/// - プロの並び（区切りまで）を、ビームに強いて同じ乱数で読み直したもの（候補に無いプロの並びを AI がどう採点するか）
+/// - 相手の手札の引き直しごとの手札（区切らない終局面の引き直しの順）
+/// - --width 8,64: 読みの中の相手のビームの幅を変え、選んだ並びとプロの並びの終局面から、--samples 回ずつ相手のターンを読んで負けた回数
+fn explain(argv: &[String]) -> Result<(), String> {
+    let (flags, rest) = parse_flags(argv)?;
+    if !rest.is_empty() {
+        return Err(format!("不明な引数: {}", rest.join(" ")));
+    }
+    check_flags(
+        &flags,
+        &[
+            "record", "points", "turn", "step", "opts", "width", "samples", "playouts", "show",
+        ],
+    )?;
+    let rec_path = flag(&flags, "record").ok_or("--record を渡してください")?;
+    let pts_path = flag(&flags, "points").ok_or("--points を渡してください")?;
+    let want_turn = num_flag(&flags, "turn", u32::MAX)?;
+    if want_turn == u32::MAX {
+        return Err(
+            "--turn を渡してください（記録の turns の添字。報告のターンから 1 を引いたもの）"
+                .into(),
+        );
+    }
+    let want_step = match flag(&flags, "step") {
+        None => None,
+        Some(v) => Some(
+            v.parse::<usize>()
+                .map_err(|_| format!("--step が読めません: {v}"))?,
+        ),
+    };
+    let opts_text = flag(&flags, "opts").unwrap_or("{}").to_string();
+    let opts = compare_options(&opts_text)?;
+    let widths: Vec<usize> = match flag(&flags, "width") {
+        None => Vec::new(),
+        Some(v) => v
+            .split(',')
+            .map(|x| {
+                x.trim()
+                    .parse::<usize>()
+                    .map_err(|_| format!("--width が読めません: {v}"))
+            })
+            .collect::<Result<_, _>>()?,
+    };
+    let samples = num_flag(&flags, "samples", 48)? as usize;
+    let playouts = num_flag(&flags, "playouts", 0)?;
+    let show = num_flag(&flags, "show", 0)? as usize;
+    let text =
+        std::fs::read_to_string(rec_path).map_err(|e| format!("{rec_path} を読めません: {e}"))?;
+    let record: Value =
+        serde_json::from_str(&text).map_err(|e| format!("{rec_path} が読めません: {e}"))?;
+    let points = read_rows(pts_path)?;
+    let turns = record_turns(&record, &points, None)?;
+    let seats = record["meta"]["seats"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let names = [seat_name(&seats[0]), seat_name(&seats[1])];
+    let base = record["seed"].as_u64().unwrap_or(0) as u32;
+    let pts = points_of(&turns, &names, base, |t, step| {
+        t.t == want_turn as usize && want_step.is_none_or(|w| w == step)
+    });
+    if pts.is_empty() {
+        return Err(
+            "その局面がありません（--turn は記録の turns の添字、--step は記録の手順の番号）"
+                .into(),
+        );
+    }
+    for pt in &pts {
+        let s = pt.game_state();
+        let p = pt.p;
+        println!(
+            "== ターン {}（turns[{}]）・手順 {}・{}・{}",
+            pt.t + 1,
+            pt.t,
+            pt.step,
+            if pt.kind == "start" {
+                "ターンの最初"
+            } else {
+                "引いた後"
+            },
+            names[p]
+        );
+        for line in describe(&s, p, &names) {
+            println!("  {line}");
+        }
+        println!("  プロの並び: {}", texts(&s, &pt.pro, p).join("、"));
+        if let Some(why) = pt.skip {
+            println!("  比べない（{why}）");
+            continue;
+        }
+        let legal = legal_actions(&s);
+        reset_lethal();
+        reset_exact_lethal_cache();
+        let agent = SearchAgent::new(opts.clone());
+        let Some(th) = agent.think_with(&s, &legal, &mut Rng::new(mix(pt.seed, 0)), None) else {
+            println!("  打てる手が 1 つ");
+            continue;
+        };
+        if let Some(l) = &th.lethal {
+            println!("  リーサル: {}", step_text(&s, l, p));
+            continue;
+        }
+        let root = &th.roots[0];
+        let (details, seeds) = &th.details[0];
+        println!(
+            "  AI の選ぶ手: {}（読み直した終局面 {}、相手の手札の引き直し {}）",
+            step_text(&s, &th.chosen, p),
+            details.len(),
+            seeds.len()
+        );
+        if let Some(c) = th.candidates.iter().find(|c| c.action == th.chosen) {
+            let r = &th.roots[c.sample];
+            println!(
+                "  AI の打つ並び（決定化 {}。この後は考え直す）: {}",
+                c.sample,
+                texts(r, &c.steps, p).join("、")
+            );
+        }
+        // 最初の手ごとに選ぶ値の最も高い終局面が、その手の値（plan_turn と同じ）
+        let best_of = |a: &Action| -> Option<usize> {
+            let mut b: Option<usize> = None;
+            for (i, d) in details.iter().enumerate() {
+                if d.action == *a && b.is_none_or(|j: usize| d.value > details[j].value) {
+                    b = Some(i);
+                }
+            }
+            b
+        };
+        let chosen_i = best_of(&th.chosen);
+        for (i, d) in details.iter().enumerate() {
+            let mark = if Some(i) == chosen_i { "★ " } else { "" };
+            print_detail(root, p, d, mark);
+        }
+        let unread: Vec<&ThoughtCandidate> = th
+            .candidates
+            .iter()
+            .filter(|c| c.value.is_none())
+            .take(6)
+            .collect();
+        if !unread.is_empty() {
+            println!("  読み直さなかった最初の手（ターン末の点数の高い順）:");
+            for c in unread {
+                println!(
+                    "    {:.1}: {}",
+                    c.turn_end.total,
+                    texts(root, &c.steps, p).join("、")
+                );
+            }
+        }
+        // プロの並びを強いて、同じ乱数で読み直す
+        let pro_detail: Option<ReadDetail> =
+            if pt.pro.first().is_some_and(|a| matches!(a, Action::EndTurn)) {
+                None
+            } else {
+                let forced = SearchOptions {
+                    allow: Some(force_plan(root, &pt.pro)),
+                    ..opts.clone()
+                };
+                reset_lethal();
+                reset_exact_lethal_cache();
+                let fa = SearchAgent::new(forced);
+                match fa.think_with(&s, &legal, &mut Rng::new(mix(pt.seed, 0)), None) {
+                    Some(t2) if t2.lethal.is_none() => {
+                        let pro_cut: Vec<Action> = pt
+                            .pro
+                            .iter()
+                            .filter(|a| !matches!(a, Action::EndTurn))
+                            .cloned()
+                            .collect();
+                        t2.details[0]
+                            .0
+                            .iter()
+                            .filter(|d| {
+                                d.full.starts_with(&pro_cut) || pro_cut.starts_with(&d.full)
+                            })
+                            .max_by(|x, y| x.value.total_cmp(&y.value))
+                            .cloned()
+                    }
+                    _ => None,
+                }
+            };
+        match &pro_detail {
+            Some(d) => {
+                println!("  プロの並びを強いて読み直したもの（同じ決定化・同じ引き直し）:");
+                print_detail(root, p, d, "◆ ");
+            }
+            None => {
+                println!("  プロの並びは読み直せない（ターン終了だけ・リーサル・ビームに無い）")
+            }
+        }
+        // 相手の手札の引き直しごとの手札（区切らない終局面の引き直しの順。AI の選んだ終局面から見たもの）
+        if let Some(ci) = chosen_i {
+            let end = play_out(root, &details[ci].full);
+            if end.phase != Phase::Ended && !seeds.is_empty() {
+                println!("  相手の手札の引き直しごと（区切らない終局面の引き直しの順）:");
+                let q = 1 - p;
+                for (k, &seed) in seeds.iter().enumerate() {
+                    let d = agent.read_view(&end, p, seed);
+                    let hand: Vec<String> = d.players[q]
+                        .hand
+                        .iter()
+                        .map(|h| crate::state::card(h.card).name.clone())
+                        .collect();
+                    // 読んだ後の局面（自分の次のターンの最初）: 自分の体力と、相手が場に出したもの
+                    let (v, after) = agent.read_after(&end, p, seed);
+                    let board: Vec<String> = after.players[q]
+                        .board
+                        .iter()
+                        .map(|c| crate::state::card(c.card).name.clone())
+                        .collect();
+                    println!(
+                        "    {:>2}: {}　→ 点数 {:.0}、自分の体力 {}{}、相手の場 {}",
+                        k + 1,
+                        hand.join("、"),
+                        v,
+                        after.players[p].leader_hp,
+                        if after.phase == Phase::Ended {
+                            "（決着）"
+                        } else {
+                            ""
+                        },
+                        board.join("、")
+                    );
+                }
+            }
+        }
+        // 読みの中の相手の幅を変えて、負けを読んだ回数を比べる
+        if !widths.is_empty() {
+            let ends: Vec<(&str, GameState)> = [
+                ("AI", chosen_i.map(|i| &details[i])),
+                ("プロ", pro_detail.as_ref()),
+            ]
+            .into_iter()
+            .filter_map(|(n, d)| d.map(|d| (n, play_out(root, &d.full))))
+            .collect();
+            let wseeds: Vec<u32> = (0..samples)
+                .map(|i| seed_of(&[EXPLAIN_TAG, pt.seed, i as u32]))
+                .collect();
+            for &w in &widths {
+                let wopts = SearchOptions {
+                    opponent_search: opts
+                        .opponent_search
+                        .map(|o| OpponentSearch { beam_width: w, ..o }),
+                    ..opts.clone()
+                };
+                let wa = SearchAgent::new(wopts);
+                let mut cells = Vec::new();
+                for (n, end) in &ends {
+                    let vs = wa.read_values(end, p, &wseeds);
+                    let lost = vs.iter().filter(|&&v| v <= DANGER).count();
+                    cells.push(format!("{n} {lost}/{}", vs.len()));
+                }
+                println!("  読みの中の相手の幅 {w}: 負けを読んだ回数 {}（終局面は区切らない並びの終わり）", cells.join("・"));
+            }
+        }
+        // run の一段目と同じ打ち比べ（同じ r 回目の乱数）で、いつ勝負が付いたか
+        if playouts > 0 {
+            let ai_plan = th
+                .candidates
+                .iter()
+                .find(|c| c.action == th.chosen)
+                .map(|c| cut_plan(&s, &c.steps, p));
+            let cfg = Cfg {
+                m: playouts,
+                confirm: 0,
+                flag: 0.0,
+                all: false,
+                opts: opts.clone(),
+            };
+            for (n, plan) in [("プロ", Some(pt.pro.clone())), ("AI", ai_plan)] {
+                let Some(plan) = plan else { continue };
+                // 局面はスレッドをまたげないので、JSON から読み直す（Point と同じ）
+                let ends: Vec<PlayoutEnd> = parallel_map(
+                    &(0..playouts).collect::<Vec<u32>>(),
+                    |&r, _| {
+                        let s = pt.game_state();
+                        playout_ends_with(&cfg.opts, &s, p, &plan, pt.seed, r, false, true, None)
+                    },
+                    |_, _, _, _| {},
+                );
+                let wins = ends.iter().filter(|e| e.result == '1').count();
+                let mut by: BTreeMap<(char, i32), usize> = BTreeMap::new();
+                for e in &ends {
+                    *by.entry((e.result, e.turns.min(6))).or_default() += 1;
+                }
+                let hist: Vec<String> = by
+                    .iter()
+                    .map(|(&(r, t), &k)| {
+                        format!(
+                            "{}{}{k}",
+                            match r {
+                                '1' => "勝",
+                                '0' => "負",
+                                'd' => "分",
+                                _ => "×",
+                            },
+                            if t >= 6 {
+                                "6+".to_string()
+                            } else {
+                                format!("{t}:")
+                            }
+                        )
+                    })
+                    .collect();
+                let nexts: Vec<[i32; 4]> = ends.iter().filter_map(|e| e.next).collect();
+                let avg = |k: usize| {
+                    nexts.iter().map(|x| x[k] as f64).sum::<f64>() / nexts.len().max(1) as f64
+                };
+                println!(
+                    "  打ち比べ {n}: {wins}/{playouts} 勝（勝ち負けと何ターン後か: {}）。自分の次のターンの最初まで続いた {} 回の平均: 体力 {:.1} 対 {:.1}、フォロワー {:.1} 対 {:.1}",
+                    hist.join(" "),
+                    nexts.len(),
+                    avg(0),
+                    avg(1),
+                    avg(2),
+                    avg(3)
+                );
+                // 負けた回のうち始めの show 回の、自分の次のターンの終わりまでの手
+                for (r, _) in ends
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e)| e.result == '0')
+                    .take(show)
+                {
+                    let mut log = PlayoutLog::default();
+                    playout_ends_with(
+                        &cfg.opts,
+                        &s,
+                        p,
+                        &plan,
+                        pt.seed,
+                        r as u32,
+                        false,
+                        true,
+                        Some(&mut log),
+                    );
+                    println!("    {n} の {} 回目（負け）:", r + 1);
+                    for l in &log.lines {
+                        println!("    {l}");
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn main(argv: &[String]) -> Result<(), String> {
     match argv.first().map(String::as_str) {
         Some("run") => run(&argv[1..]),
         Some("zero") => zero(&argv[1..]),
         Some("report") => report(&argv[1..]),
-        _ => Err("使い方: svwb review run|zero|report …（rust/engine/src/runner/review.rs の先頭の説明）".into()),
+        Some("explain") => explain(&argv[1..]),
+        _ => Err("使い方: svwb review run|zero|report|explain …（rust/engine/src/runner/review.rs の先頭の説明）".into()),
     }
 }
 

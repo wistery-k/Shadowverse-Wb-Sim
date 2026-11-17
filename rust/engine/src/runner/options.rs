@@ -297,6 +297,9 @@ pub fn search_options(
             "deferFuseLastWords" => o.defer_fuse_last_words = flag(k, v)?,
             "fuseMinimal" => o.fuse_minimal = flag(k, v)?,
             "fuseOne" => o.fuse_one = flag(k, v)?,
+            "turnStartEnd" => o.turn_start_end = flag(k, v)?,
+            "drawCandidates" => o.draw_candidates = flag(k, v)?,
+            "drawFirst" => o.draw_first = flag(k, v)?,
             "settleTrades" => o.settle_trades = flag(k, v)?,
             "dominance" => o.dominance = flag(k, v)?,
             "reusePlan" => o.reuse_plan = flag(k, v)?,
@@ -361,6 +364,10 @@ pub fn search_options(
                             extra_eval: match v.get("extraEval") {
                                 None => false,
                                 Some(x) => flag("opponentSearch.extraEval", x)?,
+                            },
+                            per_first: match v.get("perFirst") {
+                                None => None,
+                                Some(x) => Some(count("opponentSearch.perFirst", x)?),
                             },
                         })
                     }
@@ -664,6 +671,19 @@ mod tests {
             0.25
         );
         assert!(compare_options(r#"{"rescoreMix":1.5}"#).is_err());
+        let o = compare_options(
+            r#"{"turnStartEnd":true,"drawCandidates":true,"drawFirst":true,"opponentSearch":{"beamWidth":8,"maxDepth":8,"perFirst":1}}"#,
+        )
+        .unwrap();
+        assert!(o.turn_start_end && o.draw_candidates && o.draw_first);
+        assert_eq!(o.opponent_search.and_then(|x| x.per_first), Some(1));
+        assert_eq!(
+            compare_options(r#"{"opponentSearch":{"beamWidth":8,"maxDepth":8}}"#)
+                .unwrap()
+                .opponent_search
+                .and_then(|x| x.per_first),
+            None
+        );
         // 消した実験用の項目は、使わないときの値だけを受け付ける
         for ok in [
             r#"{"rescoreAverage":"score","tree":null,"nextLethal":0,"scoreTurnEnd":"all"}"#,
