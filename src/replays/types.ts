@@ -93,6 +93,12 @@ export interface TurnEvent {
   ti?: number;
   /** 融合の素材 */
   m?: string[];
+  /** play: プレイの仕方（"accelerate"・"crystal"・"enhance"）・プレイしたときの姿（アクセラレート・結晶）・奥義（1）か解放奥義（2）か */
+  mode?: string;
+  as?: string;
+  ougi?: number;
+  /** evolve・superEvolve: 進化ポイント・超進化ポイントを使った */
+  ep?: boolean;
   /** trigger: クレストの能力か・能力の番号（1〜）・その持ち主のターンか */
   crest?: boolean;
   ab?: number;
@@ -129,6 +135,8 @@ export interface GameIndex {
   /** 決着まで打ったか */
   ended: boolean;
   steps: number;
+  /** 最初のターンの前に起きたこと（始めから持っているクレストと、マリガンの間のこと） */
+  pre?: TurnEvent[];
   turns: TurnIndex[];
 }
 

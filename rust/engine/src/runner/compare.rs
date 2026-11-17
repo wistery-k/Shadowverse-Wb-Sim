@@ -1,7 +1,7 @@
 //! 探索 AI の設定 A と B を対戦させる（TypeScript 版 scripts/compare-main.ts。npm run compare と同じ試合・同じ出力）。
 //!
 //!   svwb compare <試合数> '<Aの設定JSON>' '<Bの設定JSON>' [最初の試合番号] [Bのデッキ名] [--no-mirror] [--decks <デッキ>,…|@<デッキの組>]
-//!                [--with <デッキ名> | --without <デッキ名> | --involving <文字列>,…] [--label <名前>] [--no-ledger] [--kifu <ファイル> | --no-kifu]
+//!                [--with <デッキ名> | --without <デッキ名>] [--label <名前>] [--no-ledger] [--kifu <ファイル> | --no-kifu]
 //!
 //! 同じデッキの組で席とデッキを入れ替えて 2 試合ずつ行い、A の勝率とデッキごとの A の勝率を出す。
 //! 2 試合の組ごとの A の勝ち数（2・1・0）の数と、組のばらつきから求めた標準誤差も出す。
@@ -22,8 +22,8 @@
 //! 「そのデッキの絡む k 番目の試合番号」（with_game）で、組の 2 試合（鏡）はそのまま。見ていないデッキを渡したときの落ち方を、
 //! そのデッキの絡む試合だけで測る用（docs/STATE.md の案 E）。`--without <デッキ名>` はその逆で、そのデッキの絡まない 36 組だけを打つ
 //! （そのデッキで学び足した補正が、ほかのデッキどうしの判断を壊していないかを測る用）。
-//! `--involving <文字列>,…` なら、A か B のデッキの名前に並べた文字列のどれかを含む組だけを打つ。--with と違って試合番号はそのままなので、
-//! 同じ試合番号の範囲を全部打ったときのその組と同じ試合になる（回した compare のうち、ある型の絡む組だけの A の勝率を出す用）。
+//! 回した compare のうち、ある型の絡む組だけの A の勝率は、棋譜から引く（`svwb kifu winrate <棋譜> --where 'side=A,pair~<型>'`。
+//! docs/kifu.md「数える」。2026-11-16 までの `--involving` はこれに替えて消した）。
 
 use super::deck_compare::read_deck_list;
 use super::kifu::{self, RunInfo, Seat};
@@ -223,16 +223,8 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     // --with: そのデッキの絡む組だけを打つ。--without: 絡まない組だけを打つ
     let with = ledger::take_value(&mut argv, "--with")?;
     let without = ledger::take_value(&mut argv, "--without")?;
-    // --involving: デッキの名前に、並べた文字列のどれかを含む組だけを打つ（試合番号はそのまま）
-    let involving = ledger::take_value(&mut argv, "--involving")?;
-    let involving_words: Vec<String> = involving
-        .iter()
-        .flat_map(|s| s.split(','))
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    if involving.is_some() && involving_words.is_empty() {
-        return Err("--involving の後に、デッキの名前に含む文字列をカンマで並べます".into());
+    if argv.iter().any(|a| a == "--involving") {
+        return Err("--involving は消しました。全部の組を打って棋譜を書き、`svwb kifu winrate <棋譜> --where 'side=A,pair~<型>'` で絞ります（docs/kifu.md「数える」）".into());
     }
     let mut deck_list = None;
     if let Some(i) = argv.iter().position(|s| s == "--decks") {
@@ -266,23 +258,8 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             return Err(format!("不明なデッキ: {v}"));
         }
     }
-    if [with.is_some(), without.is_some(), involving.is_some()]
-        .iter()
-        .filter(|&&x| x)
-        .count()
-        > 1
-    {
-        return Err("--with・--without・--involving は一緒に使えません".into());
-    }
-    if involving.is_some() && vs.is_some() {
-        return Err("--involving と B のデッキは一緒に使えません".into());
-    }
-    let involved = |d: &Deck| involving_words.iter().any(|w| d.name.contains(w.as_str()));
-    if involving.is_some() && !decks.iter().any(|d| involved(d)) {
-        return Err(format!(
-            "--involving: 名前に {} を含むデッキがありません",
-            involving_words.join("・")
-        ));
+    if with.is_some() && without.is_some() {
+        return Err("--with と --without は一緒に使えません".into());
     }
     for (flag, w) in [("--with", &with), ("--without", &without)] {
         if let Some(w) = w {
@@ -302,25 +279,11 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     let tasks: Vec<(u32, bool)> = (0..games)
         .flat_map(|k| [(game_of(start + k), false), (game_of(start + k), true)])
         .filter(|&(g, swap)| vs.is_none_or(|v| &compare_pair(&decks, g, swap).1.name == v))
-        .filter(|&(g, _)| {
-            involving.is_none() || {
-                let (a, b) = compare_pair(&decks, g, false);
-                involved(a) || involved(b)
-            }
-        })
         .collect();
     let only = with
         .as_ref()
         .map(|w| format!("{w} の絡む組だけ"))
-        .or_else(|| without.as_ref().map(|w| format!("{w} の絡まない組だけ")))
-        .or_else(|| {
-            involving.as_ref().map(|_| {
-                format!(
-                    "名前に {} を含むデッキの絡む組だけ",
-                    involving_words.join("・")
-                )
-            })
-        });
+        .or_else(|| without.as_ref().map(|w| format!("{w} の絡まない組だけ")));
     if let (Some(o), Some(first), Some(last)) = (&only, tasks.first(), tasks.last()) {
         println!(
             "{o}（{} 組、試合番号 {}〜{}）",
@@ -413,12 +376,6 @@ pub fn main(argv: &[String]) -> Result<(), String> {
                     "without".into(),
                     without.as_ref().map_or(crate::json::Json::Null, |w| {
                         crate::json::Json::Str(w.clone())
-                    }),
-                ),
-                (
-                    "involving".into(),
-                    involving.as_ref().map_or(crate::json::Json::Null, |_| {
-                        crate::json::Json::Str(involving_words.join(","))
                     }),
                 ),
                 ("kifu".into(), kifu::ledger_name(kifu_path.as_ref())),
