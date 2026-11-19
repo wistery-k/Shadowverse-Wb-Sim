@@ -352,9 +352,20 @@ export interface MissLine {
   first: MissTally | null;
   second: MissTally | null;
 }
+/** 席のデッキ（調査の行のデッキの名前を、調査に渡したデッキの組に引き当てたもの。scripts/misses-lines-main.ts の --decks） */
+export interface MissDeck {
+  /** デッキの名前（例: ランプD（CR）） */
+  name: string;
+  /** プロのデッキの ID（<大会>/<チーム>_<クラス>） */
+  id: string;
+  /** 元のカード（40 枚） */
+  cards: string[];
+}
 export interface MissLines {
   id: string;
   source: string;
+  /** 両方の席のデッキ（席の順。無ければ null） */
+  decks: [MissDeck, MissDeck] | null;
   lines: MissLine[];
 }
 
@@ -405,6 +416,17 @@ export function parseProblem(v: unknown): MissProblem {
   }
 }
 
+function deck(x: unknown): MissDeck {
+  if (!isObj(x)) throw new Error(`"decks" の要素は {"name","id","cards"}`);
+  return { name: str(x, "name"), id: str(x, "id"), cards: strs(x.cards, "cards") };
+}
+
+function decks(x: unknown): [MissDeck, MissDeck] | null {
+  if (x === undefined) return null;
+  if (!Array.isArray(x) || x.length !== 2) throw new Error(`"decks" は席ごとのデッキ 2 つの配列`);
+  return [deck(x[0]), deck(x[1])];
+}
+
 function tally(x: unknown, k: string): MissTally | null {
   if (x === undefined) return null;
   if (!isObj(x) || typeof x.wins !== "number" || typeof x.games !== "number") throw new Error(`"${k}" は {"wins","games"}`);
@@ -418,6 +440,7 @@ export function parseLines(v: unknown): MissLines {
   return {
     id,
     source: str(v, "source"),
+    decks: decks(v.decks),
     lines: v.lines.map((l): MissLine => {
       if (!isObj(l) || (l.kind !== "ai" && l.kind !== "good")) throw new Error(`${id}: 並びの "kind" は ai か good`);
       const rethink = l.rethink ?? null;

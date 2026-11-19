@@ -1410,7 +1410,51 @@ progress {
   font-size: 11px;
   font-weight: normal;
 }
-/* 一例の手（色を変えて札を添える） */
+/* デッキと残りの山札 */
+.misses-decks {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  font-size: 13px;
+}
+.misses-decks summary {
+  cursor: pointer;
+}
+.misses-decks[open] summary {
+  margin-bottom: 4px;
+}
+.misses-decks-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 8px;
+  align-items: start;
+}
+.misses-deck {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px;
+  display: grid;
+  gap: 4px;
+}
+.misses-deck-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.misses-deck-table td {
+  padding: 1px 4px;
+}
+.misses-deck-table .num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.misses-deck-table tbody tr {
+  cursor: pointer;
+}
+.misses-deck-table tbody tr:hover {
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+}
+/* 一例の手（色を変える） */
 .misses-view .example {
   color: var(--example);
 }

@@ -3,9 +3,12 @@
 // 問題集のページ（src/ui/Misses.tsx）が盤面の下に並べ、1 手ずつ進めて見せるのに使う。
 // 問のファイルには書かない（問題集の指紋 set_fingerprint は問のファイルの中身全部から作るので、足すと変わる）。
 //
-// 使い方: npm run misses-lines -- <調査の出力.jsonl(.gz)>… [--dir misses/azvaldt] [--force] [--check]
+// 使い方: npm run misses-lines -- <調査の出力.jsonl(.gz)>… [--dir misses/azvaldt] [--decks @<デッキの組>] [--force] [--check]
 //   問のファイルの origin（"from":"state"、"file":"g<試合>-i<手>.json"）と同じ試合・手の行を探す。
 //   --dir は問のフォルダ（既定 misses）。misses/azvaldt なら前期のローテーションのカードを足す。
+//   --decks は調査に渡したデッキの組（survey の --decks と同じ。例 @data/pools/azvaldt/sets/rep10.txt）。
+//   調査の行のデッキの名前（deck・opp）をその組のデッキに引き当て、両方の席のデッキ（名前と元の 40 枚）を decks に書く
+//   （問題集のページが、残りの山札と並べて出す。ユーザーの依頼 2026-11-19）。同じ名前のデッキが大会ごとにあるので、組で決める。
 //   既にある lines/<問>.json は書き直さない（--force で書き直す）。--check は書かずに、どこまで手に戻せたかだけ出す。
 //
 // 打ち比べは打ち直さない。調査の行から取るのは:
@@ -21,7 +24,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { basename, join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { agentOf } from "../src/ai/registry";
-import { actingPlayer, applyAction, legalActions, tryApplyAction } from "../src/engine/game";
+import type { ClassId } from "../src/cards/types";
+import { actingPlayer, applyAction, cardOf, legalActions, tryApplyAction } from "../src/engine/game";
 import { rngFrom, seedOf } from "../src/engine/rng";
 import type { Action, GameState, PlayerIndex } from "../src/engine/types";
 import { selectNets } from "../src/engine/wasm";
@@ -44,6 +48,20 @@ interface Row {
   plans?: Plan[];
   confirm?: { c: number; n: number; ai: string; alt: string } | null;
   state?: unknown;
+  /** 手番の側の席と、その席・相手の席のデッキの名前 */
+  p?: number;
+  deck?: string;
+  opp?: string;
+}
+
+/** 席のデッキ（lines/<問>.json の decks。席の順。src/misses/problems.ts の MissDeck と同じ） */
+export interface DeckOut {
+  /** デッキの名前（例: ランプD（CR）） */
+  name: string;
+  /** プロのデッキの ID（<大会>/<チーム>_<クラス>。data/pools/azvaldt/decks/<ID>.txt） */
+  id: string;
+  /** 元のカード（40 枚。ファイルの行の順） */
+  cards: string[];
 }
 
 /** 勝ち負けの数 */
@@ -121,7 +139,36 @@ function matchTexts(start: GameState, texts: readonly string[], viewer: PlayerIn
   return best;
 }
 
-function format(body: { v: number; id: string; source: string; lines: LineOut[] }): string {
+/** デッキの組のファイル（survey の --decks と同じ。1 行に 1 つのデッキのファイル）を読み、名前 → デッキ（とクラス）にする */
+async function readDeckSet(arg: string): Promise<Map<string, { deck: DeckOut; cls: ClassId }>> {
+  const { proDeck } = await import("../src/record/decks");
+  const path = arg.replace(/^@/, "");
+  const out = new Map<string, { deck: DeckOut; cls: ClassId }>();
+  for (const raw of readFileSync(path, "utf8").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const m = /decks\/([^/]+\/[^/]+)\.txt$/.exec(line);
+    const d = m?.[1] ? proDeck(m[1]) : undefined;
+    if (!d) throw new Error(`${path}: プロのデッキが読めません: ${line}`);
+    if (out.has(d.name)) throw new Error(`${path}: 同じ名前のデッキが 2 つあります: ${d.name}`);
+    out.set(d.name, { deck: { name: d.name, id: d.id, cards: [...d.cards] }, cls: d.cls });
+  }
+  return out;
+}
+
+/**
+ * 問の局面の席 q が、そのデッキで打っているか: クラスが同じで、山札にデッキのカードがある。
+ * 枚数は比べない（歩む《愚者》・リンクルのように、同じカードを山札に足す能力がある）
+ */
+function checkDeck(state: GameState, q: number, d: DeckOut, cls: ClassId, id: string) {
+  const pl = state.players[q]!;
+  const own = [...pl.deck, ...pl.hand, ...pl.board].map((c) => cardOf(c.cardId).class).find((c) => c !== "neutral");
+  if (own !== undefined && own !== cls) throw new Error(`${id}: 席 ${q} のクラス（${own}）がデッキ「${d.name}」（${cls}）と違います`);
+  const known = new Set(d.cards);
+  if (pl.deck.length > 0 && !pl.deck.some((c) => known.has(c.cardId))) throw new Error(`${id}: 席 ${q} の山札に、デッキ「${d.name}」のカードが 1 枚もありません`);
+}
+
+function format(body: { v: number; id: string; source: string; decks?: [DeckOut, DeckOut]; lines: LineOut[] }): string {
   const list = (xs: readonly unknown[]) => (xs.length === 0 ? "[]" : `[\n${xs.map((x) => `        ${JSON.stringify(x)}`).join(",\n")}\n      ]`);
   const lines = body.lines.map((l) =>
     [
@@ -138,21 +185,24 @@ function format(body: { v: number; id: string; source: string; lines: LineOut[] 
       `    }`,
     ].join("\n"),
   );
-  return `{\n  "v": ${body.v},\n  "id": ${JSON.stringify(body.id)},\n  "source": ${JSON.stringify(body.source)},\n  "lines": [\n${lines.join(",\n")}\n  ]\n}\n`;
+  const decks = body.decks ? `  "decks": [\n${body.decks.map((d) => `    ${JSON.stringify(d)}`).join(",\n")}\n  ],\n` : "";
+  return `{\n  "v": ${body.v},\n  "id": ${JSON.stringify(body.id)},\n  "source": ${JSON.stringify(body.source)},\n${decks}  "lines": [\n${lines.join(",\n")}\n  ]\n}\n`;
 }
 
 export async function main(argv: string[]): Promise<number> {
   const force = argv.includes("--force");
   const check = argv.includes("--check");
   let dir = "misses";
+  let deckArg = "";
   const files: string[] = [];
   for (let k = 0; k < argv.length; k++) {
     const a = argv[k]!;
     if (a === "--dir") dir = argv[++k] ?? "";
+    else if (a === "--decks") deckArg = argv[++k] ?? "";
     else if (a !== "--force" && a !== "--check") files.push(a);
   }
-  if (files.length === 0 || !dir) {
-    console.error("使い方: npm run misses-lines -- <調査の出力.jsonl(.gz)>… [--dir misses/azvaldt] [--force] [--check]");
+  if (files.length === 0 || !dir || argv.includes("--decks") !== (deckArg !== "")) {
+    console.error("使い方: npm run misses-lines -- <調査の出力.jsonl(.gz)>… [--dir misses/azvaldt] [--decks @<デッキの組>] [--force] [--check]");
     return 2;
   }
   const MISSES = resolve(dir);
@@ -161,6 +211,7 @@ export async function main(argv: string[]): Promise<number> {
     selectNets("azvaldt");
     await import("../src/record/pool");
   }
+  const deckSet = deckArg ? await readDeckSet(deckArg) : null;
 
   // 調査の局面から足した問: 試合・手 → 問
   const wanted = new Map<string, { id: string; raw: unknown }>();
@@ -196,6 +247,16 @@ export async function main(argv: string[]): Promise<number> {
       }
       const p = problem.player;
       if (actingPlayer(problem.state) !== p) throw new Error(`${want.id}: 問の局面の手番が問の player と違います`);
+      let decks: [DeckOut, DeckOut] | undefined;
+      if (deckSet) {
+        if (row.p !== undefined && row.p !== p) throw new Error(`${want.id}: 調査の行の席（${row.p}）が問の player と違います`);
+        const own = deckSet.get(row.deck ?? "");
+        const opp = deckSet.get(row.opp ?? "");
+        if (!own || !opp) throw new Error(`${want.id}: 調査の行のデッキ「${row.deck ?? "?"}」「${row.opp ?? "?"}」が ${deckArg} にありません`);
+        const seats = p === 0 ? [own, opp] : [opp, own];
+        for (const [q, d] of seats.entries()) checkDeck(problem.state, q, d.deck, d.cls, want.id);
+        decks = [seats[0]!.deck, seats[1]!.deck];
+      }
       const confirm = row.confirm;
       const pick = (k: number, kind: LineOut["kind"], label: string, second: string): LineOut => {
         const plan = row.plans![k];
@@ -244,6 +305,7 @@ export async function main(argv: string[]): Promise<number> {
         v: 2,
         id: want.id,
         source: `${shown} の試合 ${row.g} の ${row.i} 手目`,
+        ...(decks ? { decks } : {}),
         lines: [pick(row.ai, "ai", "問を作ったときの AI の手", confirm.ai), pick(confirm.c, "good", "打ち比べで良い手", confirm.alt)],
       };
       if (check) continue;

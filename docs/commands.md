@@ -292,7 +292,7 @@ npm run misses -- duel <問> [--line '<名前>=<手の JSON の配列>']… [--m
 局面はシミュレータの中の試合からだけ取る。問はブラウザの「問題集」タブでも見られる（公開サイトにも出す。見られるのはリポジトリの問だけ）。問の形・合格の条件の書き方・ミスを指摘されたときの手順・問題集のページは [misses.md](misses.md)。
 
 ```sh
-npm run misses-lines -- <調査の出力.jsonl(.gz)>… [--dir misses/azvaldt] [--force] [--check]
+npm run misses-lines -- <調査の出力.jsonl(.gz)>… [--dir misses/azvaldt] [--decks @<デッキの組>] [--force] [--check]
 ```
 
 打ち比べ調査から足した問に、調査で比べた 2 つの並び（AI の選んだ候補と二段目の候補）を `<問のフォルダ>/lines/<問>.json` に書き添える（問題集のページが盤面の下に手順の候補として並べる）。
@@ -300,6 +300,8 @@ npm run misses-lines -- <調査の出力.jsonl(.gz)>… [--dir misses/azvaldt] [
 `--dir` は問のフォルダ（既定 `misses`。`misses/azvaldt` なら前期のローテーションのカードと補正 R3）。調査の読んだ並びを問の局面で打てる手に戻し、
 戻せなければそこから先を問の AI に考え直させて、ターンの終わりまでの手（`actions`）を書く（[misses.md](misses.md)「調査の並び・手順の候補」）。
 `--check` は書かずに、並びごとにどこまで戻せたかだけ出す。打ち比べは打ち直さない（Vite でビルドしてから動くので、WASM を作り直す）
+`--decks` は調査に渡したデッキの組（`survey` の `--decks` と同じ。例 `@data/pools/azvaldt/sets/rep10.txt`）で、調査の行のデッキの名前を組のデッキに引き当て、
+両方の席のデッキ（名前と元の 40 枚）を `decks` に書く（問題集のページの「デッキと残りの山札」が使う。同じ名前のデッキが大会ごとにあるので、名前だけでは決めない）
 
 ## ledger
 
