@@ -42,10 +42,10 @@ use super::human_plan::{
 use super::kifu::{self, RunInfo, Seat};
 use super::options::compare_options;
 use super::parallel::parallel_map;
-use crate::ai::aidata::ai_data;
 use crate::ai::determinize::determinize;
 use crate::ai::keys::turn_order_eq;
 use crate::ai::search::{SearchAgent, SearchOptions};
+use crate::ai::valuenet::default_value_net;
 use crate::ai::{Agent, Rng};
 use crate::data::{data, Kw};
 use crate::game::{acting_player, apply_legal, create_game, is_legal, legal_actions};
@@ -212,7 +212,7 @@ fn score(agent: &SearchAgent, end: &GameState, p: PlayerIndex, seeds: &[u32]) ->
 
 /// 点数を勝率（%）にする（σ(a·点数)。a は学習した補正のもの）
 pub(crate) fn win_pct(v: f64) -> f64 {
-    let a = ai_data().value_net.a;
+    let a = default_value_net().a();
     100.0 / (1.0 + (-a * v).exp())
 }
 

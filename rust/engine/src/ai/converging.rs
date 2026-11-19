@@ -47,8 +47,7 @@ fn touches_board(a: &'static Ability) -> bool {
 }
 
 fn has_timing_sensitive_ability(s: &GameState) -> bool {
-    for p in 0..2 {
-        let pl = &s.players[p];
+    for pl in &s.players {
         let crest_abs = pl
             .crests
             .iter()

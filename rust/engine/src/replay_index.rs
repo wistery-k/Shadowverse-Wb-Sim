@@ -451,8 +451,8 @@ pub fn replay_index(decks: [&[CardIdx]; 2], seed: u32, actions: &[Action]) -> Re
     let mut s = create_game(decks, seed);
     // 最初のターンの前に起きたこと: 始めから持っているクレスト（デッキに入れると置かれる信仰）と、マリガンの間に起きたこと
     let mut pre: Vec<Json> = Vec::new();
-    for p in 0..2 {
-        for c in s.players[p].crests.iter() {
+    for (p, pl) in s.players.iter().enumerate() {
+        for c in pl.crests.iter() {
             let mut e = obj(vec![
                 ("k", Json::Str("crestIn".into())),
                 ("p", num(p as u32)),

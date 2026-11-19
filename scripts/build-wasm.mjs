@@ -2,6 +2,7 @@
 // 1. npm run rust-data: カードのデータ・能力の定義・AI のデータを rust/engine/data/ に書き出す（中身が変わらなければ書き直さない）
 // 2. cargo で wasm32-unknown-unknown 向けにビルドする（変更が無ければすぐ終わる）
 // 3. できた .wasm を src/engine/svwb.wasm にコピーする（src/engine/wasm.ts が読み込む）
+// 4. ページが読み込む補正・見込みを src/engine/nets/<名前>.bin に書く（scripts/pack-nets.ts。WASM には埋め込まない）
 // Rust（cargo と rustup target add wasm32-unknown-unknown）が要る。
 
 import { execFileSync } from "node:child_process";
@@ -17,3 +18,4 @@ run("cargo", ["build", "--quiet", "--manifest-path", "rust/Cargo.toml", "-p", "s
 const built = join(root, "rust/target/wasm32-unknown-unknown/wasm/svwb_wasm.wasm");
 const dest = join(root, "src/engine/svwb.wasm");
 if (!existsSync(dest) || !readFileSync(dest).equals(readFileSync(built))) copyFileSync(built, dest);
+run(process.execPath, [join(root, "scripts/pack-nets.ts"), "--quiet"]);

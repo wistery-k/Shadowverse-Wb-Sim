@@ -2,6 +2,7 @@
 // ファイルは画面で読んで行に分け、行のまとまりを、持っている分の少ない Worker から順に配る。検索はすべての Worker に投げて結果を合わせる。
 
 import { MAX_WORKERS } from "../sim/pool";
+import { workerName } from "../engine";
 import { splitReplayText } from "./records";
 import type { MatchRow, ReplayQuery, SearchStats } from "./query";
 import type { ReplayWorkerRequest, ReplayWorkerResponse } from "./worker";
@@ -47,7 +48,7 @@ export class ReplayLibrary {
 
   private ensure(): void {
     while (this.workers.length < this.count) {
-      const w = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+      const w = new Worker(new URL("./worker.ts", import.meta.url), { type: "module", name: workerName() });
       w.onmessage = (e: MessageEvent<ReplayWorkerResponse>) => {
         const msg = e.data;
         const key = msg.type === "loaded" ? msg.job : msg.qid;

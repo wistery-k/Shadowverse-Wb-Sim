@@ -2738,8 +2738,7 @@ fn transform(s: &mut GameState, id: Iid, cid: CardIdx) {
         return;
     }
     // 手札から山札に戻ったカード（処理待ちの【スペルブースト時】で変身する宿題やるですぅ！）。手札での状態は消える
-    for q in 0..2 {
-        let pl = &mut s.players[q];
+    for pl in &mut s.players {
         if let Some(k) = pl.deck_kept.iter().position(|h| h.iid == id) {
             pl.deck_kept.remove(k);
             if let Some(r) = pl.deck.make_mut().iter_mut().find(|r| r.iid == id) {
@@ -2848,9 +2847,9 @@ fn used_list_mut(s: &mut GameState, iid: Iid) -> Option<&mut Vec<(u8, i32)>> {
     if let Some((q, i)) = s.find_board(iid) {
         return Some(&mut s.players[q].board.make_mut()[i].used_once);
     }
-    for q in 0..2 {
-        if let Some(i) = s.players[q].crests.iter().position(|c| c.iid == iid) {
-            return Some(&mut s.players[q].crests.make_mut()[i].used_once);
+    for pl in &mut s.players {
+        if let Some(i) = pl.crests.iter().position(|c| c.iid == iid) {
+            return Some(&mut pl.crests.make_mut()[i].used_once);
         }
     }
     None

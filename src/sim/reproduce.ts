@@ -4,6 +4,7 @@
 // デッキの並び順も山札のシャッフル結果に影響するので、順番を保ったまま文字列にする。
 
 import { DEFAULT_DECKS } from "../cards/defaultDecks";
+import type { NetsName } from "../engine/wasm";
 import { seatDecks, type Entrant, type GameRecord } from "./tournament";
 
 /**
@@ -41,8 +42,8 @@ function quote(s: string): string {
   return /^[\w.,*/=-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-/** 試合を再現する npm run game のコマンド */
-export function reproduceCommand(record: Pick<GameRecord, "a" | "b" | "aIsPlayer0" | "seed">, entrants: readonly Entrant[]): string {
+/** 試合を再現する npm run game のコマンド。pool はアズヴォルト環境のページの試合なら "azvaldt"（--pool。補正もそのページのもの） */
+export function reproduceCommand(record: Pick<GameRecord, "a" | "b" | "aIsPlayer0" | "seed">, entrants: readonly Entrant[], pool: NetsName = "starter"): string {
   const decks = seatDecks(record, entrants);
   const [e0, e1] = record.aIsPlayer0 ? [entrants[record.a]!, entrants[record.b]!] : [entrants[record.b]!, entrants[record.a]!];
   return [
@@ -50,5 +51,6 @@ export function reproduceCommand(record: Pick<GameRecord, "a" | "b" | "aIsPlayer
     `--seed ${record.seed}`,
     `--p0 ${quote(e0.agent)} --p0-deck ${quote(deckArg(decks[0]))}`,
     `--p1 ${quote(e1.agent)} --p1-deck ${quote(deckArg(decks[1]))}`,
+    ...(pool === "starter" ? [] : [`--pool ${pool}`]),
   ].join(" ");
 }

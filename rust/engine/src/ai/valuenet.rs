@@ -540,10 +540,31 @@ impl ValueNet {
     }
 }
 
-/// 探索 AI の既定の補正（data/value-net.json）
+/// 既定の補正（default_value_net。WASM では install_default_value_net で入れる）
+static DEFAULT_NET: OnceLock<ValueNet> = OnceLock::new();
+
+/// 探索 AI の既定の補正（data/value-net.json）。
+/// WASM はページが読み込んだもの（スターターは同じファイル、アズヴォルト環境は R3。ai/netpack.rs）
+#[cfg(feature = "embedded-nets")]
 pub fn default_value_net() -> &'static ValueNet {
-    static NET: OnceLock<ValueNet> = OnceLock::new();
-    NET.get_or_init(|| ValueNet::new(ai_data().value_net.clone()).expect("data/value-net.json"))
+    DEFAULT_NET
+        .get_or_init(|| ValueNet::new(ai_data().value_net.clone()).expect("data/value-net.json"))
+}
+
+/// 探索 AI の既定の補正（WASM。ページが読み込んで install_default_value_net で入れたもの）
+#[cfg(not(feature = "embedded-nets"))]
+pub fn default_value_net() -> &'static ValueNet {
+    DEFAULT_NET
+        .get()
+        .expect("探索 AI の補正を読み込んでいません（src/engine/wasm.ts が load_nets で入れる）")
+}
+
+/// 既定の補正を入れる（WASM で、ページの補正を読み込んだとき）。既定の補正を使う前に 1 回だけ
+pub fn install_default_value_net(raw: RawValueNet) -> Result<(), String> {
+    let net = ValueNet::new(raw)?;
+    DEFAULT_NET
+        .set(net)
+        .map_err(|_| "既定の補正はもう決まっています".to_string())
 }
 
 /// 探索の自分の評価の重みと、手を選ぶ方策の重み（SearchOptions の weights・policy_weights）

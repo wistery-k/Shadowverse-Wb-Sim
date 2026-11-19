@@ -18,6 +18,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 
 [features]
+default = ["embedded-nets"]
+# 探索 AI の既定の補正（data/value-net.json）と見込み（data/potential-net.json）を埋め込む（CLI・テスト）。
+# WASM（rust/wasm）は埋め込まず、ページが読み込んだ補正を入れる（ai/netpack.rs。スターターは同じファイル、アズヴォルト環境は R3）
+embedded-nets = []
 # 差分テストで実行された効果の種類を数える（svwb coverage）
 coverage = []
 # 処理ごとの時間を測る（svwb profile。src/prof.rs）

@@ -10,9 +10,12 @@ use std::cell::RefCell;
 use svwb_engine::ai::exact_lethal::reset_exact_lethal_cache;
 use svwb_engine::ai::lethal::reset_lethal;
 use svwb_engine::ai::lethal_hint::lethal_hint;
+use svwb_engine::ai::netpack;
+use svwb_engine::ai::potential::install_default_potential_net;
 use svwb_engine::ai::registry::create_agent;
 use svwb_engine::ai::search::ScoreParts;
 use svwb_engine::ai::think::Thought;
+use svwb_engine::ai::valuenet::install_default_value_net;
 use svwb_engine::ai::{Agent, Rng};
 use svwb_engine::data::{data, CardIdx};
 use svwb_engine::game::{attack_reach, attack_targets, fusion_candidates};
@@ -31,6 +34,8 @@ thread_local! {
     static OUT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     /// 作った AI（添字が JS に渡す番号。消したものは None）
     static AGENTS: RefCell<Vec<Option<Box<dyn Agent>>>> = const { RefCell::new(Vec::new()) };
+    /// 読み込んだ補正・見込みのハッシュ（netpack::checksum。読み込む前は空）
+    static NETS: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 enum Fail {
@@ -79,11 +84,8 @@ pub extern "C" fn out_len() -> usize {
 /// ptr は `alloc(len)` が返したもので、len バイトの UTF-8 が書かれていること（この関数が解放する）
 #[no_mangle]
 pub unsafe extern "C" fn call(ptr: *mut u8, len: usize) -> u32 {
-    static HOOK: std::sync::Once = std::sync::Once::new();
-    HOOK.call_once(|| {
-        std::panic::set_hook(Box::new(|info| set_out(info.to_string().into_bytes())));
-    });
-    let input = Vec::from_raw_parts(ptr, len, len.max(1));
+    set_panic_hook();
+    let input = take_bytes(ptr, len);
     let result = std::str::from_utf8(&input)
         .map_err(|e| Fail::Error(format!("要求が UTF-8 ではありません: {e}")))
         .and_then(|text| Json::parse(text).map_err(Fail::Error))
@@ -95,6 +97,64 @@ pub unsafe extern "C" fn call(ptr: *mut u8, len: usize) -> u32 {
     };
     set_out(out.into_bytes());
     code
+}
+
+/// panic したときの message を OUT に残す（JS がそれを読んでエラーにする）
+fn set_panic_hook() {
+    static HOOK: std::sync::Once = std::sync::Once::new();
+    HOOK.call_once(|| {
+        std::panic::set_hook(Box::new(|info| set_out(info.to_string().into_bytes())));
+    });
+}
+
+/// `alloc(len)` で確保して JS がバイト列を書いた領域を受け取る（この関数で解放する）
+///
+/// # Safety
+/// ptr は `alloc(len)` が返したもので、len バイトが書かれていること
+unsafe fn take_bytes(ptr: *mut u8, len: usize) -> Vec<u8> {
+    Vec::from_raw_parts(ptr, len, len.max(1))
+}
+
+/// 結果の文字列を OUT に書いて、`call` と同じ番号（0: 成功、2: エラー）を返す
+fn finish(result: Result<String, String>) -> u32 {
+    let (code, out) = match result {
+        Ok(v) => (0, v),
+        Err(m) => (2, m),
+    };
+    set_out(out.into_bytes());
+    code
+}
+
+/// 探索 AI の既定の補正と見込みを入れる（ページが読み込んだ補正のファイル。gzip を戻したもの。svwb_engine::ai::netpack）。
+/// AI を作る前に 1 回だけ呼ぶ（src/engine/wasm.ts が WASM を作るたびに呼ぶ）。結果は補正と見込みのハッシュ
+///
+/// # Safety
+/// ptr は `alloc(len)` が返したもので、len バイトが書かれていること（この関数が解放する）
+#[no_mangle]
+pub unsafe extern "C" fn load_nets(ptr: *mut u8, len: usize) -> u32 {
+    set_panic_hook();
+    let bytes = take_bytes(ptr, len);
+    finish((|| {
+        let (value, potential) = netpack::unpack(&bytes)?;
+        drop(bytes);
+        let sum = netpack::checksum(&value, &potential);
+        install_default_value_net(value)?;
+        install_default_potential_net(potential)?;
+        NETS.with(|n| *n.borrow_mut() = sum.clone());
+        Ok(sum)
+    })())
+}
+
+/// 補正と見込みの JSON（`{"value": 補正, "potential": 見込み}`）を CLI と同じく serde_json で読み、netpack::checksum を返す。
+/// 読み込んだ補正が JSON と同じ値かを確かめる（tests/nets.test.ts）
+///
+/// # Safety
+/// ptr は `alloc(len)` が返したもので、len バイトが書かれていること（この関数が解放する）
+#[no_mangle]
+pub unsafe extern "C" fn nets_checksum_json(ptr: *mut u8, len: usize) -> u32 {
+    set_panic_hook();
+    let bytes = take_bytes(ptr, len);
+    finish(netpack::checksum_of_json(&bytes))
 }
 
 fn field<'a>(req: &'a Json, key: &str) -> R<&'a Json> {
@@ -264,6 +324,15 @@ fn dispatch(req: &Json) -> R<Json> {
                 )
             }
         }
+        // 読み込んだ補正・見込みのハッシュ（load_nets の結果と同じ。読み込む前は null）
+        "netsChecksum" => NETS.with(|n| {
+            let n = n.borrow();
+            if n.is_empty() {
+                Json::Null
+            } else {
+                Json::Str(n.clone())
+            }
+        }),
         "agentNew" => {
             let name = match field(req, "name")? {
                 Json::Str(n) => n.as_str(),

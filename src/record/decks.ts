@@ -1,5 +1,6 @@
 // 試合の記録で選べるデッキ: 取り込んだプロのデッキ（data/pools/azvaldt/decks/<大会>/<チーム>_<クラス>.txt。npm run decks で変換）だけ。
 // 貼り付け・自作のデッキ・デッキの編集は付けない（CLAUDE.md「決定済みの前提」の試合の記録の条件）。
+// アズヴォルト環境のページ（公開サイト。src/azvaldt/decks.ts）の総当たりも、同じデッキだけを選べる（ユーザーの依頼 2026-11-19）。
 
 import { CLASS_IDS, CLASS_NAMES, type ClassId } from "../cards/types";
 import { POOL_CARD_BY_NAME } from "./pool";

@@ -24,7 +24,8 @@ const post = (msg: ReplayWorkerResponse) => self.postMessage(msg);
 
 self.onmessage = async (e: MessageEvent<ReplayWorkerRequest>) => {
   const msg = e.data;
-  await initEngine();
+  // 試合を打ち直すだけで AI は動かさないので、探索 AI の補正は読み込まない
+  await initEngine(undefined, { nets: false });
   switch (msg.type) {
     case "load": {
       const r = loadTexts(msg.file, msg.texts, { nextId: games.length, firstLine: msg.firstLine });

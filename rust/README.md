@@ -17,7 +17,7 @@ rustup target add wasm32-unknown-unknown
 ```
 
 `npm run rust-data` でカード・能力のデータを `rust/engine/data/engine-data.json` に、AI の重み等を `ai-data.json` に書き出す
-（コミットしない）。`npm run wasm`・`npm test`・`npm run dev`・`npm run build`・`npm run svwb` は自動で書き出してからビルドする。
+（コミットしない。WASM 用に、探索 AI の既定の補正・見込みを除いた `ai-data-web.json` も書く。下の「WASM」）。`npm run wasm`・`npm test`・`npm run dev`・`npm run build`・`npm run svwb` は自動で書き出してからビルドする。
 `cargo build` だけでは書き出さないので、`rust/target/release/svwb` を直に使うときは先に `npm run rust-data` する。
 書き出すときに元のファイル（`data/`・`src/cards/`・`src/engine/` の `.ts`・`src/ai/data.ts`）の中身の指紋を `sources.txt` に書き、
 `engine/build.rs` がビルドのときに確かめる。書き出した後に元のファイルが変わっていれば（`git pull` で補正が変わった等）、
@@ -29,6 +29,18 @@ rustup target add wasm32-unknown-unknown
 （コミットしない。`npm test`・`npm run dev`・`npm run build` の前に自動で行う）。
 `src/engine/wasm.ts` が読み込み、`src/engine/game.ts`（エンジン）・`src/ai/registry.ts`（AI）の関数として呼ぶ。
 wasm-bindgen は使わず、要求と結果を JSON の文字列で受け渡す（局面・行動の形は `src/engine/types.ts`、変換は `engine/src/state_json.rs`）。
+
+探索 AI の既定の補正と見込みは、WASM に埋め込まない（2026-11-19。ページごとに違う補正を使い、WASM を小さくするため）。
+`svwb-engine` の feature `embedded-nets`（既定で入る）が埋め込みで、CLI・テストは今までどおり `data/value-net.json`・`data/potential-net.json` を埋め込む。
+`rust/wasm` は `default-features = false` で埋め込まず、`ai-data-web.json` を読む。代わりにページが補正のファイルを読み込んで、
+`load_nets` で既定の補正・見込みとして入れる（`ValueNet`・`PotentialNet` の `install_default_*`。入れる前に探索 AI を使うと止まる）。
+
+- 補正のファイル: `npm run wasm` の終わりに `scripts/pack-nets.ts` が JSON から作る `src/engine/nets/<名前>.bin`（コミットしない）。
+  `starter` はスターターのページ（`data/value-net.json`・`data/potential-net.json`）、`azvaldt` はアズヴォルト環境のページ（`data/pools/azvaldt/` の R3）
+- 形（`engine/src/ai/netpack.rs`）: 重みの数を 10 進の仮数と指数に分けてバイトの面ごとに並べ、gzip で縮める。戻した値は JSON を serde_json で解析した値とビットまで同じ
+  （補正の出力は変わらない。`tests/nets.test.ts`・`tests/nets-azvaldt.test.ts` が、読み込んだ補正の指紋を JSON の指紋と比べる）
+- ページは自分の分だけを読む（`src/engine/wasm.ts` の `selectNets`。Worker は名前 `nets:<名前>` で受け取る）。画面のメインスレッドは補正を読まない（探索 AI は Worker で動く）
+- ブラウザの R3 がコマンドの R3 と同じ手を選ぶことは、`engine/tests/browser_r3.rs`（CLI）と `tests/nets-azvaldt.test.ts`（WASM）が同じ局面の表（`tests/fixtures/browser-r3.json`）で確かめる
 
 ## テスト
 
@@ -113,4 +125,4 @@ npm run misses -- run --label 名前                         # 見落とし問�
   `valuenet.rs`（学習した補正の推論。形・入力・学習は `docs/value-net.md`）、`lethal.rs`（リーサル探索）、`lethal_hint.rs`（対戦画面の「リーサル」表示）、`determinize.rs`、
   `keys.rs`（同じ局面の判定）、`greedy.rs`・`converging.rs`・`mulligan.rs`、リノセウス用 AI の `rhino.rs`・`rhino_lethal.rs`・`exact_lethal.rs`。
   AI のデータ（重み・マリガンのモデル・学習した補正の重み等）は `aidata.rs` が `ai-data.json` から読む。テストは `tests/`
-- `wasm/src/lib.rs`: ブラウザ・Node から呼ぶ入口（`alloc`・`call`・`out_ptr`・`out_len`）
+- `wasm/src/lib.rs`: ブラウザ・Node から呼ぶ入口（`alloc`・`call`・`out_ptr`・`out_len`、補正を入れる `load_nets`）

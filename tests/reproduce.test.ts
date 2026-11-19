@@ -27,6 +27,8 @@ describe("試合の再現情報", () => {
     ];
     const cmd = reproduceCommand({ a: 0, b: 1, aIsPlayer0: false, seed: 42 }, entrants);
     expect(cmd).toBe(`npm run game -- --seed 42 --p0 greedy --p0-deck '${d1!.key}' --p1 search --p1-deck '${d0!.key}'`);
+    // アズヴォルト環境のページの試合は --pool azvaldt（前期のローテーションのカードと、そのページの補正）
+    expect(reproduceCommand({ a: 0, b: 1, aIsPlayer0: false, seed: 42 }, entrants, "azvaldt")).toBe(`${cmd} --pool azvaldt`);
   });
 
   it("コマンドの引数から同じ試合を再現できる", () => {

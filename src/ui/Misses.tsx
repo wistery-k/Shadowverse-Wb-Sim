@@ -7,8 +7,8 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { AGENTS } from "../ai/registry";
 import type { AgentRequest, AgentResponse } from "../ai/worker";
 import { CLASS_NAMES, type ClassId } from "../cards";
-import { actingPlayer, applyAction, cardOf, legalActions, opponent, type Action, type GameState, type PlayerIndex } from "../engine";
-import type { MissesData } from "../misses/data";
+import { actingPlayer, applyAction, cardOf, legalActions, opponent, type Action, type GameState, type PlayerIndex, workerName } from "../engine";
+import type { MissesData } from "../misses/load";
 import { condTexts, judgeTurn, type MissLine, type MissProblem } from "../misses/problems";
 import { AiThought, useThoughts } from "./AiThought";
 import { CardDetail, CardView, type Motion } from "./CardView";
@@ -59,19 +59,39 @@ function mix(a: number, b: number): number {
 
 // ---------------------------------------------------------------- 画面
 
+/** 問のフォルダ（ページごと） */
+export interface MissesSource {
+  /** 問を読み込む（問のモジュールを開く。別のチャンクにする） */
+  load: () => Promise<MissesData>;
+  /** リポジトリの中の問のフォルダ（問のファイルへのリンクに使う） */
+  dir: string;
+  /** 問の一覧の上の説明（問がどこから来たか） */
+  about: string;
+}
+
+/** スターターのページの問題集（misses/*.json） */
+export const STARTER_MISSES: MissesSource = {
+  load: () => import("../misses/data").then((m) => m.loadMisses()),
+  dir: "misses",
+  about:
+    "局面はどれもこのシミュレータの中の試合（AI どうしの自己対戦・人間とこのシミュレータの AI の対戦・手で作った局面）から取ったもので、ここで見られるのはリポジトリにある問だけです。",
+};
+
 interface Props {
+  /** 問のフォルダ（既定はスターターのページの問） */
+  source?: MissesSource;
   /** 問題集のタブを開いているか（開いたときに URL を今の問に合わせる） */
   active: boolean;
   /** 今の局面をサンドボックスで開く（開発サーバーだけ） */
   onSandbox?: ((state: GameState, label: string) => void) | undefined;
 }
 
-export function Misses({ active, onSandbox }: Props) {
+export function Misses({ source = STARTER_MISSES, active, onSandbox }: Props) {
   const [data, setData] = useState<MissesData | null>(null);
   const [loadError, setLoadError] = useState("");
   useEffect(() => {
-    import("../misses/data").then(
-      (m) => setData(m.loadMisses()),
+    source.load().then(
+      (d) => setData(d),
       (e: unknown) => setLoadError(String(e)),
     );
   }, []);
@@ -89,7 +109,7 @@ export function Misses({ active, onSandbox }: Props) {
   if (!data) return <p class="muted">問題集を読み込んでいます…</p>;
   const index = openId ? data.problems.findIndex((p) => p.id === openId) : -1;
   const problem = data.problems[index];
-  if (!problem) return <MissList data={data} unknown={openId} onOpen={open} />;
+  if (!problem) return <MissList data={data} about={source.about} unknown={openId} onOpen={open} />;
   const neighbor = (d: number) => data.problems[index + d]?.id ?? null;
   return (
     <MissView
@@ -100,6 +120,7 @@ export function Misses({ active, onSandbox }: Props) {
       position={`${index + 1}/${data.problems.length}`}
       prev={neighbor(-1)}
       next={neighbor(1)}
+      dir={source.dir}
       onOpen={open}
       onSandbox={onSandbox}
     />
@@ -109,7 +130,7 @@ export function Misses({ active, onSandbox }: Props) {
 /** 席 p の自分のターンの番号（先攻は奇数、後攻は偶数のターン） */
 const ownTurn = (s: GameState) => Math.ceil(s.turn / 2);
 
-function MissList({ data, unknown, onOpen }: { data: MissesData; unknown: string | null; onOpen: (id: string | null) => void }) {
+function MissList({ data, about, unknown, onOpen }: { data: MissesData; about: string; unknown: string | null; onOpen: (id: string | null) => void }) {
   const rows = useMemo(
     () =>
       data.problems.map((p) => {
@@ -122,8 +143,7 @@ function MissList({ data, unknown, onOpen }: { data: MissesData; unknown: string
     <div class="misses panel">
       <h2>見落とし問題集（{data.problems.length} 問）</h2>
       <p class="muted">
-        人間が見て分かった AI のミスの局面を、合格の条件つきで集めたものです。局面はどれもこのシミュレータの中の試合（AI どうしの自己対戦・人間とこのシミュレータの
-        AI の対戦・手で作った局面）から取ったもので、ここで見られるのはリポジトリにある問だけです。問を選ぶと、盤面と正解の理由、打ち比べた手の並びを見られます。
+        人間が見て分かった AI のミスの局面を、合格の条件つきで集めたものです。{about}問を選ぶと、盤面と正解の理由、打ち比べた手の並びを見られます。
         問の足し方と使い方は{" "}
         <a href={`${REPO_URL}/blob/main/docs/misses.md`} target="_blank" rel="noreferrer">
           docs/misses.md
@@ -204,6 +224,8 @@ interface Run {
 
 interface ViewProps {
   problem: MissProblem;
+  /** リポジトリの中の問のフォルダ */
+  dir: string;
   lines: readonly MissLine[];
   linesSource: string | null;
   position: string;
@@ -213,7 +235,7 @@ interface ViewProps {
   onSandbox?: ((state: GameState, label: string) => void) | undefined;
 }
 
-function MissView({ problem, lines, linesSource, position, prev, next, onOpen, onSandbox }: ViewProps) {
+function MissView({ problem, dir, lines, linesSource, position, prev, next, onOpen, onSandbox }: ViewProps) {
   const p = problem.player;
   const start = problem.state;
   const names = useMemo((): [string, string] => (p === 0 ? ["自分", "相手"] : ["相手", "自分"]), [p]);
@@ -271,7 +293,7 @@ function MissView({ problem, lines, linesSource, position, prev, next, onOpen, o
     setRuns((xs) => xs.map((x) => (x.key === key ? { ...x, tries: x.tries + 1 } : x)));
     let s = start;
     for (const a of r.actions) s = applyAction(s, a);
-    const worker = new Worker(new URL("../ai/worker.ts", import.meta.url), { type: "module" });
+    const worker = new Worker(new URL("../ai/worker.ts", import.meta.url), { type: "module", name: workerName() });
     let cancelled = false;
     cancel.current = () => {
       cancelled = true;
@@ -472,7 +494,7 @@ function MissView({ problem, lines, linesSource, position, prev, next, onOpen, o
         <span class="muted">{position}</span>
         <strong>{problem.id}</strong>
       </div>
-      <MissInfo problem={problem} classes={classes} agentLabel={agentLabel} />
+      <MissInfo problem={problem} dir={dir} classes={classes} agentLabel={agentLabel} />
       <div class="game">
         {side(opponent(p), true)}
         {side(p, false)}
@@ -590,7 +612,7 @@ function MissView({ problem, lines, linesSource, position, prev, next, onOpen, o
 }
 
 /** 問の説明（題・合格の条件・局面と正解の理由・出どころ） */
-function MissInfo({ problem, classes, agentLabel }: { problem: MissProblem; classes: [ClassId, ClassId]; agentLabel: string }) {
+function MissInfo({ problem, dir, classes, agentLabel }: { problem: MissProblem; dir: string; classes: [ClassId, ClassId]; agentLabel: string }) {
   const p = problem.player;
   const s = problem.state;
   return (
@@ -600,7 +622,7 @@ function MissInfo({ problem, classes, agentLabel }: { problem: MissProblem; clas
         <span class={`class-tag class-${classes[p]}`}>{CLASS_NAMES[classes[p]]}</span> 対{" "}
         <span class={`class-tag class-${classes[opponent(p)]}`}>{CLASS_NAMES[classes[opponent(p)]]}</span> / 自分の {ownTurn(s)} ターン目（
         {s.first === p ? "先攻" : "後攻"}）/ 解かせる AI: {agentLabel} / 足した日: {problem.added} /{" "}
-        <a href={`${REPO_URL}/blob/main/misses/${problem.id}.json`} target="_blank" rel="noreferrer">
+        <a href={`${REPO_URL}/blob/main/${dir}/${problem.id}.json`} target="_blank" rel="noreferrer">
           問のファイル
         </a>
       </div>

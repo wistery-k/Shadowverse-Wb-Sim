@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { AGENTS } from "../ai/registry";
-import { actingPlayer, legalActions, type Action, type GameState, type PlayerIndex } from "../engine";
+import { actingPlayer, legalActions, type Action, type GameState, type PlayerIndex, workerName } from "../engine";
 import { branchStats, diffStats, type Outcome } from "../sim/branch";
 import type { BranchRequest, BranchResponse } from "../sim/branchWorker";
 import { runPool } from "../sim/pool";
@@ -80,7 +80,7 @@ export function useBranchRuns() {
     // 仕事は（試合, 手）の組 1 つずつ。試合の番号の順に配るので、前の試合から揃っていく
     const jobs = Array.from({ length: games }, (_, game) => run.actions.map((_, action) => ({ game, action }))).flat();
     const mine = runPool<{ game: number; action: number }, BranchResponse>({
-      create: () => new Worker(new URL("../sim/branchWorker.ts", import.meta.url), { type: "module" }),
+      create: () => new Worker(new URL("../sim/branchWorker.ts", import.meta.url), { type: "module", name: workerName() }),
       jobs,
       request: ({ game, action }): BranchRequest => ({
         state,

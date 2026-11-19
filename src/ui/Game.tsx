@@ -21,8 +21,7 @@ import {
   tryApplyAction,
   type Action,
   type GameState,
-  type PlayerIndex,
-} from "../engine";
+  type PlayerIndex, workerName } from "../engine";
 import { CardDetail, CardView } from "./CardView";
 import { CLASS_NAMES, type ClassId } from "../cards";
 import { type AttackStatus, attackStatuses, crestName, describeAction, leaderClasses, modeLabels, modeSourceCard } from "./describe";
@@ -97,7 +96,7 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "„ÇÇ„Å
   const [aiThinking, setAiThinking] = useState(false);
   const worker = useRef<Worker | null>(null);
   useEffect(() => {
-    worker.current = new Worker(new URL("../ai/worker.ts", import.meta.url), { type: "module" });
+    worker.current = new Worker(new URL("../ai/worker.ts", import.meta.url), { type: "module", name: workerName() });
     return () => worker.current?.terminate();
   }, []);
 
@@ -162,7 +161,7 @@ export function Game({ initial, ai, human = 0, onExit, onEnd, exitLabel = "„ÇÇ„Å
       return;
     }
     if (autoSteps.length > 0) return;
-    const w = new Worker(new URL("../ai/lethalWorker.ts", import.meta.url), { type: "module" });
+    const w = new Worker(new URL("../ai/lethalWorker.ts", import.meta.url), { type: "module", name: workerName() });
     lethalWorker.current = w;
     const id = lethalRng.int(2 ** 30);
     setLethal((l) => (l?.status === "broken" ? l : { status: "searching" }));

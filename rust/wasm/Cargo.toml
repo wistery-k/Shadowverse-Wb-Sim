@@ -10,4 +10,5 @@ crate-type = ["cdylib"]
 path = "src/lib.rs"
 
 [dependencies]
-svwb-engine = { path = "../engine" }
+# 補正・見込みは埋め込まず、ページが読み込んだものを入れる（load_nets）
+svwb-engine = { path = "../engine", default-features = false }

@@ -1,7 +1,8 @@
 // npm run game の本体: 1試合だけ行い、行動の列と結果を表示する（リプレイ画面の「再現」のコマンドで使う）
 //
-// 使い方: npm run game -- --seed <seed> --p0 <AI> --p0-deck <デッキ> --p1 <AI> --p1-deck <デッキ> [--quiet] [--json <出力.json>]
+// 使い方: npm run game -- --seed <seed> --p0 <AI> --p0-deck <デッキ> --p1 <AI> --p1-deck <デッキ> [--pool azvaldt] [--quiet] [--json <出力.json>]
 // デッキはデフォルトデッキのキー（data/decks のファイル名）か「ID*枚数,…」（src/sim/reproduce.ts の deckArg）。
+// --pool azvaldt は、アズヴォルト環境のページの試合（前期のローテーションのカードを足し、探索 AI の補正をそのページと同じ R3 にする）。
 // 行動の番号はリプレイ画面の「n 手」と同じ（n 番目の行動の後の局面が n 手目）。
 // --json は、ランナーの棋譜と同じ形の 1 行（docs/kifu.md。source は "game"。エンジンの版・プール・補正の指紋は書かない）。
 // svwb kifu・think-at・misses add --replay・リプレイ検索がそのまま読む。
@@ -13,6 +14,7 @@ import { parseDeckArg } from "../src/sim/reproduce";
 import { replayStates } from "../src/sim/replay";
 import { deckName } from "../src/replays/records";
 import { describeAction } from "../src/ui/describe";
+import { NETS_NAMES, selectNets, type NetsName } from "../src/engine/wasm";
 
 interface Args {
   seed: number | null;
@@ -20,10 +22,11 @@ interface Args {
   decks: [string | null, string | null];
   quiet: boolean;
   json: string | null;
+  pool: NetsName;
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { seed: null, agents: [null, null], decks: [null, null], quiet: false, json: null };
+  const args: Args = { seed: null, agents: [null, null], decks: [null, null], quiet: false, json: null, pool: "starter" };
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
     const value = () => {
@@ -38,6 +41,11 @@ function parseArgs(argv: string[]): Args {
     else if (key === "--p1-deck") args.decks[1] = value();
     else if (key === "--quiet") args.quiet = true;
     else if (key === "--json") args.json = value();
+    else if (key === "--pool") {
+      const v = value();
+      if (!(NETS_NAMES as readonly string[]).includes(v)) throw new Error(`不明なプール: ${v}（${NETS_NAMES.join(", ")}）`);
+      args.pool = v as NetsName;
+    }
     else throw new Error(`不明な引数: ${key}`);
   }
   if (args.seed === null || !Number.isInteger(args.seed)) throw new Error("--seed を整数で指定してください");
@@ -51,6 +59,11 @@ function parseArgs(argv: string[]): Args {
 
 export async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
+  if (args.pool === "azvaldt") {
+    // エンジンを使う前に選ぶ（補正は 1 回だけ読み込む）。カードの名前を出すために、前期のローテーションのカードを画面の表に足す
+    selectNets("azvaldt");
+    await import("../src/record/pool");
+  }
   const seed = args.seed!;
   const agents = args.agents as [string, string];
   const decks: [string[], string[]] = [parseDeckArg(args.decks[0]!), parseDeckArg(args.decks[1]!)];

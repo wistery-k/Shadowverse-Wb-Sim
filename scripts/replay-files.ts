@@ -168,7 +168,9 @@ export function replayFiles(): Plugin {
 export const DEV_ONLY_MODULES: Record<string, string> = {
   // リプレイ検索の画面。Worker（src/replays/worker.ts）と CSS ごと公開サイトに入れない
   "/src/ui/ReplaySearch.tsx": "export function ReplaySearch() { return null; }",
-  // 試合の記録の画面。前期のローテーションのカード・プロのデッキ（src/record/）と CSS ごと公開サイトに入れない（CLAUDE.md の試合の記録の条件）
+  // 試合の記録の画面（MatchRecord.tsx）とその CSS を公開サイトに入れない（CLAUDE.md の試合の記録の条件）。
+  // 前期のローテーションのカード（src/record/pool.ts）とプロのデッキの一覧（src/record/decks.ts）は、
+  // アズヴォルト環境のページ（src/azvaldt/）が使うので公開サイトにも入る（2026-11-19。入力の画面と記録は入らない）
   "/src/ui/MatchRecord.tsx": "export function MatchRecord() { return null; }",
 };
 

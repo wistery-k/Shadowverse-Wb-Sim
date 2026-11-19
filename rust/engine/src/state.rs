@@ -886,8 +886,8 @@ impl GameState {
     /// 場のカード (プレイヤー, 添字)
     #[inline]
     pub fn find_board(&self, iid: Iid) -> Option<(PlayerIndex, usize)> {
-        for p in 0..2 {
-            if let Some(i) = self.players[p].board.iter().position(|c| c.iid == iid) {
+        for (p, pl) in self.players.iter().enumerate() {
+            if let Some(i) = pl.board.iter().position(|c| c.iid == iid) {
                 return Some((p, i));
             }
         }
@@ -918,8 +918,8 @@ impl GameState {
 
     #[inline]
     pub fn find_hand(&self, iid: Iid) -> Option<(PlayerIndex, usize)> {
-        for p in 0..2 {
-            if let Some(i) = self.players[p].hand.iter().position(|c| c.iid == iid) {
+        for (p, pl) in self.players.iter().enumerate() {
+            if let Some(i) = pl.hand.iter().position(|c| c.iid == iid) {
                 return Some((p, i));
             }
         }

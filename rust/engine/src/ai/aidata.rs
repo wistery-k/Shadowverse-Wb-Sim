@@ -1,6 +1,7 @@
 //! 探索 AI のデータ（`npm run rust-data` が書き出す rust/engine/data/ai-data.json）。
 //! 評価関数の重み・学習した評価の補正・マリガンの係数等を TypeScript 版から受け取る（書き写さない）。
 
+#[cfg(feature = "embedded-nets")]
 use super::potential::RawPotentialNet;
 use crate::data::{data, CardIdx};
 use serde::{Deserialize, Deserializer};
@@ -128,7 +129,9 @@ struct RawAiData {
     search_weights: serde_json::Map<String, serde_json::Value>,
     decay_pow: HashMap<String, Vec<f64>>,
     cards: RawCards,
+    #[cfg(feature = "embedded-nets")]
     value_net: RawValueNet,
+    #[cfg(feature = "embedded-nets")]
     potential_net: RawPotentialNet,
     mulligan_weights: HashMap<String, HashMap<String, [f64; 2]>>,
     mulligan_model: HashMap<String, RawMulliganDeck>,
@@ -158,9 +161,11 @@ pub struct AiData {
     pub jeanne: CardIdx,
     pub fusion_set: Vec<CardIdx>,
     pub boost_grown: Vec<CardIdx>,
-    /// 学習した評価の補正（data/value-net.json）
+    /// 学習した評価の補正（data/value-net.json）。WASM は持たない（ページが読み込んだものを valuenet.rs の install_default_value_net で入れる）
+    #[cfg(feature = "embedded-nets")]
     pub value_net: RawValueNet,
-    /// ターン途中の見込み（data/potential-net.json。ai/potential.rs）
+    /// ターン途中の見込み（data/potential-net.json。ai/potential.rs）。WASM は持たない（同じく install_default_potential_net）
+    #[cfg(feature = "embedded-nets")]
     pub potential_net: RawPotentialNet,
     /// デッキ名 → カード → [1 枚目を残す重み, 2 枚目も残す重み]
     pub mulligan_weights: HashMap<String, HashMap<CardIdx, [f64; 2]>>,
@@ -207,7 +212,9 @@ fn load(json: &str) -> AiData {
         jeanne: d.card_idx(&raw.cards.jeanne),
         fusion_set: ids(&raw.cards.fusion_set),
         boost_grown: ids(&raw.cards.boost_grown),
+        #[cfg(feature = "embedded-nets")]
         value_net: raw.value_net,
+        #[cfg(feature = "embedded-nets")]
         potential_net: raw.potential_net,
         mulligan_weights: raw
             .mulligan_weights
@@ -307,7 +314,12 @@ pub fn weights_with(
 }
 
 /// 埋め込んだ AI のデータの JSON（設定の重みを項目の順番どおりに表示するときにも読む）
+#[cfg(feature = "embedded-nets")]
 pub const AI_DATA_JSON: &str = include_str!("../../data/ai-data.json");
+
+/// WASM に埋め込む AI のデータの JSON（ai-data.json から補正と見込みを除いたもの。どちらもページが読み込んで入れる。ai/netpack.rs）
+#[cfg(not(feature = "embedded-nets"))]
+pub const AI_DATA_JSON: &str = include_str!("../../data/ai-data-web.json");
 
 static AI_DATA: OnceLock<AiData> = OnceLock::new();
 

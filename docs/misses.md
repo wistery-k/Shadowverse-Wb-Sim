@@ -388,7 +388,7 @@ npm run misses -- cover --dir misses/azvaldt --opts '<同じ設定>' --m 64
 - 2 問（`witch-tico-g1006`・`bishop-miko-g1006`）は、問の局面の乱数のままだと条件を満たさない並びでそのターンに勝つ回がある（`run` の 24 回中 8 回と 3 回。マナリアの魔弾の当たり先や引くカードによる）。
   打ち比べは乱数も作り直すので、その分も含めて AI の並びが負けている。合格はそのターンに勝ったかではなく、打った手で見る（問の説明に書いた）
 - 確かめの出力（cover の 2 回・run の 2 回・26 局面の候補の表・書いた条件）は共有フォルダの `logs/misses-azvaldt-2026-11-17/`
-- 問題集のページ（`misses/*.json` だけを読む）には出ない。ブラウザが新しいプールを扱うようになったら、ページに出すかと、調査の並び（`misses/lines/`）を書き添えるかを決める
+- 2026-11-19 から、アズヴォルト環境のページ（`/azvaldt/`）の「問題集」タブに出す（下の「問題集のページ」）。調査の並び（`misses/lines/`）はまだ書き添えていない
 
 | 問 | 自分のターン | 正解 | R3 | v0 | 二段目の差 | 確かめの差 |
 | --- | ---: | --- | ---: | ---: | ---: | ---: |
@@ -427,6 +427,11 @@ npm run misses -- cover --dir misses/azvaldt --opts '<同じ設定>' --m 64
 - **合格の判定**: `src/misses/problems.ts` の `judgeTurn`。`rust/engine/src/runner/misses.rs`（`step_of`・`matches`・`passes`・`play_turn`）と同じ決まりで、
   どちらかを変えたら両方を直す。`npm test`（`tests/misses.test.ts`）で、全部の問が読めることと、調査の並びがターンの終わりまである問で良い手が合格・AI の手が不合格になることを確かめる
 - **問のデータ**: ビルドに入れ、問題集のタブを開いたときに読み込む（別のチャンク）。問を足してコミットすれば、次のデプロイでページに出る
+- **アズヴォルト環境のページ**（2026-11-19、ユーザーの依頼。CLAUDE.md「決定済みの前提」）: `azvaldt/index.html` の「問題集」タブは、同じ画面で `misses/azvaldt/*.json` だけを出す
+  （`src/misses/azvaldtData.ts`。URL は `https://wistery-k.github.io/Shadowverse-Wb-Sim/azvaldt/#misses/<問の名前>`）。
+  「今の AI にこのターンを打たせる」と「AI の考え」の探索 AI は、そのページの補正（R3。`data/pools/azvaldt/`）で考える。
+  ブラウザの R3 がコマンドの R3（`--opts '{"valueNet":"rust/engine/yardstick/pool-r3-net.json",…}'`）と同じ手を選ぶことは、
+  `rust/engine/tests/browser_r3.rs` と `tests/nets-azvaldt.test.ts` が同じ局面（この 12 問とマリガン 2 つ）で確かめる
 
 ### 調査の並び（`misses/lines/<問>.json`）
 
@@ -453,7 +458,7 @@ npm run misses -- cover --dir misses/azvaldt --opts '<同じ設定>' --m 64
 
 `bishop-clear-g1689`（`misses/peek/`）の並びは調査の出力に無いので、`duel` で打ち比べた 2 つの並び（今の AI の手と、全部取る手）を同じ形で手で書いた（`misses/peek/lines/`）。
 Rust のランナー（`misses run` 等）は `misses/` のすぐ下の `*.json` だけを問として読むので、`misses/lines/`・`misses/peek/`・`misses/azvaldt/` は問として読まない（`misses/peek/` の問は `--dir misses/peek`、新しいプールの問は `--dir misses/azvaldt` で読む）。
-ブラウザの問題集のページも `misses/*.json` と `misses/lines/*.json` だけを読むので、`misses/peek/` と `misses/azvaldt/` の問はページに出ない。
+ブラウザの問題集のページも `misses/*.json` と `misses/lines/*.json` だけを読むので、`misses/peek/` の問はページに出ない。`misses/azvaldt/` の問は、アズヴォルト環境のページ（`/azvaldt/`）の問題集にだけ出る。
 
 ## 夜の定例
 
