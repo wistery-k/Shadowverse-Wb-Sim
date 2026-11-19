@@ -7,6 +7,8 @@ import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseLedger, type MissesRow, type RunRow, type SurveyRow } from "../scripts/ledger-main";
+import { outboxPathAllowed } from "../scripts/night-outbox";
+import { packItems, type PackItem } from "../scripts/pack-run-main";
 import {
   checkArgv,
   chunkJob,
@@ -804,6 +806,77 @@ describe("区切って回す（偽物の svwb で）", () => {
     const tip2 = gitT(pcGit, "rev-parse", "night/n1");
     expect(await main(["wrap", "n1", "--root", root])).toBe(0);
     expect(gitT(pcGit, "rev-parse", "night/n1")).toBe(tip2);
+  });
+
+  it("まとめが済んでいない回（電源が切れた・まとめの途中で落ちた）は status に出し、wrap --pending がまとめる。コミットの名前はいつも決まったもの", async () => {
+    // PC の git に名前とメールがあっても、公開するブランチには載せない
+    gitT(pcGit, "config", "user.name", "誰か");
+    gitT(pcGit, "config", "user.email", "someone@example.invalid");
+    process.env.FAKE_STOP_AT = "50";
+    expect(await start("--foreground")).toBe(1);
+    delete process.env.FAKE_STOP_AT;
+    expect(gitT(pcGit, "log", "-1", "--format=%an <%ae>|%cn <%ce>", "night/n1")).toBe("svwb night queue <night-queue@svwb.invalid>|svwb night queue <night-queue@svwb.invalid>");
+    // まとめの途中で電源が切れた: status にまとめの結果が無く、ブランチもまだ無い
+    const st = readStatus(dir());
+    writeFileSync(join(dir(), "status.json"), JSON.stringify({ ...st, outbox: undefined, branch: undefined }));
+    gitT(pcGit, "update-ref", "-d", "refs/heads/night/n1");
+    const said = () => vi.mocked(console.log).mock.calls.map((c) => String(c[0])).join("\n");
+    expect(await main(["status", "n1", "--root", root])).toBe(0);
+    expect(said()).toContain("まとめ: まだ");
+    expect(await main(["wrap", "--pending", "--root", root])).toBe(0);
+    expect(gitT(pcGit, "log", "-1", "--format=%s", "night/n1")).toMatch(/^台帳: 夜のキュー n1 の結果（1 行、/);
+    expect(readStatus(dir())).toMatchObject({ state: "stopped", branch: expect.stringMatching(/^night\/n1（/) });
+    vi.mocked(console.log).mockClear();
+    expect(await main(["wrap", "--pending", "--root", root])).toBe(0);
+    expect(said()).toBe("まとめが済んでいない回はありません");
+    expect(await main(["status", "n1", "--root", root])).toBe(0);
+    expect(said()).not.toContain("まとめ: まだ");
+  });
+
+  it("出口の一覧にあっても、その回の data/…/<回の名前>/・logs/<回の名前>/ の外には置かない", async () => {
+    expect(outboxPathAllowed("n2", "logs/n2/night.log")).toBe(true);
+    expect(outboxPathAllowed("n2", "data/kifu/n2/a.jsonl.gz")).toBe(true);
+    expect(outboxPathAllowed("n2", "logs/n2/")).toBe(false);
+    expect(outboxPathAllowed("n2", "logs/n20/night.log")).toBe(false);
+    expect(outboxPathAllowed("n2", "docs/ledger.jsonl")).toBe(false);
+    expect(outboxPathAllowed("n2", "data/models/other/m.json")).toBe(false);
+    const src = join(tmp, "x.txt");
+    writeFileSync(src, "x");
+    const item = (path: string): PackItem => ({ file: "x.txt", src, kind: "logs", path, gzip: false, size: 1, mtimeMs: 0 });
+    const out = join(tmp, "evil");
+    const { partFiles } = await packItems({
+      name: "n2",
+      note: null,
+      dir: tmp,
+      created: new Date(),
+      command: "試す",
+      items: [item("logs/n2/ok.txt"), item("docs/evil.md"), item("data/models/other/m.json")],
+      skipped: [],
+      outDir: out,
+      maxBytes: 0,
+      head: (entries, parts) => [
+        {
+          path: "logs/n2/outbox.json",
+          data: Buffer.from(
+            JSON.stringify({
+              v: 1,
+              kind: "night-outbox",
+              name: "n2",
+              exported: new Date().toISOString(),
+              parts: [...parts],
+              entries: entries.map((e) => ({ path: e.path, part: e.part, size: e.packedSize, sha256: e.packedSha256 })),
+              result: { name: "n2", tz: "Asia/Tokyo" },
+            }),
+          ),
+        },
+      ],
+    });
+    const shared = join(tmp, "shared2");
+    mkdirSync(shared);
+    expect(await main(["ingest", ...partFiles.map((f) => join(out, f)), "--to", shared])).toBe(1);
+    expect(readFileSync(join(shared, "logs", "n2", "ok.txt"), "utf8")).toBe("x");
+    expect(existsSync(join(shared, "docs"))).toBe(false);
+    expect(existsSync(join(shared, "data", "models", "other"))).toBe(false);
   });
 
   it("出口のアーカイブは、確かめて共有フォルダに展開する（分けたもの・足りないもの・壊れたもの）", async () => {

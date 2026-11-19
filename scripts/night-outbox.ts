@@ -151,7 +151,7 @@ export async function writeOutbox<R>(o: {
     note: o.note,
     dir: o.dir,
     created,
-    command: "夜のキューが止まったときに自分でまとめた（npm run night -- outbox でも作り直せる）",
+    command: "夜のキューが止まったときに自分でまとめた（npm run night -- wrap でも作り直せる）",
     howTo: "取り込み: スレッドで `npm run night -- ingest <上がったファイル…>`（壊れていないかを確かめて共有フォルダの data/・logs/ に展開し、台帳に行を足す。docs/night.md）。",
     repo: o.repo,
     items,
@@ -328,6 +328,11 @@ export async function peekOutbox(file: string): Promise<OutboxHead | "guide" | n
 }
 
 /** アーカイブの中の道を、展開先の下の道にする（.. や絶対の道は断る） */
+/** 出口のアーカイブから置いてよい場所（その回の data/selfplay・data/models・data/kifu・logs の下だけ） */
+export function outboxPathAllowed(name: string, path: string): boolean {
+  return [`data/selfplay/${name}/`, `data/models/${name}/`, `data/kifu/${name}/`, `logs/${name}/`].some((d) => path.startsWith(d) && path.length > d.length);
+}
+
 export function safeJoin(root: string, path: string): string {
   if (path === "" || path.startsWith("/") || path.split("/").some((p) => p === ".." || p === "")) throw new Error(`使えない道: ${path}`);
   const full = resolve(root, path);
@@ -372,6 +377,12 @@ export async function extractOutbox(file: string, h: OutboxHead, to: string, ove
       const headFile = path === `logs/${h.name}/${OUTBOX_JSON}` || path === `logs/${h.name}/MANIFEST.md`;
       if (e === undefined && !headFile) {
         rep.bad.push(`${path}（一覧に無い）`);
+        return;
+      }
+      // 一覧にあっても、その回の置き場所（pack-run と同じ data/…/<回の名前>/・logs/<回の名前>/）の外には置かない
+      if (!outboxPathAllowed(h.name, path)) {
+        if (e !== undefined) seen.add(path);
+        rep.bad.push(`${path}（置けない場所）`);
         return;
       }
       if (e !== undefined) {

@@ -103,7 +103,7 @@ cd ~/Shadowverse-Wb-Sim/docker/remote-control && docker compose build && docker 
 | 様子を見る | `docker compose logs -f` |
 | 夜のキューを手で始める・止める | `docker compose exec rc npm run night -- start <ジョブのファイル> --yes`・`docker compose exec rc npm run night -- stop`（`docs/night.md`） |
 | 夜のキューの様子を見る | `docker compose exec rc npm run night -- status` |
-| 朝、夜のキューの結果を上げる | `./night-push.sh`（このフォルダの。キューが止まるときにコミットしたブランチ `night/<回の名前>` を push するだけ。ホストで流す） |
+| 朝、夜のキューの結果を上げる | `./night-push.sh`（このフォルダの。キューが止まるときにコミットしたブランチ `night/<回の名前>` を push する。まとめていない回のまとめと、main に入った回のブランチの片付けもする。ホストで流す） |
 | コンテナの中でシェルを開く | `docker compose exec rc bash` |
 | ログインし直す | `docker compose exec rc claude auth login` の後に `docker compose restart` |
 | Claude Code・Rust を新しくする | `docker compose build --pull --no-cache && docker compose up -d`（Claude Code は動いている間にも自分で更新する） |
@@ -120,7 +120,7 @@ cd ~/Shadowverse-Wb-Sim/docker/remote-control && docker compose build && docker 
 - `CLAUDE_SPAWN`: 新しいセッションの作り方。既定は `same-dir`（どのセッションも `/workspace` で作業する）。`worktree` にすると
   セッションごとに git の worktree を作る（同時に複数のスレッドが作業しても混ざらないが、worktree ごとに Rust を作り直すので遅い）
 - コミットするなら `GIT_AUTHOR_NAME`・`GIT_AUTHOR_EMAIL`・`GIT_COMMITTER_NAME`・`GIT_COMMITTER_EMAIL`。夜のキューの `finish --commit` にも要る
-  （`docs/night.md`「台帳の行のコミット」）。止まったときのまとめのコミット（ブランチ `night/<回の名前>`）は、無ければ「svwb night queue」の名前で作るので要らない
+  （`docs/night.md`「台帳の行のコミット」）。止まったときのまとめのコミット（ブランチ `night/<回の名前>`）は、いつも「svwb night queue」の名前で作る（公開するブランチなので、ここの名前とメールは使わない）
 
 `.env` を書き換えたら、ホストで `docker compose up -d` を流してコンテナを作り直す（`.env` はコンテナを作るときに読む。動いているセッションと夜のキューは止まるので、回していない昼に）
 

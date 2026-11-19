@@ -6,7 +6,7 @@
 //   npm run night -- stop [名前] [--now]
 //   npm run night -- resume [名前] --yes [--until 07:00] [--threads N]
 //   npm run night -- finish [名前] [--commit] [--pack] [--ledger 台帳]
-//   npm run night -- wrap [名前]
+//   npm run night -- wrap [名前|--pending]
 //   npm run night -- ingest <回の名前|ファイル…> [--ledger 台帳] [--to /mnt/project-files]
 //   npm run night -- list
 //
@@ -1197,8 +1197,18 @@ export function statusText(dir: string, o: { final?: boolean } = {}): string {
     `コミット ${plan.commit}（${plan.branch}）、${s ? `${s.machine}・${s.threads} スレッド、止める時刻 ${fmtClock(s.until, tz)}（${tz}）` : ""}`,
     ...(o.final !== true && st?.branch !== undefined ? [`台帳の行: ${st.branch}（朝はホストで docker/remote-control/night-push.sh）`] : []),
     ...(o.final !== true && st?.outbox !== undefined ? [`出口: ${st.outbox}`] : []),
+    ...(o.final !== true && pid === null && needsWrap(dir)
+      ? ["まとめ: まだ（電源が切れたか、まとめている途中で落ちた）。朝の docker/remote-control/night-push.sh がまとめてから push する（手でなら npm run night -- wrap）"]
+      : []),
   ];
   return `${head.join("\n")}\n\n${markdownTable(["#", "ジョブ", "台帳の名前", "区切り", "試合", "かかった時間", "結果（A の勝率・正解率・局面・ファイル）", "メモ"], tableRows)}`;
+}
+
+/** 止まったときのまとめが済んでいない回か（worker がいない・済んだ区切りがある・status にまとめの結果が無い）。
+ * 電源が切れた回と、まとめている途中で落ちた回。朝の night-push.sh が wrap --pending でまとめる */
+export function needsWrap(dir: string): boolean {
+  const st = readStatus(dir);
+  return st !== null && (st.outbox === undefined || st.branch === undefined) && markers(dir).size > 0 && workerPid(dir) === null;
 }
 
 /** pick の結果（回のフォルダの pick-<番号>.json） */
@@ -1511,7 +1521,7 @@ interface Args {
   opts: Map<string, string>;
 }
 
-const FLAGS = new Set(["--yes", "--allow-dirty", "--now", "--commit", "--pack", "--foreground", "--prepare-only"]);
+const FLAGS = new Set(["--yes", "--allow-dirty", "--now", "--commit", "--pack", "--foreground", "--prepare-only", "--pending"]);
 
 export function parseArgs(argv: string[]): Args {
   const pos: string[] = [];
@@ -2183,14 +2193,13 @@ function gitIn(repo: string, args: string[], o: { input?: string; env?: NodeJS.P
   return r.stdout;
 }
 
-/** コミットに使う名前とメール（git に設定が無ければ「夜のキュー」。コンテナに設定が無くても止まらないように） */
-function commitIdent(repo: string): NodeJS.ProcessEnv {
-  const ok = ["GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"].every((v) => spawnSync("git", ["var", v], { cwd: repo, encoding: "utf8" }).status === 0);
-  if (ok) return {};
-  const name = "svwb night queue";
-  const email = "night-queue@svwb.invalid";
-  return { GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: name, GIT_COMMITTER_EMAIL: email };
-}
+/** コミットに使う名前とメール。行を運ぶだけのコミットで、ブランチは公開されるので、git の設定（.env のメールなど）は使わずにいつも決まったものにする */
+const NIGHT_IDENT: NodeJS.ProcessEnv = {
+  GIT_AUTHOR_NAME: "svwb night queue",
+  GIT_AUTHOR_EMAIL: "night-queue@svwb.invalid",
+  GIT_COMMITTER_NAME: "svwb night queue",
+  GIT_COMMITTER_EMAIL: "night-queue@svwb.invalid",
+};
 
 /**
  * 台帳の行をブランチ night/<回の名前> にコミットする。ブランチが無ければ回のコミットから作り、あれば先に積む。
@@ -2233,7 +2242,7 @@ export function commitNight(dir: string, summary: string, outbox: string): { bra
     gitIn(repo, ["read-tree", parent], { env });
     gitIn(repo, ["update-index", "--add", "--cacheinfo", `100644,${blob},${ledgerPath}`], { env });
     const tree = gitIn(repo, ["write-tree"], { env }).trim();
-    const sha = gitIn(repo, ["commit-tree", tree, "-p", parent, "-F", "-"], { input: msg, env: commitIdent(repo) }).trim();
+    const sha = gitIn(repo, ["commit-tree", tree, "-p", parent, "-F", "-"], { input: msg, env: NIGHT_IDENT }).trim();
     gitIn(repo, ["update-ref", "-m", `夜のキュー ${plan.name}`, ref, sha, old ?? ""]);
     return { branch, sha, rows: n };
   } finally {
@@ -2267,18 +2276,34 @@ export async function wrapUp(dir: string, log: (text: string) => void): Promise<
   return { outbox, branch };
 }
 
-/** 手でまとめ直す（worker が止まったときと同じこと。電源が切れた回や、まとめが失敗したときに） */
+/** 手でまとめ直す（worker が止まったときと同じこと。電源が切れた回や、まとめが失敗したときに）。
+ * --pending は、まとめが済んでいない回（needsWrap）を全部まとめる（朝の night-push.sh が push の前に流す） */
 async function cmdWrap(a: Args): Promise<number> {
-  known(a, [], 1);
+  known(a, ["--pending"], 1);
   const root = runsRoot(a.opts.get("--root"));
+  if (a.opts.has("--pending")) {
+    if (a.pos.length > 0) throw new Error("--pending には名前を渡しません");
+    const dirs = listRuns(root).filter(needsWrap);
+    if (dirs.length === 0) {
+      console.log("まとめが済んでいない回はありません");
+      return 0;
+    }
+    for (const dir of dirs) await wrapOne(dir);
+    return 0;
+  }
   const dir = findRun(root, a.pos[0], () => true);
   if (workerPid(dir) !== null) throw new Error(`まだ動いています: ${dir}（止まるときに自分でまとめる）`);
+  await wrapOne(dir);
+  return 0;
+}
+
+async function wrapOne(dir: string): Promise<void> {
   const tz = existsSync(join(dir, "session.json")) ? readSession(dir).tz : "Asia/Tokyo";
+  console.log(`${basename(dir)} をまとめる…`);
   const r = await wrapUp(dir, (t) => log(dir, tz, t));
   const st = readStatus(dir);
   if (st !== null) writeAtomic(join(dir, "status.json"), JSON.stringify({ ...st, outbox: r.outbox, branch: r.branch }));
   console.log(`出口: ${r.outbox}\n台帳のブランチ: ${r.branch}\n朝はホストで docker/remote-control/night-push.sh（push だけ）`);
-  return 0;
 }
 
 /** 台帳の行の重なり（同じ回・種類・名前・コミットで試合番号が重なる行、misses は同じ鍵、survey は同じ名前があるか） */
@@ -2465,7 +2490,7 @@ const USAGE = `使い方（docs/night.md）:
   npm run night -- stop [名前] [--now]
   npm run night -- resume [名前] --yes [--until 07:00] [--threads N]
   npm run night -- finish [名前] [--commit] [--pack] [--ledger 台帳]   （止まったときのまとめで要らなくなった。PC の 1 晩で確かめるまで残す）
-  npm run night -- wrap [名前]                 （止まったときのまとめをやり直す: 台帳の行を night/<名前> にコミットし、出口にまとめる）
+  npm run night -- wrap [名前|--pending]       （止まったときのまとめをやり直す: 台帳の行を night/<名前> にコミットし、出口にまとめる。--pending はまとめていない回を全部）
   npm run night -- ingest <回の名前|ファイル…> [--ledger 台帳] [--to /mnt/project-files]   （スレッドで: 台帳に足す・出口のファイルを展開する）
   npm run night -- list
   （回の置き場所は --root か環境変数 SVWB_NIGHT_DIR。既定は ~/svwb-data/night。出口は SVWB_OUTBOX_DIR、既定は ~/svwb-data/outbox）`;
