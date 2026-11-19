@@ -1,0 +1,49 @@
+{
+  "v": 2,
+  "id": "nightmare-macmillan-g1004",
+  "source": "logs/night-20261117-0328/survey-2.jsonl.gz の試合 1004 の 73 手目",
+  "lines": [
+    {
+      "kind": "ai",
+      "label": "問を作ったときの AI の手",
+      "first": {"wins":20,"games":32},
+      "second": {"wins":69,"games":96},
+      "steps": [
+        {"iid":33,"type":"play"}
+      ],
+      "text": [
+        "イステンデッドVSマルチルゲートをプレイ"
+      ],
+      "full": [
+        "イステンデッドVSマルチルゲートをプレイ",
+        "淵底の大佐をプレイ"
+      ],
+      "rethink": null,
+      "actions": [
+        {"iid":33,"type":"play"},
+        {"type":"play","iid":29},
+        {"type":"endTurn"}
+      ]
+    },
+    {
+      "kind": "good",
+      "label": "打ち比べで良い手",
+      "first": {"wins":31,"games":32},
+      "second": {"wins":92,"games":96},
+      "steps": [
+        {"iid":39,"type":"play"}
+      ],
+      "text": [
+        "デッドプレゼンター・マクミランをプレイ"
+      ],
+      "full": [
+        "デッドプレゼンター・マクミランをプレイ"
+      ],
+      "rethink": null,
+      "actions": [
+        {"iid":39,"type":"play"},
+        {"type":"endTurn"}
+      ]
+    }
+  ]
+}

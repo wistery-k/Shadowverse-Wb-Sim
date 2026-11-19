@@ -1,0 +1,79 @@
+{
+  "v": 2,
+  "id": "witch-hold-g1066",
+  "source": "logs/night-20261117-0328/survey-2.jsonl.gz の試合 1066 の 102 手目",
+  "lines": [
+    {
+      "kind": "ai",
+      "label": "問を作ったときの AI の手",
+      "first": {"wins":6,"games":32},
+      "second": {"wins":20,"games":96},
+      "steps": [
+        {"iid":6,"type":"play"},
+        {"iid":35,"type":"play"},
+        {"iid":103,"type":"play"}
+      ],
+      "text": [
+        "大遊戯世界をプレイ",
+        "災いの言霊・ジンジャーをプレイ",
+        "マナリアの魔弾をプレイ"
+      ],
+      "full": [
+        "大遊戯世界をプレイ",
+        "災いの言霊・ジンジャーをプレイ",
+        "マナリアの魔弾をプレイ",
+        "災いの言霊・ジンジャーを進化",
+        "災いの言霊・ジンジャーでアドアマネージャー・イニシアを攻撃",
+        "破式の変貌・フィーリンをプレイ",
+        "ソニック・フォーをプレイ"
+      ],
+      "rethink": null,
+      "actions": [
+        {"iid":6,"type":"play"},
+        {"iid":35,"type":"play"},
+        {"iid":103,"type":"play"},
+        {"type":"evolve","iid":35},
+        {"type":"attack","attacker":35,"target":76},
+        {"type":"play","iid":40},
+        {"type":"play","iid":104},
+        {"type":"endTurn"}
+      ]
+    },
+    {
+      "kind": "good",
+      "label": "打ち比べで良い手",
+      "first": {"wins":11,"games":32},
+      "second": {"wins":39,"games":96},
+      "steps": [
+        {"iid":35,"type":"play"},
+        {"iid":35,"type":"evolve"},
+        {"iid":40,"type":"play"},
+        {"attacker":35,"target":76,"type":"attack"},
+        {"iid":104,"type":"play"}
+      ],
+      "text": [
+        "災いの言霊・ジンジャーをプレイ",
+        "災いの言霊・ジンジャーを進化",
+        "破式の変貌・フィーリンをプレイ",
+        "災いの言霊・ジンジャーでアドアマネージャー・イニシアを攻撃",
+        "ソニック・フォーをプレイ"
+      ],
+      "full": [
+        "災いの言霊・ジンジャーをプレイ",
+        "災いの言霊・ジンジャーを進化",
+        "破式の変貌・フィーリンをプレイ",
+        "災いの言霊・ジンジャーでアドアマネージャー・イニシアを攻撃",
+        "ソニック・フォーをプレイ"
+      ],
+      "rethink": null,
+      "actions": [
+        {"iid":35,"type":"play"},
+        {"iid":35,"type":"evolve"},
+        {"iid":40,"type":"play"},
+        {"attacker":35,"target":76,"type":"attack"},
+        {"iid":104,"type":"play"},
+        {"type":"endTurn"}
+      ]
+    }
+  ]
+}

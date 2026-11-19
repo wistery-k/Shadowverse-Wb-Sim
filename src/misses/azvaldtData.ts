@@ -5,7 +5,9 @@
 import { readMissFiles, type MissesData } from "./load";
 
 const problemFiles = import.meta.glob<unknown>("../../misses/azvaldt/*.json", { eager: true, import: "default" });
+// 手順の候補（打ち比べ調査で比べた並びを、問の局面からターンの終わりまで打てる手にしたもの。scripts/misses-lines-main.ts）
+const lineFiles = import.meta.glob<unknown>("../../misses/azvaldt/lines/*.json", { eager: true, import: "default" });
 
 export function loadMisses(): MissesData {
-  return readMissFiles(problemFiles, {});
+  return readMissFiles(problemFiles, lineFiles);
 }

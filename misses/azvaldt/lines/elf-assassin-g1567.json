@@ -1,0 +1,69 @@
+{
+  "v": 2,
+  "id": "elf-assassin-g1567",
+  "source": "logs/night-20261117-0328/survey-2.jsonl.gz の試合 1567 の 77 手目",
+  "lines": [
+    {
+      "kind": "ai",
+      "label": "問を作ったときの AI の手",
+      "first": {"wins":5,"games":32},
+      "second": {"wins":26,"games":96},
+      "steps": [
+        {"iid":35,"type":"play"},
+        {"targets":[59],"type":"choose"}
+      ],
+      "text": [
+        "操嵩のアナテマ・ダストデイズをプレイ",
+        "選ぶ: 再起の夜王・ショウ"
+      ],
+      "full": [
+        "操嵩のアナテマ・ダストデイズをプレイ",
+        "選ぶ: 再起の夜王・ショウ",
+        "操嵩のアナテマ・ダストデイズを超進化",
+        "操嵩のアナテマ・ダストデイズでステージメーカーを攻撃",
+        "フェアリーをプレイ",
+        "風の理・イーウィヤをプレイ"
+      ],
+      "rethink": null,
+      "actions": [
+        {"iid":35,"type":"play"},
+        {"targets":[59],"type":"choose"},
+        {"type":"superEvolve","iid":35},
+        {"type":"attack","attacker":35,"target":67},
+        {"type":"play","iid":90},
+        {"type":"play","iid":15},
+        {"type":"endTurn"}
+      ]
+    },
+    {
+      "kind": "good",
+      "label": "打ち比べで良い手",
+      "first": {"wins":20,"games":32},
+      "second": {"wins":66,"games":96},
+      "steps": [
+        {"iid":90,"type":"play"}
+      ],
+      "text": [
+        "フェアリーをプレイ"
+      ],
+      "full": [
+        "フェアリーをプレイ",
+        "根差の刺客をプレイ",
+        "操嵩のアナテマ・ダストデイズをプレイ",
+        "選ぶ: 再起の夜王・ショウ",
+        "操嵩のアナテマ・ダストデイズを超進化",
+        "操嵩のアナテマ・ダストデイズでステージメーカーを攻撃"
+      ],
+      "rethink": 1,
+      "actions": [
+        {"iid":90,"type":"play"},
+        {"type":"play","iid":35},
+        {"type":"choose","targets":[59]},
+        {"type":"superEvolve","iid":35},
+        {"type":"attack","attacker":35,"target":67},
+        {"type":"play","iid":15},
+        {"type":"endTurn"}
+      ]
+    }
+  ]
+}

@@ -31,6 +31,8 @@ export interface Pattern {
 export interface Cond {
   must: Pattern[];
   mustNot: Pattern[];
+  /** このターンに最初にするその種類の手（play ならプレイ。target は攻撃か選ぶ手）が、どれもこの手 */
+  first: Pattern[];
   win: boolean;
   minHp: number | null;
 }
@@ -71,7 +73,7 @@ function parsePattern(v: unknown): Pattern {
 
 function parseCond(v: unknown): Cond {
   if (!isObj(v)) throw new Error("合格の条件はオブジェクトか、オブジェクトの配列");
-  const c: Cond = { must: [], mustNot: [], win: false, minHp: null };
+  const c: Cond = { must: [], mustNot: [], first: [], win: false, minHp: null };
   const list = (k: string, x: unknown) => {
     if (!Array.isArray(x)) throw new Error(`"${k}" は手の配列`);
     return x.map(parsePattern);
@@ -79,6 +81,7 @@ function parseCond(v: unknown): Cond {
   for (const [k, x] of Object.entries(v)) {
     if (k === "must") c.must = list(k, x);
     else if (k === "mustNot") c.mustNot = list(k, x);
+    else if (k === "first") c.first = list(k, x);
     else if (k === "win") {
       if (typeof x !== "boolean") throw new Error(`"win" は true か false`);
       c.win = x;
@@ -98,6 +101,19 @@ export function parsePass(v: unknown): Cond[] {
 }
 
 const cardText = (name: string) => (name === ANY ? "どれか" : name);
+
+/** 手の種類の名前（first の文に使う） */
+const VERB_NAMES: Record<Verb, string> = {
+  play: "プレイ",
+  attack: "攻撃",
+  evolve: "進化",
+  superEvolve: "超進化",
+  act: "アクト",
+  fuse: "融合",
+  choose: "選ぶ手",
+  mode: "効果の選択",
+  target: "攻撃か選ぶ手",
+};
 
 /** 手の形の文（「魔女の錬金釜をプレイ」等） */
 export function patternText(p: Pattern): string {
@@ -130,6 +146,7 @@ export function condTexts(c: Cond): string[] {
   const out: string[] = [];
   if (c.must.length > 0) out.push(`このターンに ${c.must.map(patternText).join("・")} をする`);
   if (c.mustNot.length > 0) out.push(`このターンに ${c.mustNot.map(patternText).join("・")} をしない`);
+  for (const p of c.first) out.push(`このターンの最初の${VERB_NAMES[p.verb]}として ${patternText(p)} をする`);
   if (c.win) out.push("このターンに勝つ");
   if (c.minHp !== null) out.push(`ターンを終えたときの自分の体力が ${c.minHp} 以上（このターンに勝てば満たす）`);
   return out;
@@ -266,11 +283,21 @@ export function judgeTurn(start: GameState, actions: readonly Action[], p: Playe
   return result(false, false, null);
 }
 
+/** 手 st が、手の形 p と同じ種類の手か（first で、その種類の最初の手を探すのに使う） */
+function sameKind(p: Pattern, st: Step): boolean {
+  if (st.verb === null) return false;
+  return p.verb === "target" ? st.verb === "attack" || st.verb === "choose" : st.verb === p.verb;
+}
+
 function passes(conds: readonly Cond[], steps: readonly Step[], won: boolean, hp: number): boolean {
   return conds.some(
     (c) =>
       c.must.every((pt) => steps.some((st) => matches(pt, st))) &&
       !c.mustNot.some((pt) => steps.some((st) => matches(pt, st))) &&
+      c.first.every((pt) => {
+        const st = steps.find((x) => sameKind(pt, x));
+        return st !== undefined && matches(pt, st);
+      }) &&
       (!c.win || won) &&
       (c.minHp === null || won || hp >= c.minHp),
   );
@@ -301,7 +328,13 @@ export interface MissProblem {
   state: GameState;
 }
 
-/** 打ち比べ調査で比べた並び（misses/lines/<問>.json。scripts/misses-lines.ts が書く） */
+/** 勝ち負けの数 */
+export interface MissTally {
+  wins: number;
+  games: number;
+}
+
+/** 打ち比べ調査で比べた並び（<問のフォルダ>/lines/<問>.json。scripts/misses-lines-main.ts が書く。docs/misses.md「手順の候補」） */
 export interface MissLine {
   kind: "ai" | "good";
   label: string;
@@ -311,6 +344,13 @@ export interface MissLine {
   text: string[];
   /** 調査で読んだ、ターンの終わりまでの並びの説明（AI から見た局面のもの。途中で引くカードは予想） */
   full: string[];
+  /** 問の局面から打つ、ターンの終わりまでの手（版 2 から。steps ＋ full を手に戻したもの。無ければ null） */
+  actions: Action[] | null;
+  /** full を手に戻しきれず、AI に考え直させた最初の手の番号（actions の添字。全部戻せたら null） */
+  rethink: number | null;
+  /** 調査の一段目（候補ごとに m 回）・二段目（2 つの候補を n 回）の勝ち（版 2 から。無ければ null） */
+  first: MissTally | null;
+  second: MissTally | null;
 }
 export interface MissLines {
   id: string;
@@ -365,8 +405,14 @@ export function parseProblem(v: unknown): MissProblem {
   }
 }
 
+function tally(x: unknown, k: string): MissTally | null {
+  if (x === undefined) return null;
+  if (!isObj(x) || typeof x.wins !== "number" || typeof x.games !== "number") throw new Error(`"${k}" は {"wins","games"}`);
+  return { wins: x.wins, games: x.games };
+}
+
 export function parseLines(v: unknown): MissLines {
-  if (!isObj(v) || v.v !== 1) throw new Error(`版（"v":1）がありません`);
+  if (!isObj(v) || (v.v !== 1 && v.v !== 2)) throw new Error(`版（"v":1 か 2）がありません`);
   const id = str(v, "id");
   if (!Array.isArray(v.lines)) throw new Error(`${id}: "lines" は配列`);
   return {
@@ -374,7 +420,19 @@ export function parseLines(v: unknown): MissLines {
     source: str(v, "source"),
     lines: v.lines.map((l): MissLine => {
       if (!isObj(l) || (l.kind !== "ai" && l.kind !== "good")) throw new Error(`${id}: 並びの "kind" は ai か good`);
-      return { kind: l.kind, label: str(l, "label"), steps: actions(l.steps, "steps"), text: strs(l.text, "text"), full: strs(l.full, "full") };
+      const rethink = l.rethink ?? null;
+      if (rethink !== null && typeof rethink !== "number") throw new Error(`${id}: "rethink" は数か null`);
+      return {
+        kind: l.kind,
+        label: str(l, "label"),
+        steps: actions(l.steps, "steps"),
+        text: strs(l.text, "text"),
+        full: strs(l.full, "full"),
+        actions: l.actions === undefined ? null : actions(l.actions, "actions"),
+        rethink,
+        first: tally(l.first, "first"),
+        second: tally(l.second, "second"),
+      };
     }),
   };
 }

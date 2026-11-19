@@ -1,0 +1,91 @@
+{
+  "v": 2,
+  "id": "bishop-miko-g1006",
+  "source": "logs/night-20261117-0328/survey-2.jsonl.gz の試合 1006 の 85 手目",
+  "lines": [
+    {
+      "kind": "ai",
+      "label": "問を作ったときの AI の手",
+      "first": {"wins":22,"games":32},
+      "second": {"wins":70,"games":96},
+      "steps": [
+        {"iid":64,"type":"play"},
+        {"targets":[38],"type":"choose"},
+        {"iid":58,"type":"play"},
+        {"targets":[36],"type":"choose"},
+        {"iid":49,"type":"play"},
+        {"index":0,"type":"mode"}
+      ],
+      "text": [
+        "海蝕の三叉槍をプレイ",
+        "選ぶ: 明越花・アラ",
+        "堅固なる霧巻花をプレイ",
+        "選ぶ: 災いの言霊・ジンジャー",
+        "刻みし約束をプレイ",
+        "1 番目の効果を選ぶ"
+      ],
+      "full": [
+        "海蝕の三叉槍をプレイ",
+        "選ぶ: 明越花・アラ",
+        "堅固なる霧巻花をプレイ",
+        "選ぶ: 災いの言霊・ジンジャー",
+        "刻みし約束をプレイ",
+        "1 番目の効果を選ぶ",
+        "海蝕の三叉槍の能力を使う",
+        "選ぶ: ガーディアンゴーレム",
+        "堅固なる霧巻花の能力を使う",
+        "清純なる白狐を超進化",
+        "ホーリーファルコンでリーダーを攻撃"
+      ],
+      "rethink": 7,
+      "actions": [
+        {"iid":64,"type":"play"},
+        {"targets":[38],"type":"choose"},
+        {"iid":58,"type":"play"},
+        {"targets":[36],"type":"choose"},
+        {"iid":49,"type":"play"},
+        {"index":0,"type":"mode"},
+        {"type":"act","iid":64},
+        {"type":"choose","targets":[38]},
+        {"type":"act","iid":58},
+        {"type":"superEvolve","iid":104},
+        {"type":"attack","attacker":104,"target":"leader"},
+        {"type":"play","iid":44},
+        {"type":"choose","targets":[67]},
+        {"type":"act","iid":44},
+        {"type":"choose","targets":[55]},
+        {"type":"endTurn"}
+      ]
+    },
+    {
+      "kind": "good",
+      "label": "打ち比べで良い手",
+      "first": {"wins":30,"games":32},
+      "second": {"wins":94,"games":96},
+      "steps": [
+        {"iid":72,"type":"play"}
+      ],
+      "text": [
+        "窮鼠の斎女をプレイ"
+      ],
+      "full": [
+        "窮鼠の斎女をプレイ",
+        "堅固なる霧巻花をプレイ",
+        "選ぶ: 明越花・アラ",
+        "窮鼠の斎女を超進化",
+        "堅固なる霧巻花の能力を使う",
+        "窮鼠の斎女で災いの言霊・ジンジャーを攻撃"
+      ],
+      "rethink": null,
+      "actions": [
+        {"iid":72,"type":"play"},
+        {"type":"play","iid":58},
+        {"type":"choose","targets":[38]},
+        {"type":"superEvolve","iid":72},
+        {"type":"act","iid":58},
+        {"type":"attack","attacker":72,"target":36},
+        {"type":"endTurn"}
+      ]
+    }
+  ]
+}

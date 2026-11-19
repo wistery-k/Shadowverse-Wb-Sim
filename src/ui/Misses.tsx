@@ -2,12 +2,15 @@
 // 見られるのはリポジトリにある決まった局面だけで、局面の編集・貼り付け・ファイルや URL からの読み込みは付けない
 // （実際の対戦の局面を入れて AI の手を聞く使い方ができないようにする。CLAUDE.md「ソフト打ち」）。
 // 問の一覧 → 盤面・題・合格の条件。打ち比べ調査で比べた並びと、今の AI に打たせた並びを 1 手ずつ進めて見て、ターンの終わりに合格を判定する。
+// 並びのファイルにターンの終わりまでの手（actions）がある問は、盤面の下に「手順の候補」として並べ、盤面を問の局面と各手順の後の局面で
+// 切り替えられるようにする。引いたカード・ランダムな結果に頼る手は、色を変えて「一例」と注釈を添える（src/misses/example.ts）。
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { AGENTS } from "../ai/registry";
 import type { AgentRequest, AgentResponse } from "../ai/worker";
 import { CLASS_NAMES, type ClassId } from "../cards";
 import { actingPlayer, applyAction, cardOf, legalActions, opponent, type Action, type GameState, type PlayerIndex, workerName } from "../engine";
+import { stepNotes, type ExampleKind, type StepNote } from "../misses/example";
 import type { MissesData } from "../misses/load";
 import { condTexts, judgeTurn, type MissLine, type MissProblem } from "../misses/problems";
 import { AiThought, useThoughts } from "./AiThought";
@@ -208,6 +211,47 @@ function MissList({ data, about, unknown, onOpen }: { data: MissesData; about: s
   );
 }
 
+/** 一例の手の注釈（短い札と、凡例の説明） */
+const EXAMPLE_TEXT: Record<ExampleKind, { tag: string; legend: string }> = {
+  draw: { tag: "一例: 引いたカード", legend: "問の局面の後に山札から手札に入ったカード（引いたカード）を使う手" },
+  random: { tag: "一例: ランダムの後", legend: "ランダムな結果が出た後の手" },
+  rethink: { tag: "一例: 考え直した手", legend: "調査で読んだ並びが、引いたカードやランダムな結果の違いで問の局面では打てなくなり、AI が考え直して打った手" },
+};
+
+/** 手の説明（自分の手は「自分: 」を省く） */
+function stepLabel(state: GameState, a: Action, names: [string, string], p: PlayerIndex, after: GameState | undefined): string {
+  const text = describeAction(state, a, names, after);
+  const own = `${names[p]}: `;
+  return text.startsWith(own) ? text.slice(own.length) : text;
+}
+
+/** 手の後ろに添える注釈（引いたカード・ランダムな結果） */
+function noteText(note: StepNote, after: GameState | undefined): string {
+  const parts: string[] = [];
+  if (note.drew.length > 0 && after) {
+    const name = (iid: number) => {
+      for (const pl of after.players) {
+        const h = pl.hand.find((x) => x.iid === iid);
+        if (h) return cardOf(h.cardId).name;
+      }
+      return "?";
+    };
+    parts.push(`引いた: ${note.drew.map(name).join("・")}`);
+  }
+  if (note.random) parts.push("ランダムな結果");
+  return parts.length > 0 ? `（${parts.join("、")}）` : "";
+}
+
+/** 手順の候補 1 つ（ターンの終わりまでの手がある並び） */
+interface Candidate {
+  line: MissLine;
+  actions: Action[];
+  states: GameState[];
+  notes: StepNote[];
+  labels: string[];
+  judged: ReturnType<typeof judgeTurn>;
+}
+
 /** 盤面で進めて見る手の並び */
 interface Run {
   /** 並びの番号（AI の考えの結果をこれと手の番号で残す） */
@@ -245,7 +289,31 @@ function MissView({ problem, dir, lines, linesSource, position, prev, next, onOp
 
   const nextKey = useRef(1);
   const [runs, setRuns] = useState<Run[]>(() =>
-    lines.map((l) => ({ key: nextKey.current++, label: l.label, actions: [...l.steps], base: l.steps.length, survey: l, tries: 0 })),
+    lines.map((l) => {
+      const actions = [...(l.actions ?? l.steps)];
+      return { key: nextKey.current++, label: l.label, actions, base: actions.length, survey: l, tries: 0 };
+    }),
+  );
+  // 手順の候補（ターンの終わりまでの手がある並び。盤面の下に並べる）
+  const candidates = useMemo(
+    () =>
+      lines.flatMap((line): Candidate[] => {
+        if (!line.actions) return [];
+        const actions = line.actions;
+        const states = [start];
+        for (const a of actions) states.push(applyAction(states[states.length - 1]!, a));
+        return [
+          {
+            line,
+            actions,
+            states,
+            notes: stepNotes(states, actions, line.rethink),
+            labels: actions.map((a, i) => stepLabel(states[i]!, a, names, p, states[i + 1])),
+            judged: judgeTurn(start, actions, p, problem.pass),
+          },
+        ];
+      }),
+    [lines, start, names, p, problem.pass],
   );
   // 盤面に出す並び（null は局面だけ）と手の番号
   const [sel, setSel] = useState<number | null>(null);
@@ -269,6 +337,7 @@ function MissView({ problem, dir, lines, linesSource, position, prev, next, onOp
   const cur = Math.min(step, last);
   const state = states[cur]!;
   const lineTexts = useMemo(() => actions.map((a, i) => describeAction(states[i]!, a, names, states[i + 1])), [states, names]);
+  const notes = useMemo(() => stepNotes(states, actions, run?.survey?.rethink ?? null), [states, run]);
   const judged = useMemo(() => (run ? judgeTurn(start, run.actions, p, problem.pass) : null), [run, start, p, problem.pass]);
 
   const go = (s: number) => setStep(Math.max(0, Math.min(last, s)));
@@ -277,6 +346,8 @@ function MissView({ problem, dir, lines, linesSource, position, prev, next, onOp
     setStep(at ?? 0);
     setError("");
   };
+  /** 盤面で見る手のボタン: 手順の候補は打った後の局面、ほかは最初から（選び直したときは今の手のまま） */
+  const pick = (r: Run) => select(r.key, sel === r.key ? cur : r.survey?.actions ? r.actions.length : 0);
 
   // ---- 今の AI に打たせる（思考は Web Worker。打つたびに盤面を進める） ----
 
@@ -506,8 +577,8 @@ function MissView({ problem, dir, lines, linesSource, position, prev, next, onOp
                 問の局面
               </button>
               {runs.map((r) => (
-                <button type="button" key={r.key} class={sel === r.key ? "active" : ""} onClick={() => select(r.key, sel === r.key ? cur : 0)}>
-                  {r.label}
+                <button type="button" key={r.key} class={sel === r.key ? "active" : ""} onClick={() => pick(r)}>
+                  {r.survey?.actions ? `${r.label}の後` : r.label}
                 </button>
               ))}
               <button
@@ -545,8 +616,16 @@ function MissView({ problem, dir, lines, linesSource, position, prev, next, onOp
                   )}
                 </div>
                 {last > 0 && <input type="range" min={0} max={last} value={cur} onInput={(e) => go(Number(e.currentTarget.value))} />}
-                <div>{cur === 0 ? "問の局面" : `直前: ${lineTexts[cur - 1]}`}</div>
-                {cur < last && <div class="muted">次: {lineTexts[cur]}</div>}
+                <div>
+                  {cur === 0 ? "問の局面" : `直前: ${lineTexts[cur - 1]}`}
+                  {cur > 0 && <ExampleTag note={notes[cur - 1]} />}
+                </div>
+                {cur < last && (
+                  <div class="muted">
+                    次: {lineTexts[cur]}
+                    <ExampleTag note={notes[cur]} />
+                  </div>
+                )}
                 <RunEnd
                   run={run}
                   judged={judged}
@@ -562,13 +641,25 @@ function MissView({ problem, dir, lines, linesSource, position, prev, next, onOp
             )}
             {sel === null && (
               <div class="muted">
-                {lines.length > 0
-                  ? "上のボタンで、打ち比べ調査で比べた 2 つの並びか、今の AI に打たせた並びを盤面で 1 手ずつ進めて見られます。"
-                  : "上のボタンで、今の AI に打たせた並びを盤面で 1 手ずつ進めて見られます。"}
+                {candidates.length > 0
+                  ? "上のボタンで、下の手順の候補を打った後の局面か、今の AI に打たせた並びを盤面に出します。手順の手を押すと、その手を打った後の局面を出します。"
+                  : lines.length > 0
+                    ? "上のボタンで、打ち比べ調査で比べた 2 つの並びか、今の AI に打たせた並びを盤面で 1 手ずつ進めて見られます。"
+                    : "上のボタンで、今の AI に打たせた並びを盤面で 1 手ずつ進めて見られます。"}
               </div>
             )}
             {error && <div class="problems">{error}</div>}
           </div>
+          {candidates.length > 0 && (
+            <Candidates
+              candidates={candidates}
+              runs={runs}
+              sel={sel}
+              cur={cur}
+              linesSource={linesSource}
+              onPick={(key, at) => select(key, at)}
+            />
+          )}
           {actor !== null && state.phase === "main" && running === null && (
             <AiThought
               state={state}
@@ -586,8 +677,13 @@ function MissView({ problem, dir, lines, linesSource, position, prev, next, onOp
           {run && (
             <ol class="log replay-log" ref={logRef}>
               {lineTexts.map((line, i) => (
-                <li key={i} class={i === cur - 1 ? "current" : i >= cur ? "muted" : ""} onClick={() => go(i + 1)}>
+                <li
+                  key={i}
+                  class={`${i === cur - 1 ? "current" : i >= cur ? "muted" : ""}${notes[i]?.example ? " example" : ""}`}
+                  onClick={() => go(i + 1)}
+                >
                   {line}
+                  <ExampleTag note={notes[i]} />
                   {i >= run.base && run.survey && <span class="branch-tag">続き</span>}
                 </li>
               ))}
@@ -600,7 +696,11 @@ function MissView({ problem, dir, lines, linesSource, position, prev, next, onOp
               </div>
               <div>{run.survey.full.length > 0 ? run.survey.full.join(" → ") : "（何もせずターン終了）"}</div>
               <div class="muted">
-                AI から見た局面（相手の手札・山札を並べ直したもの）で読んだターンの終わりまでの並びです。途中で引くカードは予想なので、引いた後の手は盤面の並びに入れず、AI が考え直します（調査と同じ）。
+                {run.survey.actions
+                  ? `AI から見た局面（相手の手札・山札を並べ直したもの）で読んだターンの終わりまでの並びです。盤面の手順は、これを問の局面（実際の山札の順番・乱数）で打ったものです。${
+                      run.survey.rethink !== null ? `問の局面では ${run.survey.rethink + 1} 手目から読みのとおりに打てない（引いたカードやランダムな結果が読みと違う）ので、そこから先は AI が考え直した手です。` : ""
+                    }`
+                  : "AI から見た局面（相手の手札・山札を並べ直したもの）で読んだターンの終わりまでの並びです。途中で引くカードは予想なので、引いた後の手は盤面の並びに入れず、AI が考え直します（調査と同じ）。"}
                 {linesSource && ` 出どころ: 共有フォルダの ${linesSource}`}
               </div>
             </div>
@@ -689,6 +789,7 @@ function RunEnd({
         <strong class={judged.passed ? "misses-pass-ok" : "misses-pass-ng"}>{judged.passed ? "○ 合格" : "× 不合格"}</strong>
         <span class="muted">
           {judged.won ? "このターンに勝ち" : `ターンを終えたときの自分の体力 ${judged.hp}`}
+          {run.survey?.rethink != null && "（途中から AI が考え直した一例の判定）"}
         </span>
         {reset}
       </div>
@@ -707,6 +808,111 @@ function RunEnd({
         </button>
       )}
       {reset}
+    </div>
+  );
+}
+
+/** 一例の手の札（一例でなければ何も出さない） */
+function ExampleTag({ note }: { note: StepNote | undefined }) {
+  if (!note?.example) return null;
+  return <span class="example-tag">{EXAMPLE_TEXT[note.example].tag}</span>;
+}
+
+/** 二段目の勝ちの説明 */
+function tallyText(line: MissLine): string | null {
+  const t = line.second;
+  if (!t || t.games === 0) return null;
+  return `打ち比べ ${t.wins}/${t.games} 勝（${Math.round((t.wins / t.games) * 100)}%）`;
+}
+
+/** 盤面の下の「手順の候補」: 並びごとに手を並べ、押すとその手を打った後の局面を盤面に出す */
+function Candidates({
+  candidates,
+  runs,
+  sel,
+  cur,
+  linesSource,
+  onPick,
+}: {
+  candidates: readonly Candidate[];
+  runs: readonly Run[];
+  sel: number | null;
+  cur: number;
+  linesSource: string | null;
+  onPick: (key: number, at: number) => void;
+}) {
+  const used = new Set(candidates.flatMap((c) => c.notes.flatMap((n) => (n.example ? [n.example] : []))));
+  return (
+    <div class="panel misses-lines">
+      <div>
+        <strong>手順の候補</strong>
+        <span class="muted">（打ち比べ調査で比べた 2 つの並び。手を押すと、その手を打った後の局面を盤面に出します）</span>
+      </div>
+      <div class="misses-lines-grid">
+        {candidates.map((c) => {
+          const run = runs.find((r) => r.survey === c.line);
+          if (!run) return null;
+          const shown = sel === run.key;
+          const stats = tallyText(c.line);
+          return (
+            <section key={run.key} class={`misses-line ${shown ? "shown" : ""}`}>
+              <div class="misses-line-head">
+                <button type="button" class={shown && cur === c.actions.length ? "active" : ""} onClick={() => onPick(run.key, c.actions.length)}>
+                  {c.line.label}
+                </button>
+                <strong class={c.judged.passed ? "misses-pass-ok" : "misses-pass-ng"} title="この手順を問の合格の条件で判定した結果">
+                  {c.judged.passed ? "○ 合格" : "× 不合格"}
+                  {c.line.rethink !== null && <span class="muted">（考え直した一例）</span>}
+                </strong>
+                {stats && (
+                  <span
+                    class="muted"
+                    title={`調査の二段目で、この候補を選んでから最後まで打った勝ち（相手の手札・山札と乱数を変えて ${c.line.second?.games ?? 0} 回。続きは両方の席とも AI）。一段目は ${c.line.first?.games ?? 0} 回で ${c.line.first?.wins ?? 0} 勝`}
+                  >
+                    {stats}
+                  </span>
+                )}
+              </div>
+              <ol class="misses-line-steps">
+                <li class={shown && cur === 0 ? "current" : ""} onClick={() => onPick(run.key, 0)}>
+                  <span class="muted">問の局面</span>
+                </li>
+                {c.labels.map((label, i) => {
+                  const note = c.notes[i];
+                  const example = note?.example ?? null;
+                  const rethinkStart = c.line.rethink === i;
+                  return (
+                    <li key={i} class={`${shown && cur === i + 1 ? "current" : ""}${example ? " example" : ""}`} onClick={() => onPick(run.key, i + 1)}>
+                      {rethinkStart && (
+                        <div class="misses-rethink">
+                          ここから先は AI が考え直した手（調査で読んだ並びの「{c.line.full[i] ?? "?"}」から先は、引いたカードやランダムな結果が読みと違い、問の局面では打てない）
+                        </div>
+                      )}
+                      <span class="step-no">{i + 1}.</span> {label}
+                      {note && <span class="muted">{noteText(note, c.states[i + 1])}</span>}
+                      <ExampleTag note={note} />
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
+          );
+        })}
+      </div>
+      {used.size > 0 && (
+        <div class="muted misses-legend">
+          <span class="example">色を変えた手</span>は一例です。問の局面の山札の順番・乱数のまま打ったもので、引くカードやランダムな結果が違えば変わります。
+          {(["draw", "random", "rethink"] as const)
+            .filter((k) => used.has(k))
+            .map((k) => (
+              <span key={k}>
+                {" "}
+                <span class="example-tag">{EXAMPLE_TEXT[k].tag}</span> {EXAMPLE_TEXT[k].legend}。
+              </span>
+            ))}
+        </div>
+      )}
+      {linesSource && <div class="muted">出どころ: 共有フォルダの {linesSource}（打ち比べは打ち直していません）</div>}
     </div>
   );
 }

@@ -1,0 +1,87 @@
+{
+  "v": 2,
+  "id": "royal-firstmate-g1104",
+  "source": "logs/night-20261117-0328/survey-2.jsonl.gz の試合 1104 の 47 手目",
+  "lines": [
+    {
+      "kind": "ai",
+      "label": "問を作ったときの AI の手",
+      "first": {"wins":11,"games":32},
+      "second": {"wins":18,"games":96},
+      "steps": [
+        {"iid":60,"type":"play"},
+        {"attacker":60,"target":3,"type":"attack"},
+        {"iid":54,"type":"play"},
+        {"iid":54,"type":"superEvolve"},
+        {"attacker":54,"target":"leader","type":"attack"},
+        {"type":"extraPp"},
+        {"iid":83,"type":"play"}
+      ],
+      "text": [
+        "渦潮の砲手をプレイ",
+        "渦潮の砲手で魅惑のサキュバス・リリムを攻撃",
+        "迷夢の獅子・モルドレッドをプレイ",
+        "迷夢の獅子・モルドレッドを超進化",
+        "迷夢の獅子・モルドレッドでリーダーを攻撃",
+        "エクストラPP",
+        "黄金の杯をプレイ"
+      ],
+      "full": [
+        "渦潮の砲手をプレイ",
+        "渦潮の砲手で魅惑のサキュバス・リリムを攻撃",
+        "迷夢の獅子・モルドレッドをプレイ",
+        "迷夢の獅子・モルドレッドを超進化",
+        "迷夢の獅子・モルドレッドでリーダーを攻撃",
+        "エクストラPP",
+        "黄金の杯をプレイ"
+      ],
+      "rethink": null,
+      "actions": [
+        {"iid":60,"type":"play"},
+        {"attacker":60,"target":3,"type":"attack"},
+        {"iid":54,"type":"play"},
+        {"iid":54,"type":"superEvolve"},
+        {"attacker":54,"target":"leader","type":"attack"},
+        {"type":"extraPp"},
+        {"iid":83,"type":"play"},
+        {"type":"endTurn"}
+      ]
+    },
+    {
+      "kind": "good",
+      "label": "打ち比べで良い手",
+      "first": {"wins":28,"games":32},
+      "second": {"wins":64,"games":96},
+      "steps": [
+        {"iid":72,"type":"play"},
+        {"targets":[90],"type":"choose"},
+        {"iid":83,"type":"play"},
+        {"iid":72,"type":"superEvolve"},
+        {"targets":[93],"type":"choose"}
+      ],
+      "text": [
+        "波濤の副船長をプレイ",
+        "選ぶ: スケルトン",
+        "黄金の杯をプレイ",
+        "波濤の副船長を超進化",
+        "選ぶ: スケルトン"
+      ],
+      "full": [
+        "波濤の副船長をプレイ",
+        "選ぶ: スケルトン",
+        "黄金の杯をプレイ",
+        "波濤の副船長を超進化",
+        "選ぶ: スケルトン"
+      ],
+      "rethink": null,
+      "actions": [
+        {"iid":72,"type":"play"},
+        {"targets":[90],"type":"choose"},
+        {"iid":83,"type":"play"},
+        {"iid":72,"type":"superEvolve"},
+        {"targets":[93],"type":"choose"},
+        {"type":"endTurn"}
+      ]
+    }
+  ]
+}

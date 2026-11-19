@@ -1,0 +1,83 @@
+{
+  "v": 2,
+  "id": "dragon-abyss-g1281",
+  "source": "logs/night-20261117-0328/survey-2.jsonl.gz の試合 1281 の 53 手目",
+  "lines": [
+    {
+      "kind": "ai",
+      "label": "問を作ったときの AI の手",
+      "first": {"wins":5,"games":32},
+      "second": {"wins":14,"games":96},
+      "steps": [
+        {"iid":11,"type":"play"},
+        {"iid":11,"type":"superEvolve"},
+        {"attacker":11,"target":75,"type":"attack"},
+        {"iid":24,"type":"play"},
+        {"iid":89,"type":"play"}
+      ],
+      "text": [
+        "旧き天刀・ヴォーラライをプレイ",
+        "旧き天刀・ヴォーラライを超進化",
+        "旧き天刀・ヴォーラライで誠実なる呪い屋・スージーを攻撃",
+        "世界の味方・ゾーイをプレイ",
+        "天刀の深淵をプレイ"
+      ],
+      "full": [
+        "旧き天刀・ヴォーラライをプレイ",
+        "旧き天刀・ヴォーラライを超進化",
+        "旧き天刀・ヴォーラライで誠実なる呪い屋・スージーを攻撃",
+        "世界の味方・ゾーイをプレイ",
+        "天刀の深淵をプレイ"
+      ],
+      "rethink": null,
+      "actions": [
+        {"iid":11,"type":"play"},
+        {"iid":11,"type":"superEvolve"},
+        {"attacker":11,"target":75,"type":"attack"},
+        {"iid":24,"type":"play"},
+        {"iid":89,"type":"play"},
+        {"type":"endTurn"}
+      ]
+    },
+    {
+      "kind": "good",
+      "label": "打ち比べで良い手",
+      "first": {"wins":16,"games":32},
+      "second": {"wins":53,"games":96},
+      "steps": [
+        {"iid":11,"type":"play"},
+        {"iid":11,"type":"superEvolve"},
+        {"attacker":11,"target":75,"type":"attack"},
+        {"iid":89,"type":"play"},
+        {"iid":90,"type":"play"},
+        {"iid":91,"type":"play"}
+      ],
+      "text": [
+        "旧き天刀・ヴォーラライをプレイ",
+        "旧き天刀・ヴォーラライを超進化",
+        "旧き天刀・ヴォーラライで誠実なる呪い屋・スージーを攻撃",
+        "天刀の深淵をプレイ",
+        "天刀の深淵をプレイ",
+        "天刀の深淵をプレイ"
+      ],
+      "full": [
+        "旧き天刀・ヴォーラライをプレイ",
+        "旧き天刀・ヴォーラライを超進化",
+        "旧き天刀・ヴォーラライで誠実なる呪い屋・スージーを攻撃",
+        "天刀の深淵をプレイ",
+        "天刀の深淵をプレイ",
+        "天刀の深淵をプレイ"
+      ],
+      "rethink": null,
+      "actions": [
+        {"iid":11,"type":"play"},
+        {"iid":11,"type":"superEvolve"},
+        {"attacker":11,"target":75,"type":"attack"},
+        {"iid":89,"type":"play"},
+        {"iid":90,"type":"play"},
+        {"iid":91,"type":"play"},
+        {"type":"endTurn"}
+      ]
+    }
+  ]
+}

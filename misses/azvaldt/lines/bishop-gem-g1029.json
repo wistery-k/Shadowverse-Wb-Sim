@@ -1,0 +1,99 @@
+{
+  "v": 2,
+  "id": "bishop-gem-g1029",
+  "source": "logs/night-20261117-0328/survey-2.jsonl.gz の試合 1029 の 99 手目",
+  "lines": [
+    {
+      "kind": "ai",
+      "label": "問を作ったときの AI の手",
+      "first": {"wins":0,"games":32},
+      "second": {"wins":6,"games":96},
+      "steps": [
+        {"iid":37,"type":"play"},
+        {"index":0,"type":"mode"},
+        {"iid":24,"type":"play"},
+        {"targets":[80],"type":"choose"},
+        {"iid":24,"type":"act"},
+        {"targets":[109],"type":"choose"},
+        {"attacker":112,"target":110,"type":"attack"},
+        {"attacker":108,"target":"leader","type":"attack"}
+      ],
+      "text": [
+        "希望の光彩・リテュエルをプレイ",
+        "1 番目の効果を選ぶ",
+        "海蝕の三叉槍をプレイ",
+        "選ぶ: 万術の咎人・セフィー",
+        "海蝕の三叉槍の能力を使う",
+        "選ぶ: 没入の実験体",
+        "ホーリーファルコンで没入の実験体を攻撃",
+        "清純なる白狐でリーダーを攻撃"
+      ],
+      "full": [
+        "希望の光彩・リテュエルをプレイ",
+        "1 番目の効果を選ぶ",
+        "海蝕の三叉槍をプレイ",
+        "選ぶ: 万術の咎人・セフィー",
+        "海蝕の三叉槍の能力を使う",
+        "選ぶ: 没入の実験体",
+        "ホーリーファルコンで没入の実験体を攻撃",
+        "清純なる白狐でリーダーを攻撃"
+      ],
+      "rethink": null,
+      "actions": [
+        {"iid":37,"type":"play"},
+        {"index":0,"type":"mode"},
+        {"iid":24,"type":"play"},
+        {"targets":[80],"type":"choose"},
+        {"iid":24,"type":"act"},
+        {"targets":[109],"type":"choose"},
+        {"attacker":112,"target":110,"type":"attack"},
+        {"attacker":108,"target":"leader","type":"attack"},
+        {"type":"endTurn"}
+      ]
+    },
+    {
+      "kind": "good",
+      "label": "打ち比べで良い手",
+      "first": {"wins":14,"games":32},
+      "second": {"wins":29,"games":96},
+      "steps": [
+        {"iid":15,"type":"play"},
+        {"iid":15,"type":"act"},
+        {"index":1,"type":"mode"}
+      ],
+      "text": [
+        "レ・フィーエの宝石をプレイ",
+        "レ・フィーエの宝石の能力を使う",
+        "2 番目の効果を選ぶ"
+      ],
+      "full": [
+        "レ・フィーエの宝石をプレイ",
+        "レ・フィーエの宝石の能力を使う",
+        "2 番目の効果を選ぶ",
+        "堅固なる霧巻花をプレイ",
+        "選ぶ: 万術の咎人・セフィー",
+        "ホーリーファルコンで万術の咎人・セフィーを攻撃",
+        "堅固なる霧巻花の能力を使う",
+        "ホーリーファルコンでリーダーを攻撃",
+        "ホーリーファルコンで没入の実験体を攻撃",
+        "海蝕の三叉槍をプレイ",
+        "選ぶ: 没入の実験体",
+        "清純なる白狐でリーダーを攻撃",
+        "海蝕の三叉槍の能力を使う"
+      ],
+      "rethink": 3,
+      "actions": [
+        {"iid":15,"type":"play"},
+        {"iid":15,"type":"act"},
+        {"index":1,"type":"mode"},
+        {"type":"play","iid":24},
+        {"type":"choose","targets":[109]},
+        {"type":"attack","attacker":112,"target":110},
+        {"type":"act","iid":24},
+        {"type":"choose","targets":[110]},
+        {"type":"attack","attacker":108,"target":"leader"},
+        {"type":"endTurn"}
+      ]
+    }
+  ]
+}

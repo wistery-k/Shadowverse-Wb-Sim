@@ -1,0 +1,52 @@
+{
+  "v": 2,
+  "id": "elf-dustdays-g1067",
+  "source": "logs/night-20261117-0328/survey-2.jsonl.gz の試合 1067 の 9 手目",
+  "lines": [
+    {
+      "kind": "ai",
+      "label": "問を作ったときの AI の手",
+      "first": {"wins":10,"games":32},
+      "second": {"wins":19,"games":96},
+      "steps": [
+        {"type":"extraPp"},
+        {"iid":34,"type":"play"},
+        {"targets":[82],"type":"choose"}
+      ],
+      "text": [
+        "エクストラPP",
+        "操嵩のアナテマ・ダストデイズをプレイ",
+        "選ぶ: アナライズアーティファクト"
+      ],
+      "full": [
+        "エクストラPP",
+        "操嵩のアナテマ・ダストデイズをプレイ",
+        "選ぶ: アナライズアーティファクト"
+      ],
+      "rethink": null,
+      "actions": [
+        {"type":"extraPp"},
+        {"iid":34,"type":"play"},
+        {"targets":[82],"type":"choose"},
+        {"type":"endTurn"}
+      ]
+    },
+    {
+      "kind": "good",
+      "label": "打ち比べで良い手",
+      "first": {"wins":18,"games":32},
+      "second": {"wins":40,"games":96},
+      "steps": [
+        {"type":"endTurn"}
+      ],
+      "text": [
+        "ターン終了"
+      ],
+      "full": [],
+      "rethink": null,
+      "actions": [
+        {"type":"endTurn"}
+      ]
+    }
+  ]
+}
