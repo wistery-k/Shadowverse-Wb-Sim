@@ -6,6 +6,8 @@
 //   npm run night -- stop [名前] [--now]
 //   npm run night -- resume [名前] --yes [--until 07:00] [--threads N]
 //   npm run night -- finish [名前] [--commit] [--pack] [--ledger 台帳]
+//   npm run night -- wrap [名前]
+//   npm run night -- ingest <回の名前|ファイル…> [--ledger 台帳] [--to /mnt/project-files]
 //   npm run night -- list
 //
 // - ジョブのファイルは 1 行 1 ジョブで、svwb のコマンドと同じ形（compare・yardstick・profile・misses・survey）。# から行の終わりまでは書き添え
@@ -17,7 +19,9 @@
 // - start・resume は、組み立てた svwb を回のフォルダに写し、セッションから切り離した worker を立てて、すぐに戻る。
 //   PC やコンテナの起動で勝手には始めない（始めるのは start・resume だけ）
 // - 止める時刻（--until）までに次の区切りが終わらない見込みなら、区切りの切れ目で止まる。stop で手で止める（--now ならすぐ）
-// - 区切りの結果は回のフォルダの台帳（ledger.jsonl）にだけ書く。finish がジョブごとに 1 行にまとめて、リポジトリの台帳に足す
+// - 区切りの結果は回のフォルダの台帳（ledger.jsonl）にだけ書く。止まるとき（全部済んだ・止める時刻・失敗・stop）に worker が自分で、
+//   ジョブごとに 1 行にまとめた行をブランチ night/<回の名前> にコミットし（作業ツリーには触らない）、棋譜などを出口（~/svwb-data/outbox/<回の名前>/）にまとめる。
+//   朝はホストで push だけ（docker/remote-control/night-push.sh）。スレッドは ingest <回の名前> で台帳に足す（finish は残してある）
 
 import { spawn, spawnSync } from "node:child_process";
 import {
@@ -46,6 +50,8 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createGzip } from "node:zlib";
 import { DEFAULT_LEDGER, canonical, markdownTable, parseLedger, type MissesRow, type RunRow, type SurveyRow } from "./ledger-main.ts";
+import { OUTBOX_JSON, extractOutbox, guideHead, peekOutbox, writeOutbox, type OutboxHead } from "./night-outbox.ts";
+import { formatBytes } from "./pack-run-main.ts";
 
 /** リポジトリの根 */
 export const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -800,6 +806,9 @@ export interface Status {
   /** 書いた時刻（ミリ秒） */
   at: number;
   current: { id: string; since: number } | null;
+  /** 止まったときのまとめ: 出口のフォルダと、台帳の行をコミットしたブランチ（どちらも、できなかったときはその理由） */
+  outbox?: string;
+  branch?: string;
 }
 
 export const runsRoot = (opt?: string): string => resolve(opt ?? (process.env.SVWB_NIGHT_DIR || join(homedir(), "svwb-data", "night")));
@@ -878,7 +887,7 @@ function chunkMisses(dir: string): MissesRow[] {
 }
 
 /** 区切りの台帳の行（同じ引数で回した行） */
-function rowOf<R extends { cmd: string }>(rows: R[], plan: Plan, dir: string, c: Chunk): R | undefined {
+function rowOf<R extends { cmd: string }>(rows: R[], plan: Pick<Plan, "jobs">, dir: string, c: Chunk): R | undefined {
   const job = plan.jobs[c.job - 1];
   if (!job) return undefined;
   const cmd = shellLine(jobArgv(job, c.first, c.count, dir));
@@ -1116,19 +1125,21 @@ function contiguous(rows: RunRow[]): RunRow[][] {
 const pct = (x: number | null) => (x === null ? "?" : `${(x * 100).toFixed(2)}%`);
 const pts = (x: number | null) => (x === null ? "?" : (x * 100).toFixed(2));
 
-/** 回の今の様子（表） */
-export function statusText(dir: string): string {
+/** 回の今の様子（表）。final なら worker が動いていても止まったものとして書く（止まったときのまとめに書く） */
+export function statusText(dir: string, o: { final?: boolean } = {}): string {
   const plan = readPlan(dir);
   const session = existsSync(join(dir, "session.json")) ? readSession(dir) : null;
   const tz = session?.tz ?? "Asia/Tokyo";
   const st = readStatus(dir);
-  const pid = workerPid(dir);
+  const pid = o.final === true ? null : workerPid(dir);
   const done = markers(dir);
   const rows = chunkRows(dir);
   const missesRows = chunkMisses(dir);
   const failed = existsSync(join(dir, "failed.json")) ? readJson<Record<string, string>>(join(dir, "failed.json")) : {};
   let state: string;
-  if (pid !== null) {
+  if (pid !== null && st !== null && st.state !== "running") {
+    state = `${st.state === "done" ? "全部済んだ" : "止まった"}（${st.reason}、${fmtClock(st.at, tz)}）。結果をまとめている（pid ${pid}）`;
+  } else if (pid !== null) {
     const cur = st?.current;
     state = `動いている（pid ${pid}${cur ? `、区切り ${cur.id} を ${fmtClock(cur.since, tz)} から` : ""}）`;
   } else if (st === null) {
@@ -1184,6 +1195,8 @@ export function statusText(dir: string): string {
     `夜のキュー ${plan.name}（${dir}）`,
     `状態: ${state}`,
     `コミット ${plan.commit}（${plan.branch}）、${s ? `${s.machine}・${s.threads} スレッド、止める時刻 ${fmtClock(s.until, tz)}（${tz}）` : ""}`,
+    ...(o.final !== true && st?.branch !== undefined ? [`台帳の行: ${st.branch}（朝はホストで docker/remote-control/night-push.sh）`] : []),
+    ...(o.final !== true && st?.outbox !== undefined ? [`出口: ${st.outbox}`] : []),
   ];
   return `${head.join("\n")}\n\n${markdownTable(["#", "ジョブ", "台帳の名前", "区切り", "試合", "かかった時間", "結果（A の勝率・正解率・局面・ファイル）", "メモ"], tableRows)}`;
 }
@@ -1399,11 +1412,21 @@ export async function runWorker(dir: string, ctl: WorkerControl = { stopNow: fal
   const failed: Record<string, string> = {};
   writeFileSync(join(dir, "worker.pid"), String(process.pid));
   log(dir, tz, `始めた（pid ${process.pid}、${session.machine}・${session.threads} スレッド、止める時刻 ${fmtClock(session.until, tz)}）`);
-  const end = (state: Status["state"], reason: string): Status => {
+  const end = async (state: Status["state"], reason: string): Promise<Status> => {
     writeStatus(dir, { state, reason, current: null });
     log(dir, tz, `${state === "done" ? "終わった" : "止まった"}: ${reason}`);
     writeAtomic(failedFile, JSON.stringify(failed));
-    return { state, reason, at: Date.now(), current: null };
+    // 朝に何も打たなくてよいよう、台帳の行をブランチにコミットし、棋譜などを出口にまとめる
+    let w: { outbox: string; branch: string };
+    try {
+      w = await wrapUp(dir, (t) => log(dir, tz, t));
+    } catch (e) {
+      const why = `まとめられなかった（${(e as Error).message}。npm run night -- wrap でやり直す）`;
+      log(dir, tz, why);
+      w = { outbox: why, branch: why };
+    }
+    writeStatus(dir, { state, reason, current: null, ...w });
+    return { state, reason, at: Date.now(), current: null, ...w };
   };
   writeStatus(dir, { state: "running", reason: "", current: null });
   for (const job of plan.jobs) {
@@ -1440,11 +1463,11 @@ export async function runWorker(dir: string, ctl: WorkerControl = { stopNow: fal
         writeAtomic(failedFile, JSON.stringify(failed));
         break;
       }
-      if (existsSync(join(dir, "STOP"))) return end("stopped", "手で止めた（stop）");
-      if (ctl.stopNow) return end("stopped", "すぐ止めた（stop --now）");
+      if (existsSync(join(dir, "STOP"))) return await end("stopped", "手で止めた（stop）");
+      if (ctl.stopNow) return await end("stopped", "すぐ止めた（stop --now）");
       const expected = chunkSeconds(c, plan, measuredSpeed(plan, done, session.threads));
       if (Date.now() + expected * 1000 > session.until) {
-        return end("stopped", `止める時刻 ${fmtClock(session.until, tz)} までに区切り ${c.id}（見込み ${fmtDur(expected)}）が終わらない`);
+        return await end("stopped", `止める時刻 ${fmtClock(session.until, tz)} までに区切り ${c.id}（見込み ${fmtDur(expected)}）が終わらない`);
       }
       // 前の行が書きかけ（電源が切れた等）なら、次の行がそれにつながらないよう改行を足す
       if (existsSync(ledgerFile)) {
@@ -1467,8 +1490,8 @@ export async function runWorker(dir: string, ctl: WorkerControl = { stopNow: fal
         log(dir, tz, `区切り ${c.id} 済み（${fmtDur(r.seconds)}${pace}${what}${made.length > 0 ? `、${made.join("・")}` : ""}）`);
         continue;
       }
-      if (ctl.stopNow) return end("stopped", `すぐ止めた（stop --now。区切り ${c.id} は回し直す）`);
-      if (r.why.startsWith("止める時刻")) return end("stopped", `${r.why}ので区切り ${c.id} を止めた（回し直す）`);
+      if (ctl.stopNow) return await end("stopped", `すぐ止めた（stop --now。区切り ${c.id} は回し直す）`);
+      if (r.why.startsWith("止める時刻")) return await end("stopped", `${r.why}ので区切り ${c.id} を止めた（回し直す）`);
       failed[String(job.index)] = `区切り ${c.id}（終わりの状態 ${r.code ?? "?"}${r.why ? `、${r.why}` : ""}。chunks/${c.id}.log.tmp）`;
       for (const f of chunkProducts(plan, dir, c)) rmSync(`${f}.tmp`, { force: true });
       if (job.spec.kind === "data") rmSync(dataProduct(job, c.first, dir).tmp, { force: true });
@@ -1478,7 +1501,7 @@ export async function runWorker(dir: string, ctl: WorkerControl = { stopNow: fal
     }
   }
   const allDone = plan.chunks.every((c) => markers(dir).has(c.id));
-  return end(allDone ? "done" : "stopped", allDone ? "全部の区切りが済んだ" : "失敗したジョブがある（resume でやり直す）");
+  return await end(allDone ? "done" : "stopped", allDone ? "全部の区切りが済んだ" : "失敗したジョブがある（resume でやり直す）");
 }
 
 // ---------------------------------------------------------------- コマンド
@@ -1524,6 +1547,9 @@ function git(args: string[]): string {
 
 /** 今のコミット（台帳と物差しの表のほかに変更があれば末尾に +。rust の commit_label_excluding と同じ）とブランチ */
 export function gitState(): { commit: string; branch: string; dirty: boolean } {
+  // SVWB_COMMIT（svwb が台帳の行に書くコミット）があれば、それを回のコミットにする（試す用）
+  const fixed = process.env.SVWB_COMMIT;
+  if (fixed) return { commit: fixed, branch: process.env.SVWB_BRANCH || git(["rev-parse", "--abbrev-ref", "HEAD"]) || "?", dirty: false };
   const head = git(["rev-parse", "--short=7", "HEAD"]) || "?";
   const dirty =
     git(["status", "--porcelain", "--untracked-files=no", "--", ":/", ":(exclude,top)docs/yardstick.md", ":(exclude,top)docs/ledger.jsonl"]) !== "";
@@ -1820,6 +1846,173 @@ function uncommittedQueueRows(name: string): number {
   return work - (head.status === 0 ? count(head.stdout) : 0);
 }
 
+export type QueueRun = RunRow & { queue: string; chunks: number };
+export type QueueMisses = MissesRow & { queue: string; chunks: number };
+export type QueueSurvey = SurveyRow & { queue: string; chunks: number };
+
+/** 回の区切りの結果（回のフォルダか、出口の outbox.json から） */
+export interface RowsSource {
+  /** 済んだ区切り */
+  done: Set<string>;
+  /** 区切りごとの台帳の行 */
+  runs: RunRow[];
+  misses: MissesRow[];
+  /** pick の結果（まだなら null） */
+  pick: (job: Job) => PickResult | null;
+  /** survey のジョブの台帳の行（全部の区切りが済んだジョブだけで呼ぶ。作れなければ null） */
+  survey: (job: Job) => SurveyRow | null;
+}
+
+/** 台帳に足す行 */
+export interface QueueRows {
+  runs: QueueRun[];
+  misses: QueueMisses[];
+  surveys: QueueSurvey[];
+  notes: string[];
+  /** 足し終えた区切り（前から足してあったものと、今回の行に入れたもの） */
+  merged: Set<string>;
+}
+
+type LedgerRows = { runs: RunRow[]; misses: MissesRow[]; surveys: SurveyRow[] };
+const queueOf = (r: object): string | undefined => (r as { queue?: string }).queue;
+
+/**
+ * 回の済んだ区切りの行を、台帳に足す行にまとめる（finish・出口のまとめ・ingest で同じ）。compare・yardstick は試合番号の続いたまとまりごとに 1 行、
+ * misses は区切りの行に回の名前を足してそのまま、survey は全部の区切りが済んでから 1 行。merged の区切りは足さない。
+ * target の台帳に同じ回の同じ行があれば足さない
+ */
+export function queueRows(plan: Pick<Plan, "name" | "jobs" | "chunks">, dir: string, src: RowsSource, merged: Set<string>, target: LedgerRows): QueueRows {
+  const out: QueueRows = { runs: [], misses: [], surveys: [], notes: [], merged: new Set(merged) };
+  const key = (r: { label: string; g: [number, number]; commit: string; kind: string }) => `${r.kind}\u0001${r.label}\u0001${r.g[0]}\u0001${r.g[1]}\u0001${r.commit}`;
+  const have = new Set(target.runs.filter((r) => queueOf(r) === plan.name).map(key));
+  const mkey = (r: MissesRow) => `${r.label}\u0001${r.commit}\u0001${r.seed}\u0001${r.trials}\u0001${r.set}`;
+  const haveMisses = new Set(target.misses.filter((r) => queueOf(r) === plan.name).map(mkey));
+  const haveSurveys = new Set(target.surveys.filter((r) => queueOf(r) === plan.name).map((r) => r.label));
+  for (const job of plan.jobs) {
+    if (job.spec.kind === "profile" || job.spec.kind === "data" || job.spec.kind === "node") continue;
+    if (job.spec.kind === "pick") {
+      const p = src.pick(job);
+      out.notes.push(`ジョブ ${job.index}（pick）: ${p ? pickText(p) : "まだ"}`);
+      continue;
+    }
+    if (job.spec.kind === "survey") {
+      // 打ち比べ調査は、ジョブの区切りが全部済んでから svwb survey report で 1 行にまとめる（局面ごとの結果は回のフォルダの survey-<番号>.jsonl）
+      const cs = plan.chunks.filter((c) => c.job === job.index);
+      if (cs.every((c) => out.merged.has(c.id))) continue;
+      const nDone = cs.filter((c) => src.done.has(c.id)).length;
+      if (nDone < cs.length) {
+        out.notes.push(`ジョブ ${job.index}（${job.label}）はまだ途中（区切り ${nDone}/${cs.length}）。続きを回してから台帳に足す`);
+        continue;
+      }
+      if (!haveSurveys.has(job.label)) {
+        const row = src.survey(job);
+        if (row === null) {
+          out.notes.push(`ジョブ ${job.index}（${job.label}）: survey report の行を作れなかった（台帳に足していない）`);
+          continue;
+        }
+        out.surveys.push({ ...row, queue: plan.name, chunks: cs.length });
+      }
+      for (const c of cs) out.merged.add(c.id);
+      continue;
+    }
+    if (job.spec.kind === "misses") {
+      // 見落とし問題集は分けずに回すので、区切りの行に回の名前を足してそのまま写す
+      for (const c of plan.chunks.filter((c) => c.job === job.index && src.done.has(c.id) && !out.merged.has(c.id))) {
+        const r = rowOf(src.misses, plan, dir, c);
+        if (r && !haveMisses.has(mkey(r))) out.misses.push({ ...r, queue: plan.name, chunks: 1 });
+        out.merged.add(c.id);
+      }
+      continue;
+    }
+    const cs = plan.chunks.filter((c) => c.job === job.index && src.done.has(c.id) && !out.merged.has(c.id));
+    const rs = cs.map((c) => rowOf(src.runs, plan, dir, c)).filter((r): r is RunRow => r !== undefined);
+    for (const group of contiguous(rs)) {
+      const g0 = group[0]?.g[0] ?? 0;
+      const g1 = group[group.length - 1]?.g[1] ?? 0;
+      const row = combineRows(group, shellLine(jobArgv(job, g0, g1 - g0 + 1, dir)), plan.name);
+      if (!have.has(key(row))) out.runs.push(row);
+    }
+    for (const c of cs) out.merged.add(c.id);
+  }
+  return out;
+}
+
+/** 台帳に足す行の表（finish・出口のまとめ・ingest） */
+export function rowsTables(plan: Pick<Plan, "jobs">, r: Pick<QueueRows, "runs" | "misses" | "surveys" | "notes">): string {
+  return `${
+    r.runs.length > 0
+      ? markdownTable(
+          ["名前", "試合", "A の勝率", "±", "区切り", "秒/試合"],
+          r.runs.map((x) => [x.label, `${x.n}（g${x.g[0]}〜${x.g[1]}）`, pct(x.rate), pts(x.se), String(x.chunks), x.perGame?.toFixed(3) ?? "?"]),
+        )
+      : ""
+  }${
+    r.misses.length > 0
+      ? `\n\n${markdownTable(
+          ["名前", "問", "回数", "正解率", "±", "秒"],
+          r.misses.map((x) => [x.label, `${x.problems}（${x.set}）`, String(x.trials), pct(x.rate), pts(x.se), x.seconds.toFixed(0)]),
+        )}`
+      : ""
+  }${
+    r.surveys.length > 0
+      ? `\n\n${markdownTable(
+          ["名前", "試合", "局面（打ち比べた）", "二段目で測る得", "半分で選ぶ得（8 つ）", "（上位 4 つ）", "大きなミス", "結果"],
+          r.surveys.map((x) => {
+            const f = (v: [number | null, number | null], k: number) => (v[0] === null ? "?" : `${v[0].toFixed(k)} ± ${(v[1] ?? 0).toFixed(k)}`);
+            const i = plan.jobs.find((j) => j.label === x.label && j.spec.kind === "survey")?.index ?? "?";
+            return [x.label, `${x.games}（g${x.g[0]}〜${x.g[1]}）`, `${x.positions}（${x.compared}）`, f(x.gain2, 2), f(x.gain8, 2), f(x.gain4, 2), `${x.misses}（1 試合 1 席 ${f(x.missesPerGame, 3)}）`, `survey-${i}.md`];
+          }),
+        )}`
+      : ""
+  }${r.notes.length > 0 ? `\n\n${r.notes.join("\n")}` : ""}`;
+}
+
+/** survey のジョブを svwb survey report で 1 行にまとめる（報告は survey-<番号>.md、問題集に足す候補の局面は survey-<番号>-states/、行は survey-<番号>-ledger.jsonl）。
+ * reuse なら、前に作った行があればそれを使う */
+function surveyReport(plan: Plan, dir: string, job: Job, reuse: boolean): SurveyRow {
+  const one = join(dir, `survey-${job.index}-ledger.jsonl`);
+  // 前に作った行は、その後に調査の結果が書き足されていなければ使う
+  if (reuse && existsSync(one) && statSync(one).mtimeMs >= (statSync(surveyFile(dir, job), { throwIfNoEntry: false })?.mtimeMs ?? 0)) {
+    const rows = parseLedger(readFileSync(one, "utf8")).surveys;
+    const row = rows[rows.length - 1];
+    if (row) return row;
+  }
+  rmSync(one, { force: true });
+  const states = join(dir, `survey-${job.index}-states`);
+  mkdirSync(states, { recursive: true });
+  const r = spawnSync(plan.bin, ["survey", "report", surveyFile(dir, job), "--label", job.label, "--states", states], {
+    cwd: plan.repo,
+    encoding: "utf8",
+    maxBuffer: 1 << 28,
+    env: { ...process.env, SVWB_LEDGER: one, SVWB_COMMIT: plan.commit, SVWB_BRANCH: plan.branch },
+  });
+  if (r.status !== 0) throw new Error(`ジョブ ${job.index} の survey report が失敗しました: ${(r.stderr || r.stdout).trim()}`);
+  writeFileSync(join(dir, `survey-${job.index}.md`), r.stdout);
+  const rows = existsSync(one) ? parseLedger(readFileSync(one, "utf8")).surveys : [];
+  const row = rows[rows.length - 1];
+  if (!row) throw new Error(`ジョブ ${job.index} の survey report が台帳の行を書きませんでした（${one}）`);
+  return row;
+}
+
+/** 回のフォルダの pick の結果 */
+function readPick(dir: string, job: Job): PickResult | null {
+  const f = join(dir, `pick-${job.index}.json`);
+  return existsSync(f) ? readJson<PickResult>(f) : null;
+}
+
+/** 台帳に行を足す（前の行が書きかけなら改行を足してから） */
+function appendRows(target: string, text: string): void {
+  if (text === "") return;
+  if (existsSync(target)) {
+    const t = readFileSync(target, "utf8");
+    if (t.length > 0 && !t.endsWith("\n")) appendFileSync(target, "\n");
+  }
+  appendFileSync(target, text);
+}
+
+const rowsText = (r: Pick<QueueRows, "runs" | "misses" | "surveys">): string => [...r.runs, ...r.misses, ...r.surveys].map((x) => `${JSON.stringify(x)}\n`).join("");
+const rowCount = (r: Pick<QueueRows, "runs" | "misses" | "surveys">): number => r.runs.length + r.misses.length + r.surveys.length;
+
 /** 朝: ジョブごとに 1 行にまとめた行をリポジトリの台帳に足す（足した区切りは覚えておき、2 回足さない） */
 export function cmdFinish(a: Args): number {
   known(a, ["--commit", "--pack", "--ledger"], 1);
@@ -1827,8 +2020,6 @@ export function cmdFinish(a: Args): number {
   const dir = findRun(root, a.pos[0], () => true);
   if (workerPid(dir) !== null) throw new Error(`まだ動いています: ${dir}（止めるなら stop）`);
   const plan = readPlan(dir);
-  const done = markers(dir);
-  const rows = chunkRows(dir);
   const mergedFile = join(dir, "merged.json");
   const merged = new Set<string>(existsSync(mergedFile) ? readJson<string[]>(mergedFile) : []);
   const target = a.opts.get("--ledger") ?? (process.env.SVWB_LEDGER || DEFAULT_LEDGER);
@@ -1839,110 +2030,22 @@ export function cmdFinish(a: Args): number {
     checkGitIdent();
   }
   const targetLedger = existsSync(target) ? parseLedger(readFileSync(target, "utf8")) : { runs: [], misses: [], surveys: [] };
-  const existing = targetLedger.runs;
-  const key = (r: { label: string; g: [number, number]; commit: string; kind: string }) => `${r.kind}\u0001${r.label}\u0001${r.g[0]}\u0001${r.g[1]}\u0001${r.commit}`;
-  const have = new Set(existing.filter((r) => (r as RunRow & { queue?: string }).queue === plan.name).map(key));
-  const out: RunRow[] = [];
-  // 見落とし問題集は分けずに回すので、区切りの行に回の名前を足してそのまま写す
-  const outMisses: (MissesRow & { queue: string; chunks: number })[] = [];
-  const mrows = chunkMisses(dir);
-  const mkey = (r: MissesRow) => `${r.label}\u0001${r.commit}\u0001${r.seed}\u0001${r.trials}\u0001${r.set}`;
-  const haveMisses = new Set(targetLedger.misses.filter((r) => (r as MissesRow & { queue?: string }).queue === plan.name).map(mkey));
-  // 打ち比べ調査は、ジョブの区切りが全部済んでから svwb survey report で 1 行にまとめる（局面ごとの結果は回のフォルダの survey-<番号>.jsonl）
-  const outSurveys: (SurveyRow & { queue: string; chunks: number })[] = [];
-  const haveSurveys = new Set(targetLedger.surveys.filter((r) => (r as SurveyRow & { queue?: string }).queue === plan.name).map((r) => r.label));
-  const notes: string[] = [];
-  for (const job of plan.jobs) {
-    if (job.spec.kind === "profile" || job.spec.kind === "data" || job.spec.kind === "node") continue;
-    if (job.spec.kind === "pick") {
-      const f = join(dir, `pick-${job.index}.json`);
-      notes.push(`ジョブ ${job.index}（pick）: ${existsSync(f) ? pickText(readJson<PickResult>(f)) : "まだ"}`);
-      continue;
-    }
-    if (job.spec.kind === "survey") {
-      const cs = plan.chunks.filter((c) => c.job === job.index);
-      if (cs.every((c) => merged.has(c.id))) continue;
-      const nDone = cs.filter((c) => done.has(c.id)).length;
-      if (nDone < cs.length) {
-        notes.push(`ジョブ ${job.index}（${job.label}）はまだ途中（区切り ${nDone}/${cs.length}）。resume で続きを回してから finish で台帳に足す`);
-        continue;
-      }
-      if (!haveSurveys.has(job.label)) {
-        const one = join(dir, `survey-${job.index}-ledger.jsonl`);
-        rmSync(one, { force: true });
-        const states = join(dir, `survey-${job.index}-states`);
-        mkdirSync(states, { recursive: true });
-        const r = spawnSync(plan.bin, ["survey", "report", surveyFile(dir, job), "--label", job.label, "--states", states], {
-          cwd: plan.repo,
-          encoding: "utf8",
-          maxBuffer: 1 << 28,
-          env: { ...process.env, SVWB_LEDGER: one, SVWB_COMMIT: plan.commit, SVWB_BRANCH: plan.branch },
-        });
-        if (r.status !== 0) throw new Error(`ジョブ ${job.index} の survey report が失敗しました: ${(r.stderr || r.stdout).trim()}`);
-        writeFileSync(join(dir, `survey-${job.index}.md`), r.stdout);
-        const rows = existsSync(one) ? parseLedger(readFileSync(one, "utf8")).surveys : [];
-        const row = rows[rows.length - 1];
-        if (!row) throw new Error(`ジョブ ${job.index} の survey report が台帳の行を書きませんでした（${one}）`);
-        outSurveys.push({ ...row, queue: plan.name, chunks: cs.length });
-      }
-      for (const c of cs) merged.add(c.id);
-      continue;
-    }
-    if (job.spec.kind === "misses") {
-      for (const c of plan.chunks.filter((c) => c.job === job.index && done.has(c.id) && !merged.has(c.id))) {
-        const r = rowOf(mrows, plan, dir, c);
-        if (r && !haveMisses.has(mkey(r))) outMisses.push({ ...r, queue: plan.name, chunks: 1 });
-        merged.add(c.id);
-      }
-      continue;
-    }
-    const cs = plan.chunks.filter((c) => c.job === job.index && done.has(c.id) && !merged.has(c.id));
-    const rs = cs.map((c) => rowOf(rows, plan, dir, c)).filter((r): r is RunRow => r !== undefined);
-    for (const group of contiguous(rs)) {
-      const g0 = group[0]?.g[0] ?? 0;
-      const g1 = group[group.length - 1]?.g[1] ?? 0;
-      const row = combineRows(group, shellLine(jobArgv(job, g0, g1 - g0 + 1, dir)), plan.name);
-      if (!have.has(key(row))) out.push(row);
-    }
-    for (const c of cs) merged.add(c.id);
-  }
-  const text = [...out, ...outMisses, ...outSurveys].map((r) => `${JSON.stringify(r)}\n`).join("");
-  const added = out.length + outMisses.length + outSurveys.length;
+  const src: RowsSource = {
+    done: new Set(markers(dir).keys()),
+    runs: chunkRows(dir),
+    misses: chunkMisses(dir),
+    pick: (job) => readPick(dir, job),
+    survey: (job) => surveyReport(plan, dir, job, false),
+  };
+  const rows = queueRows(plan, dir, src, merged, targetLedger);
+  const text = rowsText(rows);
+  const added = rowCount(rows);
   if (added > 0) {
-    if (existsSync(target)) {
-      const t = readFileSync(target, "utf8");
-      if (t.length > 0 && !t.endsWith("\n")) appendFileSync(target, "\n");
-    }
-    appendFileSync(target, text);
+    appendRows(target, text);
     appendFileSync(join(dir, "ledger-jobs.jsonl"), text);
   }
-  writeAtomic(mergedFile, JSON.stringify([...merged]));
-  const summary = `${statusText(dir)}\n\n台帳（${target}）に足した行: ${added}\n${
-    out.length > 0
-      ? markdownTable(
-          ["名前", "試合", "A の勝率", "±", "区切り", "秒/試合"],
-          out.map((r) => [r.label, `${r.n}（g${r.g[0]}〜${r.g[1]}）`, pct(r.rate), pts(r.se), String((r as RunRow & { chunks?: number }).chunks ?? 1), r.perGame?.toFixed(3) ?? "?"]),
-        )
-      : ""
-  }${
-    outMisses.length > 0
-      ? `\n\n${markdownTable(
-          ["名前", "問", "回数", "正解率", "±", "秒"],
-          outMisses.map((r) => [r.label, `${r.problems}（${r.set}）`, String(r.trials), pct(r.rate), pts(r.se), r.seconds.toFixed(0)]),
-        )}`
-      : ""
-  }${
-    outSurveys.length > 0
-      ? `\n\n${markdownTable(
-          ["名前", "試合", "局面（打ち比べた）", "二段目で測る得", "半分で選ぶ得（8 つ）", "（上位 4 つ）", "大きなミス", "結果"],
-          outSurveys.map((r) => {
-            const f = (x: [number | null, number | null], k: number) => (x[0] === null ? "?" : `${x[0].toFixed(k)} ± ${(x[1] ?? 0).toFixed(k)}`);
-            const i = plan.jobs.find((j) => j.label === r.label && j.spec.kind === "survey")?.index ?? "?";
-            return [r.label, `${r.games}（g${r.g[0]}〜${r.g[1]}）`, `${r.positions}（${r.compared}）`, f(r.gain2, 2), f(r.gain8, 2), f(r.gain4, 2), `${r.misses}（1 試合 1 席 ${f(r.missesPerGame, 3)}）`, `survey-${i}.md`];
-          }),
-        )}`
-      : ""
-  }${notes.length > 0 ? `\n\n${notes.join("\n")}` : ""}`;
+  writeAtomic(mergedFile, JSON.stringify([...rows.merged]));
+  const summary = `${statusText(dir)}\n\n台帳（${target}）に足した行: ${added}\n${rowsTables(plan, rows)}`;
   writeFileSync(join(dir, "summary.md"), `${summary}\n`);
   console.log(summary);
   if (commit) {
@@ -1961,6 +2064,379 @@ export function cmdFinish(a: Args): number {
     run("npm", ["run", "-s", "pack-run", "--", dir, "--name", plan.name, "--note", `夜のキュー ${plan.name}（${plan.commit}）`, "--only", "logs,kifu", "--force"]);
   }
   return 0;
+}
+
+// ---------------------------------------------------------------- 止まったときのまとめ（朝に何も打たなくてよいように）
+//
+// worker が止まるとき（全部済んだ・止める時刻・失敗・stop）に、自分で次の 2 つをする（docs/night.md「朝」）。
+// 1. 台帳の行を、ブランチ night/<回の名前> にコミットする（回のコミットから枝分かれ。作業ツリーと index には触らない）。
+//    ユーザーは朝にホストで push だけをし（docker/remote-control/night-push.sh）、スレッドは npm run night -- ingest <回の名前> で台帳に足す
+// 2. 棋譜・ログ・作ったデータとモデルを、出口のフォルダ（~/svwb-data/outbox/<回の名前>/）に .tar.gz でまとめる。要るときだけスレッドに上げ、
+//    スレッドは npm run night -- ingest <ファイル…> で共有フォルダに展開する
+
+/** 出口の outbox.json の result */
+export interface OutboxResult {
+  name: string;
+  commit: string;
+  branch: string;
+  /** 回を始めた時刻（ISO） */
+  created: string;
+  tz: string;
+  status: Status | null;
+  /** PC で見た様子と、この回の済んだ区切りを全部まとめた表 */
+  summary: string;
+}
+
+/** 出口の置き場（環境変数 SVWB_OUTBOX_DIR。無ければ回の置き場の隣の outbox。既定は ~/svwb-data/outbox） */
+export function outboxRoot(dir: string): string {
+  return resolve(process.env.SVWB_OUTBOX_DIR || join(dirname(dirname(resolve(dir))), "outbox"));
+}
+
+/** 台帳の行を足すブランチ */
+export const nightBranch = (name: string): string => `night/${name}`;
+
+/** リポジトリの中の台帳の道 */
+const LEDGER_PATH = "docs/ledger.jsonl";
+
+/** ブランチ night/<回> を置く・取ってくる git のリポジトリ（環境変数 SVWB_NIGHT_GIT_DIR。試す用。既定は回のリポジトリ・このリポジトリ） */
+const nightGitDir = (repo: string): string => process.env.SVWB_NIGHT_GIT_DIR || repo;
+
+const EMPTY_LEDGER: LedgerRows = { runs: [], misses: [], surveys: [] };
+
+/** 回のフォルダの今の結果（survey のジョブは、全部の区切りが済んでいれば survey report で 1 行にする。前に作った行があればそれを使う） */
+function runSource(plan: Plan, dir: string): { src: RowsSource; errors: string[] } {
+  const done = markers(dir);
+  const surveys = new Map<number, SurveyRow>();
+  const errors: string[] = [];
+  for (const job of plan.jobs) {
+    if (job.spec.kind !== "survey" || !plan.chunks.filter((c) => c.job === job.index).every((c) => done.has(c.id))) continue;
+    try {
+      surveys.set(job.index, surveyReport(plan, dir, job, true));
+    } catch (e) {
+      errors.push((e as Error).message);
+    }
+  }
+  return {
+    src: { done: new Set(done.keys()), runs: chunkRows(dir), misses: chunkMisses(dir), pick: (job) => readPick(dir, job), survey: (job) => surveys.get(job.index) ?? null },
+    errors,
+  };
+}
+
+/** この回の済んだ区切りを全部まとめた表（PC で見た様子と一緒に） */
+function runSummary(plan: Plan, dir: string, src: RowsSource, errors: string[]): string {
+  const tables = rowsTables(plan, queueRows(plan, dir, src, new Set(), EMPTY_LEDGER));
+  return `${statusText(dir, { final: true })}\n\nこの回の結果（済んだ区切りをジョブごとにまとめた）\n${tables === "" ? "（まだ結果の行はありません）" : tables}${
+    errors.length > 0 ? `\n\n${errors.join("\n")}` : ""
+  }`;
+}
+
+/** 回のフォルダの結果を出口のフォルダにまとめる */
+export async function makeOutbox(dir: string, summary?: string): Promise<{ folder: string; files: { name: string; bytes: number }[]; total: number }> {
+  const plan = readPlan(dir);
+  const tz = existsSync(join(dir, "session.json")) ? readSession(dir).tz : "Asia/Tokyo";
+  let text = summary;
+  if (text === undefined) {
+    const { src, errors } = runSource(plan, dir);
+    text = runSummary(plan, dir, src, errors);
+  }
+  const result: OutboxResult = { name: plan.name, commit: plan.commit, branch: plan.branch, created: plan.created, tz, status: readStatus(dir), summary: text };
+  writeFileSync(join(dir, "outbox-summary.md"), `${text}\n`);
+  const now = new Date();
+  return writeOutbox({
+    dir,
+    name: plan.name,
+    outRoot: outboxRoot(dir),
+    note: `夜のキュー ${plan.name}（${plan.commit}）`,
+    repo: `回のコミット: ${plan.commit}（ブランチ ${plan.branch}）`,
+    result,
+    now,
+    guide: (files, total) => `${guideHead(plan.name, files, total)}\n\nまとめた時刻: ${fmtClock(now.getTime(), tz)}（${tz}）\n\n${text}\n`,
+  });
+}
+
+/**
+ * 台帳に、同じ回の行が既に覆っている区切り（compare・yardstick は同じ種類・名前・コミットで試合番号が入る行、misses は同じ名前・コミット・回数・シード、
+ * survey は同じ名前）。止まるたびのコミットは、ブランチの台帳が覆っている区切りを足し終えたものとして扱う（finish の merged.json と同じ働き）
+ */
+export function coveredChunks(plan: Pick<Plan, "name" | "jobs" | "chunks" | "commit">, target: LedgerRows): Set<string> {
+  const out = new Set<string>();
+  const mine = <R extends object>(rows: R[]) => rows.filter((r) => queueOf(r) === plan.name);
+  for (const job of plan.jobs) {
+    const cs = plan.chunks.filter((c) => c.job === job.index);
+    const s = job.spec;
+    if (s.kind === "compare" || s.kind === "yardstick") {
+      const rs = mine(target.runs).filter((r) => r.kind === s.kind && r.label === job.label && r.commit === plan.commit);
+      for (const c of cs) if (rs.some((r) => r.g[0] <= c.first && c.first + c.count - 1 <= r.g[1])) out.add(c.id);
+    } else if (s.kind === "misses") {
+      if (mine(target.misses).some((r) => r.label === job.label && r.commit === plan.commit && r.seed === s.seed && r.trials === job.games)) for (const c of cs) out.add(c.id);
+    } else if (s.kind === "survey") {
+      if (mine(target.surveys).some((r) => r.label === job.label)) for (const c of cs) out.add(c.id);
+    }
+  }
+  return out;
+}
+
+/** git を回す（失敗したら投げる） */
+function gitIn(repo: string, args: string[], o: { input?: string; env?: NodeJS.ProcessEnv } = {}): string {
+  const r = spawnSync("git", args, { cwd: repo, encoding: "utf8", input: o.input, env: { ...process.env, ...o.env }, maxBuffer: 1 << 30 });
+  if (r.status !== 0) throw new Error(`git ${args.slice(0, 2).join(" ")} が失敗しました: ${(r.stderr || r.stdout).trim()}`);
+  return r.stdout;
+}
+
+/** コミットに使う名前とメール（git に設定が無ければ「夜のキュー」。コンテナに設定が無くても止まらないように） */
+function commitIdent(repo: string): NodeJS.ProcessEnv {
+  const ok = ["GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"].every((v) => spawnSync("git", ["var", v], { cwd: repo, encoding: "utf8" }).status === 0);
+  if (ok) return {};
+  const name = "svwb night queue";
+  const email = "night-queue@svwb.invalid";
+  return { GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: name, GIT_COMMITTER_EMAIL: email };
+}
+
+/**
+ * 台帳の行をブランチ night/<回の名前> にコミットする。ブランチが無ければ回のコミットから作り、あれば先に積む。
+ * 足すのは、ブランチの台帳がまだ覆っていない区切りの行だけ（止まった回の続きを回した後は、残りの区切りの行）。行が無くてもコミットし、
+ * メッセージに様子と結果の表を書く（スレッドが読む）。前のコミットと同じメッセージで足す行も無ければ、コミットしない
+ */
+export function commitNight(dir: string, summary: string, outbox: string): { branch: string; sha: string | null; rows: number } {
+  const plan = readPlan(dir);
+  const repo = nightGitDir(plan.repo);
+  const branch = nightBranch(plan.name);
+  const ref = `refs/heads/${branch}`;
+  const tip = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], { cwd: repo, encoding: "utf8" });
+  const old = tip.status === 0 ? tip.stdout.trim() : null;
+  const parent = old ?? gitIn(repo, ["rev-parse", "--verify", `${plan.commit.replace(/\+$/, "")}^{commit}`]).trim();
+  const ledgerPath = LEDGER_PATH;
+  const cur = spawnSync("git", ["show", `${parent}:${ledgerPath}`], { cwd: repo, encoding: "utf8", maxBuffer: 1 << 30 });
+  const before = cur.status === 0 ? cur.stdout : "";
+  const target = parseLedger(before);
+  const { src, errors } = runSource(plan, dir);
+  const rows = queueRows(plan, dir, src, coveredChunks(plan, target), target);
+  const n = rowCount(rows);
+  const text = rowsText(rows);
+  const msg = [
+    `台帳: 夜のキュー ${plan.name} の結果（${n} 行、${plan.commit}）`,
+    "",
+    "このブランチは夜のキューの結果の台帳の行を運ぶためのもの（PC で作った）。スレッドは npm run night -- ingest " + plan.name + " で自分のブランチの台帳に足す。",
+    `出口: ${outbox}`,
+    "",
+    summary,
+    ...(errors.length > 0 ? ["", ...errors] : []),
+  ].join("\n");
+  // 足す行が無く、様子と結果の表（1 行目と出口の行のほか）が前のコミットと同じなら、新しいことは無い
+  const gist = (m: string) => m.split("\n").slice(1).filter((l) => !l.startsWith("出口: ")).join("\n").trim();
+  if (old !== null && n === 0 && gist(gitIn(repo, ["log", "-1", "--format=%B", old])) === gist(msg)) return { branch, sha: null, rows: 0 };
+  const content = before === "" || before.endsWith("\n") ? before + text : `${before}\n${text}`;
+  const blob = gitIn(repo, ["hash-object", "-w", "--stdin"], { input: content }).trim();
+  const index = join(mkdtempSync(join(tmpdir(), "night-index-")), "index");
+  try {
+    const env = { GIT_INDEX_FILE: index };
+    gitIn(repo, ["read-tree", parent], { env });
+    gitIn(repo, ["update-index", "--add", "--cacheinfo", `100644,${blob},${ledgerPath}`], { env });
+    const tree = gitIn(repo, ["write-tree"], { env }).trim();
+    const sha = gitIn(repo, ["commit-tree", tree, "-p", parent, "-F", "-"], { input: msg, env: commitIdent(repo) }).trim();
+    gitIn(repo, ["update-ref", "-m", `夜のキュー ${plan.name}`, ref, sha, old ?? ""]);
+    return { branch, sha, rows: n };
+  } finally {
+    rmSync(dirname(index), { recursive: true, force: true });
+  }
+}
+
+/** 止まったときのまとめ（出口のフォルダとブランチのコミット）。どちらが失敗しても、もう一方はする */
+export async function wrapUp(dir: string, log: (text: string) => void): Promise<{ outbox: string; branch: string }> {
+  const plan = readPlan(dir);
+  const { src, errors } = runSource(plan, dir);
+  const summary = runSummary(plan, dir, src, errors);
+  let outbox: string;
+  try {
+    const o = await makeOutbox(dir, summary);
+    outbox = `${o.folder}（${o.files.length} 個、${formatBytes(o.total)}）`;
+    log(`出口に置いた: ${outbox}`);
+  } catch (e) {
+    outbox = `まとめられなかった（${(e as Error).message}）`;
+    log(`出口にまとめられなかった: ${(e as Error).message}（npm run night -- wrap で作り直す）`);
+  }
+  let branch: string;
+  try {
+    const c = commitNight(dir, summary, outbox);
+    branch = c.sha === null ? `${c.branch}（足すものは無かった）` : `${c.branch}（${c.sha.slice(0, 7)}、台帳の行 ${c.rows}）`;
+    log(`台帳の行をコミットした: ${branch}`);
+  } catch (e) {
+    branch = `コミットできなかった（${(e as Error).message}）`;
+    log(`台帳の行をコミットできなかった: ${(e as Error).message}（npm run night -- wrap でやり直す）`);
+  }
+  return { outbox, branch };
+}
+
+/** 手でまとめ直す（worker が止まったときと同じこと。電源が切れた回や、まとめが失敗したときに） */
+async function cmdWrap(a: Args): Promise<number> {
+  known(a, [], 1);
+  const root = runsRoot(a.opts.get("--root"));
+  const dir = findRun(root, a.pos[0], () => true);
+  if (workerPid(dir) !== null) throw new Error(`まだ動いています: ${dir}（止まるときに自分でまとめる）`);
+  const tz = existsSync(join(dir, "session.json")) ? readSession(dir).tz : "Asia/Tokyo";
+  const r = await wrapUp(dir, (t) => log(dir, tz, t));
+  const st = readStatus(dir);
+  if (st !== null) writeAtomic(join(dir, "status.json"), JSON.stringify({ ...st, outbox: r.outbox, branch: r.branch }));
+  console.log(`出口: ${r.outbox}\n台帳のブランチ: ${r.branch}\n朝はホストで docker/remote-control/night-push.sh（push だけ）`);
+  return 0;
+}
+
+/** 台帳の行の重なり（同じ回・種類・名前・コミットで試合番号が重なる行、misses は同じ鍵、survey は同じ名前があるか） */
+function alreadyIn(row: RunRow | MissesRow | SurveyRow, target: LedgerRows): boolean {
+  const q = queueOf(row);
+  if (row.kind === "compare" || row.kind === "yardstick") {
+    const r = row as RunRow;
+    return target.runs.some((x) => queueOf(x) === q && x.kind === r.kind && x.label === r.label && x.commit === r.commit && x.g[0] <= r.g[1] && r.g[0] <= x.g[1]);
+  }
+  if (row.kind === "misses") {
+    const r = row as MissesRow;
+    return target.misses.some((x) => queueOf(x) === q && x.label === r.label && x.commit === r.commit && x.seed === r.seed && x.trials === r.trials && x.set === r.set);
+  }
+  return target.surveys.some((x) => queueOf(x) === q && x.label === row.label);
+}
+
+/** ブランチ night/<回> の台帳の、その回の行（ブランチの台帳の並びのまま） */
+export function branchRows(ledgerText: string, name: string): { runs: QueueRun[]; misses: QueueMisses[]; surveys: QueueSurvey[] } {
+  const l = parseLedger(ledgerText);
+  const mine = <R extends object>(rows: R[]) => rows.filter((r) => queueOf(r) === name) as (R & { queue: string; chunks: number })[];
+  return { runs: mine(l.runs), misses: mine(l.misses), surveys: mine(l.surveys) };
+}
+
+/**
+ * スレッド: 夜のキューの結果を取り込む。引数が回の名前（か night/<回の名前>）なら、GitHub からそのブランチを取ってきて、台帳にまだ無い行を足す。
+ * ファイルなら出口のアーカイブとして、壊れていないかを確かめて共有フォルダに展開する
+ */
+export async function cmdIngest(a: Args): Promise<number> {
+  known(a, ["--to", "--ledger", "--remote"], Number.POSITIVE_INFINITY);
+  if (a.pos.length === 0) throw new Error("回の名前（ブランチ night/<回の名前> から台帳の行を足す）か、上がった出口のファイルを渡します");
+  const target = a.opts.get("--ledger") ?? (process.env.SVWB_LEDGER || DEFAULT_LEDGER);
+  const remote = a.opts.get("--remote") ?? "origin";
+  const repo = nightGitDir(REPO);
+  const out: string[] = [];
+  const notes: string[] = [];
+  let ok = true;
+  const files: string[] = [];
+  for (const arg of a.pos) {
+    if (existsSync(arg) && statSync(arg).isFile()) {
+      files.push(arg);
+      continue;
+    }
+    const name = arg.replace(/^night\//, "");
+    if (!/^[A-Za-z0-9._-]+$/.test(name)) {
+      notes.push(`${arg}: ファイルでも回の名前でもありません`);
+      ok = false;
+      continue;
+    }
+    const branch = nightBranch(name);
+    // 取ってきたものは refs/night/<回の名前> に置く（作業のブランチには触らない）
+    const tip = `refs/night/${name}`;
+    const f = spawnSync("git", ["fetch", "--quiet", remote, `+refs/heads/${branch}:${tip}`], { cwd: repo, encoding: "utf8" });
+    if (f.status !== 0) {
+      notes.push(`${branch}: GitHub から取ってこられませんでした（ホストで docker/remote-control/night-push.sh を流したか）: ${(f.stderr || f.stdout).trim()}`);
+      ok = false;
+      continue;
+    }
+    const rows = branchRows(gitIn(repo, ["show", `${tip}:${LEDGER_PATH}`]), name);
+    const have = existsSync(target) ? parseLedger(readFileSync(target, "utf8")) : EMPTY_LEDGER;
+    const add = {
+      runs: rows.runs.filter((r) => !alreadyIn(r, have)),
+      misses: rows.misses.filter((r) => !alreadyIn(r, have)),
+      surveys: rows.surveys.filter((r) => !alreadyIn(r, have)),
+    };
+    appendRows(target, rowsText(add));
+    const msg = gitIn(repo, ["log", "-1", "--format=%B", tip]).trim();
+    const jobs = rows.surveys.map((r, i) => ({ index: i + 1, label: r.label, spec: { kind: "survey" } }) as unknown as Job);
+    out.push(
+      [
+        `## ${name}（ブランチ ${branch}、${gitIn(repo, ["rev-parse", "--short=7", tip]).trim()}）`,
+        "",
+        `台帳（${target}）に足した行: ${rowCount(add)}（ブランチにあるこの回の行 ${rowCount(rows)}、前から台帳にあったもの ${rowCount(rows) - rowCount(add)}）`,
+        rowsTables({ jobs }, { ...add, notes: [] }),
+        "",
+        "### PC で見た結果（ブランチの最後のコミットのメッセージ）",
+        "",
+        msg.split("\n").slice(2).join("\n").trim(),
+      ].join("\n"),
+    );
+  }
+  if (files.length > 0) {
+    const to = resolve(a.opts.get("--to") ?? "/mnt/project-files");
+    if (!existsSync(to)) throw new Error(`展開する先がありません: ${to}（--to で渡す）`);
+    const r = await ingestFiles(files, to);
+    if (!r.ok) ok = false;
+    out.push(...r.text);
+    notes.push(...r.notes);
+  }
+  console.log([...out, ...(notes.length > 0 ? ["", ...notes] : [])].join("\n"));
+  return ok ? 0 : 1;
+}
+
+/** 上がった出口のアーカイブを、確かめて共有フォルダに展開する */
+async function ingestFiles(paths: string[], to: string): Promise<{ ok: boolean; text: string[]; notes: string[] }> {
+  const groups = new Map<string, { head: OutboxHead<OutboxResult>; files: string[] }>();
+  const notes: string[] = [];
+  let ok = true;
+  for (const f of paths) {
+    const h = await peekOutbox(f);
+    if (h === "guide") {
+      notes.push(`${f}: 出口の案内（読み飛ばした）`);
+      continue;
+    }
+    if (h === null) {
+      notes.push(`${f}: 出口のアーカイブではありません（読み飛ばした）`);
+      ok = false;
+      continue;
+    }
+    const k = `${h.name}\u0001${h.exported}`;
+    const g = groups.get(k) ?? { head: h as OutboxHead<OutboxResult>, files: [] };
+    g.files.push(f);
+    groups.set(k, g);
+  }
+  const text: string[] = [];
+  // 同じ回を何度もまとめたもの（止まった回の続きなど）は、古いものから順に
+  for (const { head: h, files } of [...groups.values()].sort((x, y) => x.head.exported.localeCompare(y.head.exported))) {
+    // 共有フォルダに同じ回のもっと新しいまとめがあれば、置き換えずに足りないものだけ置く
+    const prevFile = join(to, "logs", h.name, OUTBOX_JSON);
+    let overwrite = true;
+    if (existsSync(prevFile)) {
+      try {
+        overwrite = (JSON.parse(readFileSync(prevFile, "utf8")) as OutboxHead).exported <= h.exported;
+      } catch {
+        // 読めなければ置き換える
+      }
+    }
+    const parts = new Set<number>();
+    const lines: string[] = [];
+    let written = 0;
+    let same = 0;
+    let kept = 0;
+    for (const f of files) {
+      const r = await extractOutbox(f, h, to, overwrite);
+      for (const p of r.parts) parts.add(p);
+      written += r.written.length;
+      same += r.same.length;
+      kept += r.kept.length;
+      if (r.error !== null || r.bad.length > 0) {
+        ok = false;
+        const why = [...(r.error === null ? [] : [r.error]), ...r.bad];
+        lines.push(`壊れていた: ${f}（${why.slice(0, 5).join("・")}${why.length > 5 ? " ほか" : ""}）。上げ直して、もう一度 ingest する`);
+      }
+    }
+    const missing = h.parts.filter((_, i) => !parts.has(i));
+    if (missing.length > 0) {
+      ok = false;
+      lines.push(`足りない: ${missing.join("・")}（上げてから、もう一度 ingest する）`);
+    }
+    text.push(
+      [
+        `## ${h.name} の出口（${fmtClock(Date.parse(h.exported), h.result.tz)} にまとめたもの。アーカイブ ${parts.size}/${h.parts.length} 個）`,
+        "",
+        `共有フォルダ（${to}）: 置いた ${written}・同じ中身があった ${same}${kept > 0 ? `・新しいまとめがあるので残した ${kept}` : ""}（data/…/${h.name}/・logs/${h.name}/）`,
+        ...lines,
+      ].join("\n"),
+    );
+  }
+  return { ok, text, notes };
 }
 
 function cmdList(a: Args): number {
@@ -1988,9 +2464,11 @@ const USAGE = `使い方（docs/night.md）:
   npm run night -- status [名前]
   npm run night -- stop [名前] [--now]
   npm run night -- resume [名前] --yes [--until 07:00] [--threads N]
-  npm run night -- finish [名前] [--commit] [--pack] [--ledger 台帳]
+  npm run night -- finish [名前] [--commit] [--pack] [--ledger 台帳]   （止まったときのまとめで要らなくなった。PC の 1 晩で確かめるまで残す）
+  npm run night -- wrap [名前]                 （止まったときのまとめをやり直す: 台帳の行を night/<名前> にコミットし、出口にまとめる）
+  npm run night -- ingest <回の名前|ファイル…> [--ledger 台帳] [--to /mnt/project-files]   （スレッドで: 台帳に足す・出口のファイルを展開する）
   npm run night -- list
-  （回の置き場所は --root か環境変数 SVWB_NIGHT_DIR。既定は ~/svwb-data/night）`;
+  （回の置き場所は --root か環境変数 SVWB_NIGHT_DIR。既定は ~/svwb-data/night。出口は SVWB_OUTBOX_DIR、既定は ~/svwb-data/outbox）`;
 
 export async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
@@ -2027,6 +2505,10 @@ export async function main(argv: string[]): Promise<number> {
         return cmdStop(a);
       case "finish":
         return cmdFinish(a);
+      case "wrap":
+        return await cmdWrap(a);
+      case "ingest":
+        return await cmdIngest(a);
       case "list":
         return cmdList(a);
       case "worker": {

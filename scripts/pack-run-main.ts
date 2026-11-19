@@ -331,24 +331,35 @@ function gitInfo(): string {
 
 const cell = (s: string): string => s.replace(/\|/g, "\\|");
 
-interface Entry {
-  /** フォルダからの道（kifu/ の下なら kifu/<名前>） */
+/** まとめに入れる 1 つのファイル */
+export interface PackItem {
+  /** 一覧に出す名前（フォルダからの道。kifu/ の下なら kifu/<名前>） */
   file: string;
   /** 元のファイル */
   src: string;
   kind: Kind;
+  /** アーカイブの中の道 */
   path: string;
+  /** gzip して入れるか */
   gzip: boolean;
   size: number;
   mtimeMs: number;
+}
+
+/** アーカイブに入れたファイル */
+export interface Entry extends PackItem {
+  /** 元のファイルの sha256 */
   sha256: string;
   lines: number | null;
+  /** アーカイブの中の大きさと sha256（gzip したものなら、gzip した後の） */
   packedSize: number;
+  packedSha256: string;
   tmp: string | null;
+  /** 何個目のアーカイブか（0 から） */
   part: number;
 }
 
-interface Skipped {
+export interface Skipped {
   file: string;
   reason: string;
 }
@@ -358,7 +369,9 @@ function manifest(o: {
   note: string | null;
   dir: string;
   created: Date;
-  argv: string[];
+  command: string;
+  howTo: string;
+  repo: string;
   entries: readonly Entry[];
   skipped: readonly Skipped[];
   partFiles: readonly string[];
@@ -368,8 +381,8 @@ function manifest(o: {
   if (o.note !== null) lines.push(o.note, "");
   lines.push(`- まとめた日時: ${localTime(o.created)}`);
   lines.push(`- 元のフォルダ: \`${o.dir}\``);
-  lines.push(`- まとめたときのリポジトリ: ${gitInfo()}（データを作ったときの版とは違うことがある。作った版はログや .sh を見る）`);
-  lines.push(`- まとめたコマンド: \`npm run pack-run -- ${o.argv.map(shellQuote).join(" ")}\``);
+  lines.push(`- ${o.repo}`);
+  lines.push(`- まとめたコマンド: \`${o.command}\``);
   if (o.partFiles.length > 1) {
     lines.push(`- アーカイブ: ${o.partFiles.length} 個に分けた（${o.partFiles.join("・")}）。どれにもこの一覧が入っていて、単独で展開できる`);
   } else {
@@ -377,7 +390,7 @@ function manifest(o: {
   }
   const count = (k: Kind): number => o.entries.filter((e) => e.kind === k).length;
   lines.push(`- ファイル: ${o.entries.length}（${KINDS.map((k) => `${KIND_LABEL[k]} ${count(k)}`).join("・")}）、元の大きさ ${formatBytes(o.entries.reduce((s, e) => s + e.size, 0))}`);
-  lines.push("", "展開: `tar -xzf <アーカイブ> -C /mnt/project-files/ --skip-old-files`（共有フォルダの data/・logs/ に入る）。.jsonl.gz は `zcat` で読む。", "");
+  lines.push("", o.howTo, "");
   const split = o.partFiles.length > 1;
   const zone = localTime(o.created).replace(/^.*（/, "").replace("）", "");
   lines.push(`| ファイル | 種類 | 入れた場所 | 元の大きさ | 行数 | 更新日時（${zone}） | sha256（元のファイル） |${split ? " 何個目 |" : ""}`);
@@ -392,6 +405,97 @@ function manifest(o: {
     for (const s of o.skipped) lines.push(`- ${s.file}: ${s.reason}`);
   }
   return `${lines.join("\n")}\n`;
+}
+
+async function sha256File(file: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(file)) hash.update(chunk as Buffer);
+  return hash.digest("hex");
+}
+
+/** 一覧の「展開」の行（pack-run のまとめ） */
+const UNTAR = "展開: `tar -xzf <アーカイブ> -C /mnt/project-files/ --skip-old-files`（共有フォルダの data/・logs/ に入る）。.jsonl.gz は `zcat` で読む。";
+
+/**
+ * ファイルを .tar.gz にまとめる（maxBytes を超えるならいくつかに分ける）。どのアーカイブにも、先頭に head の返すもの、次に一覧（logs/<名前>/MANIFEST.md）を入れる。
+ * 書くのは outDir の <名前>.tar.gz か <名前>-<i>of<n>.tar.gz。outDir に同じ名前のまとめがあれば、呼ぶ側が先に消しておく
+ */
+export async function packItems(o: {
+  name: string;
+  note: string | null;
+  dir: string;
+  created: Date;
+  /** 一覧に書くまとめたコマンド */
+  command: string;
+  /** 一覧に書く展開のしかた */
+  howTo?: string;
+  /** 一覧に書くリポジトリの版 */
+  repo?: string;
+  items: readonly PackItem[];
+  skipped: readonly Skipped[];
+  outDir: string;
+  /** 1 つのアーカイブの大きさの上限（バイト）。0 なら分けない */
+  maxBytes: number;
+  head?: (entries: readonly Entry[], partFiles: readonly string[]) => { path: string; data: Buffer }[];
+  log?: (line: string) => void;
+}): Promise<{ partFiles: string[]; entries: Entry[] }> {
+  const say = o.log ?? (() => {});
+  mkdirSync(o.outDir, { recursive: true });
+  const tmpDir = mkdtempSync(join(o.outDir, ".pack-tmp-"));
+  try {
+    // 1. 読む（sha256・行数。.jsonl は gzip して一時ファイルに）
+    const entries: Entry[] = [];
+    for (const p of o.items) {
+      const tmp = p.gzip ? join(tmpDir, `${entries.length}.gz`) : null;
+      const d = await digest(p.src, p.size, tmp);
+      const isJsonl = p.file.endsWith(".jsonl");
+      const packedSha256 = tmp === null ? d.sha256 : await sha256File(tmp);
+      entries.push({ ...p, sha256: d.sha256, lines: isJsonl ? d.lines : null, packedSize: d.packedSize, packedSha256, tmp, part: 0 });
+      say(`  ${p.file}（${KIND_LABEL[p.kind]}）${formatBytes(p.size)}${p.gzip ? ` → ${formatBytes(d.packedSize)}` : ""}${isJsonl ? `、${d.lines} 行` : ""}`);
+    }
+
+    // 2. 分ける
+    const parts = planParts(
+      entries.map((e) => e.packedSize),
+      o.maxBytes > 0 ? Math.max(1, o.maxBytes - 64 * 1024) : 0, // MANIFEST.md 等の分を空ける
+    );
+    entries.forEach((e, i) => (e.part = parts[i] ?? 0));
+    const nParts = parts.length === 0 ? 1 : Math.max(...parts) + 1;
+    const partFiles = Array.from({ length: nParts }, (_, i) => (nParts === 1 ? `${o.name}.tar.gz` : `${o.name}-${i + 1}of${nParts}.tar.gz`));
+    const big = entries.filter((e) => o.maxBytes > 0 && e.packedSize > o.maxBytes);
+    if (big.length > 0) say(`注意: 1 つで上限を超えるファイルがある（そのファイルだけで 1 個にした）: ${big.map((e) => e.file).join("・")}`);
+
+    // 3. 書く（先頭のものと一覧は、どのアーカイブにも同じものを入れる）
+    const text = manifest({
+      name: o.name,
+      note: o.note,
+      dir: o.dir,
+      created: o.created,
+      command: o.command,
+      howTo: o.howTo ?? UNTAR,
+      repo: o.repo ?? `まとめたときのリポジトリ: ${gitInfo()}（データを作ったときの版とは違うことがある。作った版はログや .sh を見る）`,
+      entries,
+      skipped: o.skipped,
+      partFiles,
+    });
+    const heads = o.head?.(entries, partFiles) ?? [];
+    const mtime = Math.floor(o.created.getTime() / 1000);
+    for (let part = 0; part < nParts; part++) {
+      const w = new TarGzWriter(join(o.outDir, partFiles[part] ?? ""));
+      for (const h of heads) await w.addBuffer(h.path, h.data, mtime);
+      await w.addBuffer(`logs/${o.name}/MANIFEST.md`, Buffer.from(text, "utf8"), mtime);
+      for (const e of entries) {
+        if (e.part !== part) continue;
+        const t = Math.floor(e.mtimeMs / 1000);
+        if (e.tmp !== null) await w.addFile(e.path, e.tmp, e.packedSize, t);
+        else await w.addFile(e.path, e.src, e.size, t);
+      }
+      await w.finish();
+    }
+    return { partFiles, entries };
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
 }
 
 // ---- 本体 ----
@@ -427,7 +531,7 @@ export async function main(argv: string[]): Promise<number> {
   const include = args.include.map(globToRegExp);
   const exclude = args.exclude.map(globToRegExp);
   const skipped: Skipped[] = [];
-  const picked: { file: string; src: string; kind: Kind; size: number; mtimeMs: number }[] = [];
+  const picked: PackItem[] = [];
   const sorted = (d: string): string[] => readdirSync(d).sort((a, b) => a.localeCompare(b, "ja", { numeric: true }));
   // 1 段目のファイルと、kifu/ の下のファイル（file はフォルダからの道。名前の条件はファイルの名前に当てる）
   const files: { file: string; base: string; full: string }[] = [];
@@ -463,15 +567,14 @@ export async function main(argv: string[]): Promise<number> {
       skipped.push({ file, reason: `--only に無い種類（${KIND_LABEL[kind]}）` });
       continue;
     }
-    picked.push({ file, src: full, kind, size: st.size, mtimeMs: st.mtimeMs });
+    const { path, gzip } = destination(kind, name, base);
+    picked.push({ file, src: full, kind, path, gzip, size: st.size, mtimeMs: st.mtimeMs });
   }
   if (picked.length === 0) {
     console.error(`入れるファイルが無い: ${args.dir}`);
     return 1;
   }
-  // 小さいもの（ログ・モデル）を先に入れる（分けるとき 1 個目に揃う）
-  const order: Record<Kind, number> = { logs: 0, models: 1, kifu: 2, selfplay: 3 };
-  picked.sort((a, b) => order[a.kind] - order[b.kind]);
+  sortItems(picked);
 
   // 前のまとめと名前がぶつからないか
   mkdirSync(args.out, { recursive: true });
@@ -488,59 +591,36 @@ export async function main(argv: string[]): Promise<number> {
   const recent = picked.filter((p) => now - p.mtimeMs < 60_000).map((p) => p.file);
   if (recent.length > 0) console.log(`注意: 1 分以内に書き換わったファイルがある（まだ書き込み中かもしれない）: ${recent.join("・")}`);
 
-  // 2. 読む（sha256・行数。.jsonl は gzip して一時ファイルに）
-  const tmpDir = mkdtempSync(join(args.out, ".pack-tmp-"));
-  try {
-    const entries: Entry[] = [];
-    for (const p of picked) {
-      const { path, gzip } = destination(p.kind, name, basename(p.src));
-      const tmp = gzip ? join(tmpDir, `${entries.length}.gz`) : null;
-      const d = await digest(p.src, p.size, tmp);
-      const isJsonl = p.file.endsWith(".jsonl");
-      entries.push({ ...p, path, gzip, sha256: d.sha256, lines: isJsonl ? d.lines : null, packedSize: d.packedSize, tmp, part: 0 });
-      console.log(`  ${p.file}（${KIND_LABEL[p.kind]}）${formatBytes(p.size)}${gzip ? ` → ${formatBytes(d.packedSize)}` : ""}${isJsonl ? `、${d.lines} 行` : ""}`);
-    }
+  const { partFiles, entries } = await packItems({
+    name,
+    note: args.note,
+    dir: args.dir,
+    created,
+    command: `npm run pack-run -- ${argv.map(shellQuote).join(" ")}`,
+    items: picked,
+    skipped,
+    outDir: args.out,
+    maxBytes: args.maxBytes,
+    log: (line) => console.log(line),
+  });
 
-    // 3. 分ける
-    const parts = planParts(
-      entries.map((e) => e.packedSize),
-      args.maxBytes > 0 ? Math.max(1, args.maxBytes - 64 * 1024) : 0, // MANIFEST.md の分を空ける
-    );
-    entries.forEach((e, i) => (e.part = parts[i] ?? 0));
-    const nParts = Math.max(...parts) + 1;
-    const partFiles = Array.from({ length: nParts }, (_, i) => (nParts === 1 ? `${name}.tar.gz` : `${name}-${i + 1}of${nParts}.tar.gz`));
-    const big = entries.filter((e) => args.maxBytes > 0 && e.packedSize > args.maxBytes);
-    if (big.length > 0) console.log(`注意: 1 つで --max-mb を超えるファイルがある（そのファイルだけで 1 個にした）: ${big.map((e) => e.file).join("・")}`);
-
-    // 4. 書く（一覧はどのアーカイブにも同じものを入れる）
-    const text = manifest({ name, note: args.note, dir: args.dir, created, argv, entries, skipped, partFiles });
-    for (let part = 0; part < nParts; part++) {
-      const out = join(args.out, partFiles[part] ?? "");
-      const w = new TarGzWriter(out);
-      await w.addBuffer(`logs/${name}/MANIFEST.md`, Buffer.from(text, "utf8"), Math.floor(created.getTime() / 1000));
-      for (const e of entries) {
-        if (e.part !== part) continue;
-        const mtime = Math.floor(e.mtimeMs / 1000);
-        if (e.tmp !== null) await w.addFile(e.path, e.tmp, e.packedSize, mtime);
-        else await w.addFile(e.path, e.src, e.size, mtime);
-      }
-      await w.finish();
-    }
-
-    // 5. まとめ
-    const count = (k: Kind): number => entries.filter((e) => e.kind === k).length;
-    console.log("");
-    console.log(`まとめた: ${entries.length} ファイル（${KINDS.map((k) => `${KIND_LABEL[k]} ${count(k)}`).join("・")}）、元の大きさ ${formatBytes(entries.reduce((s, e) => s + e.size, 0))}`);
-    if (skipped.length > 0) console.log(`入れなかった: ${skipped.length} ファイル（一覧はアーカイブの logs/${name}/MANIFEST.md）`);
-    console.log("できたファイル:");
-    for (const f of partFiles) console.log(`  ${join(args.out, f)}  ${formatBytes(statSync(join(args.out, f)).size)}`);
-    const distro = process.env.WSL_DISTRO_NAME;
-    if (distro !== undefined && distro !== "" && args.out.startsWith("/")) {
-      console.log(`Windows のエクスプローラーでは \\\\wsl.localhost\\${distro}${args.out.replace(/\//g, "\\")} に見えます。`);
-    }
-    console.log(`これをプロジェクトのファイル（共有フォルダ）に上げて、スレッドで「${name} を上げた」と伝えてください。`);
-    return 0;
-  } finally {
-    rmSync(tmpDir, { recursive: true, force: true });
+  // まとめ
+  const count = (k: Kind): number => entries.filter((e) => e.kind === k).length;
+  console.log("");
+  console.log(`まとめた: ${entries.length} ファイル（${KINDS.map((k) => `${KIND_LABEL[k]} ${count(k)}`).join("・")}）、元の大きさ ${formatBytes(entries.reduce((s, e) => s + e.size, 0))}`);
+  if (skipped.length > 0) console.log(`入れなかった: ${skipped.length} ファイル（一覧はアーカイブの logs/${name}/MANIFEST.md）`);
+  console.log("できたファイル:");
+  for (const f of partFiles) console.log(`  ${join(args.out, f)}  ${formatBytes(statSync(join(args.out, f)).size)}`);
+  const distro = process.env.WSL_DISTRO_NAME;
+  if (distro !== undefined && distro !== "" && args.out.startsWith("/")) {
+    console.log(`Windows のエクスプローラーでは \\\\wsl.localhost\\${distro}${args.out.replace(/\//g, "\\")} に見えます。`);
   }
+  console.log(`これをプロジェクトのファイル（共有フォルダ）に上げて、スレッドで「${name} を上げた」と伝えてください。`);
+  return 0;
+}
+
+/** 小さいもの（ログ・モデル）を先に入れる（分けるとき 1 個目に揃う） */
+export function sortItems(items: PackItem[]): void {
+  const order: Record<Kind, number> = { logs: 0, models: 1, kifu: 2, selfplay: 3 };
+  items.sort((a, b) => order[a.kind] - order[b.kind]);
 }

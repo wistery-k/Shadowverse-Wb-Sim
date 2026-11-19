@@ -40,7 +40,9 @@
 
 ## 持ち帰り方（夜のキュー）
 
-- 朝の `npm run night -- finish --pack` が、ログと一緒に棋譜もまとめる（`pack-run --only logs,kifu`）
+- キューが止まるときに、ログと一緒に棋譜も出口のフォルダ（`~/svwb-data/outbox/<回の名前>/`）にまとめる。要るときにユーザーに上げてもらい、
+  スレッドが `npm run night -- ingest <ファイル…>` で `/mnt/project-files/data/kifu/<回の名前>/` に展開する（[night.md](night.md)「止まったときのまとめ」。
+  前の `npm run night -- finish --pack` も残してある）
 - `npm run pack-run` は、フォルダの中の `kifu/` の下と、1 行目が `{"kind":"replay", …}` の `.jsonl` を棋譜として `data/kifu/<名前>/` に入れる。
   共有フォルダに展開すると `/mnt/project-files/data/kifu/<名前>/` に入る
 

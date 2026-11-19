@@ -1,7 +1,7 @@
 // 夜のキュー（scripts/night-main.ts・docs/night.md）。svwb の代わりに、台帳の行だけを書く偽物を回して、区切り・再開・止め方・まとめを確かめる
 
-import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, truncateSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
@@ -471,17 +471,39 @@ describe("worker の pid", () => {
   });
 });
 
+/** git を回す（試す用の名前とメールで） */
+const gitT = (cwd: string, ...args: string[]): string => {
+  const r = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t.invalid" },
+  });
+  if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+  return r.stdout.trim();
+};
+
 describe("区切って回す（偽物の svwb で）", () => {
   let tmp = "";
   let root = "";
   let jobs = "";
   let fake = "";
   let fakeLog = "";
-  const env = ["FAKE_FAIL", "FAKE_HANG", "FAKE_STOP_AT", "FAKE_LOG", "FAKE_WIN", "FAKE_TD_FAIL"];
+  /** PC のリポジトリの代わり（止まったときに台帳の行を night/<回> にコミットする先） */
+  let pcGit = "";
+  const env = ["FAKE_FAIL", "FAKE_HANG", "FAKE_STOP_AT", "FAKE_LOG", "FAKE_WIN", "FAKE_TD_FAIL", "SVWB_NIGHT_GIT_DIR", "SVWB_COMMIT", "SVWB_OUTBOX_MAX_MB"];
 
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "night-"));
     root = join(tmp, "runs");
+    // 本物のリポジトリに night/ のブランチを作らないよう、小さなリポジトリを作って、その最初のコミットを回のコミットにする
+    pcGit = join(tmp, "pc-git");
+    mkdirSync(join(pcGit, "docs"), { recursive: true });
+    writeFileSync(join(pcGit, "docs", "ledger.jsonl"), `${JSON.stringify({ v: 1, kind: "decision", note: "前からある行" })}\n`);
+    gitT(pcGit, "init", "-q", "-b", "main");
+    gitT(pcGit, "add", ".");
+    gitT(pcGit, "commit", "-q", "-m", "最初");
+    process.env.SVWB_NIGHT_GIT_DIR = pcGit;
+    process.env.SVWB_COMMIT = gitT(pcGit, "rev-parse", "--short=7", "HEAD");
     fake = join(tmp, "fake-svwb");
     writeFileSync(fake, FAKE, { mode: 0o755 });
     fakeLog = join(tmp, "calls.log");
@@ -735,5 +757,84 @@ describe("区切って回す（偽物の svwb で）", () => {
     delete process.env.FAKE_HANG;
     expect(await resume()).toBe(0);
     expect(done()).toEqual(["1-1", "1-2", "1-3", "2-1", "3-1", "4-1"]);
+  });
+
+  it("止まるたびに台帳の行を night/<回> にコミットし、スレッドの ingest は finish と同じ行を足す（2 回目は足さない）", async () => {
+    const head = gitT(pcGit, "rev-parse", "HEAD");
+    const work = readFileSync(join(pcGit, "docs", "ledger.jsonl"), "utf8");
+    // 1 晩目: compare の 2 つ目の区切りの後で止める
+    process.env.FAKE_STOP_AT = "50";
+    expect(await start("--foreground")).toBe(1);
+    delete process.env.FAKE_STOP_AT;
+    // 今の朝のやり方（finish）で足した行と比べる
+    const byFinish = join(tmp, "finish-ledger.jsonl");
+    writeFileSync(byFinish, "");
+    expect(await main(["finish", "n1", "--root", root, "--ledger", byFinish])).toBe(0);
+    const tip1 = gitT(pcGit, "rev-parse", "night/n1");
+    expect(gitT(pcGit, "rev-parse", "night/n1^")).toBe(head);
+    expect(gitT(pcGit, "log", "-1", "--format=%s", "night/n1")).toBe(`台帳: 夜のキュー n1 の結果（1 行、${process.env.SVWB_COMMIT}）`);
+    expect(readStatus(dir())).toMatchObject({ branch: expect.stringMatching(/^night\/n1（.*台帳の行 1）$/), outbox: expect.stringContaining(join(tmp, "outbox", "n1")) });
+    // 2 晩目: 続きを回す。ブランチの上に、残りの区切りの行を積む
+    expect(await resume()).toBe(0);
+    expect(await main(["finish", "n1", "--root", root, "--ledger", byFinish])).toBe(0);
+    expect(gitT(pcGit, "rev-parse", "night/n1^")).toBe(tip1);
+    // PC の作業ツリーと HEAD には触らない
+    expect(gitT(pcGit, "rev-parse", "HEAD")).toBe(head);
+    expect(readFileSync(join(pcGit, "docs", "ledger.jsonl"), "utf8")).toBe(work);
+    expect(gitT(pcGit, "status", "--porcelain")).toBe("");
+    // スレッド: GitHub の代わりに PC のリポジトリから取ってきて足す
+    const threadGit = join(tmp, "thread-git");
+    mkdirSync(threadGit);
+    gitT(threadGit, "init", "-q");
+    process.env.SVWB_NIGHT_GIT_DIR = threadGit;
+    const byIngest = join(tmp, "ingest-ledger.jsonl");
+    writeFileSync(byIngest, "");
+    expect(await main(["ingest", "n1", "--remote", pcGit, "--ledger", byIngest])).toBe(0);
+    const lines = (f: string) => readFileSync(f, "utf8").trim().split("\n");
+    expect(lines(byIngest)).toEqual(lines(byFinish));
+    expect(parseLedger(readFileSync(byIngest, "utf8")).runs.map((r) => [r.label, r.g])).toEqual([
+      ["幅", [0, 99]],
+      ["幅", [100, 149]],
+      ["弱", [10, 49]],
+    ]);
+    expect(await main(["ingest", "night/n1", "--remote", pcGit, "--ledger", byIngest])).toBe(0);
+    expect(lines(byIngest)).toEqual(lines(byFinish));
+    // まとめ直し（wrap）は、足すものも様子の違いも無ければコミットしない
+    process.env.SVWB_NIGHT_GIT_DIR = pcGit;
+    const tip2 = gitT(pcGit, "rev-parse", "night/n1");
+    expect(await main(["wrap", "n1", "--root", root])).toBe(0);
+    expect(gitT(pcGit, "rev-parse", "night/n1")).toBe(tip2);
+  });
+
+  it("出口のアーカイブは、確かめて共有フォルダに展開する（分けたもの・足りないもの・壊れたもの）", async () => {
+    process.env.SVWB_OUTBOX_MAX_MB = "0.002";
+    expect(await start("--foreground")).toBe(0);
+    // 名前が ASCII でないファイルも入る（tar の PAX）
+    writeFileSync(join(dir(), "メモ.txt"), "あいう");
+    expect(await main(["wrap", "n1", "--root", root])).toBe(0);
+    const box = join(tmp, "outbox", "n1");
+    const files = readdirSync(box).sort();
+    expect(files).toContain("案内.txt");
+    const parts = files.filter((f) => f.endsWith(".tar.gz"));
+    expect(parts.length).toBeGreaterThan(2);
+    expect(readFileSync(join(box, "案内.txt"), "utf8")).toMatch(/^夜のキューの出口: n1\n/);
+    const shared = join(tmp, "shared");
+    mkdirSync(shared);
+    // 1 つ足りないと、置けるものは置いて、足りないものを言う
+    const some = files.filter((f) => f !== parts[1]).map((f) => join(box, f));
+    expect(await main(["ingest", ...some, "--to", shared])).toBe(1);
+    expect(existsSync(join(shared, "logs", "n1", "night.log"))).toBe(true);
+    expect(readFileSync(join(shared, "logs", "n1", "メモ.txt"), "utf8")).toBe("あいう");
+    expect(gunzipSync(readFileSync(join(shared, "data", "kifu", "n1", "compare-g50-99.jsonl.gz"))).toString()).toBe('{"kind":"replay","version":2,"g":50}\n');
+    expect(JSON.parse(readFileSync(join(shared, "logs", "n1", "outbox.json"), "utf8"))).toMatchObject({ kind: "night-outbox", name: "n1", result: { name: "n1" } });
+    // 壊れたもの（途中で切れた）は置かない
+    const broken = join(tmp, "broken.tar.gz");
+    copyFileSync(join(box, parts[1] ?? ""), broken);
+    truncateSync(broken, 200);
+    expect(await main(["ingest", broken, "--to", shared])).toBe(1);
+    // 全部そろえば 0。同じ中身は書き直さない
+    expect(await main(["ingest", ...files.map((f) => join(box, f)), "--to", shared])).toBe(0);
+    expect(readdirSync(join(shared, "logs", "n1"))).toEqual(expect.arrayContaining(["chunks", "plan.json", "outbox-summary.md", "speed-3.md", "ledger.jsonl.gz", "MANIFEST.md"]));
+    expect(readdirSync(join(shared, "logs", "n1")).filter((f) => f.includes("ingest-tmp"))).toEqual([]);
   });
 });
