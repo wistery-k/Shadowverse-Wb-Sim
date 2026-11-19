@@ -2480,6 +2480,68 @@ mod tests {
         );
     }
 
+    /// 回ごとのターンの手順: 選ぶ手は直前の手にまとめ、出したカードの並びは攻撃・ターン終了・選ぶ手を除く
+    #[test]
+    fn turn_steps_merge_picks_and_list_cards() {
+        let t = |a: Action, x: &str| (a, x.to_string());
+        let turn = vec![
+            t(Action::Play(1), "A をプレイ"),
+            t(Action::Choose(vec![9]), "選ぶ: B"),
+            t(
+                Action::Attack {
+                    attacker: 1,
+                    target: None,
+                },
+                "A でリーダーを攻撃",
+            ),
+            t(Action::Evolve(1), "A を進化"),
+            t(Action::Mode(0), "1 番目の効果を選ぶ"),
+            t(Action::EndTurn, "ターン終了"),
+        ];
+        assert_eq!(
+            turn_steps(&turn, false),
+            vec![
+                "A をプレイ（選ぶ: B）",
+                "A でリーダーを攻撃",
+                "A を進化（1 番目の効果を選ぶ）",
+                "ターン終了"
+            ]
+        );
+        assert_eq!(turn_steps(&turn, true), vec!["A をプレイ", "A を進化"]);
+    }
+
+    /// 打ち方の記録を取っても勝ち負けは変わらず、記録は候補の最初の手から始まり、ターン終了（か決着）で終わる
+    #[test]
+    fn playout_records_the_whole_turn_without_changing_the_result() {
+        let rec = play_game(3, None, &SearchOptions::default());
+        let &(i, p) = rec
+            .starts
+            .iter()
+            .find(|x| x.0 > 30)
+            .expect("自分のターンの最初の局面");
+        let (s, _) = rebuild(&rec, i);
+        let first = legal_actions(&s)
+            .into_iter()
+            .find(|a| !matches!(a, Action::EndTurn))
+            .expect("ターン終了でない手");
+        let plan = vec![first.clone()];
+        let seed = pos_seed(&rec, i);
+        let plain = playout_ends(&s, p, &plan, seed, 0, false, false, None);
+        let mut log = PlayoutLog::default();
+        let logged = playout_ends(&s, p, &plan, seed, 0, false, false, Some(&mut log));
+        assert_eq!(plain, logged);
+        assert_eq!(log.turn.first().map(|x| &x.0), Some(&first));
+        let last = &log.turn.last().expect("手がある").0;
+        assert!(matches!(last, Action::EndTurn) || logged.turns == 0);
+        assert_eq!(
+            log.turn
+                .iter()
+                .filter(|x| matches!(x.0, Action::EndTurn))
+                .count(),
+            usize::from(matches!(last, Action::EndTurn))
+        );
+    }
+
     /// 読み直しを打ち切った候補も入れると、AI が読み直す候補（top）の最初の手は、打ち切りを切った（rescoreRace なし）ときと同じになる。
     /// 打ち切った候補は、読み直した候補にも足した候補にも重ならない
     #[test]
