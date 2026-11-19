@@ -3,7 +3,8 @@
 import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, truncateSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseLedger, type MissesRow, type RunRow, type SurveyRow } from "../scripts/ledger-main";
@@ -16,13 +17,17 @@ import {
   estimate,
   expandBraces,
   gzipKifu,
+  httpsRemote,
+  isDaytime,
   jobInputs,
   kifuDir,
   kifuSnapshot,
   jobProducts,
   main,
+  makeTicket,
   parseJob,
   parseJobs,
+  parseTicket,
   parseUntil,
   readStatus,
   runWorker,
@@ -30,6 +35,9 @@ import {
   shellWords,
   standIn,
   jobArgv,
+  ticketHere,
+  ticketPlan,
+  ticketText,
   wallClock,
   workerPid,
   type WorkerControl,
@@ -492,7 +500,7 @@ describe("区切って回す（偽物の svwb で）", () => {
   let fakeLog = "";
   /** PC のリポジトリの代わり（止まったときに台帳の行を night/<回> にコミットする先） */
   let pcGit = "";
-  const env = ["FAKE_FAIL", "FAKE_HANG", "FAKE_STOP_AT", "FAKE_LOG", "FAKE_WIN", "FAKE_TD_FAIL", "SVWB_NIGHT_GIT_DIR", "SVWB_COMMIT", "SVWB_OUTBOX_MAX_MB"];
+  const env = ["FAKE_FAIL", "FAKE_HANG", "FAKE_STOP_AT", "FAKE_LOG", "FAKE_WIN", "FAKE_TD_FAIL", "SVWB_NIGHT_GIT_DIR", "SVWB_COMMIT", "SVWB_OUTBOX_MAX_MB", "SVWB_NIGHT_REMOTE"];
 
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "night-"));
@@ -900,6 +908,75 @@ describe("区切って回す（偽物の svwb で）", () => {
     expect(existsSync(join(shared, "data", "models", "other"))).toBe(false);
   });
 
+  it("券（go）: 券のコミットを取ってきて回のフォルダに出し、そこで回す。止まった回は同じ券で続きから、済んだ回・動いている回は回さない", async () => {
+    // GitHub の代わりのリポジトリ。夜のキューのスクリプト（今のもの）とジョブのファイルをコミットする
+    const here = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts");
+    const orig = join(tmp, "origin-git");
+    mkdirSync(join(orig, "scripts"), { recursive: true });
+    mkdirSync(join(orig, "night"), { recursive: true });
+    mkdirSync(join(orig, "docs"), { recursive: true });
+    for (const f of ["night-main.ts", "night-outbox.ts", "ledger-main.ts", "pack-run-main.ts"]) copyFileSync(join(here, f), join(orig, "scripts", f));
+    copyFileSync(join(pcGit, "docs", "ledger.jsonl"), join(orig, "docs", "ledger.jsonl"));
+    const jobsText = readFileSync(jobs, "utf8");
+    writeFileSync(join(orig, "night", "t.txt"), jobsText);
+    writeFileSync(join(orig, "package-lock.json"), "{}\n");
+    gitT(orig, "init", "-q", "-b", "claude/x");
+    gitT(orig, "add", ".");
+    gitT(orig, "commit", "-q", "-m", "夜のキュー");
+    const full = gitT(orig, "rev-parse", "HEAD");
+    process.env.SVWB_NIGHT_REMOTE = orig;
+    // PC の /workspace（pcGit）には券のコミットが無い。依存は同じ（node_modules を指す）
+    writeFileSync(join(pcGit, "package-lock.json"), "{}\n");
+    mkdirSync(join(pcGit, "node_modules"));
+    const t = makeTicket({ name: "g1", branch: "claude/x", commit: full.slice(0, 12), jobs: "night/t.txt", until: "+2h", threads: 2, chunk: 1 }, jobsText);
+    const go = (ticket: string) => main(["go", ...ticket.split(" "), "--root", root, "--yes", "--bin", fake, "--foreground"]);
+    const g1 = join(root, "g1");
+    const said = () => vi.mocked(console.log).mock.calls.map((c) => String(c[0])).join("\n");
+    const errs = vi.spyOn(console, "error").mockImplementation(() => {});
+    // 1 晩目: compare の 2 つ目の区切りの後で止める
+    process.env.FAKE_STOP_AT = "50";
+    expect(await go(ticketText(t))).toBe(1);
+    delete process.env.FAKE_STOP_AT;
+    expect(readFileSync(join(g1, "ticket.txt"), "utf8")).toBe(`${ticketText(t)}\n`);
+    expect(readFileSync(join(g1, "src", "night", "t.txt"), "utf8")).toBe(jobsText);
+    const plan = JSON.parse(readFileSync(join(g1, "plan.json"), "utf8")) as { repo: string; gitDir: string; commit: string; commitFull: string; branch: string };
+    expect(plan).toMatchObject({ repo: join(g1, "src"), gitDir: pcGit, commit: full.slice(0, 7), commitFull: full, branch: "claude/x" });
+    expect(readStatus(g1)).toMatchObject({ state: "stopped" });
+    expect(gitT(pcGit, "rev-parse", "night/g1^")).toBe(full);
+    const n1 = calls().length;
+    // 2 晩目: 同じ券で続きから
+    expect(await go(ticketText(t))).toBe(0);
+    expect(readStatus(g1)).toMatchObject({ state: "done" });
+    expect(gitT(pcGit, "rev-parse", "night/g1^^")).toBe(full);
+    const n2 = calls().length;
+    expect(n2).toBeGreaterThan(n1);
+    // 済んだ回は回さない
+    vi.mocked(console.log).mockClear();
+    expect(await go(ticketText(t))).toBe(0);
+    expect(calls().length).toBe(n2);
+    expect(said()).toContain("この回は全部済んでいます");
+    // 止める時刻だけ替えた券でも、同じ回として扱う
+    const later = makeTicket({ ...t, until: "+3h" }, jobsText);
+    expect(await go(ticketText(later))).toBe(0);
+    expect(calls().length).toBe(n2);
+    // 写し間違い（指紋が合わない）・同じ名前の別の回・ブランチに無いコミットは断る
+    const why = () => errs.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(await go(ticketText({ ...t, until: "+3h" }))).toBe(2);
+    expect(why()).toContain("券の指紋が合いません");
+    writeFileSync(join(orig, "night", "t.txt"), `${jobsText}\nprofile --games 2\n`);
+    gitT(orig, "commit", "-q", "-am", "足す");
+    const full2 = gitT(orig, "rev-parse", "HEAD");
+    const other = makeTicket({ ...t, commit: full2.slice(0, 12) }, `${jobsText}\nprofile --games 2\n`);
+    expect(await go(ticketText(other))).toBe(2);
+    expect(why()).toContain("同じ名前の別の回があります");
+    expect(await go(ticketText(makeTicket({ ...t, name: "g2", commit: "0123456789ab" }, jobsText)))).toBe(2);
+    expect(why()).toContain("券のコミット 0123456789ab がブランチ claude/x にありません");
+    // 別の名前なら、新しいコミットで回る
+    expect(await go(ticketText({ ...other, name: "g3", plan: ticketPlan({ ...other, name: "g3" }, `${jobsText}\nprofile --games 2\n`) }))).toBe(0);
+    expect(gitT(pcGit, "rev-parse", "night/g3^")).toBe(full2);
+    delete process.env.SVWB_NIGHT_REMOTE;
+  }, 60_000);
+
   it("出口のアーカイブは、確かめて共有フォルダに展開する（分けたもの・足りないもの・壊れたもの）", async () => {
     process.env.SVWB_OUTBOX_MAX_MB = "0.002";
     expect(await start("--foreground")).toBe(0);
@@ -930,5 +1007,65 @@ describe("区切って回す（偽物の svwb で）", () => {
     expect(await main(["ingest", ...files.map((f) => join(box, f)), "--to", shared])).toBe(0);
     expect(readdirSync(join(shared, "logs", "n1"))).toEqual(expect.arrayContaining(["chunks", "plan.json", "outbox-summary.md", "speed-3.md", "ledger.jsonl.gz", "MANIFEST.md"]));
     expect(readdirSync(join(shared, "logs", "n1")).filter((f) => f.includes("ingest-tmp"))).toEqual([]);
+  });
+});
+
+describe("券", () => {
+  const body = { name: "night-20261119", branch: "claude/x", commit: "0123456789ab", jobs: "night/t.txt", until: "07:00" };
+  it("書いて読み直すと同じ。指紋はジョブのファイルの中身と項目で変わる", () => {
+    const t = makeTicket(body, "compare 10 '{}' '{}' 0 --label a\n");
+    expect(ticketText(t)).toBe(`svwb-night-1 name=night-20261119 branch=claude/x commit=0123456789ab jobs=night/t.txt until=07:00 plan=${t.plan}`);
+    expect(parseTicket([ticketText(t)])).toEqual(t);
+    expect(parseTicket(ticketText(t).split(" "))).toEqual(t);
+    const u = makeTicket({ ...body, tz: "Asia/Tokyo", threads: 8, chunk: 15 }, "x");
+    expect(parseTicket([ticketText(u)])).toEqual(u);
+    expect(ticketPlan(body, "a")).not.toBe(ticketPlan(body, "b"));
+    expect(ticketPlan(body, "a")).not.toBe(ticketPlan({ ...body, until: "08:00" }, "a"));
+  });
+  it("形の違う券・読めない語・使えない値は断る", () => {
+    const t = ticketText(makeTicket(body, "x"));
+    expect(() => parseTicket(["svwb-night-2", "name=a"])).toThrow(/git pull/);
+    expect(() => parseTicket(["compare", "10"])).toThrow(/券ではありません/);
+    expect(() => parseTicket([`${t} extra=1`])).toThrow(/読めない語/);
+    expect(() => parseTicket([t.replace("name=night-20261119", "name=../x")])).toThrow(/name/);
+    expect(() => parseTicket([t.replace("jobs=night/t.txt", "jobs=../t.txt")])).toThrow(/jobs/);
+    expect(() => parseTicket([t.replace("commit=0123456789ab", "commit=0123")])).toThrow(/commit/);
+    expect(() => parseTicket([t.replace("until=07:00", "until=朝")])).toThrow(/--until/);
+    expect(() => parseTicket([t.replace(/ plan=\w+/, "")])).toThrow(/plan がありません/);
+  });
+  it("昼（7 時〜18 時）を見分け、GitHub の URL を認証の要らない形にする", () => {
+    expect(isDaytime(Date.parse("2026-11-19T05:00:00Z"), "Asia/Tokyo")).toBe(true); // 14:00
+    expect(isDaytime(Date.parse("2026-11-19T13:00:00Z"), "Asia/Tokyo")).toBe(false); // 22:00
+    expect(isDaytime(Date.parse("2026-11-18T22:00:00Z"), "Asia/Tokyo")).toBe(true); // 07:00
+    expect(isDaytime(Date.parse("2026-11-19T09:00:00Z"), "Asia/Tokyo")).toBe(false); // 18:00
+    expect(httpsRemote("git@github.com:o/r.git")).toBe("https://github.com/o/r.git");
+    expect(httpsRemote("ssh://git@github.com/o/r")).toBe("https://github.com/o/r.git");
+    expect(httpsRemote("https://github.com/o/r.git\n")).toBe("https://github.com/o/r.git");
+  });
+  it("plan の券は、ジョブのファイルをコミットして push してあるときだけ出す", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "night-ticket-"));
+    try {
+      const bare = join(tmp, "bare.git");
+      const repo = join(tmp, "repo");
+      gitT(tmp, "init", "-q", "--bare", bare);
+      mkdirSync(join(repo, "night"), { recursive: true });
+      writeFileSync(join(repo, "night", "t.txt"), "profile --games 2\n");
+      gitT(repo, "init", "-q", "-b", "claude/x");
+      const file = join(repo, "night", "t.txt");
+      expect(ticketHere(file, { name: "n", until: "07:00" }, repo)).toEqual({ why: expect.stringContaining("コミットしていない") });
+      gitT(repo, "add", ".");
+      gitT(repo, "commit", "-q", "-m", "a");
+      gitT(repo, "remote", "add", "origin", bare);
+      expect(ticketHere(file, { name: "n", until: "07:00" }, repo)).toEqual({ why: expect.stringContaining("push していない") });
+      gitT(repo, "push", "-q", "origin", "claude/x");
+      const r = ticketHere(file, { name: "n", until: "07:00", threads: 8 }, repo);
+      const full = gitT(repo, "rev-parse", "HEAD");
+      expect(r).toEqual({ ticket: makeTicket({ name: "n", branch: "claude/x", commit: full.slice(0, 12), jobs: "night/t.txt", until: "07:00", threads: 8 }, "profile --games 2\n") });
+      writeFileSync(file, "profile --games 4\n");
+      expect(ticketHere(file, { name: "n", until: "07:00" }, repo)).toEqual({ why: expect.stringContaining("コミットしていない変更") });
+      expect(ticketHere(join(tmp, "outside.txt"), { name: "n", until: "07:00" }, repo)).toEqual({ why: expect.stringContaining("リポジトリの外") });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

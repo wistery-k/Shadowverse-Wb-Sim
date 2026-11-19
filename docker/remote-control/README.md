@@ -101,8 +101,8 @@ cd ~/Shadowverse-Wb-Sim/docker/remote-control && docker compose build && docker 
 | 止める | `docker compose down`（ログインと設定はボリュームに残る） |
 | 動かす | `docker compose up -d` |
 | 様子を見る | `docker compose logs -f` |
-| 夜のキューを手で始める・止める | `docker compose exec rc npm run night -- start <ジョブのファイル> --yes`・`docker compose exec rc npm run night -- stop`（`docs/night.md`） |
-| 夜のキューの様子を見る | `docker compose exec rc npm run night -- status` |
+| 夜のキューを始める | `./night.sh go <券>`（このフォルダの。券はスレッドが出す `svwb-night-1` で始まる 1 行。スレッドが見せる `~/Shadowverse-Wb-Sim/docker/remote-control/night.sh go …` の行をそのまま流せばよい。`docs/night.md`「券と go」） |
+| 夜のキューの様子を見る・止める | `./night.sh status`・`./night.sh stop`（`--now` ですぐ。中は `docker compose exec rc npm run night -- …`） |
 | 朝、夜のキューの結果を上げる | `./night-push.sh`（このフォルダの。キューが止まるときにコミットしたブランチ `night/<回の名前>` を push する。まとめていない回のまとめと、main に入った回のブランチの片付けもする。ホストで流す） |
 | コンテナの中でシェルを開く | `docker compose exec rc bash` |
 | ログインし直す | `docker compose exec rc claude auth login` の後に `docker compose restart` |

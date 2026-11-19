@@ -1,6 +1,7 @@
 // 夜のキュー: ジョブを並べたファイルを上から順に、5〜10 分の区切りに分けて回す（npm run night）。運用は docs/night.md。
 //
-//   npm run night -- plan <ジョブのファイル> [--until 07:00] [--threads N] [--machine 名前] [--chunk-min 7.5] [--tz Asia/Tokyo] [--at 23:00]
+//   npm run night -- plan <ジョブのファイル> [--until 07:00] [--threads N] [--machine 名前] [--chunk-min 7.5] [--tz Asia/Tokyo] [--at 23:00] [--name 名前]
+//   npm run night -- go <券>
 //   npm run night -- start <ジョブのファイル> --yes [--name 名前] [--until 07:00] [--threads N] [--chunk-min 7.5] [--allow-dirty]
 //   npm run night -- status [名前]
 //   npm run night -- stop [名前] [--now]
@@ -16,6 +17,8 @@
 //   @/ は回のフォルダ、{1..20} は 1,2,…,20 に開く。作ったファイルがあれば済んだものとし、前のジョブの作るファイルが無ければ失敗にする
 // - 回は ~/svwb-data/night/<名前>/ に置く（環境変数 SVWB_NIGHT_DIR か --root で替えられる）。区切りが済むたびに印を書き、
 //   やり直したときは済んだ区切りを飛ばす。電源が切れても、失うのは回していた区切りだけ
+// - 夕方: plan が計画の表と券（ブランチ・コミット・ジョブのファイル・止める時刻・計画の指紋の 1 行）を出す。ユーザーがホストで
+//   docker/remote-control/night.sh go <券> を流すと、コンテナの中の go が券のコミットを回のフォルダの src/ に出して、そこの start を流す
 // - start・resume は、組み立てた svwb を回のフォルダに写し、セッションから切り離した worker を立てて、すぐに戻る。
 //   PC やコンテナの起動で勝手には始めない（始めるのは start・resume だけ）
 // - 止める時刻（--until）までに次の区切りが終わらない見込みなら、区切りの切れ目で止まる。stop で手で止める（--now ならすぐ）
@@ -24,6 +27,7 @@
 //   朝はホストで push だけ（docker/remote-control/night-push.sh）。スレッドは ingest <回の名前> で台帳に足す（finish は残してある）
 
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   appendFileSync,
   chmodSync,
@@ -42,10 +46,12 @@ import {
   renameSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { availableParallelism, homedir, hostname, tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createGzip } from "node:zlib";
@@ -769,7 +775,11 @@ export interface Plan {
   repo: string;
   jobsFile: string;
   commit: string;
+  /** 回のコミットの全部の sha（台帳の行をコミットするブランチの元。前の回には無い） */
+  commitFull?: string;
   branch: string;
+  /** 台帳の行をコミットする git のリポジトリ（go で回すときは、回のフォルダに出したソースではなく /workspace。無ければ repo） */
+  gitDir?: string;
   /** 回す svwb（回のフォルダに写したもの） */
   bin: string;
   chunkMin: number;
@@ -1565,9 +1575,17 @@ export function gitState(): { commit: string; branch: string; dirty: boolean } {
   const fixed = process.env.SVWB_COMMIT;
   if (fixed) return { commit: fixed, branch: process.env.SVWB_BRANCH || git(["rev-parse", "--abbrev-ref", "HEAD"]) || "?", dirty: false };
   const head = git(["rev-parse", "--short=7", "HEAD"]) || "?";
-  const dirty =
-    git(["status", "--porcelain", "--untracked-files=no", "--", ":/", ":(exclude,top)docs/yardstick.md", ":(exclude,top)docs/ledger.jsonl"]) !== "";
+  const dirty = dirtyIn(REPO);
   return { commit: dirty ? `${head}+` : head, branch: git(["rev-parse", "--abbrev-ref", "HEAD"]) || "?", dirty };
+}
+
+/** 台帳と物差しの表のほかに、コミットしていない変更があるか */
+function dirtyIn(cwd: string): boolean {
+  const r = spawnSync("git", ["status", "--porcelain", "--untracked-files=no", "--", ":/", ":(exclude,top)docs/yardstick.md", ":(exclude,top)docs/ledger.jsonl"], {
+    cwd,
+    encoding: "utf8",
+  });
+  return r.status === 0 && r.stdout.trim() !== "";
 }
 
 const thisMachine = (): string => process.env.SVWB_MACHINE || hostname();
@@ -1707,14 +1725,15 @@ function afterStart(dir: string, session: Session): string {
   return [
     `回のフォルダ: ${dir}（進み具合は night.log）`,
     `止める時刻: ${fmtClock(session.until, session.tz)}（${session.tz}）`,
-    "様子: npm run night -- status　止める: npm run night -- stop（--now ですぐ）　朝: npm run night -- finish --commit",
+    "様子: npm run night -- status　止める: npm run night -- stop（--now ですぐ）（ホストからは docker/remote-control/night.sh status・stop）",
+    "朝: 止まるときに結果を自分でまとめる。ホストで docker/remote-control/night-push.sh を流し、スレッドに「回の名前 を push した」と伝える",
   ].join("\n");
 }
 
 export async function cmdStart(a: Args): Promise<number> {
   // --bin（組み立てずにこの svwb を使う）・--node-bin（td・potential をビルドせずにここのものを使う）・--foreground（切り離さずに回す）・
-  // --prepare-only（回のフォルダを作るだけ）は試す用
-  known(a, ["--yes", "--name", "--until", "--tz", "--threads", "--chunk-min", "--allow-dirty", "--bin", "--node-bin", "--foreground", "--prepare-only"], 1);
+  // --prepare-only（回のフォルダを作るだけ）は試す用。--git-dir（台帳の行をコミットするリポジトリ）は go が渡す
+  known(a, ["--yes", "--name", "--until", "--tz", "--threads", "--chunk-min", "--allow-dirty", "--bin", "--node-bin", "--foreground", "--prepare-only", "--git-dir"], 1);
   const file = a.pos[0];
   if (file === undefined) throw new Error("ジョブのファイルを渡します");
   const jobsText = readFileSync(file, "utf8");
@@ -1737,13 +1756,15 @@ export async function cmdStart(a: Args): Promise<number> {
   if (active.length > 0) throw new Error(`ほかの回が動いています: ${active.join(", ")}（1 晩に 1 つ）`);
   if (g.dirty && !a.opts.has("--allow-dirty")) throw new Error("コミットしていない変更があります（push してから回す。試すだけなら --allow-dirty）");
   const dir = join(root, name);
-  if (existsSync(dir)) throw new Error(`もうあります: ${dir}（続きなら resume）`);
+  // go は先に回のフォルダにソース（src/）と券を置くので、計画（plan.json）が無ければ始めてよい
+  if (existsSync(join(dir, "plan.json"))) throw new Error(`もうあります: ${dir}（続きなら resume）`);
   let bin = a.opts.get("--bin");
   if (bin === undefined) {
     console.log("svwb を組み立てる…");
     run(process.execPath, [join(REPO, "scripts/vite-run.mjs"), "scripts/rust-data-main.ts", "--quiet"]);
     run("cargo", ["build", "--quiet", "--release", "--manifest-path", "rust/Cargo.toml", "-p", "svwb-engine"]);
-    bin = join(REPO, "rust/target/release/svwb");
+    // go は CARGO_TARGET_DIR で /workspace のビルド結果の置き場を使い回す
+    bin = join(process.env.CARGO_TARGET_DIR ? resolve(process.env.CARGO_TARGET_DIR) : join(REPO, "rust/target"), "release/svwb");
   }
   validate(resolve(bin), jobs);
   mkdirSync(join(dir, "bin"), { recursive: true });
@@ -1753,6 +1774,9 @@ export async function cmdStart(a: Args): Promise<number> {
   chmodSync(copied, 0o755);
   const nodeBin = a.opts.get("--node-bin");
   prepareNodeTools(jobs, dir, nodeBin === undefined ? undefined : resolve(nodeBin));
+  const gitDirOpt = a.opts.get("--git-dir");
+  const gitDir = gitDirOpt === undefined ? undefined : resolve(gitDirOpt);
+  const full = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${g.commit.replace(/\+$/, "")}^{commit}`], { cwd: nightGitDir(gitDir ?? REPO), encoding: "utf8" });
   const plan: Plan = {
     v: 1,
     name,
@@ -1760,6 +1784,8 @@ export async function cmdStart(a: Args): Promise<number> {
     repo: REPO,
     jobsFile: resolve(file),
     commit: g.commit,
+    ...(full.status === 0 ? { commitFull: full.stdout.trim() } : {}),
+    ...(gitDir === undefined ? {} : { gitDir }),
     branch: g.branch,
     bin: copied,
     chunkMin,
@@ -2213,12 +2239,12 @@ const NIGHT_IDENT: NodeJS.ProcessEnv = {
  */
 export function commitNight(dir: string, summary: string, outbox: string): { branch: string; sha: string | null; rows: number } {
   const plan = readPlan(dir);
-  const repo = nightGitDir(plan.repo);
+  const repo = nightGitDir(plan.gitDir ?? plan.repo);
   const branch = nightBranch(plan.name);
   const ref = `refs/heads/${branch}`;
   const tip = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], { cwd: repo, encoding: "utf8" });
   const old = tip.status === 0 ? tip.stdout.trim() : null;
-  const parent = old ?? gitIn(repo, ["rev-parse", "--verify", `${plan.commit.replace(/\+$/, "")}^{commit}`]).trim();
+  const parent = old ?? gitIn(repo, ["rev-parse", "--verify", `${plan.commitFull ?? plan.commit.replace(/\+$/, "")}^{commit}`]).trim();
   const ledgerPath = LEDGER_PATH;
   const cur = spawnSync("git", ["show", `${parent}:${ledgerPath}`], { cwd: repo, encoding: "utf8", maxBuffer: 1 << 30 });
   const before = cur.status === 0 ? cur.stdout : "";
@@ -2475,6 +2501,301 @@ async function ingestFiles(paths: string[], to: string): Promise<{ ok: boolean; 
   return { ok, text, notes };
 }
 
+// ---------------------------------------------------------------- 券と go（夕方の 1 行。docs/night.md「券と go」）
+
+/** 券の 1 語目（形を変えたら数を上げる） */
+export const TICKET_V = "svwb-night-1";
+/** ユーザーがホストで券を流すスクリプト */
+export const NIGHT_SH = "~/Shadowverse-Wb-Sim/docker/remote-control/night.sh";
+
+/** 券: 今夜回すものの 1 行（スレッドが plan で出し、ユーザーがホストで night.sh go <券> を流す） */
+export interface Ticket {
+  name: string;
+  branch: string;
+  /** 回すコミット（sha の頭 12 桁） */
+  commit: string;
+  /** ジョブのファイル（リポジトリの根からの道） */
+  jobs: string;
+  /** 止める時刻（--until と同じ形） */
+  until: string;
+  tz?: string;
+  threads?: number;
+  /** 区切りのおよその長さ（--chunk-min） */
+  chunk?: number;
+  /** 計画の指紋（ほかの項目とジョブのファイルの中身の sha256 の頭 12 桁） */
+  plan: string;
+}
+
+type TicketBody = Omit<Ticket, "plan">;
+const TICKET_FIELDS = ["name", "branch", "commit", "jobs", "until", "tz", "threads", "chunk"] as const;
+/** ブランチとジョブのファイルの道に使えるもの（シェルで引用符が要らない） */
+const SAFE_PATH = /^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$/;
+
+const ticketWords = (t: TicketBody): string[] => TICKET_FIELDS.flatMap((k) => (t[k] === undefined ? [] : [`${k}=${t[k]}`]));
+const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
+
+/** 計画の指紋。券の項目とジョブのファイルの中身から決まる（写し間違い・書き換えと、違うジョブのファイルを見つける） */
+export function ticketPlan(t: TicketBody, jobsText: string): string {
+  return sha256([TICKET_V, ...ticketWords(t), `jobs-sha256=${sha256(jobsText)}`].join("\n")).slice(0, 12);
+}
+
+export const makeTicket = (t: TicketBody, jobsText: string): Ticket => ({ ...t, plan: ticketPlan(t, jobsText) });
+export const ticketText = (t: Ticket): string => [TICKET_V, ...ticketWords(t), `plan=${t.plan}`].join(" ");
+
+/** 券を読む（語に分かれていても、1 つの文字列でもよい） */
+export function parseTicket(words: string[]): Ticket {
+  const ws = words.join(" ").trim().split(/\s+/).filter((w) => w !== "");
+  const head = ws[0];
+  if (head !== TICKET_V) {
+    if (head !== undefined && /^svwb-night-\d+$/.test(head)) {
+      throw new Error(`この券（${head}）は、このチェックアウトの夜のキューと形が違います。ホストの ~/Shadowverse-Wb-Sim で git pull してから流します`);
+    }
+    throw new Error(`券ではありません（${TICKET_V} で始まる 1 行。スレッドが出したものをそのまま渡します）`);
+  }
+  const kv = new Map<string, string>();
+  for (const w of ws.slice(1)) {
+    const i = w.indexOf("=");
+    const k = i < 0 ? w : w.slice(0, i);
+    if (i < 0 || !([...TICKET_FIELDS, "plan"] as string[]).includes(k)) throw new Error(`券の読めない語: ${w}`);
+    if (kv.has(k)) throw new Error(`券に ${k} が 2 つあります`);
+    kv.set(k, w.slice(i + 1));
+  }
+  const need = (k: string): string => {
+    const v = kv.get(k);
+    if (v === undefined || v === "") throw new Error(`券に ${k} がありません`);
+    return v;
+  };
+  const bad = (k: string, v: string): Error => new Error(`券の ${k} が使えない形: ${v}`);
+  const name = need("name");
+  if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(name)) throw bad("name", name);
+  const branch = need("branch");
+  if (!SAFE_PATH.test(branch) || branch.endsWith(".lock") || branch.includes("..")) throw bad("branch", branch);
+  const commit = need("commit");
+  if (!/^[0-9a-f]{12,40}$/.test(commit)) throw bad("commit", commit);
+  const jobs = need("jobs");
+  if (!SAFE_PATH.test(jobs)) throw bad("jobs", jobs);
+  const tz = kv.get("tz");
+  if (tz !== undefined) {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    } catch {
+      throw bad("tz", tz);
+    }
+  }
+  const until = need("until");
+  parseUntil(until, Date.now(), tz ?? "Asia/Tokyo");
+  const threadsText = kv.get("threads");
+  const chunkText = kv.get("chunk");
+  const chunk = chunkText === undefined ? undefined : Number(chunkText);
+  if (chunk !== undefined && !(chunk > 0 && Number.isFinite(chunk))) throw bad("chunk", chunkText ?? "");
+  const plan = need("plan");
+  if (!/^[0-9a-f]{12}$/.test(plan)) throw bad("plan", plan);
+  return {
+    name,
+    branch,
+    commit,
+    jobs,
+    until,
+    ...(tz === undefined ? {} : { tz }),
+    ...(threadsText === undefined ? {} : { threads: intOf(threadsText, "券の threads", 1) }),
+    ...(chunk === undefined ? {} : { chunk }),
+    plan,
+  };
+}
+
+/** plan で券を作る。ジョブのファイルがリポジトリにコミットしてあり、今のコミットを push してあるときだけ（どちらかが欠けると理由を返す） */
+export function ticketHere(file: string, o: Omit<TicketBody, "branch" | "commit" | "jobs">, cwd: string = REPO): { ticket: Ticket } | { why: string } {
+  const gitHere = (args: string[]) => spawnSync("git", args, { cwd, encoding: "utf8", maxBuffer: 1 << 26 });
+  const top = gitHere(["rev-parse", "--show-toplevel"]);
+  if (top.status !== 0) return { why: "git のリポジトリの中で流していない" };
+  const root = top.stdout.trim();
+  const rel = relative(root, resolve(file)).split(sep).join("/");
+  if (rel.startsWith("../") || isAbsolute(rel)) return { why: `ジョブのファイルがリポジトリの外にある（${file}。リポジトリの night/ に置いてコミットする）` };
+  if (!SAFE_PATH.test(rel)) return { why: `ジョブのファイルの道に使えない文字がある（${rel}。英数字と . _ - / だけ）` };
+  if (gitHere(["ls-files", "--error-unmatch", "--", rel]).status !== 0) return { why: `ジョブのファイル（${rel}）をコミットしていない` };
+  if (dirtyIn(root) || gitHere(["diff", "--quiet", "HEAD", "--", rel]).status !== 0) return { why: "コミットしていない変更がある（コミットして push してから plan を流し直す）" };
+  const branch = gitHere(["rev-parse", "--abbrev-ref", "HEAD"]).stdout.trim();
+  if (branch === "" || branch === "HEAD" || !SAFE_PATH.test(branch)) return { why: `ブランチの上にいないか、ブランチの名前に使えない文字がある（${branch}）` };
+  if (gitHere(["merge-base", "--is-ancestor", "HEAD", `refs/remotes/origin/${branch}`]).status !== 0) {
+    return { why: `今のコミットを origin/${branch} に push していない（push してから plan を流し直す）` };
+  }
+  const full = gitHere(["rev-parse", "HEAD"]).stdout.trim();
+  const jobsText = gitHere(["show", `HEAD:${rel}`]).stdout;
+  return { ticket: makeTicket({ name: o.name, branch, commit: full.slice(0, 12), jobs: rel, until: o.until, ...pick3(o) }, jobsText) };
+}
+
+const pick3 = (o: Pick<TicketBody, "tz" | "threads" | "chunk">): Pick<TicketBody, "tz" | "threads" | "chunk"> => ({
+  ...(o.tz === undefined ? {} : { tz: o.tz }),
+  ...(o.threads === undefined ? {} : { threads: o.threads }),
+  ...(o.chunk === undefined ? {} : { chunk: o.chunk }),
+});
+
+/** 昼（7 時〜18 時）か。昼はゲームがカクつくので、go は昼なら 1 回確かめる */
+export function isDaytime(ms: number, tz: string): boolean {
+  const h = wallClock(ms, tz).h;
+  return h >= 7 && h < 18;
+}
+
+/** origin の URL を、認証の要らない https の形にする（git@github.com:o/r.git → https://github.com/o/r.git。リポジトリは公開なので、コンテナに認証情報が無くても取れる） */
+export function httpsRemote(url: string): string {
+  const m = /^(?:ssh:\/\/)?git@github\.com[:/](.+?)(?:\.git)?\/?$/.exec(url.trim());
+  return m ? `https://github.com/${m[1]}.git` : url.trim();
+}
+
+/** 券のコミット（全部の sha）。手元に無ければ GitHub から券のブランチを取ってくる */
+function ensureCommit(repo: string, t: Ticket): string {
+  const has = (): string | null => {
+    const r = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${t.commit}^{commit}`], { cwd: repo, encoding: "utf8" });
+    return r.status === 0 ? r.stdout.trim() : null;
+  };
+  const before = has();
+  if (before !== null) return before;
+  const url = process.env.SVWB_NIGHT_REMOTE || httpsRemote(gitIn(repo, ["remote", "get-url", "origin"]));
+  console.log(`券のコミット ${t.commit} を取ってくる（${url} のブランチ ${t.branch}）…`);
+  const f = spawnSync("git", ["fetch", "--quiet", "--no-tags", "--update-shallow", url, `refs/heads/${t.branch}`], { cwd: repo, encoding: "utf8" });
+  if (f.status !== 0) throw new Error(`ブランチ ${t.branch} を取ってこられませんでした: ${(f.stderr || f.stdout).trim()}`);
+  const after = has();
+  if (after === null) throw new Error(`券のコミット ${t.commit} がブランチ ${t.branch} にありません（スレッドに券を作り直してもらう）`);
+  return after;
+}
+
+/** 券のコミットを回のフォルダの src/ に出す（git の一時の index で。/workspace の作業ツリー・index・今のブランチには触らない） */
+function exportSource(repo: string, full: string, src: string): void {
+  if (existsSync(src)) return;
+  const tmp = `${src}.tmp`;
+  rmSync(tmp, { recursive: true, force: true });
+  mkdirSync(tmp, { recursive: true });
+  const index = join(mkdtempSync(join(tmpdir(), "night-src-")), "index");
+  try {
+    const env = { GIT_INDEX_FILE: index };
+    gitIn(repo, ["read-tree", full], { env });
+    gitIn(repo, ["checkout-index", "--all", "--force", `--prefix=${tmp}/`], { env });
+  } finally {
+    rmSync(dirname(index), { recursive: true, force: true });
+  }
+  renameSync(tmp, src);
+}
+
+/** 回のソースの node_modules。依存（package-lock.json）が /workspace と同じなら /workspace のものを指し、違えば npm ci */
+function prepareNodeModules(repo: string, src: string): void {
+  const nm = join(src, "node_modules");
+  if (statSync(nm, { throwIfNoEntry: false }) !== undefined) return;
+  const lock = (d: string) => (existsSync(join(d, "package-lock.json")) ? readFileSync(join(d, "package-lock.json"), "utf8") : null);
+  if (lock(src) !== null && lock(src) === lock(repo) && existsSync(join(repo, "node_modules"))) {
+    symlinkSync(join(repo, "node_modules"), nm);
+    return;
+  }
+  console.log("券のコミットの依存が /workspace と違うので、回のソースに npm ci する（数分）…");
+  const r = spawnSync("npm", ["ci", "--no-audit", "--no-fund"], { cwd: src, stdio: ["ignore", "inherit", "inherit"] });
+  if (r.status !== 0) {
+    rmSync(nm, { recursive: true, force: true });
+    throw new Error("回のソースの npm ci が失敗しました");
+  }
+}
+
+async function askYes(question: string): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return /^(y|yes|はい)$/i.test((await rl.question(question)).trim());
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * 券で回す（コンテナの中で。ホストからは docker/remote-control/night.sh go <券>）。
+ * 券のコミットを取ってきて（無ければ）、計画の指紋を確かめ、回のフォルダの src/ に出して、そこの start を流す（svwb もそこで組み立てる）。
+ * 同じ券の回があれば、動いていればそう言い、済んでいればそう言い、途中なら resume。昼なら 1 回確かめる
+ */
+export async function cmdGo(a: Args): Promise<number> {
+  // --yes: 昼でも確かめない（端末の無いところで流すとき）。--bin・--node-bin・--foreground は試す用（start・resume に渡す）
+  known(a, ["--yes", "--bin", "--node-bin", "--foreground"], Number.POSITIVE_INFINITY);
+  if (a.pos.length === 0) throw new Error("券を渡します（スレッドが出した svwb-night-1 で始まる 1 行）");
+  const t = parseTicket(a.pos);
+  const root = runsRoot(a.opts.get("--root"));
+  const repo = nightGitDir(REPO);
+  const tz = t.tz ?? "Asia/Tokyo";
+  const dir = join(root, t.name);
+  const src = join(dir, "src");
+  const ticketFile = join(dir, "ticket.txt");
+  const full = ensureCommit(repo, t);
+  const shown = spawnSync("git", ["show", `${full}:${t.jobs}`], { cwd: repo, encoding: "utf8", maxBuffer: 1 << 26 });
+  if (shown.status !== 0) throw new Error(`券のジョブのファイル ${t.jobs} が、コミット ${t.commit} にありません`);
+  if (ticketPlan(t, shown.stdout) !== t.plan) {
+    throw new Error("券の指紋が合いません（写すときに欠けたか、書き換わった）。スレッドが出した 1 行をそのまま流します。直らなければ、スレッドに券を作り直してもらう");
+  }
+  if (existsSync(dir)) {
+    const had = existsSync(ticketFile) ? parseTicket([readFileSync(ticketFile, "utf8")]) : null;
+    if (had === null) throw new Error(`同じ名前の回が、券を使わずに作ってあります: ${dir}（スレッドに名前を替えた券を作ってもらう）`);
+    if (had.commit !== t.commit || had.jobs !== t.jobs || had.branch !== t.branch || had.chunk !== t.chunk) {
+      throw new Error(`同じ名前の別の回があります: ${dir}（その券: ${ticketText(had)}）。スレッドに名前を替えた券を作ってもらう`);
+    }
+  }
+  const started = existsSync(join(dir, "plan.json"));
+  const morning = `朝は ${NIGHT_SH.replace("night.sh", "night-push.sh")} を流し、スレッドに「${t.name} を push した」と伝えてください。`;
+  if (started) {
+    if (workerPid(dir) !== null) {
+      console.log(`${statusText(dir)}\n\nこの回はもう動いています。${morning}`);
+      return 0;
+    }
+    const done = markers(dir);
+    if (readPlan(dir).chunks.every((c) => done.has(c.id))) {
+      console.log(`${statusText(dir)}\n\nこの回は全部済んでいます。${morning}`);
+      return 0;
+    }
+  }
+  const others = activeRuns(root).filter((d) => d !== dir);
+  if (others.length > 0) throw new Error(`ほかの回が動いています: ${others.map((d) => basename(d)).join(", ")}（1 晩に 1 つ。止めるなら night.sh stop）`);
+  const now = Date.now();
+  if (isDaytime(now, tz) && !a.opts.has("--yes")) {
+    const msg = `今は ${fmtClock(now, tz)}（${tz}）で、昼です（7 時〜18 時）。昼はゲームがカクつくので、ふつうは夜に回します。`;
+    if (process.stdin.isTTY !== true) throw new Error(`${msg}今から回すなら、端末で流して y と答えます`);
+    if (!(await askYes(`${msg}\n今から回しますか？ [y/N] `))) {
+      console.log("回しませんでした。");
+      return 1;
+    }
+  }
+  if (!started) {
+    mkdirSync(dir, { recursive: true });
+    if (!existsSync(ticketFile)) writeFileSync(ticketFile, `${ticketText(t)}\n`);
+    console.log(`券のコミット ${t.commit} を ${src} に出す…`);
+    exportSource(repo, full, src);
+    prepareNodeModules(repo, src);
+  }
+  if (!existsSync(join(src, "scripts", "night-main.ts"))) throw new Error(`回のソースがありません: ${src}`);
+  const pass = (k: string): string[] => {
+    const v = a.opts.get(k);
+    return v === undefined ? [] : k === "--foreground" ? [k] : [k, resolve(v)];
+  };
+  const common = ["--root", root, "--until", t.until, "--tz", tz, ...(t.threads === undefined ? [] : ["--threads", String(t.threads)]), ...pass("--foreground")];
+  const args = started
+    ? ["resume", t.name, "--yes", ...common]
+    : [
+        "start",
+        join(src, t.jobs),
+        "--yes",
+        "--name",
+        t.name,
+        "--git-dir",
+        repo,
+        ...(t.chunk === undefined ? [] : ["--chunk-min", String(t.chunk)]),
+        ...pass("--bin"),
+        ...pass("--node-bin"),
+        ...common,
+      ];
+  const env = {
+    ...process.env,
+    // 台帳の行のコミットとブランチ（回のソースには .git が無い）
+    SVWB_COMMIT: gitIn(repo, ["rev-parse", "--short=7", full]).trim(),
+    SVWB_BRANCH: t.branch,
+    // Rust のビルド結果は /workspace の置き場（コンテナではボリューム）を使い回す
+    CARGO_TARGET_DIR: process.env.CARGO_TARGET_DIR || join(repo, "rust", "target"),
+  };
+  const r = spawnSync(process.execPath, [join(src, "scripts", "night-main.ts"), ...args], { cwd: src, stdio: "inherit", env });
+  if (r.status === 0 && !a.opts.has("--foreground")) console.log(`\n${morning}`);
+  return r.status ?? 1;
+}
+
 function cmdList(a: Args): number {
   known(a, [], 0);
   const root = runsRoot(a.opts.get("--root"));
@@ -2495,7 +2816,8 @@ function cmdList(a: Args): number {
 }
 
 const USAGE = `使い方（docs/night.md）:
-  npm run night -- plan <ジョブのファイル> [--until 07:00] [--threads N] [--machine 名前] [--chunk-min 7.5] [--tz Asia/Tokyo] [--at 23:00]
+  npm run night -- plan <ジョブのファイル> [--until 07:00] [--threads N] [--machine 名前] [--chunk-min 7.5] [--tz Asia/Tokyo] [--at 23:00] [--name 名前]
+  npm run night -- go <券>                    （コンテナの中で。ホストからは docker/remote-control/night.sh go <券>。券は plan が出す 1 行）
   npm run night -- start <ジョブのファイル> --yes [--name 名前] [--until 07:00] [--threads N] [--chunk-min 7.5] [--allow-dirty]
   npm run night -- status [名前]
   npm run night -- stop [名前] [--now]
@@ -2513,7 +2835,7 @@ export async function main(argv: string[]): Promise<number> {
     switch (cmd) {
       case "plan": {
         // --at: 始める時刻（見込みの表だけ。既定は今。--until と同じ形）
-        known(a, ["--until", "--tz", "--threads", "--machine", "--chunk-min", "--at"], 1);
+        known(a, ["--until", "--tz", "--threads", "--machine", "--chunk-min", "--at", "--name"], 1);
         const file = a.pos[0];
         if (file === undefined) throw new Error("ジョブのファイルを渡します");
         const jobs = parseJobs(readFileSync(file, "utf8"));
@@ -2525,8 +2847,26 @@ export async function main(argv: string[]): Promise<number> {
         const startAt = at === undefined ? session.started : parseUntil(at, session.started, session.tz);
         const until = at === undefined || a.opts.has("--until") ? session.until : parseUntil(a.opts.get("--until") ?? "07:00", startAt, session.tz);
         console.log(planText({ jobs, ...parts }, { threads: session.threads, machine, startAt, until, tz: session.tz, title: `夜のキュー（${file}）` }));
+        // 券（ユーザーがホストで night.sh go <券> を流す。docs/night.md「券と go」）
+        const w = wallClock(startAt, session.tz);
+        const name = a.opts.get("--name") ?? `night-${w.y}${p2(w.mo)}${p2(w.d)}`;
+        if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(name)) throw new Error(`--name は英数字と . _ - だけ: ${name}`);
+        const tk = ticketHere(file, {
+          name,
+          until: a.opts.get("--until") ?? "07:00",
+          ...(a.opts.has("--tz") ? { tz: session.tz } : {}),
+          ...(a.opts.has("--threads") ? { threads: session.threads } : {}),
+          ...(a.opts.has("--chunk-min") ? { chunk: chunkMin } : {}),
+        });
+        console.log(
+          "ticket" in tk
+            ? `\n券（今夜回すと決めたら、ユーザーがホストでこの 1 行を流す。docs/night.md「ユーザーの手順」）:\n${NIGHT_SH} go ${ticketText(tk.ticket)}`
+            : `\n券は出していません: ${tk.why}`,
+        );
         return 0;
       }
+      case "go":
+        return await cmdGo(a);
       case "start":
         return await cmdStart(a);
       case "resume":
