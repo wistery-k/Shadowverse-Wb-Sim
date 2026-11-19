@@ -1,16 +1,17 @@
-import { execSync } from "node:child_process";
+import { execSync, type ExecSyncOptionsWithStringEncoding } from "node:child_process";
 import { statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import preact from "@preact/preset-vite";
 import { devOnlyModules, replayFiles } from "./scripts/replay-files.ts";
 
-/** ビルド時点の最終コミット（画面に表示する）。git が使えなければ空 */
+/** ビルド時点の最終コミット（画面に表示する）。git が使えなければ空（夜のキューの回のソースのように .git が無いところでも、git の文句は出さない） */
 function gitInfo(): { commit: string; date: string; dirty: boolean } {
+  const quiet: ExecSyncOptionsWithStringEncoding = { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] };
   try {
-    const [commit = "", date = ""] = execSync("git log -1 --format=%H%n%cI", { encoding: "utf8" }).trim().split("\n");
+    const [commit = "", date = ""] = execSync("git log -1 --format=%H%n%cI", quiet).trim().split("\n");
     // 未コミットの変更があると、コミットだけでは試合を再現できない（リプレイ画面で知らせる）
-    const dirty = execSync("git status --porcelain --untracked-files=no", { encoding: "utf8" }).trim() !== "";
+    const dirty = execSync("git status --porcelain --untracked-files=no", quiet).trim() !== "";
     return { commit, date, dirty };
   } catch {
     return { commit: "", date: "", dirty: false };
