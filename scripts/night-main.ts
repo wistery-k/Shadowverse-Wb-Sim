@@ -1921,7 +1921,43 @@ const queueOf = (r: object): string | undefined => (r as { queue?: string }).que
  * misses は区切りの行に回の名前を足してそのまま、survey は全部の区切りが済んでから 1 行。merged の区切りは足さない。
  * target の台帳に同じ回の同じ行があれば足さない
  */
+/**
+ * 台帳の行とコミットのメッセージに書く道。PC の中の回のフォルダ（/home/wk/svwb-data/night/<回>/…）を、回の名前からの道（@<回>/…）にする。
+ * 共有フォルダでは、@<回>/<ファイル> は ingest が置いた data/…/<回>/ か logs/<回>/ の同じ名前（pack-run の分け方）。ほかの道は替えない
+ */
+export function portablePath(text: string, dir: string, name: string): string {
+  if (dir === "" || !text.includes(dir)) return text;
+  const esc = dir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.replace(new RegExp(`${esc}(?![A-Za-z0-9._-])`, "g"), `@${name}`);
+}
+
+/** 行の中の文字列（鍵も）を portablePath で書き換える */
+export function portableRow<T>(row: T, dir: string, name: string): T {
+  const walk = (v: unknown): unknown =>
+    typeof v === "string"
+      ? portablePath(v, dir, name)
+      : Array.isArray(v)
+        ? v.map(walk)
+        : v !== null && typeof v === "object"
+          ? Object.fromEntries(Object.entries(v).map(([k, x]) => [portablePath(k, dir, name), walk(x)]))
+          : v;
+  return walk(row) as T;
+}
+
+/** メッセージの道: 回のフォルダは @<回>、ホームは ~（出口の ~/svwb-data/outbox/<回> はホストでも同じ場所） */
+function portableText(text: string, dir: string, name: string): string {
+  const home = homedir();
+  const t = portablePath(text, dir, name);
+  return home.length > 1 ? t.split(`${home}/`).join("~/") : t;
+}
+
 export function queueRows(plan: Pick<Plan, "name" | "jobs" | "chunks">, dir: string, src: RowsSource, merged: Set<string>, target: LedgerRows): QueueRows {
+  const out = queueRowsRaw(plan, dir, src, merged, target);
+  const p = <R>(r: R): R => portableRow(r, dir, plan.name);
+  return { ...out, runs: out.runs.map(p), misses: out.misses.map(p), surveys: out.surveys.map(p), notes: out.notes.map((n) => portablePath(n, dir, plan.name)) };
+}
+
+function queueRowsRaw(plan: Pick<Plan, "name" | "jobs" | "chunks">, dir: string, src: RowsSource, merged: Set<string>, target: LedgerRows): QueueRows {
   const out: QueueRows = { runs: [], misses: [], surveys: [], notes: [], merged: new Set(merged) };
   const key = (r: { label: string; g: [number, number]; commit: string; kind: string }) => `${r.kind}\u0001${r.label}\u0001${r.g[0]}\u0001${r.g[1]}\u0001${r.commit}`;
   const have = new Set(target.runs.filter((r) => queueOf(r) === plan.name).map(key));
@@ -2166,9 +2202,10 @@ function runSource(plan: Plan, dir: string): { src: RowsSource; errors: string[]
 /** この回の済んだ区切りを全部まとめた表（PC で見た様子と一緒に） */
 function runSummary(plan: Plan, dir: string, src: RowsSource, errors: string[]): string {
   const tables = rowsTables(plan, queueRows(plan, dir, src, new Set(), EMPTY_LEDGER));
-  return `${statusText(dir, { final: true })}\n\nこの回の結果（済んだ区切りをジョブごとにまとめた）\n${tables === "" ? "（まだ結果の行はありません）" : tables}${
+  const text = `${statusText(dir, { final: true })}\n\nこの回の結果（済んだ区切りをジョブごとにまとめた）\n${tables === "" ? "（まだ結果の行はありません）" : tables}${
     errors.length > 0 ? `\n\n${errors.join("\n")}` : ""
   }`;
+  return portableText(text, dir, plan.name);
 }
 
 /** 回のフォルダの結果を出口のフォルダにまとめる */
@@ -2257,10 +2294,10 @@ export function commitNight(dir: string, summary: string, outbox: string): { bra
     `台帳: 夜のキュー ${plan.name} の結果（${n} 行、${plan.commit}）`,
     "",
     "このブランチは夜のキューの結果の台帳の行を運ぶためのもの（PC で作った）。スレッドは npm run night -- ingest " + plan.name + " で自分のブランチの台帳に足す。",
-    `出口: ${outbox}`,
+    `出口: ${portableText(outbox, dir, plan.name)}`,
     "",
     summary,
-    ...(errors.length > 0 ? ["", ...errors] : []),
+    ...(errors.length > 0 ? ["", ...errors.map((e) => portableText(e, dir, plan.name))] : []),
   ].join("\n");
   // 足す行が無く、様子と結果の表（1 行目と出口の行のほか）が前のコミットと同じなら、新しいことは無い
   const gist = (m: string) => m.split("\n").slice(1).filter((l) => !l.startsWith("出口: ")).join("\n").trim();

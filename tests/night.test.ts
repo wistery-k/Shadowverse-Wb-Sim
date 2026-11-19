@@ -29,6 +29,8 @@ import {
   parseJobs,
   parseTicket,
   parseUntil,
+  portablePath,
+  portableRow,
   readStatus,
   runWorker,
   shellLine,
@@ -724,7 +726,12 @@ describe("区切って回す（偽物の svwb で）", () => {
     const target = join(tmp, "ledger.jsonl");
     writeFileSync(target, "");
     expect(await main(["finish", "n1", "--root", root, "--ledger", target])).toBe(0);
-    expect(parseLedger(readFileSync(target, "utf8")).runs.map((r) => r.label)).toEqual(["q1", "q2"]);
+    const added = parseLedger(readFileSync(target, "utf8")).runs;
+    expect(added.map((r) => r.label)).toEqual(["q1", "q2"]);
+    // 台帳の行には、PC の中の回のフォルダの道ではなく、回の名前からの道（@<回>/…）を書く
+    expect(added[1]?.a).toEqual({ valueNet: "@n1/q2.json", potentialNet: "@n1/q2pot.json" });
+    expect(added[1]?.cmd).toBe(`compare 4 '{"valueNet":"@n1/q2.json","potentialNet":"@n1/q2pot.json"}' '{}' 0 --label q2`);
+    expect(readFileSync(target, "utf8")).not.toContain(dir());
     expect(readFileSync(f("summary.md"), "utf8")).toMatch(/ジョブ 6（pick）: q1: 100.00%.*越えた。@\/q2.json は @\/a.json/);
   });
 
@@ -783,6 +790,9 @@ describe("区切って回す（偽物の svwb で）", () => {
     const tip1 = gitT(pcGit, "rev-parse", "night/n1");
     expect(gitT(pcGit, "rev-parse", "night/n1^")).toBe(head);
     expect(gitT(pcGit, "log", "-1", "--format=%s", "night/n1")).toBe(`台帳: 夜のキュー n1 の結果（1 行、${process.env.SVWB_COMMIT}）`);
+    // コミットのメッセージ（公開するブランチ）にも、PC の中の回のフォルダの道は書かない
+    expect(gitT(pcGit, "log", "-1", "--format=%B", "night/n1")).not.toContain(root);
+    expect(gitT(pcGit, "log", "-1", "--format=%B", "night/n1")).toContain("夜のキュー n1（@n1）");
     expect(readStatus(dir())).toMatchObject({ branch: expect.stringMatching(/^night\/n1（.*台帳の行 1）$/), outbox: expect.stringContaining(join(tmp, "outbox", "n1")) });
     // 2 晩目: 続きを回す。ブランチの上に、残りの区切りの行を積む
     expect(await resume()).toBe(0);
@@ -1007,6 +1017,22 @@ describe("区切って回す（偽物の svwb で）", () => {
     expect(await main(["ingest", ...files.map((f) => join(box, f)), "--to", shared])).toBe(0);
     expect(readdirSync(join(shared, "logs", "n1"))).toEqual(expect.arrayContaining(["chunks", "plan.json", "outbox-summary.md", "speed-3.md", "ledger.jsonl.gz", "MANIFEST.md"]));
     expect(readdirSync(join(shared, "logs", "n1")).filter((f) => f.includes("ingest-tmp"))).toEqual([]);
+  });
+});
+
+describe("台帳の行の道", () => {
+  it("回のフォルダの道だけを @<回の名前> にする（名前の続く別の回や、ほかの道は替えない）", () => {
+    const dir = "/home/wk/svwb-data/night/n1";
+    expect(portablePath(`td train --data ${dir}/s-1.jsonl.gz,${dir}/s-2.jsonl.gz`, dir, "n1")).toBe("td train --data @n1/s-1.jsonl.gz,@n1/s-2.jsonl.gz");
+    expect(portablePath(`回のフォルダ ${dir}（済んだ）`, dir, "n1")).toBe("回のフォルダ @n1（済んだ）");
+    expect(portablePath(`${dir}0/a.json /home/wk/svwb-data/td-royal/m.json data/value-net.json`, dir, "n1")).toBe(
+      `${dir}0/a.json /home/wk/svwb-data/td-royal/m.json data/value-net.json`,
+    );
+    expect(portableRow({ a: { valueNet: `${dir}/q.json` }, files: { [`${dir}/q.json`]: "abc" }, g: [0, 9] }, dir, "n1")).toEqual({
+      a: { valueNet: "@n1/q.json" },
+      files: { "@n1/q.json": "abc" },
+      g: [0, 9],
+    });
   });
 });
 
