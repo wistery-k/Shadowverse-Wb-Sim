@@ -1,11 +1,13 @@
-// 問題集の手順の候補（<問のフォルダ>/lines/<問>.json の actions。docs/misses.md「手順の候補」）と、一例の手の見分け（src/misses/example.ts）
+// 問題集の手順の候補（<問のフォルダ>/lines/<問>.json の actions。docs/misses.md「手順の候補」）と、一例の手の見分け（src/misses/example.ts）、デッキと残りの山札（src/misses/deck.ts）
 import { describe, expect, it } from "vitest";
 import "../src/record/pool";
-import { actingPlayer, applyAction, tryApplyAction, type Action, type GameState } from "../src/engine";
+import { actingPlayer, applyAction, cardOf, tryApplyAction, type Action, type GameState } from "../src/engine";
 import { loadMisses } from "../src/misses/azvaldtData";
+import { deckRows } from "../src/misses/deck";
 import { groupNote, stepGroups, stepNotes } from "../src/misses/example";
 import { judgeTurn } from "../src/misses/problems";
 import { stepText } from "../src/misses/stepText";
+import { leaderClasses } from "../src/ui/describe";
 
 const data = loadMisses();
 const byId = new Map(data.problems.map((p) => [p.id, p]));
@@ -147,5 +149,45 @@ describe("一例の手（src/misses/example.ts）", () => {
     // 刻みし約束をプレイ（1 番目の効果）: 効果を選んだ手でランダムな結果
     const h = groups.find((x) => x.start === 4)!;
     expect(groupNote(notes, h)).toMatchObject({ example: null, random: true });
+  });
+});
+
+describe("デッキと残りの山札（src/misses/deck.ts）", () => {
+  it("全部の問に両方の席のデッキがあり、手番の側のデッキは問の説明の名前、クラスは盤面の席と同じ", () => {
+    for (const l of data.lines.values()) {
+      const p = byId.get(l.id)!;
+      expect(l.decks, l.id).not.toBeNull();
+      const decks = l.decks!;
+      expect(p.note, l.id).toContain(`（${decks[p.player].name}、`);
+      for (const q of [0, 1] as const) {
+        expect(decks[q].cards.length, `${l.id} ${q}`).toBe(40);
+        const cls = new Set(decks[q].cards.map((c) => cardOf(c).class).filter((c) => c !== "neutral"));
+        expect([...cls], `${l.id} ${q}`).toEqual([leaderClasses(p.state)[q]]);
+      }
+    }
+  });
+
+  it("残りは山札の枚数と合い、コストの順に並び、デッキのカードは全部出す", () => {
+    const l = data.lines.get("dragon-abyss-g1281")!;
+    const p = byId.get(l.id)!;
+    for (const q of [0, 1] as const) {
+      const rows = deckRows(p.state, q, l.decks![q]);
+      expect(rows.reduce((n, r) => n + r.left, 0)).toBe(p.state.players[q].deck.length);
+      expect(rows.filter((r) => r.total !== 0).reduce((n, r) => n + r.total!, 0)).toBe(40);
+      const costs = rows.map((r) => cardOf(r.cardId).cost);
+      expect(costs).toEqual([...costs].sort((a, b) => a - b));
+    }
+    // デッキが分からなければ残りだけ
+    const rows = deckRows(p.state, 0, null);
+    expect(rows.every((r) => r.total === null && r.left > 0)).toBe(true);
+  });
+
+  it("能力で山札に足されたカードは、デッキの枚数より多く残る", () => {
+    // 歩む《愚者》・リンクルの超進化で 10 枚足した後の局面
+    const l = data.lines.get("witch-hold-g1066")!;
+    const p = byId.get(l.id)!;
+    const rinkle = deckRows(p.state, 0, l.decks![0]).find((r) => cardOf(r.cardId).name === "歩む《愚者》・リンクル")!;
+    expect(rinkle.total).toBe(3);
+    expect(rinkle.left).toBeGreaterThan(3);
   });
 });

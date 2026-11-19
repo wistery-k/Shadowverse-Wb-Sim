@@ -11,9 +11,10 @@ import { AGENTS } from "../ai/registry";
 import type { AgentRequest, AgentResponse } from "../ai/worker";
 import { CLASS_NAMES, type ClassId } from "../cards";
 import { actingPlayer, applyAction, cardOf, legalActions, opponent, type Action, type GameState, type PlayerIndex, workerName } from "../engine";
+import { deckRows } from "../misses/deck";
 import { groupNote, stepGroups, stepNotes, type StepGroup, type StepNote } from "../misses/example";
 import type { MissesData } from "../misses/load";
-import { condTexts, judgeTurn, type MissLine, type MissProblem } from "../misses/problems";
+import { condTexts, judgeTurn, type MissDeck, type MissLine, type MissProblem } from "../misses/problems";
 import { AiThought, useThoughts } from "./AiThought";
 import { CardDetail, CardView, type Motion } from "./CardView";
 import { attackStatuses, describeAction, leaderClasses, modeLabels } from "./describe";
@@ -121,6 +122,7 @@ export function Misses({ source = STARTER_MISSES, active, onSandbox }: Props) {
       problem={problem}
       lines={data.lines.get(problem.id)?.lines ?? []}
       linesSource={data.lines.get(problem.id)?.source ?? null}
+      decks={data.lines.get(problem.id)?.decks ?? null}
       position={`${index + 1}/${data.problems.length}`}
       prev={neighbor(-1)}
       next={neighbor(1)}
@@ -289,6 +291,8 @@ interface ViewProps {
   dir: string;
   lines: readonly MissLine[];
   linesSource: string | null;
+  /** 両方の席のデッキ（手順の候補のファイルにあれば） */
+  decks: readonly [MissDeck, MissDeck] | null;
   position: string;
   prev: string | null;
   next: string | null;
@@ -296,7 +300,7 @@ interface ViewProps {
   onSandbox?: ((state: GameState, label: string) => void) | undefined;
 }
 
-function MissView({ problem, dir, lines, linesSource, position, prev, next, onOpen, onSandbox }: ViewProps) {
+function MissView({ problem, dir, lines, linesSource, decks, position, prev, next, onOpen, onSandbox }: ViewProps) {
   const p = problem.player;
   const start = problem.state;
   const names = useMemo((): [string, string] => (p === 0 ? ["自分", "相手"] : ["相手", "自分"]), [p]);
@@ -676,6 +680,7 @@ function MissView({ problem, dir, lines, linesSource, position, prev, next, onOp
               onPick={(key, at) => select(key, at)}
             />
           )}
+          <DeckPanel state={state} p={p} names={names} decks={decks} onCard={setDetail} />
           {actor !== null && state.phase === "main" && running === null && (
             <AiThought
               state={state}
@@ -827,6 +832,101 @@ function RunEnd({
 }
 
 /** 二段目の勝ちの説明 */
+/** 両方の席のデッキと、盤面の局面の山札に残るカード（折りたたむ。相手の側は伏せ、押すと表にする。ユーザーの依頼 2026-11-19） */
+function DeckPanel({
+  state,
+  p,
+  names,
+  decks,
+  onCard,
+}: {
+  state: GameState;
+  p: PlayerIndex;
+  names: [string, string];
+  decks: readonly [MissDeck, MissDeck] | null;
+  onCard: (cardId: string) => void;
+}) {
+  const [showOpp, setShowOpp] = useState(false);
+  const o = opponent(p);
+  const head = (q: PlayerIndex) => `${names[q]}（${state.first === q ? "先攻" : "後攻"}）${decks ? `: ${decks[q].name}` : ""}`;
+  const column = (q: PlayerIndex) => {
+    const deck = decks?.[q] ?? null;
+    const rows = deckRows(state, q, deck);
+    const added = rows.some((r) => r.total !== null && r.left > r.total);
+    return (
+      <section class="misses-deck" key={q}>
+        <div>
+          <strong>{head(q)}</strong>
+          {q === o && (
+            <button type="button" class="misses-deck-hide" onClick={() => setShowOpp(false)}>
+              伏せる
+            </button>
+          )}
+        </div>
+        <div class="muted">
+          山札の残り {state.players[q].deck.length} 枚{deck ? `（デッキ ${deck.cards.length} 枚）` : ""}
+        </div>
+        <table class="misses-deck-table">
+          <thead>
+            <tr>
+              <th>コスト</th>
+              <th>カード</th>
+              <th class="num">{deck ? "残り / デッキ" : "残り"}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const card = cardOf(r.cardId);
+              return (
+                <tr key={r.cardId} class={r.left === 0 ? "muted" : ""} onClick={() => onCard(r.cardId)}>
+                  <td>
+                    <span class="cost">{card.cost}</span>
+                  </td>
+                  <td>{card.name}</td>
+                  <td class="num">{r.total === null ? r.left : r.total === 0 ? `${r.left}（デッキに無い）` : `${r.left} / ${r.total}`}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {added && <div class="muted">残りがデッキの枚数より多いカードは、能力で山札に足された分を含みます</div>}
+      </section>
+    );
+  };
+  return (
+    <details class="panel misses-decks">
+      <summary>
+        <strong>デッキと残りの山札</strong>
+        <span class="muted">
+          （{decks ? `${names[p]}: ${decks[p].name}。` : ""}押すと、盤面の局面の山札に残るカードを出します）
+        </span>
+      </summary>
+      <div class="misses-decks-grid">
+        {column(p)}
+        {showOpp ? (
+          column(o)
+        ) : (
+          <section class="misses-deck">
+            <div>
+              <strong>{names[o]}（{state.first === o ? "先攻" : "後攻"}）</strong>
+            </div>
+            <div class="muted">相手のデッキと残りの山札は伏せています。</div>
+            <div>
+              <button type="button" onClick={() => setShowOpp(true)}>
+                相手のデッキを見る
+              </button>
+            </div>
+          </section>
+        )}
+      </div>
+      <div class="muted">
+        カードはコストの順で、山札の順番（引く順番）は出しません。{decks ? "デッキは、問を取った試合でその席が使ったプロのデッキです。" : ""}
+        カードを押すと詳細を出します。
+      </div>
+    </details>
+  );
+}
+
 function tallyText(line: MissLine): string | null {
   const t = line.second;
   if (!t || t.games === 0) return null;
