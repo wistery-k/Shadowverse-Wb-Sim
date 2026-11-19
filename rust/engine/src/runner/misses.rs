@@ -118,6 +118,8 @@ struct Cond {
     must: Vec<Pattern>,
     /// このターンにどれも含まない
     must_not: Vec<Pattern>,
+    /// このターンに最初にするその種類の手（play ならプレイ、attack なら攻撃。target は攻撃か選ぶ手）が、どれもこの手
+    first: Vec<Pattern>,
     /// このターンに勝つ
     win: bool,
     /// ターンを終えたときの自分の体力がこれ以上（このターンに勝ったときも満たす）
@@ -234,6 +236,7 @@ fn parse_cond(v: &Json) -> Result<Cond, String> {
         match k.as_str() {
             "must" => c.must = list(k, x)?,
             "mustNot" => c.must_not = list(k, x)?,
+            "first" => c.first = list(k, x)?,
             "win" => {
                 c.win = match x {
                     Json::Bool(b) => *b,
@@ -248,12 +251,17 @@ fn parse_cond(v: &Json) -> Result<Cond, String> {
             }
             _ => {
                 return Err(format!(
-                    "合格の条件の知らない項目: {k}（must・mustNot・win・minHp）"
+                    "合格の条件の知らない項目: {k}（must・mustNot・first・win・minHp）"
                 ))
             }
         }
     }
-    if c.must.is_empty() && c.must_not.is_empty() && !c.win && c.min_hp.is_none() {
+    if c.must.is_empty()
+        && c.must_not.is_empty()
+        && c.first.is_empty()
+        && !c.win
+        && c.min_hp.is_none()
+    {
         return Err("合格の条件が空です".into());
     }
     Ok(c)
@@ -368,6 +376,15 @@ fn matches(p: &Pattern, st: &Step) -> bool {
     }
 }
 
+/// 手 st が、手の形 p と同じ種類の手か（first で、その種類の最初の手を探すのに使う）
+fn same_kind(p: &Pattern, st: &Step) -> bool {
+    match (p.verb, st.verb) {
+        (Verb::Target, Some(v)) => matches!(v, Verb::Attack | Verb::Choose),
+        (want, Some(v)) => want == v,
+        (_, None) => false,
+    }
+}
+
 /// 1 ターンを打った結果
 struct Turn {
     steps: Vec<Step>,
@@ -383,6 +400,12 @@ fn passes(conds: &[Cond], t: &Turn) -> bool {
                 .must_not
                 .iter()
                 .any(|p| t.steps.iter().any(|s| matches(p, s)))
+            && c.first.iter().all(|p| {
+                t.steps
+                    .iter()
+                    .find(|s| same_kind(p, s))
+                    .is_some_and(|s| matches(p, s))
+            })
             && (!c.win || t.won)
             && c.min_hp.is_none_or(|h| t.won || t.hp >= h)
     })
@@ -1423,6 +1446,12 @@ fn cond_text(c: &Cond) -> String {
         parts.push(format!(
             "含まない: {}",
             c.must_not.iter().map(pat).collect::<Vec<_>>().join("・")
+        ));
+    }
+    if !c.first.is_empty() {
+        parts.push(format!(
+            "最初: {}",
+            c.first.iter().map(pat).collect::<Vec<_>>().join("・")
         ));
     }
     if c.win {
@@ -2499,6 +2528,14 @@ mod tests {
         assert!(ok(
             r#"{"mustNot":[{"play":"五行の果て・クオン"},{"evolve":"*"}]}"#
         ));
+        // first: その種類の手のうち最初のもの
+        assert!(ok(r#"{"first":[{"play":"異次元からの銃撃"}]}"#));
+        assert!(!ok(r#"{"first":[{"play":"理光の証明"}]}"#));
+        assert!(ok(r#"{"first":[{"attack":"新たなる少女・エース"}]}"#));
+        assert!(ok(r#"{"first":[{"mode":2}]}"#));
+        assert!(ok(r#"{"first":[{"target":"楽朗の天宮・フィルドア"}]}"#));
+        assert!(!ok(r#"{"first":[{"target":"相手のリーダー"}]}"#));
+        assert!(!ok(r#"{"first":[{"evolve":"*"}]}"#));
         assert!(ok(r#"{"minHp":11}"#));
         assert!(!ok(r#"{"minHp":12}"#));
         assert!(!ok(r#"{"win":true}"#));

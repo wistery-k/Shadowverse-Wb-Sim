@@ -31,6 +31,8 @@ export interface Pattern {
 export interface Cond {
   must: Pattern[];
   mustNot: Pattern[];
+  /** このターンに最初にするその種類の手（play ならプレイ。target は攻撃か選ぶ手）が、どれもこの手 */
+  first: Pattern[];
   win: boolean;
   minHp: number | null;
 }
@@ -71,7 +73,7 @@ function parsePattern(v: unknown): Pattern {
 
 function parseCond(v: unknown): Cond {
   if (!isObj(v)) throw new Error("合格の条件はオブジェクトか、オブジェクトの配列");
-  const c: Cond = { must: [], mustNot: [], win: false, minHp: null };
+  const c: Cond = { must: [], mustNot: [], first: [], win: false, minHp: null };
   const list = (k: string, x: unknown) => {
     if (!Array.isArray(x)) throw new Error(`"${k}" は手の配列`);
     return x.map(parsePattern);
@@ -79,6 +81,7 @@ function parseCond(v: unknown): Cond {
   for (const [k, x] of Object.entries(v)) {
     if (k === "must") c.must = list(k, x);
     else if (k === "mustNot") c.mustNot = list(k, x);
+    else if (k === "first") c.first = list(k, x);
     else if (k === "win") {
       if (typeof x !== "boolean") throw new Error(`"win" は true か false`);
       c.win = x;
@@ -98,6 +101,19 @@ export function parsePass(v: unknown): Cond[] {
 }
 
 const cardText = (name: string) => (name === ANY ? "どれか" : name);
+
+/** 手の種類の名前（first の文に使う） */
+const VERB_NAMES: Record<Verb, string> = {
+  play: "プレイ",
+  attack: "攻撃",
+  evolve: "進化",
+  superEvolve: "超進化",
+  act: "アクト",
+  fuse: "融合",
+  choose: "選ぶ手",
+  mode: "効果の選択",
+  target: "攻撃か選ぶ手",
+};
 
 /** 手の形の文（「魔女の錬金釜をプレイ」等） */
 export function patternText(p: Pattern): string {
@@ -130,6 +146,7 @@ export function condTexts(c: Cond): string[] {
   const out: string[] = [];
   if (c.must.length > 0) out.push(`このターンに ${c.must.map(patternText).join("・")} をする`);
   if (c.mustNot.length > 0) out.push(`このターンに ${c.mustNot.map(patternText).join("・")} をしない`);
+  for (const p of c.first) out.push(`このターンの最初の${VERB_NAMES[p.verb]}として ${patternText(p)} をする`);
   if (c.win) out.push("このターンに勝つ");
   if (c.minHp !== null) out.push(`ターンを終えたときの自分の体力が ${c.minHp} 以上（このターンに勝てば満たす）`);
   return out;
@@ -266,11 +283,21 @@ export function judgeTurn(start: GameState, actions: readonly Action[], p: Playe
   return result(false, false, null);
 }
 
+/** 手 st が、手の形 p と同じ種類の手か（first で、その種類の最初の手を探すのに使う） */
+function sameKind(p: Pattern, st: Step): boolean {
+  if (st.verb === null) return false;
+  return p.verb === "target" ? st.verb === "attack" || st.verb === "choose" : st.verb === p.verb;
+}
+
 function passes(conds: readonly Cond[], steps: readonly Step[], won: boolean, hp: number): boolean {
   return conds.some(
     (c) =>
       c.must.every((pt) => steps.some((st) => matches(pt, st))) &&
       !c.mustNot.some((pt) => steps.some((st) => matches(pt, st))) &&
+      c.first.every((pt) => {
+        const st = steps.find((x) => sameKind(pt, x));
+        return st !== undefined && matches(pt, st);
+      }) &&
       (!c.win || won) &&
       (c.minHp === null || won || hp >= c.minHp),
   );

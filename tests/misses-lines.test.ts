@@ -63,14 +63,13 @@ describe("アズヴォルト環境の問題集の手順の候補", () => {
     expect(rethinks).toBe(4);
   });
 
-  it("良い手は合格、AI の手は不合格", () => {
+  it("良い手は合格、AI の手は不合格（途中から考え直した並びも）", () => {
     for (const l of data.lines.values()) {
       const p = byId.get(l.id)!;
       for (const line of l.lines) {
         const r = judgeTurn(p.state, line.actions!, p.player, p.pass);
         expect(r.done, `${l.id} ${line.kind}`).toBe(true);
-        // 途中から考え直した良い手は、合格の要の手を引けなかったことがある（elf-assassin-g1567: 根差の刺客を引く読み）
-        if (line.rethink === null || line.kind === "ai") expect(r.passed, `${l.id} ${line.kind}`).toBe(line.kind === "good");
+        expect(r.passed, `${l.id} ${line.kind}`).toBe(line.kind === "good");
       }
     }
   });
