@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import "../src/record/pool";
 import { actingPlayer, applyAction, tryApplyAction, type Action, type GameState } from "../src/engine";
 import { loadMisses } from "../src/misses/azvaldtData";
-import { stepNotes } from "../src/misses/example";
+import { groupNote, stepGroups, stepNotes } from "../src/misses/example";
 import { judgeTurn } from "../src/misses/problems";
 import { stepText } from "../src/misses/stepText";
 
@@ -119,5 +119,33 @@ describe("一例の手（src/misses/example.ts）", () => {
     const notes = notesOf("elf-assassin-g1567", line.actions!, line.rethink);
     expect(line.rethink).toBe(1);
     expect(notes.map((n) => n.example)).toEqual([null, "rethink", "rethink", "rethink", "rethink", "rethink", null]);
+  });
+
+  it("選ぶ手・効果を選ぶ手は直前の手とまとめる", () => {
+    // 希望の光彩・リテュエルをプレイ → 1 番目の効果 → 海蝕の三叉槍をプレイ → 選ぶ → 海蝕の三叉槍の能力 → 選ぶ → 攻撃 → 攻撃 → ターン終了
+    const line = lineOf("bishop-gem-g1029", "ai");
+    const states = statesOf(problem("bishop-gem-g1029").state, line.actions!)!;
+    expect(stepGroups(states, line.actions!).map((g) => [g.start, g.end])).toEqual([
+      [0, 1],
+      [2, 3],
+      [4, 5],
+      [6, 6],
+      [7, 7],
+      [8, 8],
+    ]);
+  });
+
+  it("まとめた手の一例は、中の手のいちばん強い種類", () => {
+    const line = lineOf("bishop-miko-g1006", "ai");
+    const states = statesOf(problem("bishop-miko-g1006").state, line.actions!)!;
+    const notes = stepNotes(states, line.actions!, line.rethink);
+    const groups = stepGroups(states, line.actions!);
+    // 海蝕の三叉槍の能力（ランダムの後）と、考え直した選ぶ手（8 手目）
+    const g = groups.find((x) => x.start === 6)!;
+    expect(g.end).toBe(7);
+    expect(groupNote(notes, g).example).toBe("rethink");
+    // 刻みし約束をプレイ（1 番目の効果）: 効果を選んだ手でランダムな結果
+    const h = groups.find((x) => x.start === 4)!;
+    expect(groupNote(notes, h)).toMatchObject({ example: null, random: true });
   });
 });

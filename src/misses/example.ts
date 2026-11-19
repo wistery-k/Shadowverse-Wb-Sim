@@ -111,3 +111,34 @@ export function stepNotes(states: readonly GameState[], actions: readonly Action
   }
   return notes;
 }
+
+/** 手順の表示のまとまり（手の添字 start〜end。選ぶ手・効果を選ぶ手は、同じ席の直前の手とまとめる） */
+export interface StepGroup {
+  start: number;
+  end: number;
+}
+
+/**
+ * 選ぶ手（choose）と効果を選ぶ手（mode）を、それを求めた直前の手（プレイ・アクト・融合など）とまとめる
+ * （問題集の手順を「海蝕の三叉槍をプレイ（明越花・アラを選択）」の形で見せる。ユーザーの依頼 2026-11-19）。
+ * states[k] は actions[k] を打つ前の局面。直前の手と打つ席が違えば（相手の選択待ち）まとめない
+ */
+export function stepGroups(states: readonly GameState[], actions: readonly Action[]): StepGroup[] {
+  const groups: StepGroup[] = [];
+  for (const [k, a] of actions.entries()) {
+    const prev = groups[groups.length - 1];
+    const before = states[k];
+    const head = prev ? states[prev.start] : undefined;
+    if ((a.type === "choose" || a.type === "mode") && prev && before && head && actingPlayer(before) === actingPlayer(head)) prev.end = k;
+    else groups.push({ start: k, end: k });
+  }
+  return groups;
+}
+
+/** まとまりの注釈（一例の種類は、考え直した手・ランダムの後・引いたカードの順に強いもの。引いたカード・ランダムな結果は全部） */
+export function groupNote(notes: readonly StepNote[], g: StepGroup): StepNote {
+  const part = notes.slice(g.start, g.end + 1);
+  const kinds = part.map((n) => n.example);
+  const example: ExampleKind | null = kinds.includes("rethink") ? "rethink" : kinds.includes("random") ? "random" : kinds.includes("draw") ? "draw" : null;
+  return { example, drew: part.flatMap((n) => n.drew), random: part.some((n) => n.random) };
+}

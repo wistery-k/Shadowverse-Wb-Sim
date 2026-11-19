@@ -1313,6 +1313,13 @@ progress {
 .misses-info p {
   margin: 0;
 }
+.misses-info summary {
+  cursor: pointer;
+  font-size: 15px;
+}
+.misses-info[open] summary {
+  margin-bottom: 4px;
+}
 .misses-pass ul {
   margin: 2px 0;
   padding-left: 20px;
@@ -1326,12 +1333,6 @@ progress {
 }
 .misses-pass-ng {
   color: var(--div-lose);
-}
-.misses-full {
-  display: grid;
-  gap: 4px;
-  font-size: 12px;
-  padding: 8px;
 }
 /* 伏せた相手の手札（手札のカードと同じ大きさの裏面） */
 .hand .card-back.hand-back {
@@ -1413,19 +1414,7 @@ progress {
 .misses-view .example {
   color: var(--example);
 }
-.example-tag {
-  margin-left: 6px;
-  padding: 0 5px;
-  border: 1px solid var(--example);
-  border-radius: 999px;
-  color: var(--example);
-  font-size: 11px;
-  font-weight: normal;
-  white-space: nowrap;
-}
-.misses-legend .example-tag {
-  margin-left: 0;
-}
+
 
 /* ページの切り替え（スターター ↔ アズヴォルト環境） */
 .pool-link {
