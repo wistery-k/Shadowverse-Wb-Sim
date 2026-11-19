@@ -2045,7 +2045,8 @@ export function cmdFinish(a: Args): number {
     runs: chunkRows(dir),
     misses: chunkMisses(dir),
     pick: (job) => readPick(dir, job),
-    survey: (job) => surveyReport(plan, dir, job, false),
+    // 止まったときのまとめが作った行があれば使う（同じ調査の結果から作り直すと、行の at だけが違ってしまう）
+    survey: (job) => surveyReport(plan, dir, job, true),
   };
   const rows = queueRows(plan, dir, src, merged, targetLedger);
   const text = rowsText(rows);
@@ -2355,7 +2356,13 @@ export async function cmdIngest(a: Args): Promise<number> {
     const branch = nightBranch(name);
     // 取ってきたものは refs/night/<回の名前> に置く（作業のブランチには触らない）
     const tip = `refs/night/${name}`;
-    const f = spawnSync("git", ["fetch", "--quiet", remote, `+refs/heads/${branch}:${tip}`], { cwd: repo, encoding: "utf8" });
+    // --update-shallow: 浅いクローン（クラウド環境）どうしでも取れるように。git は断った ref があっても 0 で終わることがあるので、取れたかを確かめる
+    const f = spawnSync("git", ["fetch", "--quiet", "--update-shallow", remote, `+refs/heads/${branch}:${tip}`], { cwd: repo, encoding: "utf8" });
+    if (f.status === 0 && spawnSync("git", ["rev-parse", "--verify", "--quiet", `${tip}^{commit}`], { cwd: repo }).status !== 0) {
+      notes.push(`${branch}: 取ってきたはずのブランチがありません: ${(f.stderr || f.stdout).trim()}`);
+      ok = false;
+      continue;
+    }
     if (f.status !== 0) {
       notes.push(`${branch}: GitHub から取ってこられませんでした（ホストで docker/remote-control/night-push.sh を流したか）: ${(f.stderr || f.stdout).trim()}`);
       ok = false;
