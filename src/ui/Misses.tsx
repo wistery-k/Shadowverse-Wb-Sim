@@ -832,7 +832,7 @@ function RunEnd({
 }
 
 /** 二段目の勝ちの説明 */
-/** 両方の席のデッキと、盤面の局面の山札に残るカード（折りたたむ。相手の側は伏せ、押すと表にする。ユーザーの依頼 2026-11-19） */
+/** 両方の席のデッキと、盤面の局面の山札に残るカード（折りたたむ。ユーザーの依頼 2026-11-19） */
 function DeckPanel({
   state,
   p,
@@ -846,34 +846,16 @@ function DeckPanel({
   decks: readonly [MissDeck, MissDeck] | null;
   onCard: (cardId: string) => void;
 }) {
-  const [showOpp, setShowOpp] = useState(false);
-  const o = opponent(p);
-  const head = (q: PlayerIndex) => `${names[q]}（${state.first === q ? "先攻" : "後攻"}）${decks ? `: ${decks[q].name}` : ""}`;
   const column = (q: PlayerIndex) => {
     const deck = decks?.[q] ?? null;
     const rows = deckRows(state, q, deck);
     const added = rows.some((r) => r.total !== null && r.left > r.total);
     return (
       <section class="misses-deck" key={q}>
-        <div>
-          <strong>{head(q)}</strong>
-          {q === o && (
-            <button type="button" class="misses-deck-hide" onClick={() => setShowOpp(false)}>
-              伏せる
-            </button>
-          )}
-        </div>
-        <div class="muted">
-          山札の残り {state.players[q].deck.length} 枚{deck ? `（デッキ ${deck.cards.length} 枚）` : ""}
-        </div>
+        <strong>
+          {names[q]}（{state.first === q ? "先攻" : "後攻"}）{deck ? `: ${deck.name}` : ""}
+        </strong>
         <table class="misses-deck-table">
-          <thead>
-            <tr>
-              <th>コスト</th>
-              <th>カード</th>
-              <th class="num">{deck ? "残り / デッキ" : "残り"}</th>
-            </tr>
-          </thead>
           <tbody>
             {rows.map((r) => {
               const card = cardOf(r.cardId);
@@ -897,31 +879,10 @@ function DeckPanel({
     <details class="panel misses-decks">
       <summary>
         <strong>デッキと残りの山札</strong>
-        <span class="muted">
-          （{decks ? `${names[p]}: ${decks[p].name}。` : ""}押すと、盤面の局面の山札に残るカードを出します）
-        </span>
       </summary>
       <div class="misses-decks-grid">
         {column(p)}
-        {showOpp ? (
-          column(o)
-        ) : (
-          <section class="misses-deck">
-            <div>
-              <strong>{names[o]}（{state.first === o ? "先攻" : "後攻"}）</strong>
-            </div>
-            <div class="muted">相手のデッキと残りの山札は伏せています。</div>
-            <div>
-              <button type="button" onClick={() => setShowOpp(true)}>
-                相手のデッキを見る
-              </button>
-            </div>
-          </section>
-        )}
-      </div>
-      <div class="muted">
-        カードはコストの順で、山札の順番（引く順番）は出しません。{decks ? "デッキは、問を取った試合でその席が使ったプロのデッキです。" : ""}
-        カードを押すと詳細を出します。
+        {column(opponent(p))}
       </div>
     </details>
   );

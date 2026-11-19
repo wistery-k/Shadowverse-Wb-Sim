@@ -1436,22 +1436,11 @@ progress {
   display: grid;
   gap: 4px;
 }
-.misses-deck-hide {
-  margin-left: 6px;
-  font-size: 11px;
-}
 .misses-deck-table {
   border-collapse: collapse;
   width: 100%;
 }
-.misses-deck-table th {
-  font-weight: normal;
-  color: var(--muted);
-  text-align: left;
-  font-size: 11px;
-}
-.misses-deck-table td,
-.misses-deck-table th {
+.misses-deck-table td {
   padding: 1px 4px;
 }
 .misses-deck-table .num {
