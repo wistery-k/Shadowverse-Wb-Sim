@@ -31,6 +31,20 @@ function wasmSize(): number {
 export default defineConfig(({ command, isSsrBuild }) => ({
   // GitHub Pages はリポジトリ名のサブパスで配信される
   base: "/Shadowverse-Wb-Sim/",
+  // ページは 2 つ: スターター（index.html）と、アズヴォルト環境（azvaldt/index.html。/Shadowverse-Wb-Sim/azvaldt/）。
+  // スクリプトを束ねるビルド（scripts/vite-run.mjs の SSR）には入口を足さない
+  ...(command === "build" && !isSsrBuild
+    ? {
+        build: {
+          rollupOptions: {
+            input: {
+              main: fileURLToPath(new URL("./index.html", import.meta.url)),
+              azvaldt: fileURLToPath(new URL("./azvaldt/index.html", import.meta.url)),
+            },
+          },
+        },
+      }
+    : {}),
   // replayFiles: 開発サーバーだけで、リプレイ検索が読む手元の試合の記録を配る（vite build では働かない）。
   // devOnlyModules: vite build で、リプレイ検索と試合の記録の画面を何も表示しないものに置き換える（公開サイトに入れない）
   plugins: [preact(), replayFiles(), devOnlyModules()],
@@ -41,6 +55,8 @@ export default defineConfig(({ command, isSsrBuild }) => ({
     __SVWB_WASM_SIZE__: JSON.stringify(wasmSize()),
     // Node（テスト・スクリプト）で読み込むエンジンの WASM（src/engine/wasm.ts）。ブラウザ向けのビルドでは使わない（このマシンのパスを埋め込まない）
     __SVWB_WASM_PATH__: JSON.stringify(command === "build" && !isSsrBuild ? "" : fileURLToPath(new URL("./src/engine/svwb.wasm", import.meta.url))),
+    // Node で読み込む探索 AI の補正の置き場所（src/engine/nets/<名前>.bin。scripts/pack-nets.ts）。ブラウザ向けのビルドでは使わない
+    __SVWB_NETS_DIR__: JSON.stringify(command === "build" && !isSsrBuild ? "" : fileURLToPath(new URL("./src/engine/nets", import.meta.url))),
   },
   test: {
     include: ["tests/**/*.test.ts"],

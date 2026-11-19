@@ -8,8 +8,9 @@ data/raw/
 # Rust 版エンジンのビルド結果と、書き出したデータ（npm run rust-data で生成）
 rust/target/
 rust/engine/data/
-# エンジンと AI の WASM（npm run wasm で生成）
+# エンジンと AI の WASM と、ページが読み込む補正・見込み（npm run wasm で生成）
 src/engine/svwb.wasm
+src/engine/nets/
 # docker/remote-control の手元の設定（UID・GID など）
 docker/remote-control/.env
 # 試合の記録の検討の出力（npm run review。docs/match-record.md「検討」）

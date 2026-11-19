@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SVWB Simulator（アズヴォルト環境）</title>
+    <!-- アセットを使わないため favicon は空にする -->
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <!-- エンジン（WASM）を読み込むまでの表示。読み込んだら src/azvaldt/main.tsx が画面に置き換える -->
+    <div id="app"><p class="boot">エンジンを読み込んでいます…</p></div>
+    <script type="module" src="/src/azvaldt/main.tsx"></script>
+  </body>
+</html>

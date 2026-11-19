@@ -4,13 +4,17 @@ import { buildHumanRecord } from "../sim/humanRecord";
 import { compareMatch, OPPONENTS as COMPARE_OPPONENTS } from "../sim/humanCompare";
 import { DeckSelect, resolveDeck, type DeckChoice } from "./DeckSelect";
 import { Decks } from "./Decks";
+import { Footer } from "./Footer";
 import { Game } from "./Game";
 import { HumanCompare, loadHumanRecords, saveHumanRecords, type HumanMatchChoice } from "./HumanCompare";
 import { MatchRecord } from "./MatchRecord";
 import { isMissesHash, Misses } from "./Misses";
 import { ReplaySearch } from "./ReplaySearch";
 import { Sandbox, type SandboxIncoming } from "./Sandbox";
-import { Simulate } from "./Simulate";
+import { AGENTS } from "../ai/registry";
+import { DEFAULT_DECKS } from "../cards/defaultDecks";
+import { isPlayable } from "./Decks";
+import { Simulate, type DeckOption } from "./Simulate";
 import { loadDecks, saveDecks, type SavedDeck } from "./storage";
 
 /** 相手の強さ（キーは src/ai/registry.ts） */
@@ -19,6 +23,19 @@ const OPPONENTS: Record<string, string> = {
   greedy: "ふつう（貪欲法）",
   random: "よわい（ランダム）",
 };
+
+/** AI対戦（総当たり）で選べる AI（全部） */
+const SIM_AGENTS: Record<string, string> = Object.fromEntries(Object.entries(AGENTS).map(([key, { label }]) => [key, label]));
+/** AI対戦の最初の選択（デフォルトデッキ全部と貪欲法、1組 10 試合） */
+const SIM_DEFAULTS = { decks: DEFAULT_DECKS.map((d) => `default:${d.key}`), agents: ["greedy"], games: 10 };
+
+/** AI対戦で選べるデッキ（デフォルトデッキと、保存した完成済みのデッキ） */
+function simDecks(saved: readonly SavedDeck[]): DeckOption[] {
+  return [
+    ...DEFAULT_DECKS.map((d) => ({ key: `default:${d.key}`, cls: d.class, cards: d.cards, label: d.name })),
+    ...saved.filter(isPlayable).map((d) => ({ key: `saved:${d.id}`, cls: d.class, cards: d.cards, label: `${d.name}（保存）` })),
+  ];
+}
 
 const SETUP_KEY = "svwb-sim:setup:v1";
 interface Setup {
@@ -153,6 +170,9 @@ export function App() {
       <header>
         <h1>Shadowverse: Worlds Beyond Simulator</h1>
         <span class="muted">{MATCH_RECORD && tab === "record" ? "前期のローテーション（プロのデッキ）" : "スターター（ベーシック＋伝説の幕開け）"}</span>
+        <a class="pool-link" href={`${import.meta.env.BASE_URL}azvaldt/`}>
+          アズヴォルト環境のページへ
+        </a>
         {!game && (
           <nav class="tabs">
             {TABS.map(([key, label]) => (
@@ -167,7 +187,13 @@ export function App() {
       <main>
         {/* AI対戦とサンドボックスは、ほかのタブに移っても実行中の対戦・打ち比べと局面を残すため、隠すだけにする */}
         <div hidden={!!game || tab !== "sim"}>
-          <Simulate saved={saved} {...(SANDBOX ? { onSandbox: openSandbox } : {})} />
+          <Simulate
+            decks={simDecks(saved)}
+            agents={SIM_AGENTS}
+            defaults={SIM_DEFAULTS}
+            storageKey="svwb-sim:simulate-selection:v1"
+            {...(SANDBOX ? { onSandbox: openSandbox } : {})}
+          />
         </div>
         {SANDBOX && (
           <div hidden={!!game || tab !== "sandbox"}>
@@ -233,32 +259,7 @@ export function App() {
           </div>
         )}
       </main>
-      <footer>
-        非公式ファンプロジェクトです。Cygames 社および関連企業とは一切関係ありません。
-        ゲーム名・カード名・カードテキストの権利は各権利者に帰属します。
-        ゲームの実際の対戦の最中に、手を決める助けとして使うこと（ソフト打ち）は禁止です。
-        <BuildInfo />
-      </footer>
-    </div>
-  );
-}
-
-const REPO_URL = "https://github.com/wistery-k/Shadowverse-Wb-Sim";
-
-/** 最終更新日時とコミットハッシュ（ビルド時に埋め込んだ値） */
-function BuildInfo() {
-  if (!__BUILD_COMMIT__) return null;
-  const date = __BUILD_DATE__ ? new Date(__BUILD_DATE__) : null;
-  const dateText =
-    date && !Number.isNaN(date.getTime())
-      ? date.toLocaleString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
-      : "不明";
-  return (
-    <div class="build-info">
-      最終更新: {dateText} / コミット:{" "}
-      <a href={`${REPO_URL}/commit/${__BUILD_COMMIT__}`} target="_blank" rel="noreferrer">
-        {__BUILD_COMMIT__.slice(0, 7)}
-      </a>
+      <Footer />
     </div>
   );
 }

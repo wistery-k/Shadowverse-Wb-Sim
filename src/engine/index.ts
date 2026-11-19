@@ -23,3 +23,4 @@ export { parseStaticAbilities, enhanceCost } from "./keywords";
 export { abilitiesOf, cardTableVersion, crestOf, knownCards, registerPoolCards, staticInfoOf, staticOf } from "./registry";
 export { newBoardCard, newHandCard, leaderId, findBoard, findHand, handCost, evolveTurnReached, superEvolveTurnReached } from "./state";
 export { nextRandom, rngFrom, seedOf, shuffle, type Rng } from "./rng";
+export { currentNets, NETS_NAMES, selectNets, workerName, type NetsName } from "./wasm";

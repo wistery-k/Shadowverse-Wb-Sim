@@ -25,8 +25,7 @@ import {
   type GameState,
   type HandCard,
   type PlayerIndex,
-  type StaticKeyword,
-} from "../engine";
+  type StaticKeyword, workerName } from "../engine";
 import * as sb from "../sim/sandbox";
 import { AiThought, useThoughts } from "./AiThought";
 import { BranchCompare, useBranchRuns } from "./BranchCompare";
@@ -201,7 +200,7 @@ export function Sandbox({ saved, incoming }: Props) {
   // ---- AI に打たせる（思考は Web Worker） ----
 
   function askAi(state: GameState, legal: Action[]): Promise<Action> {
-    aiWorker.current ??= new Worker(new URL("../ai/worker.ts", import.meta.url), { type: "module" });
+    aiWorker.current ??= new Worker(new URL("../ai/worker.ts", import.meta.url), { type: "module", name: workerName() });
     const w = aiWorker.current;
     const id = Math.floor(Math.random() * 2 ** 30);
     return new Promise((resolve, reject) => {

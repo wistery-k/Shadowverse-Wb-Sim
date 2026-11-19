@@ -1,28 +1,46 @@
 // AI 同士の自動対戦（総当たり）と勝率の集計。複数の Web Worker で並列に実行する（試合を 1 つずつ配る。src/sim/pool.ts）。
 
+import { Fragment, type ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { AGENTS } from "../ai/registry";
-import { CLASS_NAMES } from "../cards";
+import { CLASS_NAMES, type ClassId } from "../cards";
 import type { GameState, PlayerIndex } from "../engine";
-import type { Deck } from "../cards/deck";
-import { DEFAULT_DECKS } from "../cards/defaultDecks";
+import { workerName } from "../engine";
 import { runPool } from "../sim/pool";
 import { planGames, summarize, type Entrant, type GameRecord, type GameSpec, type TournamentSummary } from "../sim/tournament";
 import type { WorkerRequest, WorkerResponse } from "../sim/worker";
-import { isPlayable } from "./Decks";
 import { Replay } from "./Replay";
-import type { SavedDeck } from "./storage";
 
-interface Props {
-  saved: readonly SavedDeck[];
-  /** リプレイの局面をサンドボックスで開く */
-  onSandbox?: (state: GameState, label: string) => void;
+/** 総当たりに出せるデッキ */
+export interface DeckOption {
+  key: string;
+  cls: ClassId;
+  cards: readonly string[];
+  label: string;
+  /** 一覧の小見出し（同じものを続けて並べる。無ければ見出しなし） */
+  group?: string;
 }
 
-interface DeckOption {
-  key: string;
-  deck: Deck;
+/** デッキをまとめて選ぶボタン */
+export interface DeckPreset {
   label: string;
+  keys: readonly string[];
+}
+
+interface Props {
+  /** 選べるデッキ */
+  decks: readonly DeckOption[];
+  /** 選べる AI（キーは src/ai/registry.ts、値は表示名） */
+  agents: Readonly<Record<string, string>>;
+  /** 保存した選択が無いときの選択と、1組あたりの試合数 */
+  defaults: { decks: readonly string[]; agents: readonly string[]; games: number };
+  /** デッキと AI の選択の保存先（localStorage のキー） */
+  storageKey: string;
+  /** デッキをまとめて選ぶボタン */
+  presets?: readonly DeckPreset[];
+  /** 見出しの下の説明 */
+  note?: ComponentChildren;
+  /** リプレイの局面をサンドボックスで開く */
+  onSandbox?: (state: GameState, label: string) => void;
 }
 
 interface Run {
@@ -41,49 +59,42 @@ function cellColor(rate: number): string {
 
 const pct = (n: number, d: number) => (d === 0 ? "-" : `${Math.round((n / d) * 100)}%`);
 
-/** デッキと AI のチェック状態の保存先（localStorage） */
-const SELECTION_KEY = "svwb-sim:simulate-selection:v1";
 interface Selection {
   decks: string[];
   agents: string[];
 }
-function loadSelection(): Selection {
-  const fallback: Selection = { decks: DEFAULT_DECKS.map((d) => `default:${d.key}`), agents: ["greedy"] };
+function loadSelection(key: string, fallback: Selection, agents: Readonly<Record<string, string>>): Selection {
   try {
-    const v: unknown = JSON.parse(localStorage.getItem(SELECTION_KEY) ?? "null");
+    const v: unknown = JSON.parse(localStorage.getItem(key) ?? "null");
     if (typeof v !== "object" || v === null) return fallback;
     const strings = (x: unknown): string[] | null =>
       Array.isArray(x) && x.every((k) => typeof k === "string") ? (x as string[]) : null;
-    const { decks, agents } = v as Record<string, unknown>;
+    const { decks, agents: saved } = v as Record<string, unknown>;
     return {
       decks: strings(decks) ?? fallback.decks,
-      agents: strings(agents)?.filter((k) => k in AGENTS) ?? fallback.agents,
+      agents: strings(saved)?.filter((k) => k in agents) ?? fallback.agents,
     };
   } catch {
     // 保存できない環境では既定値を使う
   }
   return fallback;
 }
-function saveSelection(selection: Selection): void {
+function saveSelection(key: string, selection: Selection): void {
   try {
-    localStorage.setItem(SELECTION_KEY, JSON.stringify(selection));
+    localStorage.setItem(key, JSON.stringify(selection));
   } catch {
     // 保存できなくても動作には影響しない
   }
 }
 
-export function Simulate({ saved, onSandbox }: Props) {
-  const options: DeckOption[] = [
-    ...DEFAULT_DECKS.map((d) => ({ key: `default:${d.key}`, deck: d, label: d.name })),
-    ...saved.filter(isPlayable).map((d) => ({ key: `saved:${d.id}`, deck: d, label: `${d.name}（保存）` })),
-  ];
+export function Simulate({ decks: options, agents: agentLabels, defaults, storageKey, presets, note, onSandbox }: Props) {
   // 保存済みの選択には、削除されたデッキの key が残っていることがあるので、今ある選択肢だけに絞る
-  const [initial] = useState(loadSelection);
+  const [initial] = useState(() => loadSelection(storageKey, { decks: [...defaults.decks], agents: [...defaults.agents] }, agentLabels));
   const [checkedDecks, setSelected] = useState<string[]>(initial.decks);
   const [agents, setAgents] = useState<string[]>(initial.agents);
   const selected = checkedDecks.filter((k) => options.some((o) => o.key === k));
-  useEffect(() => saveSelection({ decks: checkedDecks, agents }), [checkedDecks, agents]);
-  const [games, setGames] = useState(10);
+  useEffect(() => saveSelection(storageKey, { decks: checkedDecks, agents }), [checkedDecks, agents]);
+  const [games, setGames] = useState(defaults.games);
   const [mirror, setMirror] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
   const [replay, setReplay] = useState<GameRecord | null>(null);
@@ -104,8 +115,8 @@ export function Simulate({ saved, onSandbox }: Props) {
     const decks = options.filter((o) => selected.includes(o.key));
     const entrants: Entrant[] = decks.flatMap((o) =>
       agents.map((agent) => ({
-        name: agents.length > 1 ? `${o.label}（${AGENTS[agent]?.label ?? agent}）` : o.label,
-        deck: o.deck.cards,
+        name: agents.length > 1 ? `${o.label}（${agentLabels[agent] ?? agent}）` : o.label,
+        deck: o.cards,
         agent,
       })),
     );
@@ -118,7 +129,7 @@ export function Simulate({ saved, onSandbox }: Props) {
     setRun({ entrants, total: specs.length, records: [], startedAt, finishedAt: null });
 
     workers.current = runPool<GameSpec, WorkerResponse>({
-      create: () => new Worker(new URL("../sim/worker.ts", import.meta.url), { type: "module" }),
+      create: () => new Worker(new URL("../sim/worker.ts", import.meta.url), { type: "module", name: workerName() }),
       jobs: specs,
       request: (spec): WorkerRequest => ({ entrants, specs: [spec], record: true }),
       isDone: (msg) => msg.type === "done",
@@ -142,26 +153,46 @@ export function Simulate({ saved, onSandbox }: Props) {
     <div class="simulate">
       <section class="panel">
         <h2>AI 同士の総当たり</h2>
+        {note}
         <div class="sim-options">
           <fieldset>
             <legend>デッキ</legend>
-            {options.map((o) => (
-              <label key={o.key} class={`check class-${o.deck.class}`}>
-                <input
-                  type="checkbox"
-                  checked={selected.includes(o.key)}
-                  disabled={running}
-                  onChange={(e) =>
-                    setSelected(e.currentTarget.checked ? [...selected, o.key] : selected.filter((k) => k !== o.key))
-                  }
-                />
-                {o.label} <span class="muted">{CLASS_NAMES[o.deck.class]}</span>
-              </label>
-            ))}
+            {presets && presets.length > 0 && (
+              <div class="row-buttons sim-presets">
+                {presets.map((p) => (
+                  <button type="button" key={p.label} disabled={running} onClick={() => setSelected(options.filter((o) => p.keys.includes(o.key)).map((o) => o.key))}>
+                    {p.label}
+                  </button>
+                ))}
+                <button type="button" disabled={running} onClick={() => setSelected([])}>
+                  外す
+                </button>
+                <span class="muted">{selected.length} 個を選択</span>
+              </div>
+            )}
+            {/* デッキが多いとき（アズヴォルト環境のページの 84 個）は、開始のボタンが遠くならないよう枠の中で送る */}
+            <div class={options.length > 20 ? "sim-deck-list" : undefined}>
+              {options.map((o, i) => (
+                <Fragment key={o.key}>
+                  {o.group !== undefined && o.group !== options[i - 1]?.group && <div class="sim-group muted">{o.group}</div>}
+                  <label class={`check class-${o.cls}`}>
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(o.key)}
+                      disabled={running}
+                      onChange={(e) =>
+                        setSelected(e.currentTarget.checked ? [...selected, o.key] : selected.filter((k) => k !== o.key))
+                      }
+                    />
+                    {o.label} <span class="muted">{CLASS_NAMES[o.cls]}</span>
+                  </label>
+                </Fragment>
+              ))}
+            </div>
           </fieldset>
           <fieldset>
             <legend>AI</legend>
-            {Object.entries(AGENTS).map(([key, { label }]) => (
+            {Object.entries(agentLabels).map(([key, label]) => (
               <label key={key} class="check">
                 <input
                   type="checkbox"

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { AGENTS } from "../ai/registry";
 import { THINKING_AGENTS, type ScoreParts, type Thought, type ThoughtCandidate } from "../ai/think";
 import type { ThinkRequest, ThinkResponse } from "../ai/thinkWorker";
-import { actingPlayer, tryApplyAction, type Action, type GameState, type PlayerIndex } from "../engine";
+import { actingPlayer, tryApplyAction, type Action, type GameState, type PlayerIndex, workerName } from "../engine";
 import { describeAction } from "./describe";
 
 /** 1 回の考え */
@@ -33,7 +33,7 @@ export function useThoughts() {
   const start = (step: number, agent: string, variant: number, state: GameState, rng: number) => {
     terminate();
     setRuns((m) => new Map(m).set(step, { step, agent, variant, startedAt: Date.now(), finishedAt: null }));
-    const w = new Worker(new URL("../ai/thinkWorker.ts", import.meta.url), { type: "module" });
+    const w = new Worker(new URL("../ai/thinkWorker.ts", import.meta.url), { type: "module", name: workerName() });
     worker.current = w;
     w.onmessage = (e: MessageEvent<ThinkResponse>) => {
       const msg = e.data;

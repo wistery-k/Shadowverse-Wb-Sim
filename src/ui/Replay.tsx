@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { AGENTS } from "../ai/registry";
-import { cardOf, legalActions, opponent, type GameState, type PlayerIndex } from "../engine";
+import { cardOf, currentNets, legalActions, opponent, type GameState, type PlayerIndex } from "../engine";
 import { replayStates } from "../sim/replay";
 import { reproduceCommand } from "../sim/reproduce";
 import { seatDecks, type Entrant, type GameRecord } from "../sim/tournament";
@@ -349,7 +349,7 @@ const REPO_URL = "https://github.com/wistery-k/Shadowverse-Wb-Sim";
 function Reproduce({ record, entrants, names }: { record: GameRecord; entrants: readonly Entrant[]; names: [string, string] }) {
   const [copied, setCopied] = useState(false);
   const seats = record.aIsPlayer0 ? [entrants[record.a]!, entrants[record.b]!] : [entrants[record.b]!, entrants[record.a]!];
-  const command = [...(__BUILD_COMMIT__ ? [`git checkout ${__BUILD_COMMIT__}`] : []), reproduceCommand(record, entrants)].join("\n");
+  const command = [...(__BUILD_COMMIT__ ? [`git checkout ${__BUILD_COMMIT__}`] : []), reproduceCommand(record, entrants, currentNets())].join("\n");
   const copy = () => {
     void navigator.clipboard?.writeText(command).then(() => {
       setCopied(true);

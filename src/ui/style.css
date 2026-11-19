@@ -1347,3 +1347,22 @@ progress {
   border-color: var(--accent);
   color: #fff;
 }
+
+/* ページの切り替え（スターター ↔ アズヴォルト環境） */
+.pool-link {
+  font-size: 13px;
+}
+/* 総当たりのデッキの小見出し（大会）と、まとめて選ぶボタン */
+.sim-group {
+  margin-top: 6px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.sim-presets {
+  margin-bottom: 4px;
+}
+.sim-deck-list {
+  max-height: 26rem;
+  overflow-y: auto;
+  padding-right: 4px;
+}

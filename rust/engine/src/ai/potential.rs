@@ -13,6 +13,7 @@
 //! その前は relearn9 の data/models/relearn9/tpot.json、relearn8 の data/models/relearn8/upot.json、最初は data/models/potential-1/m1.json の重みを有効数字 7 桁にしたもの）。
 //! 評価関数（重み・data/value-net.json）を変えたら、見込みも学び直す（データの v・y はその評価の点数）。
 
+#[cfg(feature = "embedded-nets")]
 use super::aidata::ai_data;
 use super::beam_key::beam_features;
 use crate::data::{data, CardIdx, Pool, WARD};
@@ -210,17 +211,17 @@ impl PotentialEncoder {
 #[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RawPotentialNet {
-    kind: String,
-    version: u32,
-    vocab: Vec<String>,
-    zones: Vec<String>,
-    scalars: Vec<String>,
-    hidden: usize,
+    pub(crate) kind: String,
+    pub(crate) version: u32,
+    pub(crate) vocab: Vec<String>,
+    pub(crate) zones: Vec<String>,
+    pub(crate) scalars: Vec<String>,
+    pub(crate) hidden: usize,
     /// 入力ごとに hidden 個（入力の添字 × hidden + 隠れ層の添字）
-    w1: Vec<f64>,
-    b1: Vec<f64>,
-    w2: Vec<f64>,
-    b2: f64,
+    pub(crate) w1: Vec<f64>,
+    pub(crate) b1: Vec<f64>,
+    pub(crate) w2: Vec<f64>,
+    pub(crate) b2: f64,
 }
 
 /// 見込みのネットワーク（入力 → 隠れ層 1 つ（ReLU）→ 出力。出力はターン末の点数の単位）
@@ -301,13 +302,36 @@ impl PotentialNet {
     }
 }
 
-/// 既定の見込み（data/potential-net.json。探索 AI の既定 SearchOptions::default() が使う）
+/// 既定の見込み（default_potential_net。WASM では install_default_potential_net で入れる）
+static DEFAULT_NET: OnceLock<Arc<PotentialNet>> = OnceLock::new();
+
+/// 既定の見込み（data/potential-net.json。探索 AI の既定 SearchOptions::default() が使う）。
+/// WASM はページが読み込んだもの（スターターは同じファイル、アズヴォルト環境は R3。ai/netpack.rs）
+#[cfg(feature = "embedded-nets")]
 pub fn default_potential_net() -> Arc<PotentialNet> {
-    static NET: OnceLock<Arc<PotentialNet>> = OnceLock::new();
-    NET.get_or_init(|| {
-        Arc::new(
-            PotentialNet::new(ai_data().potential_net.clone()).expect("data/potential-net.json"),
-        )
-    })
-    .clone()
+    DEFAULT_NET
+        .get_or_init(|| {
+            Arc::new(
+                PotentialNet::new(ai_data().potential_net.clone())
+                    .expect("data/potential-net.json"),
+            )
+        })
+        .clone()
+}
+
+/// 既定の見込み（WASM。ページが読み込んで install_default_potential_net で入れたもの）
+#[cfg(not(feature = "embedded-nets"))]
+pub fn default_potential_net() -> Arc<PotentialNet> {
+    DEFAULT_NET
+        .get()
+        .expect("探索 AI の見込みを読み込んでいません（src/engine/wasm.ts が load_nets で入れる）")
+        .clone()
+}
+
+/// 既定の見込みを入れる（WASM で、ページの見込みを読み込んだとき）。既定の見込みを使う前に 1 回だけ
+pub fn install_default_potential_net(raw: RawPotentialNet) -> Result<(), String> {
+    let net = Arc::new(PotentialNet::new(raw)?);
+    DEFAULT_NET
+        .set(net)
+        .map_err(|_| "既定の見込みはもう決まっています".to_string())
 }
