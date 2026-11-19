@@ -199,7 +199,7 @@ profile --games 49
 | ファイル | 中身 |
 | --- | --- |
 | `plan.json`・`jobs.txt` | 計画（ジョブ・区切り・見込み・コミット）と、渡したジョブのファイルの写し |
-| `ticket.txt`・`src/` | `go` で始めた回の券と、券のコミットを出したソース（ここで svwb を組み立て、ここで回す。`node_modules` は `/workspace` のものを指す） |
+| `ticket.txt`・`src/` | `go` で始めた回の券と、券のコミットを出したソース（ここで svwb を組み立て、ここで回す。`node_modules` は依存が同じなら `/workspace` のものを指す） |
 | `session.json` | 今の `start`・`resume` の設定（止める時刻・スレッド数・マシン。止まるときにまとめる版で回した回は `wraps`） |
 | `night.log` | 進み具合（区切りごとに始め・済み・失敗。時刻は `--tz`） |
 | `status.json`・`worker.pid`・`STOP` | 本体の今の状態・pid・止める印 |
@@ -232,7 +232,8 @@ profile --games 49
    動いていれば「もう動いています」、全部済んでいれば「全部済んでいます」と言って終わる（2 回流しても困らない）
 5. ほかの回が動いていれば断る。昼（7 時〜18 時、券の時刻帯）なら 1 回聞く（端末が無ければ断る。`--yes` で聞かない）
 6. 新しい回なら、回のフォルダに `ticket.txt` を置き、券のコミットを `src/` に出す（git の一時の index で。`/workspace` の作業ツリー・index・今のブランチには触らない）。
-   `node_modules` は、`package-lock.json` が `/workspace` と同じなら `/workspace` のものを指し、違えば `src/` で `npm ci`
+   `node_modules` は、`package-lock.json` が `/workspace` と同じなら `/workspace` のものを指し、違えば `src/` で `npm ci`。
+   途中の回の `go` でも確かめ直す（止まっている間に `/workspace` の依存が変わっていたら、指すのをやめて `npm ci`）
 7. `src/` の `night-main.ts` の `start`（新しい回）か `resume`（途中の回）を流す。svwb は `src/` で組み立てる（ビルド結果の置き場は `/workspace/rust/target`。
    コンテナではボリューム）。台帳の行のコミットとブランチは券のもの（`SVWB_COMMIT`・`SVWB_BRANCH`）、台帳の行をコミットするのは `/workspace` の git（`plan.json` の `gitDir`）
 

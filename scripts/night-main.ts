@@ -38,6 +38,7 @@ import {
   createWriteStream,
   existsSync,
   fsyncSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -47,6 +48,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { availableParallelism, homedir, hostname, tmpdir } from "node:os";
@@ -2713,21 +2715,33 @@ function exportSource(repo: string, full: string, src: string): void {
   renameSync(tmp, src);
 }
 
-/** 回のソースの node_modules。依存（package-lock.json）が /workspace と同じなら /workspace のものを指し、違えば npm ci */
-function prepareNodeModules(repo: string, src: string): void {
-  const nm = join(src, "node_modules");
-  if (statSync(nm, { throwIfNoEntry: false }) !== undefined) return;
-  const lock = (d: string) => (existsSync(join(d, "package-lock.json")) ? readFileSync(join(d, "package-lock.json"), "utf8") : null);
-  if (lock(src) !== null && lock(src) === lock(repo) && existsSync(join(repo, "node_modules"))) {
-    symlinkSync(join(repo, "node_modules"), nm);
-    return;
-  }
+function npmCi(src: string): void {
   console.log("券のコミットの依存が /workspace と違うので、回のソースに npm ci する（数分）…");
   const r = spawnSync("npm", ["ci", "--no-audit", "--no-fund"], { cwd: src, stdio: ["ignore", "inherit", "inherit"] });
   if (r.status !== 0) {
-    rmSync(nm, { recursive: true, force: true });
+    rmSync(join(src, "node_modules"), { recursive: true, force: true });
     throw new Error("回のソースの npm ci が失敗しました");
   }
+}
+
+/**
+ * 回のソースの node_modules。依存（package-lock.json）が /workspace と同じなら /workspace のものを指し、違えば npm ci。
+ * go のたびに（続きの夜も）確かめる: 前の go で /workspace を指した後に /workspace の依存が変わっていたら、指すのをやめて npm ci
+ */
+export function prepareNodeModules(repo: string, src: string, ci: (src: string) => void = npmCi): void {
+  const nm = join(src, "node_modules");
+  const lock = (d: string) => (existsSync(join(d, "package-lock.json")) ? readFileSync(join(d, "package-lock.json"), "utf8") : null);
+  const same = lock(src) !== null && lock(src) === lock(repo) && existsSync(join(repo, "node_modules"));
+  const st = lstatSync(nm, { throwIfNoEntry: false });
+  if (st !== undefined) {
+    // npm ci で入れたもの、または今も依存が同じ /workspace を指しているもの
+    if (!st.isSymbolicLink() || same) return;
+    unlinkSync(nm);
+  } else if (same) {
+    symlinkSync(join(repo, "node_modules"), nm);
+    return;
+  }
+  ci(src);
 }
 
 async function askYes(question: string): Promise<boolean> {
@@ -2797,9 +2811,9 @@ export async function cmdGo(a: Args): Promise<number> {
     if (!existsSync(ticketFile)) writeFileSync(ticketFile, `${ticketText(t)}\n`);
     console.log(`券のコミット ${t.commit} を ${src} に出す…`);
     exportSource(repo, full, src);
-    prepareNodeModules(repo, src);
   }
   if (!existsSync(join(src, "scripts", "night-main.ts"))) throw new Error(`回のソースがありません: ${src}`);
+  prepareNodeModules(repo, src);
   const pass = (k: string): string[] => {
     const v = a.opts.get(k);
     return v === undefined ? [] : k === "--foreground" ? [k] : [k, resolve(v)];

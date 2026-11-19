@@ -1,7 +1,7 @@
 // 夜のキュー（scripts/night-main.ts・docs/night.md）。svwb の代わりに、台帳の行だけを書く偽物を回して、区切り・再開・止め方・まとめを確かめる
 
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, truncateSync, unlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, truncateSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +31,7 @@ import {
   parseUntil,
   portablePath,
   portableRow,
+  prepareNodeModules,
   readStatus,
   runWorker,
   shellLine,
@@ -1090,6 +1091,39 @@ describe("券", () => {
       writeFileSync(file, "profile --games 4\n");
       expect(ticketHere(file, { name: "n", until: "07:00" }, repo)).toEqual({ why: expect.stringContaining("コミットしていない変更") });
       expect(ticketHere(join(tmp, "outside.txt"), { name: "n", until: "07:00" }, repo)).toEqual({ why: expect.stringContaining("リポジトリの外") });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("回のソースの node_modules", () => {
+  it("依存が同じなら /workspace を指し、続きの go の前に /workspace の依存が変わっていたら指すのをやめて npm ci", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "night-nm-"));
+    try {
+      const repo = join(tmp, "workspace");
+      const src = join(tmp, "src");
+      mkdirSync(join(repo, "node_modules"), { recursive: true });
+      mkdirSync(src);
+      writeFileSync(join(repo, "package-lock.json"), "a\n");
+      writeFileSync(join(src, "package-lock.json"), "a\n");
+      const ci = vi.fn((s: string) => mkdirSync(join(s, "node_modules")));
+      const nm = join(src, "node_modules");
+      prepareNodeModules(repo, src, ci);
+      expect(lstatSync(nm).isSymbolicLink()).toBe(true);
+      prepareNodeModules(repo, src, ci);
+      expect(ci).not.toHaveBeenCalled();
+      // 回が止まっている間に /workspace の依存が変わった
+      writeFileSync(join(repo, "package-lock.json"), "b\n");
+      prepareNodeModules(repo, src, ci);
+      expect(ci).toHaveBeenCalledTimes(1);
+      expect(lstatSync(nm).isDirectory()).toBe(true);
+      expect(existsSync(join(repo, "node_modules"))).toBe(true);
+      // npm ci で入れたものは、そのまま使う
+      writeFileSync(join(repo, "package-lock.json"), "a\n");
+      prepareNodeModules(repo, src, ci);
+      expect(ci).toHaveBeenCalledTimes(1);
+      expect(lstatSync(nm).isDirectory()).toBe(true);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
