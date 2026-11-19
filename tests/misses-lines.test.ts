@@ -44,8 +44,9 @@ describe("アズヴォルト環境の問題集の手順の候補", () => {
     }
   });
 
-  it("考え直す前の手は、調査の読んだ並び（full）と同じ説明になる", () => {
+  it("AI が打つ前の手は、調査の読んだ並び（full）と同じ説明になる", () => {
     let rethinks = 0;
+    let continued = 0;
     for (const l of data.lines.values()) {
       const p = byId.get(l.id)!;
       for (const line of l.lines) {
@@ -54,15 +55,24 @@ describe("アズヴォルト環境の問題集の手順の候補", () => {
         const states = statesOf(p.state, actions)!;
         const texts = actions.slice(0, upto).map((a, k) => stepText(states[k]!, a, p.player)).filter((t) => t !== "ターン終了");
         if (line.full.length > 0) expect(texts, `${l.id} ${line.kind}`).toEqual(line.full.slice(0, texts.length));
-        if (line.rethink !== null) {
-          // 考え直すのは、読んだ並びの手（full[rethink]）が打てないときだけ
-          expect(texts.length, `${l.id} ${line.kind}`).toBe(line.rethink);
-          expect(line.full[line.rethink], `${l.id} ${line.kind}`).toBeDefined();
-          rethinks++;
+        if (line.rethink === null) {
+          // 読んだ並びを打ちきって、AI がすぐターンを終えた
+          expect(texts.length, `${l.id} ${line.kind}`).toBe(line.full.length);
+          continue;
+        }
+        expect(texts.length, `${l.id} ${line.kind}`).toBe(line.rethink);
+        // 読んだ並びの手（full[rethink]）が打てずに考え直したか、読んだ並びを打ちきった後に AI が続きを打った
+        if (line.rethink < line.full.length) rethinks++;
+        else {
+          expect(line.rethink, `${l.id} ${line.kind}`).toBe(line.full.length);
+          expect(actions[line.rethink]!.type, `${l.id} ${line.kind}`).not.toBe("endTurn");
+          continued++;
         }
       }
     }
     expect(rethinks).toBe(4);
+    // 読んだ並び（ビームの終局面まで）の後にも、AI が攻撃などを打つ並び（2026-11-19 のユーザーの指摘まで、ここでターン終了を足していた）
+    expect(continued).toBe(5);
   });
 
   it("良い手は合格、AI の手は不合格（途中から考え直した並びも）", () => {

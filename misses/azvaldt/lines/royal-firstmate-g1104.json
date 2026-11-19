@@ -77,13 +77,14 @@
         "波濤の副船長を超進化",
         "選ぶ: スケルトン"
       ],
-      "rethink": null,
+      "rethink": 5,
       "actions": [
         {"iid":72,"type":"play"},
         {"targets":[90],"type":"choose"},
         {"iid":83,"type":"play"},
         {"iid":72,"type":"superEvolve"},
         {"targets":[93],"type":"choose"},
+        {"type":"attack","attacker":72,"target":3},
         {"type":"endTurn"}
       ]
     }

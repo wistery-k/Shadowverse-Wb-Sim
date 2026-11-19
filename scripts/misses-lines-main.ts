@@ -13,12 +13,13 @@
 //
 // 打ち比べは打ち直さない。調査の行から取るのは:
 // - steps: AI がその候補を選んだときに、考え直すまで打つ手（調査が打った手。ドロー・ランダムの手の前まで）
-// - full: ビームが読んだターンの終わりまでの並びの説明（文字列だけ。AI から見た決定化の局面のもの）
+// - full: ビームが読んだ並び（ビームの終局面まで。ターンの終わりまでとは限らない）の説明（文字列だけ。AI から見た決定化の局面のもの）
 // - 勝ち負け: 一段目（候補ごとに m 回）と二段目（2 つの候補を confirm.n 回）
 // actions は、問の局面に steps を打ち、full の残りを打てる手と文字列で突き合わせて（src/misses/stepText.ts）手に戻したもの。
-// 最後に「ターン終了」を足す。突き合わせられない文字列が出たら（引いたカード・ランダムな結果が読みと違う）、そこから先は
-// 探索 AI（--dir のプールの補正。アズヴォルト環境は R3）に問の名前から作った乱数で考え直させてターンの終わりまで打ち、
-// 考え直した最初の手の番号を rethink に書く（調査の打ち比べも、steps の後は AI が考え直して打っている）。
+// その後は、探索 AI（--dir のプールの補正。アズヴォルト環境は R3）に問の名前から作った乱数でターンの終わりまで打たせる
+// （調査の打ち比べも、steps の後は AI が考え直して打っている）。突き合わせられない文字列が出たとき（引いたカード・ランダムな結果が
+// 読みと違う）と、読みを打ちきった後に AI がすぐにはターンを終えなかったとき（full はビームの終局面までで、攻撃などを読まずに
+// 終わることがある）は、AI が打った最初の手の番号を rethink に書く。読みを打ちきって AI がすぐターンを終えたら rethink は null。
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
@@ -78,11 +79,11 @@ export interface LineOut {
   steps: Action[];
   /** steps の説明（調査が書いたもの） */
   text: string[];
-  /** 調査で読んだターンの終わりまでの並びの説明（AI から見た決定化の局面のもの。途中で引くカードは予想） */
+  /** 調査で読んだ並び（ビームの終局面まで。ターンの終わりまでとは限らない）の説明（AI から見た決定化の局面のもの。途中で引くカードは予想） */
   full: string[];
-  /** 問の局面から打つターンの終わりまでの手（steps ＋ full の残りを手に戻したもの。最後はターン終了） */
+  /** 問の局面から打つターンの終わりまでの手（steps ＋ full の残りを手に戻したもの ＋ AI が打った続き。最後はターン終了） */
   actions: Action[];
-  /** full を手に戻しきれず、AI に考え直させた最初の手の番号（actions の添字。全部戻せたら null） */
+  /** AI が打った最初の手の番号（actions の添字）。full を手に戻しきれず考え直させたか、full を打ちきった後に AI がすぐにはターンを終えなかったとき。どちらでもなければ null */
   rethink: number | null;
   /** 一段目の勝ち（m 回のうち） */
   first: Tally;
@@ -277,27 +278,29 @@ export async function main(argv: string[]): Promise<number> {
           const m = matchTexts(s, rest, p);
           actions.push(...m.actions);
           s = m.end;
-          const end = m.actions.length === rest.length ? tryApplyAction(s, { type: "endTurn" }) : null;
-          if (end) {
-            actions.push({ type: "endTurn" });
-            s = end;
-          } else {
-            // 読んだ並びを打ちきれない: そこから先は AI に考え直させる
-            missed = rest[m.actions.length] ?? "";
-            rethink = actions.length;
-            const rng = rngFrom({ rng: seedOf([fnv(want.id), kind === "ai" ? 0 : 1]) });
-            const agent = agentOf(problem.agent);
-            for (let n = 0; !turnOver(s, p); n++) {
-              if (n >= 60) throw new Error(`${want.id}: ${label}を考え直すと、60 手打ってもターンが終わりません`);
-              const a = agent.chooseAction(s, legalActions(s), rng);
-              actions.push(a);
-              s = applyAction(s, a);
-            }
+          // 読んだ並びを打ちきったか（full はビームの終局面までの並びで、ターンの終わりまでとは限らない。
+          // 攻撃を読まずに終わることがある。2026-11-19 にユーザーの指摘で分かった）
+          const done = prefixOk && m.actions.length === rest.length;
+          if (!done) missed = prefixOk ? (rest[m.actions.length] ?? "") : (plan.full[plan.steps.length] ?? "");
+          // そこから先は、問の AI にターンの終わりまで打たせる（調査の打ち比べも、steps の後は AI が考え直して打つ）
+          const from = actions.length;
+          const rng = rngFrom({ rng: seedOf([fnv(want.id), kind === "ai" ? 0 : 1]) });
+          const agent = agentOf(problem.agent);
+          for (let n = 0; !turnOver(s, p); n++) {
+            if (n >= 60) throw new Error(`${want.id}: ${label}を AI に打たせると、60 手打ってもターンが終わりません`);
+            const a = agent.chooseAction(s, legalActions(s), rng);
+            actions.push(a);
+            s = applyAction(s, a);
           }
+          // 読みを打ちきって AI がすぐターンを終えたら、読みのとおり（考え直した手は無い）
+          const ended = actions.length === from + 1 && actions[from]!.type === "endTurn";
+          if (!done || !ended) rethink = from;
         }
         const w = row.w?.[k] ?? "";
         console.log(
-          `${want.id} ${kind}: steps ${plan.steps.length}、full ${plan.full.length} → 手 ${actions.length}${rethink === null ? "" : `（${rethink + 1} 手目から考え直した。読みの「${missed}」が打てない）`}`,
+          `${want.id} ${kind}: steps ${plan.steps.length}、full ${plan.full.length} → 手 ${actions.length}${
+            rethink === null ? "" : missed ? `（${rethink + 1} 手目から考え直した。読みの「${missed}」が打てない）` : `（読みの後、${rethink + 1} 手目から AI が続きを打った）`
+          }`,
         );
         return { kind, label, steps: plan.steps, text: plan.text, full: plan.full, actions, rethink, first: tally(w), second: tally(second) };
       };

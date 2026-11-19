@@ -69,13 +69,15 @@
         "災いの言霊・ジンジャーでアドアマネージャー・イニシアを攻撃",
         "ソニック・フォーをプレイ"
       ],
-      "rethink": null,
+      "rethink": 5,
       "actions": [
         {"iid":35,"type":"play"},
         {"iid":35,"type":"evolve"},
         {"iid":40,"type":"play"},
         {"attacker":35,"target":76,"type":"attack"},
         {"iid":104,"type":"play"},
+        {"type":"play","iid":6},
+        {"type":"play","iid":103},
         {"type":"endTurn"}
       ]
     }

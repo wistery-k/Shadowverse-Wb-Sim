@@ -953,7 +953,13 @@ function Candidates({
                       class={`${shown && cur >= g.start + 1 && cur <= g.end + 1 ? "current" : ""}${note?.example ? " example" : ""}`}
                       onClick={() => onPick(run.key, g.end + 1)}
                     >
-                      {rethinkStart && <div class="misses-rethink">ここから AI が考え直した手（読んだ並びの「{c.line.full[rethink] ?? "?"}」が問の局面では打てない）</div>}
+                      {rethinkStart && (
+                        <div class="misses-rethink">
+                          {rethink < c.line.full.length
+                            ? `ここから AI が考え直した手（読んだ並びの「${c.line.full[rethink]}」が問の局面では打てない）`
+                            : "ここから AI が打った続き（調査で読んだ並びはここまで）"}
+                        </div>
+                      )}
                       <span class="step-no">{i + 1}.</span> {c.labels[i]}
                       {note && <span class="muted">{noteText(note, c.states[g.end + 1])}</span>}
                     </li>
@@ -966,7 +972,7 @@ function Candidates({
       </div>
       {anyExample && (
         <div class="muted misses-legend">
-          <span class="example">色を変えた手</span>は一例です（引いたカードを使う手・ランダムな結果の後の手・AI が考え直した手。山札の順番や乱数が違えば変わります）
+          <span class="example">色を変えた手</span>は一例です（引いたカードを使う手・ランダムな結果の後の手・AI が考え直した手や続けた手。山札の順番や乱数が違えば変わります）
         </div>
       )}
     </div>

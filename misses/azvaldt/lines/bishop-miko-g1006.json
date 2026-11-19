@@ -80,7 +80,7 @@
         "堅固なる霧巻花の能力を使う",
         "窮鼠の斎女で災いの言霊・ジンジャーを攻撃"
       ],
-      "rethink": null,
+      "rethink": 6,
       "actions": [
         {"iid":72,"type":"play"},
         {"type":"play","iid":58},
@@ -88,6 +88,7 @@
         {"type":"superEvolve","iid":72},
         {"type":"act","iid":58},
         {"type":"attack","attacker":72,"target":36},
+        {"type":"attack","attacker":105,"target":"leader"},
         {"type":"endTurn"}
       ]
     }

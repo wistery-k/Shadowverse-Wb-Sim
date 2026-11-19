@@ -342,11 +342,11 @@ export interface MissLine {
   steps: Action[];
   /** steps の説明 */
   text: string[];
-  /** 調査で読んだ、ターンの終わりまでの並びの説明（AI から見た局面のもの。途中で引くカードは予想） */
+  /** 調査で読んだ並び（ビームの終局面まで。ターンの終わりまでとは限らない）の説明（AI から見た局面のもの。途中で引くカードは予想） */
   full: string[];
-  /** 問の局面から打つ、ターンの終わりまでの手（版 2 から。steps ＋ full を手に戻したもの。無ければ null） */
+  /** 問の局面から打つ、ターンの終わりまでの手（版 2 から。steps ＋ full を手に戻したもの ＋ AI が打った続き。無ければ null） */
   actions: Action[] | null;
-  /** full を手に戻しきれず、AI に考え直させた最初の手の番号（actions の添字。全部戻せたら null） */
+  /** AI が打った最初の手の番号（actions の添字）。full を手に戻しきれず考え直させたか、full を打ちきった後に AI がすぐにはターンを終えなかったとき。どちらでもなければ null */
   rethink: number | null;
   /** 調査の一段目（候補ごとに m 回）・二段目（2 つの候補を n 回）の勝ち（版 2 から。無ければ null） */
   first: MissTally | null;
