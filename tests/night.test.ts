@@ -833,6 +833,27 @@ describe("区切って回す（偽物の svwb で）", () => {
     expect(said()).not.toContain("まとめ: まだ");
   });
 
+  it("前の版（止まるときにまとめない版）で回した回は、status も wrap --pending も拾わない。名前を渡した wrap ならまとめる", async () => {
+    expect(await start("--foreground")).toBe(0);
+    // 前の版の回: session.json に wraps が無く、status にまとめの結果も無い。ブランチも無い
+    const session = JSON.parse(readFileSync(join(dir(), "session.json"), "utf8")) as Record<string, unknown>;
+    delete session.wraps;
+    writeFileSync(join(dir(), "session.json"), JSON.stringify(session));
+    writeFileSync(join(dir(), "status.json"), JSON.stringify({ ...readStatus(dir()), outbox: undefined, branch: undefined }));
+    gitT(pcGit, "update-ref", "-d", "refs/heads/night/n1");
+    rmSync(join(tmp, "outbox"), { recursive: true, force: true });
+    const said = () => vi.mocked(console.log).mock.calls.map((c) => String(c[0])).join("\n");
+    expect(await main(["status", "n1", "--root", root])).toBe(0);
+    expect(said()).not.toContain("まとめ: まだ");
+    vi.mocked(console.log).mockClear();
+    expect(await main(["wrap", "--pending", "--root", root])).toBe(0);
+    expect(said()).toBe("まとめが済んでいない回はありません");
+    expect(existsSync(join(tmp, "outbox", "n1"))).toBe(false);
+    expect(spawnSync("git", ["rev-parse", "--verify", "--quiet", "night/n1"], { cwd: pcGit }).status).not.toBe(0);
+    expect(await main(["wrap", "n1", "--root", root])).toBe(0);
+    expect(gitT(pcGit, "log", "-1", "--format=%s", "night/n1")).toMatch(/^台帳: 夜のキュー n1 の結果（3 行、/);
+  });
+
   it("出口の一覧にあっても、その回の data/…/<回の名前>/・logs/<回の名前>/ の外には置かない", async () => {
     expect(outboxPathAllowed("n2", "logs/n2/night.log")).toBe(true);
     expect(outboxPathAllowed("n2", "data/kifu/n2/a.jsonl.gz")).toBe(true);

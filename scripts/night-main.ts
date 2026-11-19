@@ -786,6 +786,8 @@ export interface Session {
   tz: string;
   threads: number;
   machine: string;
+  /** 止まるときに自分でまとめる版（2026-11-19 から）で start・resume した回の印。まとめが済んでいない回を拾う（needsWrap）のは、これがある回だけ */
+  wraps?: 1;
 }
 
 /** 区切りが済んだ印 */
@@ -1204,9 +1206,11 @@ export function statusText(dir: string, o: { final?: boolean } = {}): string {
   return `${head.join("\n")}\n\n${markdownTable(["#", "ジョブ", "台帳の名前", "区切り", "試合", "かかった時間", "結果（A の勝率・正解率・局面・ファイル）", "メモ"], tableRows)}`;
 }
 
-/** 止まったときのまとめが済んでいない回か（worker がいない・済んだ区切りがある・status にまとめの結果が無い）。
- * 電源が切れた回と、まとめている途中で落ちた回。朝の night-push.sh が wrap --pending でまとめる */
+/** 止まったときのまとめが済んでいない回か（止まるときにまとめる版で回した・worker がいない・済んだ区切りがある・status にまとめの結果が無い）。
+ * 電源が切れた回と、まとめている途中で落ちた回。朝の night-push.sh が wrap --pending でまとめる。
+ * 前の版で回した回（session.json に wraps が無い）は拾わない（手で wrap <名前> を流したときだけまとめる） */
 export function needsWrap(dir: string): boolean {
+  if (!existsSync(join(dir, "session.json")) || readSession(dir).wraps !== 1) return false;
   const st = readStatus(dir);
   return st !== null && (st.outbox === undefined || st.branch === undefined) && markers(dir).size > 0 && workerPid(dir) === null;
 }
@@ -1578,7 +1582,7 @@ function sessionOf(a: Args, machine: string): Session {
   const now = Date.now();
   const threadsText = a.opts.get("--threads");
   const threads = threadsText === undefined ? (SPEEDS[machine] && machine !== thisMachine() ? (SPEEDS[machine]?.threads ?? 1) : availableParallelism()) : intOf(threadsText, "--threads", 1);
-  return { started: now, until: parseUntil(a.opts.get("--until") ?? "07:00", now, tz), tz, threads, machine };
+  return { started: now, until: parseUntil(a.opts.get("--until") ?? "07:00", now, tz), tz, threads, machine, wraps: 1 };
 }
 
 function activeRuns(root: string): string[] {

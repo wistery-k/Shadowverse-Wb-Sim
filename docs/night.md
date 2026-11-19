@@ -185,7 +185,7 @@ profile --games 49
 | ファイル | 中身 |
 | --- | --- |
 | `plan.json`・`jobs.txt` | 計画（ジョブ・区切り・見込み・コミット）と、渡したジョブのファイルの写し |
-| `session.json` | 今の `start`・`resume` の設定（止める時刻・スレッド数・マシン） |
+| `session.json` | 今の `start`・`resume` の設定（止める時刻・スレッド数・マシン。止まるときにまとめる版で回した回は `wraps`） |
 | `night.log` | 進み具合（区切りごとに始め・済み・失敗。時刻は `--tz`） |
 | `status.json`・`worker.pid`・`STOP` | 本体の今の状態・pid・止める印 |
 | `ledger.jsonl` | 区切りごとの台帳の行（svwb が `SVWB_LEDGER` に書く） |
@@ -206,6 +206,8 @@ profile --games 49
 worker は止まるとき（全部済んだ・止める時刻・失敗・`stop`・`stop --now`）に、次の 2 つをしてから終わる（`scripts/night-main.ts` の `wrapUp`）。
 どちらかが失敗しても、もう一方はする。結果は `night.log` と `status` に出る。
 電源が切れた回と、まとめている途中で落ちた回は、`status` に「まとめ: まだ」と出て、朝の `night-push.sh` が push の前にまとめる（`wrap --pending`。手でなら `wrap <名前>`）。
+拾うのは、この版（2026-11-19 から）で `start`・`resume` した回だけ（`session.json` の `wraps`）。前の版で回した回は、名前を渡した `wrap <名前>` のときだけまとめる
+（`~/svwb-data/night/` に残っている前の回を、朝に全部まとめ直して上げないように）。
 
 1. **台帳の行のコミット**: ジョブごとに 1 行にまとめた行（`finish` と同じ作り方。同じ関数 `queueRows`）を、ブランチ `night/<回の名前>` の
    `docs/ledger.jsonl` の末尾に足してコミットする。ブランチが無ければ回のコミットから作り、あれば先に積む。git の低い層のコマンドで
