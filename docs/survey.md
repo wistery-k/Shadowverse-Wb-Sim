@@ -101,6 +101,7 @@ AI は上位 4 つを読み直すとき、引き直しを 3 通り読んで見�
 npm run svwb -- survey run --out 結果.jsonl --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8] [--decks <デッキ>,…|@<デッキの組>] [--opts '<設定>']
 npm run svwb -- survey report 結果.jsonl… [--label 名前] [--no-ledger] [--top 20] [--states <フォルダ>]
 npm run svwb -- survey recheck 結果.jsonl… --out 打ち直し.jsonl [--m 32] [--peek 1] [--batch 16]
+npm run svwb -- survey turns 結果.jsonl… --pos <試合>:<手の番号> [--stage 2] [--out 回ごと.jsonl] [--cards <カード名>,…]
 ```
 
 | 引数 | 既定 | 意味 |
@@ -120,6 +121,10 @@ npm run svwb -- survey recheck 結果.jsonl… --out 打ち直し.jsonl [--m 32]
 | `report --states <フォルダ>` | なし | 問題集に足す候補の局面を `g<試合>-i<手>.json`（状態の JSON）で書く。`npm run misses -- add --state` に渡せる |
 | `recheck --m` | 32 | 二段目に回した局面ごとに、AI の選んだ候補と替える候補を打ち直す回数（2026-11-12 に足した確かめ。下の「本番の結果」） |
 | `recheck --peek` | 1 | 1 なら相手の手札を実際のまま（山札の中身と順番、乱数の状態は作り直す）、0 なら今までどおり引き直す。打ち比べの得が、引き直した世界だけのものでないかを見る |
+| `turns --pos <試合>:<手の番号>` | （要る） | 打ち直す局面（結果の行の `g` と `i`）。下の「回ごとのターンの手順」 |
+| `turns --stage` | 2 | 2 なら二段目（AI の選んだ候補と替える候補を `confirm.n` 回ずつ）、1 なら一段目（全部の候補を `m` 回ずつ） |
+| `turns --out` | なし | 回ごとの行（JSON Lines。`plan` 候補の添字・`ai` AI の選んだ候補か・`r` 回・`result` 勝ち負け・`stored` 結果の行の勝ち負け・`turn` 始めのターンに打った手・`text` その説明） |
+| `turns --cards` | なし | 並べたカードを、このターンにプレイした回としなかった回の勝率も出す |
 | `recheck --batch` | 16 | まとめて打って書く局面の数。出力に既にある局面は飛ばす（同じ引数で再開できる）。台帳には書かない |
 
 - `run` は出力に既にある試合を飛ばす（同じ引数で再開できる）。試合の行の無い局面の行（途中で止めたもの）は、再開のときに消す

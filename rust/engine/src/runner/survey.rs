@@ -1992,8 +1992,11 @@ fn turn_steps(turn: &[(Action, String)], cards: bool) -> Vec<String> {
     out
 }
 
+/// 打ち比べの 1 回: 始めのターンに打った手と説明、勝ち負けの 1 文字
+type TurnRun<'a> = (&'a [(Action, String)], char);
+
 /// 手順の表（同じ手順の回をまとめ、多い順）
-fn line_table(runs: &[(&[(Action, String)], char)], cards: bool) {
+fn line_table(runs: &[TurnRun], cards: bool) {
     let mut by: BTreeMap<String, (usize, f64, usize)> = BTreeMap::new();
     for (turn, c) in runs {
         let text = turn_steps(turn, cards).join(" → ");
@@ -2208,7 +2211,7 @@ fn turns(argv: &[String]) -> Result<(), String> {
         tasks.len(),
         t0.elapsed().as_secs_f64()
     );
-    let runs_of = |k: usize| -> Vec<(&[(Action, String)], char)> {
+    let runs_of = |k: usize| -> Vec<TurnRun> {
         tasks
             .iter()
             .zip(&res)
@@ -2257,7 +2260,7 @@ fn turns(argv: &[String]) -> Result<(), String> {
         println!();
         println!("| 候補 | 条件 | 回数 | 勝ち | 勝率 |");
         println!("| --- | --- | ---: | ---: | ---: |");
-        let mut groups: Vec<(String, Vec<(&[(Action, String)], char)>)> = (0..cands.len())
+        let mut groups: Vec<(String, Vec<TurnRun>)> = (0..cands.len())
             .map(|k| (format!("{}（{}）", cands[k], role(k)), runs_of(k)))
             .collect();
         groups.push(("全部".into(), (0..cands.len()).flat_map(runs_of).collect()));

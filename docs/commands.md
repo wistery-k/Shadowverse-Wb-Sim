@@ -401,6 +401,7 @@ npm run svwb -- deep-gap report gap.jsonl… [--rollouts roll.jsonl,…] [--top 
 npm run svwb -- survey run --out 結果.jsonl --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8] [--decks <デッキ>,…|@<デッキの組>]
 npm run svwb -- survey report 結果.jsonl… [--label 名前] [--no-ledger] [--top 20] [--states <フォルダ>]
 npm run svwb -- survey recheck 結果.jsonl… --out 打ち直し.jsonl [--m 32] [--peek 1] [--batch 16]   # run は棋譜も書く（--kifu k.jsonl | --no-kifu）
+npm run svwb -- survey turns 結果.jsonl… --pos <試合>:<手の番号> [--stage 2] [--out 回ごと.jsonl] [--cards <カード名>,…]   # 1 局面の打ち比べを同じ乱数で打ち直し、回ごとのターン全体の手順を数える
 npm run svwb -- review run --record <記録.json> --points <局面.jsonl> --out <結果.jsonl> [--m 32] [--confirm 96] [--flag 10] [--opts '<JSON>'] [--all 0|1] [--seat 0|1] [--batch 4]
 npm run svwb -- review zero --out <結果.jsonl> --games a-b --decks <デッキ>,…|@<デッキの組> [--rate 0.3] [--m 32] [--confirm 96] [--flag 10] [--opts '<JSON>'] [--batch 2]   # 棋譜も書く
 npm run svwb -- review report <結果.jsonl> [--out <報告.md>]
