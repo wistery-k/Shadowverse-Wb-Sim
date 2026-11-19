@@ -27,6 +27,8 @@
   --mull-drawn: #2f6fdb;
   /* エクストラPP（明るい橙） */
   --expp: #ff8c1a;
+  /* 問題集の手順の「一例」の手（引いたカード・ランダムな結果に頼る手） */
+  --example: #a3478f;
   /* 勝率表の発散配色（青 = 勝ち越し、赤 = 負け越し、灰 = 五分） */
   --div-win: #2a78d6;
   --div-lose: #e34948;
@@ -44,6 +46,7 @@
     --div-win: #3987e5;
     --div-lose: #e66767;
     --div-mid: #383835;
+    --example: #e08fd0;
   }
 }
 body {
@@ -1342,10 +1345,86 @@ progress {
 .misses-table td:nth-child(6) {
   white-space: nowrap;
 }
-.misses-view .controls .replay-buttons button.active {
+.misses-view .controls .replay-buttons button.active,
+.misses-line-head button.active {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
+}
+/* 盤面の下の手順の候補 */
+.misses-lines {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  font-size: 13px;
+}
+.misses-lines-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 8px;
+}
+.misses-line {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px;
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+.misses-line.shown {
+  border-color: var(--accent);
+}
+.misses-line-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+}
+.misses-line-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.misses-line-steps li {
+  padding: 1px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.misses-line-steps li:hover {
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+}
+.misses-line-steps li.current {
+  font-weight: bold;
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+}
+.misses-line-steps .step-no {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.misses-rethink {
+  margin: 2px 0;
+  padding-top: 2px;
+  border-top: 1px dashed var(--example);
+  color: var(--example);
+  font-size: 11px;
+  font-weight: normal;
+}
+/* 一例の手（色を変えて札を添える） */
+.misses-view .example {
+  color: var(--example);
+}
+.example-tag {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--example);
+  border-radius: 999px;
+  color: var(--example);
+  font-size: 11px;
+  font-weight: normal;
+  white-space: nowrap;
+}
+.misses-legend .example-tag {
+  margin-left: 0;
 }
 
 /* ページの切り替え（スターター ↔ アズヴォルト環境） */

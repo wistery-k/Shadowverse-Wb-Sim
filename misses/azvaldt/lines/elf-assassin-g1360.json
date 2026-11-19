@@ -1,0 +1,87 @@
+{
+  "v": 2,
+  "id": "elf-assassin-g1360",
+  "source": "logs/night-20261117-0328/survey-2.jsonl.gz の試合 1360 の 57 手目",
+  "lines": [
+    {
+      "kind": "ai",
+      "label": "問を作ったときの AI の手",
+      "first": {"wins":1,"games":32},
+      "second": {"wins":2,"games":96},
+      "steps": [
+        {"iid":77,"type":"play"},
+        {"iid":77,"type":"superEvolve"},
+        {"attacker":77,"target":83,"type":"attack"},
+        {"iid":95,"type":"play"}
+      ],
+      "text": [
+        "氷界の鹿王をプレイ",
+        "氷界の鹿王を超進化",
+        "氷界の鹿王で没入の実験体を攻撃",
+        "森の神秘をプレイ"
+      ],
+      "full": [
+        "氷界の鹿王をプレイ",
+        "氷界の鹿王を超進化",
+        "氷界の鹿王で没入の実験体を攻撃",
+        "森の神秘をプレイ"
+      ],
+      "rethink": null,
+      "actions": [
+        {"iid":77,"type":"play"},
+        {"iid":77,"type":"superEvolve"},
+        {"attacker":77,"target":83,"type":"attack"},
+        {"iid":95,"type":"play"},
+        {"type":"endTurn"}
+      ]
+    },
+    {
+      "kind": "good",
+      "label": "打ち比べで良い手",
+      "first": {"wins":9,"games":32},
+      "second": {"wins":20,"games":96},
+      "steps": [
+        {"iid":61,"type":"play"},
+        {"iid":95,"type":"play"},
+        {"iid":57,"type":"play"},
+        {"attacker":57,"target":"leader","type":"attack"},
+        {"iid":59,"type":"play"},
+        {"attacker":59,"target":"leader","type":"attack"},
+        {"iid":61,"type":"superEvolve"},
+        {"attacker":61,"target":18,"type":"attack"}
+      ],
+      "text": [
+        "根差の刺客をプレイ",
+        "フェアリーをプレイ",
+        "緑風のレイピア使いをプレイ",
+        "緑風のレイピア使いでリーダーを攻撃",
+        "緑風のレイピア使いをプレイ",
+        "緑風のレイピア使いでリーダーを攻撃",
+        "根差の刺客を超進化",
+        "根差の刺客でマナリアスクリプター・ティコを攻撃"
+      ],
+      "full": [
+        "根差の刺客をプレイ",
+        "フェアリーをプレイ",
+        "緑風のレイピア使いをプレイ",
+        "緑風のレイピア使いでリーダーを攻撃",
+        "緑風のレイピア使いをプレイ",
+        "緑風のレイピア使いでリーダーを攻撃",
+        "根差の刺客を超進化",
+        "根差の刺客でマナリアスクリプター・ティコを攻撃"
+      ],
+      "rethink": null,
+      "actions": [
+        {"iid":61,"type":"play"},
+        {"iid":95,"type":"play"},
+        {"iid":57,"type":"play"},
+        {"attacker":57,"target":"leader","type":"attack"},
+        {"iid":59,"type":"play"},
+        {"attacker":59,"target":"leader","type":"attack"},
+        {"iid":61,"type":"superEvolve"},
+        {"attacker":61,"target":18,"type":"attack"},
+        {"type":"endTurn"}
+      ]
+    }
+  ]
+}

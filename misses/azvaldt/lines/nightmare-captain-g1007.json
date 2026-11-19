@@ -1,0 +1,55 @@
+{
+  "v": 2,
+  "id": "nightmare-captain-g1007",
+  "source": "logs/night-20261117-0328/survey-2.jsonl.gz の試合 1007 の 22 手目",
+  "lines": [
+    {
+      "kind": "ai",
+      "label": "問を作ったときの AI の手",
+      "first": {"wins":5,"games":32},
+      "second": {"wins":8,"games":96},
+      "steps": [
+        {"iid":83,"type":"play"},
+        {"iid":67,"type":"play"}
+      ],
+      "text": [
+        "バットをプレイ",
+        "夜の唱のライブをプレイ"
+      ],
+      "full": [
+        "バットをプレイ",
+        "夜の唱のライブをプレイ"
+      ],
+      "rethink": null,
+      "actions": [
+        {"iid":83,"type":"play"},
+        {"iid":67,"type":"play"},
+        {"type":"endTurn"}
+      ]
+    },
+    {
+      "kind": "good",
+      "label": "打ち比べで良い手",
+      "first": {"wins":10,"games":32},
+      "second": {"wins":40,"games":96},
+      "steps": [
+        {"iid":59,"type":"play"},
+        {"iid":51,"type":"play"}
+      ],
+      "text": [
+        "強襲の特攻隊長をプレイ",
+        "残虐の炸裂をプレイ"
+      ],
+      "full": [
+        "強襲の特攻隊長をプレイ",
+        "残虐の炸裂をプレイ"
+      ],
+      "rethink": null,
+      "actions": [
+        {"iid":59,"type":"play"},
+        {"iid":51,"type":"play"},
+        {"type":"endTurn"}
+      ]
+    }
+  ]
+}

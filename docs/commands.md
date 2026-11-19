@@ -38,7 +38,7 @@
 | `npm run meta` | 環境（デッキと使用率）のアジャスト合戦を 1 回りずつ回す（下） | `rust/engine/src/runner/meta.rs` |
 | `npm run yardstick` | 固定した相手との勝率（強さの物差し。下） | `rust/engine/src/runner/yardstick.rs` |
 | `npm run misses` | 見落とし問題集: 人間が見つけた AI のミスの局面を何度も解かせて正解率を出す・問を足す（下） | `rust/engine/src/runner/misses.rs` |
-| `npm run misses-lines` | 見落とし問題集の問に、打ち比べ調査で比べた並びを書き添える（下の「misses」） | `scripts/misses-lines.ts` |
+| `npm run misses-lines` | 見落とし問題集の問に、打ち比べ調査で比べた並び（ターンの終わりまでの手順の候補）を書き添える（下の「misses」） | `scripts/misses-lines-main.ts` |
 | `npm run profile` | デッキごとの 1 試合の時間と、思考の処理ごとの時間の内訳（下） | `scripts/profile.mjs`・`rust/engine/src/runner/profile.rs` |
 | `npm run svwb` | Rust 版の CLI（下） | `rust/engine/src/main.rs` |
 | `npm run td` | TD 学習のモデルの作成・学習・分析（下） | `scripts/td-main.ts` |
@@ -292,11 +292,14 @@ npm run misses -- duel <問> [--line '<名前>=<手の JSON の配列>']… [--m
 局面はシミュレータの中の試合からだけ取る。問はブラウザの「問題集」タブでも見られる（公開サイトにも出す。見られるのはリポジトリの問だけ）。問の形・合格の条件の書き方・ミスを指摘されたときの手順・問題集のページは [misses.md](misses.md)。
 
 ```sh
-npm run misses-lines -- <調査の出力.jsonl(.gz)>… [--force]
+npm run misses-lines -- <調査の出力.jsonl(.gz)>… [--dir misses/azvaldt] [--force] [--check]
 ```
 
-打ち比べ調査から足した問に、調査で比べた 2 つの並び（AI の選んだ候補と二段目の候補）を `misses/lines/<問>.json` に書き添える（問題集のページが盤面で進めて見せる）。
-問の `origin`（`"from":"state"`、`"file":"g<試合>-i<手>.json"`）と同じ試合・手の行を探し、局面が問と同じかを確かめる。既にあるファイルは書き直さない（`--force` で書き直す）
+打ち比べ調査から足した問に、調査で比べた 2 つの並び（AI の選んだ候補と二段目の候補）を `<問のフォルダ>/lines/<問>.json` に書き添える（問題集のページが盤面の下に手順の候補として並べる）。
+問の `origin`（`"from":"state"`、`"file":"g<試合>-i<手>.json"`）と同じ試合・手の行を探し、局面が問と同じかを確かめる。既にあるファイルは書き直さない（`--force` で書き直す）。
+`--dir` は問のフォルダ（既定 `misses`。`misses/azvaldt` なら前期のローテーションのカードと補正 R3）。調査の読んだ並びを問の局面で打てる手に戻し、
+戻せなければそこから先を問の AI に考え直させて、ターンの終わりまでの手（`actions`）を書く（[misses.md](misses.md)「調査の並び・手順の候補」）。
+`--check` は書かずに、並びごとにどこまで戻せたかだけ出す。打ち比べは打ち直さない（Vite でビルドしてから動くので、WASM を作り直す）
 
 ## ledger
 

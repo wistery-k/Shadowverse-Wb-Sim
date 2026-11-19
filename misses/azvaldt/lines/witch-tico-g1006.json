@@ -1,0 +1,89 @@
+{
+  "v": 2,
+  "id": "witch-tico-g1006",
+  "source": "logs/night-20261117-0328/survey-2.jsonl.gz の試合 1006 の 120 手目",
+  "lines": [
+    {
+      "kind": "ai",
+      "label": "問を作ったときの AI の手",
+      "first": {"wins":16,"games":32},
+      "second": {"wins":52,"games":96},
+      "steps": [
+        {"iid":11,"type":"play"},
+        {"targets":[107],"type":"choose"},
+        {"iid":22,"type":"play"},
+        {"iid":111,"type":"play"}
+      ],
+      "text": [
+        "ストームブラストをプレイ",
+        "選ぶ: 清純なる白狐",
+        "マナリアスクリプター・ティコをプレイ",
+        "マナリアの魔弾をプレイ"
+      ],
+      "full": [
+        "ストームブラストをプレイ",
+        "選ぶ: 清純なる白狐",
+        "マナリアスクリプター・ティコをプレイ",
+        "マナリアの魔弾をプレイ",
+        "マナリアの魔弾をプレイ",
+        "余情の俳人をプレイ",
+        "相承の意思をプレイ",
+        "1 番目の効果を選ぶ",
+        "歩む《愚者》・リンクルでリーダーを攻撃"
+      ],
+      "rethink": null,
+      "actions": [
+        {"iid":11,"type":"play"},
+        {"targets":[107],"type":"choose"},
+        {"iid":22,"type":"play"},
+        {"iid":111,"type":"play"},
+        {"type":"play","iid":112},
+        {"type":"play","iid":31},
+        {"type":"play","iid":18},
+        {"type":"mode","index":0},
+        {"type":"attack","attacker":9,"target":"leader"},
+        {"type":"endTurn"}
+      ]
+    },
+    {
+      "kind": "good",
+      "label": "打ち比べで良い手",
+      "first": {"wins":32,"games":32},
+      "second": {"wins":95,"games":96},
+      "steps": [
+        {"iid":22,"type":"play"},
+        {"iid":22,"type":"evolve"},
+        {"attacker":22,"target":107,"type":"attack"},
+        {"iid":111,"type":"play"}
+      ],
+      "text": [
+        "マナリアスクリプター・ティコをプレイ",
+        "マナリアスクリプター・ティコを進化",
+        "マナリアスクリプター・ティコで清純なる白狐を攻撃",
+        "マナリアの魔弾をプレイ"
+      ],
+      "full": [
+        "マナリアスクリプター・ティコをプレイ",
+        "マナリアスクリプター・ティコを進化",
+        "マナリアスクリプター・ティコで清純なる白狐を攻撃",
+        "マナリアの魔弾をプレイ",
+        "マナリアの魔弾をプレイ",
+        "相承の意思をプレイ",
+        "1 番目の効果を選ぶ",
+        "歩む《愚者》・リンクルでリーダーを攻撃"
+      ],
+      "rethink": null,
+      "actions": [
+        {"iid":22,"type":"play"},
+        {"iid":22,"type":"evolve"},
+        {"attacker":22,"target":107,"type":"attack"},
+        {"iid":111,"type":"play"},
+        {"type":"play","iid":112},
+        {"type":"play","iid":18},
+        {"type":"mode","index":0},
+        {"type":"attack","attacker":9,"target":"leader"},
+        {"type":"endTurn"}
+      ]
+    }
+  ]
+}
