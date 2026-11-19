@@ -14,7 +14,7 @@ import { actingPlayer, applyAction, cardOf, legalActions, opponent, type Action,
 import { deckRows } from "../misses/deck";
 import { groupNote, stepGroups, stepNotes, type StepGroup, type StepNote } from "../misses/example";
 import type { MissesData } from "../misses/load";
-import { condTexts, judgeTurn, type MissDeck, type MissLine, type MissProblem } from "../misses/problems";
+import { condTexts, judgeTurn, passesBefore, type MissDeck, type MissLine, type MissProblem } from "../misses/problems";
 import { AiThought, useThoughts } from "./AiThought";
 import { CardDetail, CardView, type Motion } from "./CardView";
 import { attackStatuses, describeAction, leaderClasses, modeLabels } from "./describe";
@@ -269,6 +269,8 @@ interface Candidate {
   notes: StepNote[];
   labels: string[];
   judged: ReturnType<typeof judgeTurn>;
+  /** 不合格だが、AI が打つ前の手（調査で読んだ並び）まででターンを終えれば合格する */
+  readPasses: boolean;
 }
 
 /** 盤面で進めて見る手の並び */
@@ -334,6 +336,7 @@ function MissView({ problem, dir, lines, linesSource, decks, position, prev, nex
             notes: groups.map((g) => groupNote(notes, g)),
             labels: groups.map((g) => groupLabel(states, actions, g, names, p)),
             judged: judgeTurn(start, actions, p, problem.pass),
+            readPasses: passesBefore(start, actions, line.rethink, p, problem.pass) && judgeTurn(start, actions, p, problem.pass).passed === false,
           },
         ];
       }),
@@ -930,6 +933,8 @@ function Candidates({
                 <strong class={c.judged.passed ? "misses-pass-ok" : "misses-pass-ng"} title="この手順を問の合格の条件で判定した結果">
                   {c.judged.passed ? "○ 合格" : "× 不合格"}
                 </strong>
+                {c.readPasses && <span class="muted">（AI が打った続きで不合格。調査で読んだ並びまでなら合格）</span>}
+                {c.line.hand && <span class="muted" title={c.line.hand}>（{c.line.hand.split("。")[0]}）</span>}
                 {stats && (
                   <span
                     class="muted"

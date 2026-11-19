@@ -2,7 +2,7 @@
 // 問題集のページ（src/ui/Misses.tsx）で使う。判定の決まりは Rust の rust/engine/src/runner/misses.rs
 // （step_of・matches・passes・play_turn）と同じ。どちらかを変えるときは両方を直す。
 
-import { actingPlayer, applyAction, cardOf, type Action, type GameState, type PlayerIndex } from "../engine";
+import { actingPlayer, applyAction, cardOf, legalActions, type Action, type GameState, type PlayerIndex } from "../engine";
 
 // ---------------------------------------------------------------- 合格の条件
 
@@ -283,6 +283,19 @@ export function judgeTurn(start: GameState, actions: readonly Action[], p: Playe
   return result(false, false, null);
 }
 
+/**
+ * 手順のうち AI が打つ前の手（actions の rethink の手前まで）でターンを終えたら合格するか。
+ * 調査で読んだ並びの後に AI が打った続きのせいで不合格になった手順を見分ける
+ * （2026-11-19。witch-hold-g1066 の良い手は、続きで条件が禁じる大遊戯世界とマナリアの魔弾を打つ。ユーザーの判断で条件はそのまま）
+ */
+export function passesBefore(start: GameState, actions: readonly Action[], rethink: number | null, p: PlayerIndex, pass: readonly Cond[]): boolean {
+  if (rethink === null) return false;
+  let s = start;
+  for (const a of actions.slice(0, rethink)) s = applyAction(s, a);
+  if (s.pending || !legalActions(s).some((a) => a.type === "endTurn")) return false;
+  return judgeTurn(start, [...actions.slice(0, rethink), { type: "endTurn" }], p, pass).passed === true;
+}
+
 /** 手 st が、手の形 p と同じ種類の手か（first で、その種類の最初の手を探すのに使う） */
 function sameKind(p: Pattern, st: Step): boolean {
   if (st.verb === null) return false;
@@ -351,6 +364,8 @@ export interface MissLine {
   /** 調査の一段目（候補ごとに m 回）・二段目（2 つの候補を n 回）の勝ち（版 2 から。無ければ null） */
   first: MissTally | null;
   second: MissTally | null;
+  /** 手で書いた並びの出どころ（例: ユーザーが見つけた手順。調査の並びなら null） */
+  hand: string | null;
 }
 /** 席のデッキ（調査の行のデッキの名前を、調査に渡したデッキの組に引き当てたもの。scripts/misses-lines-main.ts の --decks） */
 export interface MissDeck {
@@ -453,8 +468,9 @@ export function parseLines(v: unknown): MissLines {
         full: strs(l.full, "full"),
         actions: l.actions === undefined ? null : actions(l.actions, "actions"),
         rethink,
-        first: tally(l.first, "first"),
-        second: tally(l.second, "second"),
+        first: tally(l.first ?? undefined, "first"),
+        second: tally(l.second ?? undefined, "second"),
+        hand: l.hand === undefined ? null : str(l, "hand"),
       };
     }),
   };

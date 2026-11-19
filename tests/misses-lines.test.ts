@@ -1,11 +1,11 @@
 // 問題集の手順の候補（<問のフォルダ>/lines/<問>.json の actions。docs/misses.md「手順の候補」）と、一例の手の見分け（src/misses/example.ts）、デッキと残りの山札（src/misses/deck.ts）
 import { describe, expect, it } from "vitest";
 import "../src/record/pool";
-import { actingPlayer, applyAction, cardOf, tryApplyAction, type Action, type GameState } from "../src/engine";
+import { actingPlayer, applyAction, cardOf, legalActions, tryApplyAction, type Action, type GameState } from "../src/engine";
 import { loadMisses } from "../src/misses/azvaldtData";
 import { deckRows } from "../src/misses/deck";
 import { groupNote, stepGroups, stepNotes } from "../src/misses/example";
-import { judgeTurn } from "../src/misses/problems";
+import { judgeTurn, passesBefore } from "../src/misses/problems";
 import { stepText } from "../src/misses/stepText";
 import { leaderClasses } from "../src/ui/describe";
 
@@ -39,9 +39,14 @@ describe("アズヴォルト環境の問題集の手順の候補", () => {
         // 最後の手でターンが終わる（その前は手番の側のターン）
         expect(end.active !== p.player || end.winner !== null, `${l.id} ${line.kind}`).toBe(true);
         for (const s of states!.slice(0, -1)) expect(actingPlayer(s) === p.player || s.active === p.player, `${l.id} ${line.kind}`).toBe(true);
-        expect(line.second!.games, l.id).toBeGreaterThan(0);
+        // 調査の並びには二段目の勝ちがある（手で書いた並びは無い）
+        if (line.hand === null) expect(line.second!.games, l.id).toBeGreaterThan(0);
+        else expect(line.second, l.id).toBeNull();
       }
     }
+    // 手で書いた並び: witch-tico-g1006 の良い手（ユーザーが見つけたリーサル）だけ
+    const hands = [...data.lines.values()].flatMap((l) => l.lines.filter((x) => x.hand !== null).map((x) => `${l.id} ${x.kind}`));
+    expect(hands).toEqual(["witch-tico-g1006 good"]);
   });
 
   it("AI が打つ前の手は、調査の読んだ並び（full）と同じ説明になる", () => {
@@ -71,18 +76,64 @@ describe("アズヴォルト環境の問題集の手順の候補", () => {
       }
     }
     expect(rethinks).toBe(4);
-    // 読んだ並び（ビームの終局面まで）の後にも、AI が攻撃などを打つ並び（2026-11-19 のユーザーの指摘まで、ここでターン終了を足していた）
-    expect(continued).toBe(5);
+    // 読んだ並び（ビームの終局面まで）の後にも、AI が攻撃などを打つ並び（2026-11-19 のユーザーの指摘まで、ここでターン終了を足していた）。
+    // royal-firstmate-g1104・bishop-miko-g1006・witch-hold-g1066 の良い手と witch-tico-g1006 の AI の手
+    expect(continued).toBe(4);
   });
 
-  it("良い手は合格、AI の手は不合格（途中から考え直した並びも）", () => {
+  it("良い手は合格、AI の手は不合格（途中から考え直した並びも。AI が打った続きで不合格になる良い手は除く）", () => {
+    const continuationFails: string[] = [];
     for (const l of data.lines.values()) {
       const p = byId.get(l.id)!;
       for (const line of l.lines) {
         const r = judgeTurn(p.state, line.actions!, p.player, p.pass);
         expect(r.done, `${l.id} ${line.kind}`).toBe(true);
+        if (line.kind === "good" && r.passed === false) {
+          // 調査で読んだ並びまででターンを終えれば合格し、AI が打った続きで不合格になる
+          expect(passesBefore(p.state, line.actions!, line.rethink, p.player, p.pass), l.id).toBe(true);
+          continuationFails.push(l.id);
+          continue;
+        }
         expect(r.passed, `${l.id} ${line.kind}`).toBe(line.kind === "good");
       }
+    }
+    // witch-hold-g1066: 良い手の続きで、AI は条件が禁じる大遊戯世界とマナリアの魔弾を打つ。条件はそのまま（2026-11-19、ユーザーの判断。
+    // 続きを今の AI に打たせる打ち比べのやり方の側を直す）
+    expect(continuationFails).toEqual(["witch-hold-g1066"]);
+  });
+
+  it("witch-tico-g1006 のリーサル（ユーザーが見つけた手順）は、局面の乱数によらず勝てる", () => {
+    const p = byId.get("witch-tico-g1006")!;
+    const line = data.lines.get(p.id)!.lines.find((x) => x.hand !== null)!;
+    expect(judgeTurn(p.state, line.actions!, p.player, p.pass)).toMatchObject({ done: true, won: true, passed: true });
+    // ティコをプレイして進化 → 魔弾 → 魔弾 → ストームブラスト → テトラ＆ラティカ。選ぶ手と、その後の攻撃は深さ 3 まで探す
+    const plan: [Action["type"], string][] = [
+      ["play", "マナリアスクリプター・ティコ"],
+      ["evolve", "マナリアスクリプター・ティコ"],
+      ["play", "マナリアの魔弾"],
+      ["play", "マナリアの魔弾"],
+      ["play", "ストームブラスト"],
+      ["play", "恩愛の大地・テトラ＆ラティカ"],
+    ];
+    const me = p.player;
+    const wins = (s: GameState, rest: typeof plan, depth: number): boolean => {
+      if (s.phase === "ended") return s.winner === me;
+      if (s.active !== me && s.pending?.player !== me) return false;
+      const legal = legalActions(s).filter((a) => a.type !== "endTurn");
+      if (s.pending) return legal.some((a) => wins(applyAction(s, a), rest, depth));
+      const head = rest[0];
+      if (head) {
+        return legal.some((a) => {
+          if (a.type !== head[0] || !("iid" in a)) return false;
+          const card = [...s.players[me].hand, ...s.players[me].board].find((c) => c.iid === a.iid);
+          return !!card && cardOf(card.cardId).name === head[1] && wins(applyAction(s, a), rest.slice(1), depth);
+        });
+      }
+      return depth > 0 && legal.some((a) => wins(applyAction(s, a), rest, depth - 1));
+    };
+    for (let k = 0; k < 12; k++) {
+      const rng = k === 0 ? p.state.rng : (Math.imul(k, 0x9e3779b9) ^ p.state.rng) >>> 0;
+      expect(wins({ ...p.state, rng }, plan, 3), `乱数 ${k}`).toBe(true);
     }
   });
 });

@@ -16,11 +16,13 @@ await import("../src/record/pool");
 const data = loadMisses();
 
 describe("アズヴォルト環境の問題集の手順の候補の終わり", () => {
-  it("ターン終了の手前の局面で、問の AI もターン終了を選ぶ（候補の打つ手でターンを終える並びは除く）", () => {
+  it("ターン終了の手前の局面で、問の AI もターン終了を選ぶ（候補の打つ手でターンを終える並びと、手で書いた並びは除く）", () => {
     const wrong: string[] = [];
     for (const l of data.lines.values()) {
       const p = data.problems.find((x) => x.id === l.id)!;
       for (const line of l.lines) {
+        // 手で書いた並び（witch-tico-g1006 のユーザーが見つけたリーサル。このターンに勝って終わる）は AI の手ではない
+        if (line.hand !== null) continue;
         const actions = line.actions!;
         expect(actions.at(-1)?.type, `${l.id} ${line.kind}`).toBe("endTurn");
         // 候補の打つ手（steps）でターンを終える並び（elf-dustdays-g1067 の良い手「何も出さずにターンを終える」）は、候補そのものの手

@@ -9,7 +9,8 @@
 //   --decks は調査に渡したデッキの組（survey の --decks と同じ。例 @data/pools/azvaldt/sets/rep10.txt）。
 //   調査の行のデッキの名前（deck・opp）をその組のデッキに引き当て、両方の席のデッキ（名前と元の 40 枚）を decks に書く
 //   （問題集のページが、残りの山札と並べて出す。ユーザーの依頼 2026-11-19）。同じ名前のデッキが大会ごとにあるので、組で決める。
-//   既にある lines/<問>.json は書き直さない（--force で書き直す）。--check は書かずに、どこまで手に戻せたかだけ出す。
+//   既にある lines/<問>.json は書き直さない（--force で書き直す。そのときも、手で書いた並び（"hand" のある並び）は残す）。
+//   --check は書かずに、どこまで手に戻せたかだけ出す。
 //
 // 打ち比べは打ち直さない。調査の行から取るのは:
 // - steps: AI がその候補を選んだときに、考え直すまで打つ手（調査が打った手。ドロー・ランダムの手の前まで）
@@ -85,10 +86,12 @@ export interface LineOut {
   actions: Action[];
   /** AI が打った最初の手の番号（actions の添字）。full を手に戻しきれず考え直させたか、full を打ちきった後に AI がすぐにはターンを終えなかったとき。どちらでもなければ null */
   rethink: number | null;
-  /** 一段目の勝ち（m 回のうち） */
-  first: Tally;
-  /** 二段目の勝ち（confirm.n 回のうち） */
-  second: Tally;
+  /** 一段目の勝ち（m 回のうち。手で書いた並びは null） */
+  first: Tally | null;
+  /** 二段目の勝ち（confirm.n 回のうち。手で書いた並びは null） */
+  second: Tally | null;
+  /** 手で書いた並びの出どころ（例: ユーザーが見つけた手順）。--force で書き直しても残す */
+  hand?: string;
 }
 
 /** キーの順番によらない文字列（局面が同じかを見る） */
@@ -176,6 +179,7 @@ function format(body: { v: number; id: string; source: string; decks?: [DeckOut,
       `    {`,
       `      "kind": ${JSON.stringify(l.kind)},`,
       `      "label": ${JSON.stringify(l.label)},`,
+      ...(l.hand === undefined ? [] : [`      "hand": ${JSON.stringify(l.hand)},`]),
       `      "first": ${JSON.stringify(l.first)},`,
       `      "second": ${JSON.stringify(l.second)},`,
       `      "steps": ${list(l.steps)},`,
@@ -311,6 +315,17 @@ export async function main(argv: string[]): Promise<number> {
         ...(decks ? { decks } : {}),
         lines: [pick(row.ai, "ai", "問を作ったときの AI の手", confirm.ai), pick(confirm.c, "good", "打ち比べで良い手", confirm.alt)],
       };
+      // 手で書いた並び（hand）は残す（同じ種類の並びを置き換えている）
+      if (existsSync(out)) {
+        const old = JSON.parse(readFileSync(out, "utf8")) as { lines?: LineOut[] };
+        for (const l of old.lines ?? []) {
+          if (typeof l.hand !== "string") continue;
+          const k = body.lines.findIndex((x) => x.kind === l.kind);
+          if (k < 0) throw new Error(`${want.id}: 手で書いた並び（${l.label}）と同じ種類の並びがありません`);
+          body.lines[k] = l;
+          console.log(`${want.id} ${l.kind}: 手で書いた並び「${l.label}」を残した（${l.hand}）`);
+        }
+      }
       if (check) continue;
       writeFileSync(out, format(body));
       written++;

@@ -52,45 +52,58 @@
     },
     {
       "kind": "good",
-      "label": "打ち比べで良い手",
-      "first": {"wins":32,"games":32},
-      "second": {"wins":95,"games":96},
+      "label": "ユーザーが見つけたリーサル",
+      "hand": "ユーザーが見つけた手順（2026-11-19）。ティコを進化 → 魔弾 → 魔弾 → ストームブラスト → テトラ＆ラティカで、魔弾の当たり先によらず勝てる。攻撃とストームブラストの当たり先は、問の局面の乱数での一例。調査の打ち比べの良い手（ティコを進化してティコで清純なる白狐を攻撃する並び。二段目 95/96 勝）の代わりに置いた",
+      "first": null,
+      "second": null,
       "steps": [
         {"iid":22,"type":"play"},
         {"iid":22,"type":"evolve"},
-        {"attacker":22,"target":107,"type":"attack"},
-        {"iid":111,"type":"play"}
+        {"iid":111,"type":"play"},
+        {"iid":112,"type":"play"},
+        {"iid":11,"type":"play"},
+        {"targets":[107],"type":"choose"},
+        {"iid":34,"type":"play"},
+        {"attacker":9,"target":109,"type":"attack"},
+        {"attacker":22,"target":109,"type":"attack"},
+        {"attacker":34,"target":"leader","type":"attack"}
       ],
       "text": [
         "マナリアスクリプター・ティコをプレイ",
         "マナリアスクリプター・ティコを進化",
+        "マナリアの魔弾をプレイ",
+        "マナリアの魔弾をプレイ",
+        "ストームブラストをプレイ",
+        "選ぶ: 清純なる白狐",
+        "恩愛の大地・テトラ＆ラティカをプレイ",
+        "歩む《愚者》・リンクルで清純なる白狐を攻撃",
         "マナリアスクリプター・ティコで清純なる白狐を攻撃",
-        "マナリアの魔弾をプレイ"
+        "恩愛の大地・テトラ＆ラティカでリーダーを攻撃"
       ],
       "full": [
         "マナリアスクリプター・ティコをプレイ",
         "マナリアスクリプター・ティコを進化",
+        "マナリアの魔弾をプレイ",
+        "マナリアの魔弾をプレイ",
+        "ストームブラストをプレイ",
+        "選ぶ: 清純なる白狐",
+        "恩愛の大地・テトラ＆ラティカをプレイ",
+        "歩む《愚者》・リンクルで清純なる白狐を攻撃",
         "マナリアスクリプター・ティコで清純なる白狐を攻撃",
-        "マナリアの魔弾をプレイ",
-        "マナリアの魔弾をプレイ",
-        "相承の意思をプレイ",
-        "1 番目の効果を選ぶ",
-        "歩む《愚者》・リンクルでリーダーを攻撃"
+        "恩愛の大地・テトラ＆ラティカでリーダーを攻撃"
       ],
-      "rethink": 8,
+      "rethink": null,
       "actions": [
         {"iid":22,"type":"play"},
         {"iid":22,"type":"evolve"},
-        {"attacker":22,"target":107,"type":"attack"},
         {"iid":111,"type":"play"},
-        {"type":"play","iid":112},
-        {"type":"play","iid":18},
-        {"type":"mode","index":0},
-        {"type":"attack","attacker":9,"target":"leader"},
-        {"type":"play","iid":6},
-        {"type":"play","iid":31},
-        {"type":"play","iid":1},
-        {"type":"endTurn"}
+        {"iid":112,"type":"play"},
+        {"iid":11,"type":"play"},
+        {"targets":[107],"type":"choose"},
+        {"iid":34,"type":"play"},
+        {"attacker":9,"target":109,"type":"attack"},
+        {"attacker":22,"target":109,"type":"attack"},
+        {"attacker":34,"target":"leader","type":"attack"}
       ]
     }
   ]
