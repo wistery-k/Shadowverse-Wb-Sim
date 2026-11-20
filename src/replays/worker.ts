@@ -1,7 +1,7 @@
 // リプレイ検索の Web Worker。受け取った試合を打ち直して持っておき、検索の条件を受け取ると、持っている試合から条件に合うターンを返す。
 // 試合はいくつかの Worker に分けて持つ（src/replays/library.ts）。
 
-import { currentNets, initEngine } from "../engine";
+import { initEngine } from "../engine";
 import { loadTexts } from "./games";
 import { compileQuery, searchGames, type MatchRow, type ReplayQuery, type SearchStats } from "./query";
 import type { GameIndex, LoadedGame, ReplayRecord } from "./types";
@@ -22,12 +22,8 @@ const games: LoadedGame[] = [];
 
 const post = (msg: ReplayWorkerResponse) => self.postMessage(msg);
 
-// アズヴォルト環境のページ（開発サーバー）が作った Worker は、前期のローテーションのカードをカードの表に足す（デッキの確かめ・カード名の条件のため）
-const poolCards = currentNets() === "azvaldt" ? import("../record/pool") : Promise.resolve();
-
 self.onmessage = async (e: MessageEvent<ReplayWorkerRequest>) => {
   const msg = e.data;
-  await poolCards;
   // 試合を打ち直すだけで AI は動かさないので、探索 AI の補正は読み込まない
   await initEngine(undefined, { nets: false });
   switch (msg.type) {

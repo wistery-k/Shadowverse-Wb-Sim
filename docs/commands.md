@@ -610,10 +610,6 @@ zcat /mnt/project-files/data/selfplay/<名前>/f0.jsonl.gz | head -c 500
 - **条件**: 自分・相手のクラスとデッキ名、先攻・後攻、勝ち・負けで絞り、「いつ（このターン・次のターン・前の自分のターン・これより前の自分のターンのどれか…）に
   誰が何をした（プレイした・進化させた・攻撃した・場に出た・場から離れた・次のターンを越えて場に残った・場にいた・手札にあった・エクストラPPを使った・勝った（リーサル）・
   数値（体力・PP＋エクストラPP・手札の枚数など）」を全部満たすターンを探す。1 試合は両方のプレイヤーの視点で調べる。込み入った条件は JavaScript の式でも書ける（画面に説明）
-- **アズヴォルト環境の試合**（2026-11-20、ユーザーの依頼）: 開発サーバーのアズヴォルト環境のページ（`/Shadowverse-Wb-Sim/azvaldt/`）にも「リプレイ検索」タブがある。
-  前期のローテーションのカードの試合（`npm run game -- … --pool azvaldt --json`、新しいプールのランナーの棋譜）はこちらで読む（Worker が前期のローテーションのカードを足す）。
-  リプレイの打ち比べ・AI の考えは、このページの補正 R3 で打つので、公開サイトのアズヴォルト環境のページの AI対戦のリプレイと同じ数字になる。
-  スターターのページで読むと、カードが分からないので読めない
 - **打ち直しと検索**: ブラウザの Web Worker（`src/replays/worker.ts`）がエンジンの `replayIndex`（`rust/engine/src/replay_index.rs`。ターンごとの始めと終わりの様子と、
   そのターンに起きたこと）で打ち直して持ち、検索のたびに全部の Worker で探す。条件の意味は `src/replays/query.ts`
 
@@ -621,10 +617,6 @@ zcat /mnt/project-files/data/selfplay/<名前>/f0.jsonl.gz | head -c 500
 npm run svwb -- td selfplay --model data/value-net.json --games 200 --out ~/svwb-data/sp1/d.jsonl   # 棋譜は ~/svwb-data/kifu/ に
 npm run compare -- 50 '{}' '{"beamWidth":32}' 0 --kifu ~/svwb-data/cmp1/k.jsonl
 npm run dev   # 「リプレイ検索」タブで ~/svwb-data の下の棋譜を選んで読み込む
-
-# アズヴォルト環境の試合（リプレイの「再現」のコマンドに --json を足す）を、開発サーバーのアズヴォルト環境のページで開く
-npm run game -- --seed 1181588137 --p0 search --p0-deck '…' --p1 search --p1-deck '…' --pool azvaldt --json replays/g1181588137.json
-npm run dev   # http://localhost:5173/Shadowverse-Wb-Sim/azvaldt/ の「リプレイ検索」で読み込み、検索の結果の行を押すとそのターンのリプレイが開く
 ```
 
 ## cloud/gcp.sh（クラウドの Spot VM で回す）

@@ -33,13 +33,8 @@ export function knownCards(): readonly Card[] {
   return poolCards.size === 0 ? ALL_CARDS : [...ALL_CARDS, ...poolCards.values()];
 }
 
-/** 画面のカードの表のカード（無ければ undefined） */
-export function findCard(cardId: string): Card | undefined {
-  return CARDS_BY_ID.get(cardId) ?? poolCards.get(cardId);
-}
-
 export function cardOf(cardId: string): Card {
-  const card = findCard(cardId);
+  const card = CARDS_BY_ID.get(cardId) ?? poolCards.get(cardId);
   if (!card) throw new Error(`未知のカードID: ${cardId}`);
   return card;
 }
