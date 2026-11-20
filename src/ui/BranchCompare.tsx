@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { AGENTS } from "../ai/registry";
 import { actingPlayer, applyAction, legalActions, type Action, type GameState, type PlayerIndex, workerName } from "../engine";
-import { branchStats, diffStats, tallyTurns, type Outcome, type Played } from "../sim/branch";
+import { branchStats, diffStats, quickCounts, tallyTurns, type Outcome, type Played } from "../sim/branch";
 import type { BranchRequest, BranchResponse } from "../sim/branchWorker";
 import { runPool } from "../sim/pool";
 import { actionLabels } from "./describe";
@@ -496,6 +496,8 @@ function BranchResult({ run, names, agentLabel }: { run: BranchRun; names: [stri
             <th>{names[run.actor]}の勝率</th>
             <th title="同じ並べ直しの試合どうしの勝ち負けの差の平均">{baseTag}との差</th>
             {multi && <th title="手の列を最後まで打てた試合の数（打てなかった手からは AI が打った）">手の列を打てた</th>}
+            <th title={`${names[run.actor]}の次のターンが来る前に負けた試合の割合（相手の次のターンにリーサルを取られた等）`}>すぐ負けた</th>
+            <th title={`${names[run.actor]}の次のターンまでに勝った試合の割合（このターンに勝った試合も含む）`}>次勝った</th>
             <th title="始めのターンに実際に打った手順（手の列の後に AI が打った続きも含む）の内訳">このターン</th>
           </tr>
         </thead>
@@ -509,7 +511,16 @@ function BranchResult({ run, names, agentLabel }: { run: BranchRun; names: [stri
             const len = run.lines[b]!.length;
             const finished = p.filter((x): x is Played => x !== undefined && x.outcome !== null);
             const full = finished.filter((x) => x.followed >= len).length;
-            const cols = 4 + Number(multi);
+            const q = quickCounts(p);
+            const quickCell = (n: number) =>
+              q.decided > 0 ? (
+                <>
+                  {percent(n / q.decided)} <span class="muted">（{n}/{q.decided}）</span>
+                </>
+              ) : (
+                "—"
+              );
+            const cols = 6 + Number(multi);
             return [
               <tr key={b} class={cls}>
                 <td>
@@ -539,6 +550,8 @@ function BranchResult({ run, names, agentLabel }: { run: BranchRun; names: [stri
                   )}
                 </td>
                 {multi && <td class="num">{len > 1 ? (finished.length > 0 ? `${full}/${finished.length}` : "—") : ""}</td>}
+                <td class="num">{quickCell(q.lost)}</td>
+                <td class="num">{quickCell(q.won)}</td>
                 <td>
                   <button type="button" class={shown === b ? "active" : ""} disabled={finished.length === 0} onClick={() => setShown(shown === b ? null : b)}>
                     {shown === b ? "閉じる" : "手順"}

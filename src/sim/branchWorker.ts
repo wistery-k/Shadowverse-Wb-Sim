@@ -2,7 +2,7 @@
 // 仕事は src/sim/pool.ts の runPool が 1 つずつ配る（終わったら次をもらう）。
 
 import { initEngine, type Action, type GameState, type PlayerIndex } from "../engine";
-import { branchLine, branchSeed, type Played } from "./branch";
+import { branchLine, branchSeed, quickEnd, type Played } from "./branch";
 
 export interface BranchRequest {
   state: GameState;
@@ -29,11 +29,17 @@ self.onmessage = async (e: MessageEvent<BranchRequest>) => {
   try {
     await initEngine();
     const l = lines[line];
-    let played: Played = { outcome: null, followed: 0, turn: [] };
+    let played: Played = { outcome: null, followed: 0, turn: [], quick: null };
     if (l !== undefined && l.length > 0) {
       try {
         const r = branchLine(state, l, agents, branchSeed(seedBase, game));
-        if (r) played = { outcome: r.winner !== null ? r.winner === viewer : null, followed: r.followed, turn: r.turn };
+        if (r)
+          played = {
+            outcome: r.winner !== null ? r.winner === viewer : null,
+            followed: r.followed,
+            turn: r.turn,
+            quick: quickEnd(state, viewer, r.winner, r.turns),
+          };
       } catch {
         // 打てなかった試合として数える
       }

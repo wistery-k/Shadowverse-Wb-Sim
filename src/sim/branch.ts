@@ -42,6 +42,34 @@ export interface Played {
   outcome: Outcome;
   followed: number;
   turn: string[];
+  /** 早い決着（quickEnd）。打てなかった・エラーなら null */
+  quick: QuickEnd;
+}
+
+/** 早い決着: "lost" は手番のプレイヤーの次のターンが来る前に負けた（すぐ負けた）、"won" は次のターンまでに勝った（このターンの勝ちも含む。次勝った） */
+export type QuickEnd = "lost" | "won" | null;
+
+/** 打ち比べの局面 start（手番のプレイヤー viewer）から打った試合が、ターン endTurn に winner の勝ちで終わったときの早い決着 */
+export function quickEnd(start: Pick<GameState, "turn" | "active">, viewer: PlayerIndex, winner: PlayerIndex | null, endTurn: number): QuickEnd {
+  if (winner === null) return null;
+  // viewer の次のターンの番号（ふつうは viewer のターンの局面なので、相手のターンをはさんで 2 つ先）
+  const next = start.turn + (start.active === viewer ? 2 : 1);
+  if (winner === viewer) return endTurn <= next ? "won" : null;
+  return endTurn < next ? "lost" : null;
+}
+
+/** 結果の出た試合のうち、すぐ負けた・次勝った試合の数 */
+export function quickCounts(played: readonly (Played | undefined)[]): { lost: number; won: number; decided: number } {
+  let lost = 0;
+  let won = 0;
+  let decided = 0;
+  for (const p of played) {
+    if (!p || p.outcome === null) continue;
+    decided++;
+    if (p.quick === "lost") lost++;
+    if (p.quick === "won") won++;
+  }
+  return { lost, won, decided };
 }
 
 /** 始めのターンに打った手順ごとの回数（同じ手順の試合をまとめ、多い順。同じ回数なら手順の文言の順） */

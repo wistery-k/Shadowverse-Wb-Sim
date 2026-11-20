@@ -3,7 +3,7 @@ import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { agentOf } from "../src/ai/registry";
 import { legalActions } from "../src/engine";
 import { applyAction, actingPlayer } from "../src/engine";
-import { branchLine, branchPlayout, branchSeed, branchStats, diffStats, tallyTurns } from "../src/sim/branch";
+import { branchLine, branchPlayout, branchSeed, branchStats, diffStats, quickCounts, quickEnd, tallyTurns } from "../src/sim/branch";
 import { playMatch } from "../src/sim/match";
 import { replayStates } from "../src/sim/replay";
 
@@ -62,16 +62,51 @@ describe("打ち比べ", () => {
 
   it("始めのターンの手順を、同じ手順の試合でまとめる", () => {
     const t = tallyTurns([
-      { outcome: true, followed: 2, turn: ["A", "B"] },
-      { outcome: false, followed: 2, turn: ["A", "B"] },
-      { outcome: true, followed: 1, turn: ["A", "C"] },
-      { outcome: null, followed: 0, turn: [] },
+      { outcome: true, followed: 2, turn: ["A", "B"], quick: null },
+      { outcome: false, followed: 2, turn: ["A", "B"], quick: null },
+      { outcome: true, followed: 1, turn: ["A", "C"], quick: null },
+      { outcome: null, followed: 0, turn: [], quick: null },
       undefined,
     ]);
     expect(t).toEqual([
       { text: "A → B", games: 2, wins: 1, decided: 2 },
       { text: "A → C", games: 1, wins: 1, decided: 1 },
     ]);
+  });
+
+  it("すぐ負けた（次のターンが来る前に負けた）・次勝った（次のターンまでに勝った）を数える", () => {
+    // ふつうは手番のプレイヤー（0）のターン 15 の局面: 相手のターン 16 までの負けと、自分のターン 17 までの勝ち
+    const own = { turn: 15, active: 0 as const };
+    expect(quickEnd(own, 0, 1, 16)).toBe("lost");
+    expect(quickEnd(own, 0, 1, 15)).toBe("lost");
+    expect(quickEnd(own, 0, 1, 17)).toBeNull();
+    expect(quickEnd(own, 0, 0, 15)).toBe("won");
+    expect(quickEnd(own, 0, 0, 17)).toBe("won");
+    expect(quickEnd(own, 0, 0, 19)).toBeNull();
+    expect(quickEnd(own, 0, null, 16)).toBeNull();
+    // 相手のターンの局面で選ぶとき: 自分の次のターンは 1 つ先
+    const theirs = { turn: 16, active: 1 as const };
+    expect(quickEnd(theirs, 0, 1, 16)).toBe("lost");
+    expect(quickEnd(theirs, 0, 0, 17)).toBe("won");
+    expect(quickEnd(theirs, 0, 1, 18)).toBeNull();
+    expect(
+      quickCounts([
+        { outcome: false, followed: 1, turn: [], quick: "lost" },
+        { outcome: true, followed: 1, turn: [], quick: "won" },
+        { outcome: true, followed: 1, turn: [], quick: null },
+        { outcome: null, followed: 0, turn: [], quick: null },
+        undefined,
+      ]),
+    ).toEqual({ lost: 1, won: 1, decided: 3 });
+  });
+
+  it("試合の turns は決着したターン（最後の手で勝った試合は、その局面のターン）", () => {
+    const last = r.log!.length - 1;
+    const before = states[last]!;
+    const x = branchLine(before, [r.log![last]!], ["random", "random"], 3)!;
+    expect(x.winner).toBe(r.winner);
+    expect(x.turns).toBe(states[last + 1]!.turn);
+    expect(quickEnd(before, actingPlayer(before), x.winner, x.turns)).toBe(x.winner === actingPlayer(before) ? "won" : "lost");
   });
 
   it("勝率と、同じ試合どうしの差を集計する", () => {
