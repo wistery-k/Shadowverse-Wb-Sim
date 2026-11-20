@@ -259,6 +259,8 @@ pub struct LineEnd {
 /// 並べ直した局面の打てる手から、同じものを選ぶ（同じ手そのものが打てて同じものなら、それを優先する）。
 /// 合う手が無ければ、そこから先は AI が打つ（followed がそこまでの数）。手番の側の手番で、始めのターンのあいだだけ合わせる
 /// （相手が選ぶ手が挟まったら、それは AI が打ち、手の列は続ける）。
+/// 2 手目からの列の手は、AI の乱数（MatchRng）の 1 回の判断の分を使う。列の後の AI の判断は、列が 1 手の試合で AI が同じ回数目に判断するときと
+/// 同じ乱数になる（同じ番号の試合どうしの対応を、列の長さが違っても保つ。最初の手は前からの branch_playout と同じく使わない）。
 /// log なら、始めのターンに打った手の説明を turn に入れる
 pub fn branch_line_playout(
     start: &GameState,
@@ -304,6 +306,9 @@ pub fn branch_line_playout(
         };
         let a = match planned {
             Some(a) => {
+                // この判断の分の乱数を使っておく（列の後の AI の判断の乱数を、列の長さによらず「ターンで何回目の判断か」でそろえる。
+                // 手が 1 つの列は、ここを通らないので前と同じ）
+                rng.next(&s, actor, agents[actor].sequential_rng());
                 followed += 1;
                 a
             }
@@ -601,6 +606,38 @@ mod tests {
             assert_eq!(json_of(&e.end), json_of(&again.end));
             assert_eq!(e.turn, again.turn);
         }
+    }
+
+    #[test]
+    fn branch_line_keeps_the_ai_rng_aligned_after_the_line() {
+        // 列の 2 手目に、手が 1 つの列の試合で AI が選んだ手そのものを入れると、同じ試合になる
+        // （列の手が乱数の 1 回の判断の分を使うので、その後の AI の判断の乱数が同じ）
+        let (s, first) = with_play();
+        let viewer = crate::game::acting_player(&s);
+        let mut checked = 0;
+        for seed in 0..16 {
+            let det = crate::ai::determinize::determinize(
+                &s,
+                viewer,
+                &mut crate::ai::Rng::new(seed),
+                false,
+            );
+            let t = crate::game::apply_legal(&det, &first);
+            let mut rng = MatchRng::new(seed);
+            let mut r = RandomAgent;
+            let second = rng.choose(&mut r, &t, &legal_actions(&t));
+            let real = apply_action(&s, &first);
+            if !crate::game::is_legal(&real, &second) {
+                continue;
+            }
+            let one = line(&s, std::slice::from_ref(&first), seed).expect("打てる");
+            let two = line(&s, &[first.clone(), second], seed).expect("打てる");
+            assert_eq!(two.followed, 2);
+            assert_eq!(json_of(&one.end), json_of(&two.end));
+            assert_eq!(one.turn, two.turn);
+            checked += 1;
+        }
+        assert!(checked > 0);
     }
 
     #[test]
