@@ -2168,19 +2168,21 @@ fn explain_at(
             }
             out.push(String::new());
         }
-        // 読みの中の相手の幅を変えて、48 回の引き直しで負けを読んだ回数
+        // 読みの中の相手のビームの幅と深さを変えて、48 回の引き直しで負けを読んだ回数（既定は幅 8・深さ 8）
         let wseeds: Vec<u32> = (0..48).map(|k| seed_of(&[WHY_TAG, seed, k])).collect();
         let mut cells = Vec::new();
-        for w in [16usize, 64] {
+        for (w, dp) in [(8usize, 8usize), (64, 8), (8, 16), (64, 16)] {
             let wopts = SearchOptions {
-                opponent_search: opts
-                    .opponent_search
-                    .map(|o| OpponentSearch { beam_width: w, ..o }),
+                opponent_search: opts.opponent_search.map(|o| OpponentSearch {
+                    beam_width: w,
+                    max_depth: dp,
+                    ..o
+                }),
                 ..opts.clone()
             };
             let vs = SearchAgent::new(wopts).read_values(&end, p, &wseeds);
             let lost = vs.iter().filter(|&&v| v <= DANGER).count();
-            cells.push(format!("幅 {w} で {lost}/{}", vs.len()));
+            cells.push(format!("幅 {w}・深さ {dp} で {lost}/{}", vs.len()));
         }
         out.push(format!(
             "相手のターンの読みで負けを読んだ回数（引き直し 48 回）: {}",
@@ -2211,6 +2213,27 @@ fn explain_at(
                 count(&|e| e.result == '0' && e.turns != 1),
                 count(&|e| e.result != '1' && e.result != '0'),
             ));
+            // 相手の次のターンに負けた最初の回の、相手のターンの手（読みが負けを読まない理由を見る）
+            if let Some(r) = ends.iter().position(|e| e.result == '0' && e.turns == 1) {
+                let mut log = PlayoutLog::default();
+                playout_ends_with(
+                    opts,
+                    s,
+                    p,
+                    &plan,
+                    seed,
+                    r as u32,
+                    false,
+                    true,
+                    Some(&mut log),
+                );
+                out.push(String::new());
+                out.push(format!("相手の次のターンに負けた最初の回（{r} 回目）:"));
+                out.push(String::new());
+                out.push("```".into());
+                out.extend(log.lines.iter().cloned());
+                out.push("```".into());
+            }
         }
     }
     out
