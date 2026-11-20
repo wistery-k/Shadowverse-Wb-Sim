@@ -393,7 +393,8 @@ fn side_events(prev: &GameState, next: &GameState, at: usize, out: &mut Vec<Json
     }
 }
 
-/// ターンを終えたとき（ターン終了を選ぶ直前の局面 s）の様子: 残した PP と、手札からプレイできたカード（同じカードは 1 回）
+/// ターンを終えたとき（ターン終了を選ぶ直前の局面 s）の様子: 残した PP と、手札からプレイできたカード（同じカードは 1 回）、
+/// そのターンのコンボの数と、持っているクレスト（信仰を含む。2026-11-20、ダストデイズの調べ）
 fn turn_end_event(s: &GameState, at: usize) -> Json {
     let p = acting_player(s);
     let pl = &s.players[p];
@@ -412,6 +413,11 @@ fn turn_end_event(s: &GameState, at: usize) -> Json {
         ("at", num(at as u32)),
         ("pp", num(pl.pp)),
         ("playable", Json::Arr(cards.into_iter().map(id).collect())),
+        ("combo", num(pl.combo)),
+        (
+            "crests",
+            Json::Arr(pl.crests.iter().map(|c| crest_id(c.crest)).collect()),
+        ),
     ])
 }
 

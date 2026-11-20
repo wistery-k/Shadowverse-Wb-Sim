@@ -438,6 +438,18 @@ pub fn event_ok(spec: &EventSpec, e: &Json, turn: &Json) -> Result<bool, String>
             "crest" if c.op == Op::Flag => is_crest,
             "crest" => is_crest && card(&str_of(e.get("c")))?,
             "target" => card(&str_of(e.get("t")))?,
+            // turnEnd の、持っているクレスト（どれかが合えばよい。!~・!= はどれにも合わない）
+            "holds" => {
+                let ids: Vec<String> = match e.get("crests") {
+                    Some(Json::Arr(xs)) => xs.iter().map(|x| str_of(Some(x))).collect(),
+                    _ => Vec::new(),
+                };
+                match c.op {
+                    Op::Has | Op::Eq => ids.iter().map(|i| card(i)).collect::<Result<Vec<_>, _>>()?.into_iter().any(|b| b),
+                    Op::NotHas | Op::Ne => ids.iter().map(|i| card(i)).collect::<Result<Vec<_>, _>>()?.into_iter().all(|b| b),
+                    _ => return Err("holds は文字の条件（~・!~・=・!=）で書きます".into()),
+                }
+            }
             "as" => card(&str_of(e.get("as")))?,
             "mode" => match c.op {
                 Op::Has | Op::NotHas | Op::Eq | Op::Ne => text_ok(c, &str_of(e.get("mode"))),
@@ -451,13 +463,13 @@ pub fn event_ok(spec: &EventSpec, e: &Json, turn: &Json) -> Result<bool, String>
             "search" | "burned" | "ep" => flag(e.get(&c.key) == Some(&Json::Bool(true)))?,
             "turn" => num_ok(c, num_field(turn, "n").unwrap_or(0.0))?,
             "tc" => num_ok(c, num_field(turn, "tc").unwrap_or(0.0))?,
-            key @ ("n" | "pp" | "ab" | "playable" | "i" | "ougi") => match num_field(e, key) {
+            key @ ("n" | "pp" | "ab" | "playable" | "i" | "ougi" | "combo") => match num_field(e, key) {
                 Some(v) => num_ok(c, v)?,
                 None => false,
             },
             key => {
                 return Err(format!(
-                    "知らない出来事の条件: {key}（card・crest・target・as・mode・own・opp・search・burned・ep・turn・tc・n・pp・ab・playable・i・ougi）"
+                    "知らない出来事の条件: {key}（card・crest・holds・target・as・mode・own・opp・search・burned・ep・turn・tc・n・pp・ab・playable・combo・i・ougi）"
                 ))
             }
         };
@@ -1233,6 +1245,17 @@ mod tests {
         assert!(event_ok(&spec, &te, &theirs).unwrap());
         let none = Json::parse(r#"{"k":"turnEnd","p":0,"at":9,"pp":2,"playable":[]}"#).unwrap();
         assert!(!event_ok(&spec, &none, &theirs).unwrap());
+        // ターン終わりのコンボの数と、持っているクレスト（2026-11-20、ダストデイズの調べ）
+        let te = Json::parse(r#"{"k":"turnEnd","p":0,"at":9,"pp":1,"playable":["a"],"combo":2,"crests":["c1","c2"]}"#).unwrap();
+        let te_ok = |spec: &str| event_ok(&parse_event(spec).unwrap(), &te, &theirs);
+        assert!(te_ok("turnEnd combo=2 holds=c2").unwrap() && !te_ok("turnEnd combo>=3").unwrap());
+        assert!(
+            !te_ok("turnEnd holds=c3").unwrap()
+                && te_ok("turnEnd holds!=c3").unwrap()
+                && !te_ok("turnEnd holds!=c1").unwrap()
+        );
+        assert!(te_ok("turnEnd holds").is_err());
+        assert!(!event_ok(&parse_event("turnEnd holds~c").unwrap(), &none, &theirs).unwrap());
         assert!(parse_event("nope").is_err());
         let ev = |spec: &str| event_ok(&parse_event(spec).unwrap(), &e, &mine);
         assert!(!ev("trigger card!~x").unwrap() && ev("trigger card!=y").unwrap());

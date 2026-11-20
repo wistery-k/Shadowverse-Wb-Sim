@@ -100,7 +100,7 @@
 | `destroy`・`banish`・`bounce` | カードの持ち主 | `c`・`i` | 場から離れた理由（破壊・消滅・手札に戻った） |
 | `crestIn`・`crestOut` | 持ち主 | `c`・`i` | クレスト（信仰を含む）を持った・無くなった |
 | `pp`・`maxPp` | 持ち主 | `n`（増減） | PP・PP の最大値が変わった |
-| `turnEnd` | ターンを終えた側 | `pp`（残した PP）・`playable`（そのとき手札からプレイできたカード。同じカードは 1 回） | ターンを終えた（ターン終了を選ぶ直前の局面） |
+| `turnEnd` | ターンを終えた側 | `pp`（残した PP）・`playable`（そのとき手札からプレイできたカード。同じカードは 1 回）・`combo`（そのターンのコンボの数）・`crests`（持っているクレスト。信仰も） | ターンを終えた（ターン終了を選ぶ直前の局面）。`combo`・`crests` は 2026-11-20 から（ダストデイズの調べ） |
 
 `trigger` から `bounce` までは、エンジンが打ち直しの間に残したもの（`rust/engine/src/trace.rs`。試合は変えない。前の profile のクレストの数え方 `crest_tally.rs` はこれに替えて消した）。
 どの出来事を足しても、打つ手・試合は変わらない。
@@ -145,10 +145,11 @@ svwb kifu seats <棋譜>… [--where '<条件>,…'] [--out 席.jsonl]
 | `card`・`target`・`as` | カード（`c`）・攻撃先（`t`。リーダーは `leader`）・プレイしたときの姿（`as`）の ID か名前 |
 | `mode` | プレイの仕方（`mode=accelerate`・`crystal`・`enhance`） |
 | `crest` | クレストの能力の誘発・クレストの出入り（値を付けなければクレストのものだけ、`crest~クキシロ` で名前も） |
+| `holds` | `turnEnd` の、持っているクレスト（`holds~ダストデイズ`。どれかが合えばよい。`!~`・`!=` はどれにも合わない） |
 | `own`・`opp` | その席の自分のターン・相手のターンに起きた |
 | `search`・`burned`・`ep` | 上の表の同じ名前の項目が true |
 | `turn`・`tc` | 全体のターン番号・その手番のプレイヤーの何ターン目か |
-| `n`・`pp`・`ab`・`playable`・`i`・`ougi` | 数の項目（`playable` は数。`playable>0 pp>0` で、プレイできるカードと PP を残してターンを終えた） |
+| `n`・`pp`・`ab`・`playable`・`combo`・`i`・`ougi` | 数の項目（`playable` は数。`playable>0 pp>0` で、プレイできるカードと PP を残してターンを終えた。`combo=2 playable>0` で、あと 1 枚打てたのにコンボ 2 で終えた） |
 
 文字の条件は `~`（含む）・`!~`（含まない）・`=`・`!=`、数の条件は `=`・`!=`・`>=`・`<=`・`>`・`<`。分け方（`--by`）は
 `deck`・`arch`・`opp`・`oppArch`・`side`・`agent`・`variant`・`first`（先攻・後攻）・`result`（勝ち・負け・引き分け）・`seat`・`run`・`source`・`engine`・`pool`・`file`。
@@ -164,6 +165,9 @@ svwb kifu winrate data/kifu/kukishiro-check/compare-r3-r2-involving.jsonl.gz --w
 # クキシロのクレストを持った席の割合と、持った席の勝率
 svwb kifu count data/kifu/kukishiro-check --where 'deck~クキシロ' --event 'crestIn crest~クキシロ' --by agent
 svwb kifu count data/kifu/kukishiro-check --where 'deck~クキシロ' --event 'turnEnd pp>0 playable>0' --per turn
+# ダストデイズのクレストを持って終えたターンと、そのうちあと 1 枚打てたのにコンボ 2 で終えたターン（2026-11-20。棋譜は共有フォルダの data/kifu/night-20261117-0328/）
+svwb kifu count data/kifu/night-20261117-0328 --where 'deck~コンボE' --event 'turnEnd holds~ダストデイズ' --by agent
+svwb kifu count data/kifu/night-20261117-0328 --where 'deck~コンボE' --event 'turnEnd holds~ダストデイズ combo=2 playable>0' --by agent
 ```
 
 本体は `rust/engine/src/runner/kifu_cmd.rs`。
