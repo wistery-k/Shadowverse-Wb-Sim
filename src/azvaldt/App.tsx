@@ -1,13 +1,15 @@
 // アズヴォルト環境（前期のローテーション・能力調整後）のページ（ユーザーの依頼 2026-11-19。CLAUDE.md「決定済みの前提」）。
 // タブは「AI対戦（総当たり）」と「問題集」の 2 つだけ。AI 同士の試合と、問題集の決まった局面を表示・再生する。
 // 人間と AI の対戦・デッキの編集や貼り付け・サンドボックス・試合の記録・局面の入力は付けない（実際の対戦の支援にならないように。CLAUDE.md「ソフト打ち」）。
+// AI 同士の試合のリプレイは、seed・両者の AI・デッキ（プロのデッキの ID）を持つ URL（#game?…。src/sim/gameLink.ts）で開ける（ユーザーの依頼 2026-11-20。局面は URL に入らない）。
 // AI は探索 AI に、このページが読み込む補正と見込み R3（data/pools/azvaldt/）を入れたもの（コマンドの R3 と同じ手を選ぶ。tests/nets-azvaldt.test.ts）
 
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { Footer } from "../ui/Footer";
 import { isMissesHash, Misses, type MissesSource } from "../ui/Misses";
 import { Simulate, type DeckPreset } from "../ui/Simulate";
-import { AZVALDT_DECK_OPTIONS, REP10_IDS } from "./decks";
+import { isGameHash } from "../sim/gameLink";
+import { AZVALDT_DECK_OPTIONS, AZVALDT_LINK_DECKS, REP10_IDS } from "./decks";
 
 /** 総当たりで選べる AI（キーは src/ai/registry.ts。探索はこのページの補正 R3 で打つ） */
 const AGENTS: Record<string, string> = {
@@ -47,6 +49,14 @@ export function AzvaldtApp() {
   const [tab, setTabState] = useState<Tab>(() => (isMissesHash() ? "misses" : "sim"));
   // 問題集は、最初に開くまで作らない（開くと問のデータを読み込む）
   const [missesOpened, setMissesOpened] = useState(() => isMissesHash());
+  // 試合の URL（#game?…）を同じページに貼ったら、AI対戦のタブに移る（試合を打ち直すのは Simulate）
+  useEffect(() => {
+    const onHash = () => {
+      if (isGameHash()) setTabState("sim");
+    };
+    addEventListener("hashchange", onHash);
+    return () => removeEventListener("hashchange", onHash);
+  }, []);
   const setTab = (t: Tab) => {
     setTabState(t);
     if (t === "misses") setMissesOpened(true);
@@ -85,6 +95,7 @@ export function AzvaldtApp() {
             defaults={DEFAULTS}
             storageKey="svwb-sim:azvaldt:simulate-selection:v1"
             presets={PRESETS}
+            links={AZVALDT_LINK_DECKS}
             note={
               <p class="muted">
                 デッキは、取り込んだプロのデッキ（プレミアシリーズ 3 回分）だけを選べます。カードは、これらのデッキに入るものだけを実装しています。

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { CLASS_NAMES, type ClassId } from "../cards";
 import type { GameState, PlayerIndex } from "../engine";
 import { workerName } from "../engine";
+import { gameHash, isGameHash, linkMatch, parseGameHash, recordLink, replaceHash, type LinkDecks } from "../sim/gameLink";
 import { runPool } from "../sim/pool";
 import { planGames, summarize, type Entrant, type GameRecord, type GameSpec, type TournamentSummary } from "../sim/tournament";
 import type { WorkerRequest, WorkerResponse } from "../sim/worker";
@@ -41,7 +42,23 @@ interface Props {
   note?: ComponentChildren;
   /** リプレイの局面をサンドボックスで開く */
   onSandbox?: (state: GameState, label: string) => void;
+  /**
+   * 試合の URL（src/sim/gameLink.ts）のデッキの書き方。あれば、リプレイを開くと URL の # に試合（seed・AI・デッキ）を書き、
+   * その URL でページを開くと試合を打ち直してリプレイを開く
+   */
+  links?: LinkDecks;
 }
+
+/** URL で開いた試合（打ち直している途中なら record は null） */
+interface Linked {
+  seed: number;
+  entrants: Entrant[];
+  record: GameRecord | null;
+  error: string | null;
+}
+
+/** 今のページの、# を付けた URL */
+const pageUrl = (hash: string) => location.origin + location.pathname + location.search + hash;
 
 interface Run {
   entrants: Entrant[];
@@ -87,7 +104,7 @@ function saveSelection(key: string, selection: Selection): void {
   }
 }
 
-export function Simulate({ decks: options, agents: agentLabels, defaults, storageKey, presets, note, onSandbox }: Props) {
+export function Simulate({ decks: options, agents: agentLabels, defaults, storageKey, presets, note, onSandbox, links }: Props) {
   // 保存済みの選択には、削除されたデッキの key が残っていることがあるので、今ある選択肢だけに絞る
   const [initial] = useState(() => loadSelection(storageKey, { decks: [...defaults.decks], agents: [...defaults.agents] }, agentLabels));
   const [checkedDecks, setSelected] = useState<string[]>(initial.decks);
@@ -107,6 +124,69 @@ export function Simulate({ decks: options, agents: agentLabels, defaults, storag
     workers.current = [];
   };
   useEffect(() => stop, []);
+
+  // URL の試合（#game?…）: 開いたときと、# が変わったとき（同じページに別の試合の URL を貼ったとき）に打ち直す
+  const [linked, setLinked] = useState<Linked | null>(null);
+  const linkWorker = useRef<Worker | null>(null);
+  function openLink(hash: string) {
+    if (!links) return;
+    linkWorker.current?.terminate();
+    linkWorker.current = null;
+    setReplay(null);
+    const link = parseGameHash(hash);
+    const m = link ? linkMatch(link, links, agentLabels) : "URL の試合の指定（seed・p0・d0・p1・d1）が読めません";
+    if (typeof m === "string") {
+      setLinked({ seed: link?.seed ?? 0, entrants: [], record: null, error: m });
+      return;
+    }
+    setLinked({ seed: m.spec.seed, entrants: m.entrants, record: null, error: null });
+    const worker = new Worker(new URL("../sim/worker.ts", import.meta.url), { type: "module", name: workerName() });
+    linkWorker.current = worker;
+    worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
+      if (e.data.type === "record") {
+        const r = e.data.record;
+        setLinked((l) => (l ? { ...l, record: r, error: r.actions ? null : `試合を打てませんでした: ${r.error ?? "不明なエラー"}` } : l));
+      } else {
+        worker.terminate();
+        if (linkWorker.current === worker) linkWorker.current = null;
+      }
+    };
+    const request: WorkerRequest = { entrants: m.entrants, specs: [m.spec], record: true };
+    worker.postMessage(request);
+  }
+  const closeLinked = () => {
+    linkWorker.current?.terminate();
+    linkWorker.current = null;
+    setLinked(null);
+    if (isGameHash()) replaceHash(null);
+  };
+  useEffect(() => {
+    if (!links) return;
+    if (isGameHash()) openLink(location.hash);
+    const onHash = () => {
+      if (isGameHash()) openLink(location.hash);
+    };
+    addEventListener("hashchange", onHash);
+    return () => {
+      removeEventListener("hashchange", onHash);
+      linkWorker.current?.terminate();
+    };
+  }, []);
+
+  // 総当たりの試合のリプレイを開くと、URL の # にその試合を書く（読み込み直す・URL を送ると同じ試合を打ち直して開く）
+  const openReplay = (r: GameRecord) => {
+    setReplay(r);
+    const link = links && run ? recordLink(r, run.entrants, links) : null;
+    if (link) replaceHash(gameHash(link));
+  };
+  const closeReplay = () => {
+    setReplay(null);
+    if (isGameHash()) replaceHash(null);
+  };
+  const linkOf = (r: GameRecord, entrants: readonly Entrant[]) => {
+    const link = links ? recordLink(r, entrants, links) : null;
+    return link ? pageUrl(gameHash(link)) : undefined;
+  };
 
   function start() {
     stop();
@@ -147,10 +227,29 @@ export function Simulate({ decks: options, agents: agentLabels, defaults, storag
   const entrantCount = selected.length * agents.length;
   const pairCount = (entrantCount * (entrantCount - 1)) / 2 + (mirror ? entrantCount : 0);
 
-  if (run && replay) return <Replay record={replay} entrants={run.entrants} onClose={() => setReplay(null)} onSandbox={onSandbox} />;
+  if (linked?.record?.actions)
+    return <Replay record={linked.record} entrants={linked.entrants} onClose={closeLinked} onSandbox={onSandbox} link={linkOf(linked.record, linked.entrants)} />;
+  if (run && replay) return <Replay record={replay} entrants={run.entrants} onClose={closeReplay} onSandbox={onSandbox} link={linkOf(replay, run.entrants)} />;
 
   return (
     <div class="simulate">
+      {linked && (
+        <section class="panel">
+          <h2>URL の試合</h2>
+          {linked.error ? (
+            <p class="problems">URL の試合を開けませんでした: {linked.error}</p>
+          ) : (
+            <p>
+              {linked.entrants[0]?.name} vs {linked.entrants[1]?.name}（seed {linked.seed}）の試合を、このページの今の版で打ち直しています。終わるとリプレイを開きます（探索 AI は 1 試合に数秒かかります）。
+            </p>
+          )}
+          <div class="row-buttons">
+            <button type="button" onClick={closeLinked}>
+              {linked.error ? "閉じる" : "中止"}
+            </button>
+          </div>
+        </section>
+      )}
       <section class="panel">
         <h2>AI 同士の総当たり</h2>
         {note}
@@ -259,7 +358,7 @@ export function Simulate({ decks: options, agents: agentLabels, defaults, storag
           summary={summarize(run.entrants.length, run.records)}
           pair={pair}
           onPair={setPair}
-          onReplay={setReplay}
+          onReplay={openReplay}
         />
       )}
     </div>
