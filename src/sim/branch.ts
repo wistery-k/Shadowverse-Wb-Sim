@@ -1,6 +1,7 @@
-// 打ち比べ: リプレイのある局面で、実戦の手と別の手をそれぞれ打ち、残りを AI に最後まで打たせて勝率を比べる。
-// 1 試合は Rust の branch_playout（rust/engine/src/sim.rs）。手番のプレイヤーから見えない情報（相手の手札・山札の中身、
+// 打ち比べ: リプレイのある局面で、実戦の手と別の手（か、続けて打つ手の列）をそれぞれ打ち、残りを AI に最後まで打たせて勝率を比べる。
+// 1 試合は Rust の branch_playout・branch_line_playout（rust/engine/src/sim.rs）。手番のプレイヤーから見えない情報（相手の手札・山札の中身、
 // 山札の順番、乱数の状態）を試合ごとに並べ直す。同じ番号の試合はどの手でも同じ並べ直し方・同じ AI の乱数にして、手の違いだけを比べる。
+// 手の列の 2 手目からは、並べ直した局面で同じ手（手の種類と、指すカードの持ち主・場所・カード）を探して打つ。無ければそこから AI が打つ。
 
 import { nextRandom, type Action, type GameState, type PlayerIndex } from "../engine";
 import { callEngine } from "../engine/wasm";
@@ -15,6 +16,19 @@ export function branchPlayout(state: GameState, action: Action, agents: readonly
   return callEngine({ f: "branchPlayout", state, action, agents, seed: seed >>> 0 }) as PlayoutResult | null;
 }
 
+export interface LineResult extends PlayoutResult {
+  /** 手の列のうち、この試合で打てた手の数（最初の手は必ず打つ。手の列の長さと同じなら全部打てた） */
+  followed: number;
+  /** 始めのターンに打った手（手の列の手と、その後に AI が打った続き。ターン終了か決着まで）の説明。選ぶ手は直前の手にまとめる */
+  turn: string[];
+}
+
+/** 打ち比べの、手の列 line を打ってから続きを AI に打たせる 1 試合。最初の手がこの試合の並べ直した局面で打てなければ null。
+ *  手が 1 つなら branchPlayout と同じ試合になる */
+export function branchLine(state: GameState, line: readonly Action[], agents: readonly [string, string], seed: number): LineResult | null {
+  return callEngine({ f: "branchLine", state, line, agents, seed: seed >>> 0 }) as LineResult | null;
+}
+
 /** i 番目の試合のシード（base は打ち比べごとに変えてもよい） */
 export function branchSeed(base: number, i: number): number {
   return nextRandom((base ^ Math.imul(i + 1, 0x9e3779b1)) >>> 0)[1];
@@ -22,6 +36,37 @@ export function branchSeed(base: number, i: number): number {
 
 /** 1 試合の結果: 手番のプレイヤーが勝ったか（打てなかった・エラーなら null） */
 export type Outcome = boolean | null;
+
+/** 1 試合の結果と、手の列をどこまで打てたか・始めのターンに打った手（打てなかった・エラーなら followed は 0、turn は空） */
+export interface Played {
+  outcome: Outcome;
+  followed: number;
+  turn: string[];
+}
+
+/** 始めのターンに打った手順ごとの回数（同じ手順の試合をまとめ、多い順。同じ回数なら手順の文言の順） */
+export interface TurnTally {
+  /** 手順（「 → 」でつないだもの。何も打たなかったら空） */
+  text: string;
+  games: number;
+  /** 勝ち負けの出た試合のうち、手番のプレイヤーが勝った数 */
+  wins: number;
+  decided: number;
+}
+
+export function tallyTurns(played: readonly (Played | undefined)[]): TurnTally[] {
+  const by = new Map<string, TurnTally>();
+  for (const p of played) {
+    if (!p || p.outcome === null) continue;
+    const text = p.turn.join(" → ");
+    const t = by.get(text) ?? { text, games: 0, wins: 0, decided: 0 };
+    t.games++;
+    t.decided++;
+    if (p.outcome) t.wins++;
+    by.set(text, t);
+  }
+  return [...by.values()].sort((a, b) => b.games - a.games || (a.text < b.text ? -1 : a.text > b.text ? 1 : 0));
+}
 
 export interface BranchStats {
   /** 結果が出た試合数 */

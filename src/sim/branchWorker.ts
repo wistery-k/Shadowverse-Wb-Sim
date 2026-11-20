@@ -1,13 +1,13 @@
-// 打ち比べの Web Worker。受け取った 1 つの仕事（試合の番号と手）を 1 試合打って結果を返す。
+// 打ち比べの Web Worker。受け取った 1 つの仕事（試合の番号と手の列）を 1 試合打って結果を返す。
 // 仕事は src/sim/pool.ts の runPool が 1 つずつ配る（終わったら次をもらう）。
 
 import { initEngine, type Action, type GameState, type PlayerIndex } from "../engine";
-import { branchPlayout, branchSeed, type Outcome } from "./branch";
+import { branchLine, branchSeed, type Played } from "./branch";
 
 export interface BranchRequest {
   state: GameState;
-  /** 比べる手（0 番目が実戦の手） */
-  actions: Action[];
+  /** 比べる手の列（0 番目が基準。手が 1 つの列は、前からの 1 手の打ち比べと同じ試合になる） */
+  lines: Action[][];
   /** プレイヤー0・1の AI（src/ai/registry.ts のキー） */
   agents: [string, string];
   /** 勝ちを数えるプレイヤー（この局面の手番のプレイヤー） */
@@ -15,30 +15,30 @@ export interface BranchRequest {
   seedBase: number;
   /** 打つ試合の番号（シードを決める） */
   game: number;
-  /** 打つ手の添字（actions の何番目か） */
-  action: number;
+  /** 打つ手の列の添字（lines の何番目か） */
+  line: number;
 }
 
 export type BranchResponse =
-  | { type: "outcome"; game: number; action: number; outcome: Outcome }
+  | { type: "outcome"; game: number; line: number; played: Played }
   | { type: "error"; message: string }
   | { type: "done" };
 
 self.onmessage = async (e: MessageEvent<BranchRequest>) => {
-  const { state, actions, agents, viewer, seedBase, game, action } = e.data;
+  const { state, lines, agents, viewer, seedBase, game, line } = e.data;
   try {
     await initEngine();
-    const a = actions[action];
-    let outcome: Outcome = null;
-    if (a !== undefined) {
+    const l = lines[line];
+    let played: Played = { outcome: null, followed: 0, turn: [] };
+    if (l !== undefined && l.length > 0) {
       try {
-        const r = branchPlayout(state, a, agents, branchSeed(seedBase, game));
-        outcome = r && r.winner !== null ? r.winner === viewer : null;
+        const r = branchLine(state, l, agents, branchSeed(seedBase, game));
+        if (r) played = { outcome: r.winner !== null ? r.winner === viewer : null, followed: r.followed, turn: r.turn };
       } catch {
-        outcome = null;
+        // 打てなかった試合として数える
       }
     }
-    const response: BranchResponse = { type: "outcome", game, action, outcome };
+    const response: BranchResponse = { type: "outcome", game, line, played };
     self.postMessage(response);
   } catch (err) {
     const response: BranchResponse = { type: "error", message: String(err) };

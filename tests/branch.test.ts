@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_DECKS } from "../src/cards/defaultDecks";
 import { agentOf } from "../src/ai/registry";
 import { legalActions } from "../src/engine";
-import { branchPlayout, branchSeed, branchStats, diffStats } from "../src/sim/branch";
+import { applyAction, actingPlayer } from "../src/engine";
+import { branchLine, branchPlayout, branchSeed, branchStats, diffStats, tallyTurns } from "../src/sim/branch";
 import { playMatch } from "../src/sim/match";
 import { replayStates } from "../src/sim/replay";
 
@@ -30,6 +31,47 @@ describe("打ち比べ", () => {
 
   it("打てない手は null", () => {
     expect(branchPlayout(state, { type: "attack", attacker: -12345, target: "leader" }, ["random", "random"], 1)).toBeNull();
+  });
+
+  it("手が 1 つの手の列は、前からの 1 手の打ち比べと同じ試合になる", () => {
+    for (const a of legalActions(state)) {
+      for (const seed of [5, branchSeed(3, 1)]) {
+        const old = branchPlayout(state, a, ["random", "random"], seed);
+        const line = branchLine(state, [a], ["random", "random"], seed);
+        expect(line).not.toBeNull();
+        expect({ winner: line!.winner, turns: line!.turns }).toEqual(old);
+        expect(line!.followed).toBe(1);
+        expect(line!.turn.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("手の列を最後まで打ち、始めのターンに打った手を返す", () => {
+    // 手番が続く手の後にターンを終える手の列
+    const p = actingPlayer(state);
+    const first = legalActions(state).find((a) => a.type !== "endTurn" && actingPlayer(applyAction(state, a)) === p && !applyAction(state, a).pending);
+    if (!first) return;
+    for (let i = 0; i < 4; i++) {
+      const r = branchLine(state, [first, { type: "endTurn" }], ["random", "random"], branchSeed(2, i));
+      expect(r).not.toBeNull();
+      expect(r!.followed).toBe(2);
+      expect(r!.turn[r!.turn.length - 1]).toBe("ターン終了");
+      expect(branchLine(state, [first, { type: "endTurn" }], ["random", "random"], branchSeed(2, i))).toEqual(r);
+    }
+  });
+
+  it("始めのターンの手順を、同じ手順の試合でまとめる", () => {
+    const t = tallyTurns([
+      { outcome: true, followed: 2, turn: ["A", "B"] },
+      { outcome: false, followed: 2, turn: ["A", "B"] },
+      { outcome: true, followed: 1, turn: ["A", "C"] },
+      { outcome: null, followed: 0, turn: [] },
+      undefined,
+    ]);
+    expect(t).toEqual([
+      { text: "A → B", games: 2, wins: 1, decided: 2 },
+      { text: "A → C", games: 1, wins: 1, decided: 1 },
+    ]);
   });
 
   it("勝率と、同じ試合どうしの差を集計する", () => {

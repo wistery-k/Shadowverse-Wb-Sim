@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { AGENTS } from "../ai/registry";
-import { cardOf, currentNets, legalActions, opponent, type GameState, type PlayerIndex } from "../engine";
+import { actingPlayer, cardOf, currentNets, legalActions, opponent, type Action, type GameState, type PlayerIndex } from "../engine";
 import { replayStates } from "../sim/replay";
 import { reproduceCommand } from "../sim/reproduce";
 import { seatDecks, type Entrant, type GameRecord } from "../sim/tournament";
@@ -98,8 +98,25 @@ export function Replay({ record, entrants, onClose, onSandbox, initialStep, init
     logRef.current?.querySelector(".current")?.scrollIntoView({ block: "nearest" });
   }, [step]);
 
-  const state = states[step]!;
+  const real = states[step]!;
   const winnerName = record.seats ? names[record.seats.winner] : "なし";
+  // 打ち比べで作っている手の列を打った後の局面（作った局面でだけ、盤面に出す）
+  const [preview, setPreview] = useState<{ step: number; state: GameState } | null>(null);
+  const previewing = preview !== null && preview.step === step;
+  // 盤面に出す局面
+  const state = previewing ? preview.state : real;
+  // 実戦でこの局面から同じターンに手番の側が続けて打った手（ターン終了まで）
+  const actualLine = useMemo(() => {
+    const p = actingPlayer(real);
+    const out: Action[] = [];
+    for (let i = step; i < actions.length; i++) {
+      const s = states[i]!;
+      if (s.phase !== "main" || s.turn !== real.turn || actingPlayer(s) !== p) break;
+      out.push(actions[i]!);
+      if (actions[i]!.type === "endTurn") break;
+    }
+    return out;
+  }, [states, step]);
 
   // 手番のフォロワーの攻撃の可否
   const attackable = useMemo(() => attackStatuses(state), [state]);
@@ -133,8 +150,8 @@ export function Replay({ record, entrants, onClose, onSandbox, initialStep, init
   const { motions, leaderHit } = useMemo(() => {
     const motions = new Map<number, Motion>();
     let leaderHit: PlayerIndex | null = null;
-    const prev = step > 0 ? states[step - 1]! : null;
-    const action = step > 0 ? actions[step - 1] : undefined;
+    const prev = step > 0 && !previewing ? states[step - 1]! : null;
+    const action = step > 0 && !previewing ? actions[step - 1] : undefined;
     if (prev) {
       for (const p of [0, 1] as const) {
         const before = new Set(prev.players[p].board.map((c) => c.iid));
@@ -147,7 +164,7 @@ export function Replay({ record, entrants, onClose, onSandbox, initialStep, init
       else motions.set(action.target, "hit");
     }
     return { motions, leaderHit };
-  }, [states, step, bottom]);
+  }, [states, step, bottom, previewing]);
 
   const side = (p: PlayerIndex, top: boolean) => {
     const pl = state.players[p];
@@ -220,7 +237,7 @@ export function Replay({ record, entrants, onClose, onSandbox, initialStep, init
         </span>
       </div>
       <Reproduce record={record} entrants={entrants} names={names} />
-      <div class="game">
+      <div class={`game${previewing ? " previewing" : ""}`}>
         {side(opponent(bottom), true)}
         {side(bottom, false)}
         <section class="controls">
@@ -273,7 +290,7 @@ export function Replay({ record, entrants, onClose, onSandbox, initialStep, init
                   title="この局面を「サンドボックス」タブで開きます（盤面・手札を編集して、AI に考えさせたり手を打ち比べたりできます）"
                   onClick={() => {
                     setPlaying(false);
-                    onSandbox(state, `リプレイの局面（${names[0]} vs ${names[1]}、seed ${record.seed}、${step} 手目の後）`);
+                    onSandbox(real, `リプレイの局面（${names[0]} vs ${names[1]}、seed ${record.seed}、${step} 手目の後）`);
                   }}
                 >
                   サンドボックスで開く
@@ -283,13 +300,14 @@ export function Replay({ record, entrants, onClose, onSandbox, initialStep, init
             <input type="range" min={0} max={last} value={step} onInput={(e) => go(Number(e.currentTarget.value))} />
             <div>
               {step === 0 ? "対戦開始" : `直前: ${lines[step - 1]}`}
-              {step === last && state.phase === "ended" && <strong> — {winnerName}の勝利</strong>}
+              {step === last && real.phase === "ended" && <strong> — {winnerName}の勝利</strong>}
             </div>
             {step < last && <div class="muted">次: {lines[step]}</div>}
+            {previewing && <div class="branch-preview">盤面は、打ち比べで作っている手の列を打った後の局面です（手の列をやり直すか、打ち比べを閉じると戻ります）</div>}
           </div>
           {step < last && (
             <AiThought
-              state={state}
+              state={real}
               step={step}
               actual={actions[step]!}
               names={names}
@@ -300,9 +318,10 @@ export function Replay({ record, entrants, onClose, onSandbox, initialStep, init
           )}
           {step < last && (
             <BranchCompare
-              state={state}
+              state={real}
               step={step}
               actual={actions[step]!}
+              actualLine={actualLine}
               names={names}
               matchAgents={matchAgents}
               seed={record.seed}
@@ -311,6 +330,7 @@ export function Replay({ record, entrants, onClose, onSandbox, initialStep, init
                 setPlaying(false);
                 go(s);
               }}
+              onPreview={(s) => setPreview(s ? { step, state: s } : null)}
             />
           )}
         </section>
