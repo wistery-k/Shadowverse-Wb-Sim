@@ -978,6 +978,9 @@ progress {
 }
 .replay {
   display: grid;
+  /* 長い行（再現のコマンド。プロのデッキはカードの ID を 40 枚分並べる）で画面より広がらないようにする。
+     列の幅を決めないと、列が中身の幅まで広がり、対戦画面と手札のカードがその幅に合わせて大きくなる */
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
 }
 .replay-buttons {
@@ -1108,6 +1111,8 @@ progress {
 }
 .repro-command pre {
   flex: 1;
+  /* 長いコマンドは枠の中で横に送る（中身の幅まで枠を広げない） */
+  min-width: 0;
   margin: 0;
   padding: 6px 8px;
   overflow-x: auto;
