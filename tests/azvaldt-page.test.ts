@@ -5,6 +5,11 @@ import { describe, expect, it } from "vitest";
 import { AZVALDT_DECK_OPTIONS, eventShort, REP10_IDS, setDeckIds } from "../src/azvaldt/decks";
 import { loadMisses } from "../src/misses/azvaldtData";
 import { PRO_DECKS } from "../src/record/decks";
+import "../src/record/pool";
+import { applyAction, createGame, legalActions, nextRandom, type Action } from "../src/engine";
+import { loadTexts } from "../src/replays/games";
+import { cardIdsOf } from "../src/replays/query";
+import { deckClass } from "../src/replays/records";
 
 describe("アズヴォルト環境のページ", () => {
   it("選べるデッキは取り込んだプロのデッキ 84 個だけ", () => {
@@ -33,5 +38,26 @@ describe("アズヴォルト環境のページ", () => {
     const files = readdirSync("misses/azvaldt").filter((f) => f.endsWith(".json"));
     expect(data.problems.map((p) => `${p.id}.json`)).toEqual([...files].sort());
     for (const p of data.problems) expect(p.source).not.toMatch(/records\/pro/);
+  });
+
+  it("開発サーバーのリプレイ検索で、前期のローテーションの試合の棋譜を読める（カードの表に足したプールのカードを引く）", () => {
+    const [a, b] = [AZVALDT_DECK_OPTIONS[0]!, AZVALDT_DECK_OPTIONS.find((d) => d.cls !== AZVALDT_DECK_OPTIONS[0]!.cls)!];
+    const decks: [string[], string[]] = [[...a.cards], [...b.cards]];
+    let s = createGame({ decks, seed: 3 });
+    let r = 3;
+    const actions: Action[] = [];
+    while (s.phase !== "ended" && actions.length < 3000) {
+      const legal = legalActions(s);
+      const [v, next] = nextRandom(r);
+      r = next;
+      const act = legal[Math.floor(v * legal.length)]!;
+      actions.push(act);
+      s = applyAction(s, act);
+    }
+    const loaded = loadTexts("g.json", [JSON.stringify({ seed: 3, decks, actions, winner: s.winner })], { nextId: 0, firstLine: 1 });
+    expect(loaded.errors).toEqual([]);
+    expect(loaded.games).toHaveLength(1);
+    expect(deckClass(a.cards)).toBe(a.cls);
+    expect(cardIdsOf("空の命運を握る少女・ルリア")).toEqual(new Set(["10403120"]));
   });
 });

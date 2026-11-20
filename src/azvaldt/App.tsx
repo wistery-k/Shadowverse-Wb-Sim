@@ -6,6 +6,7 @@
 import { useState } from "preact/hooks";
 import { Footer } from "../ui/Footer";
 import { isMissesHash, Misses, type MissesSource } from "../ui/Misses";
+import { ReplaySearch } from "../ui/ReplaySearch";
 import { Simulate, type DeckPreset } from "../ui/Simulate";
 import { AZVALDT_DECK_OPTIONS, REP10_IDS } from "./decks";
 
@@ -35,11 +36,18 @@ const MISSES: MissesSource = {
     "局面はどれも、このシミュレータの中の AI（探索 AI に補正 R3 を入れたもの）どうしの自己対戦（打ち比べ調査）から取ったもので、ここで見られるのはリポジトリにある問だけです。",
 };
 
-type Tab = "sim" | "misses";
+type Tab = "sim" | "misses" | "replays";
+
+/**
+ * リプレイ検索（開発サーバーだけ。ユーザーの依頼 2026-11-20）: 手元の棋譜（`npm run game -- … --pool azvaldt --json` 等）を開き、
+ * このページの補正 R3 で打ち比べる。vite build ではモジュールが空のものに置き換わり（scripts/replay-files.ts の DEV_ONLY_MODULES）、公開サイトには出ない
+ */
+const REPLAY_SEARCH = import.meta.env.DEV;
 
 const TABS: readonly [Tab, string][] = [
   ["sim", "AI対戦（総当たり）"],
   ["misses", "問題集"],
+  ...(REPLAY_SEARCH ? [["replays", "リプレイ検索"] as [Tab, string]] : []),
 ];
 
 export function AzvaldtApp() {
@@ -47,9 +55,11 @@ export function AzvaldtApp() {
   const [tab, setTabState] = useState<Tab>(() => (isMissesHash() ? "misses" : "sim"));
   // 問題集は、最初に開くまで作らない（開くと問のデータを読み込む）
   const [missesOpened, setMissesOpened] = useState(() => isMissesHash());
+  const [replaysOpened, setReplaysOpened] = useState(false);
   const setTab = (t: Tab) => {
     setTabState(t);
     if (t === "misses") setMissesOpened(true);
+    if (t === "replays") setReplaysOpened(true);
     // 問題集を離れたら URL の #misses を消す（読み込み直したときに問題集が開かないように）
     else if (isMissesHash()) {
       try {
@@ -96,6 +106,11 @@ export function AzvaldtApp() {
         {missesOpened && (
           <div hidden={tab !== "misses"}>
             <Misses source={MISSES} active={tab === "misses"} />
+          </div>
+        )}
+        {REPLAY_SEARCH && replaysOpened && (
+          <div hidden={tab !== "replays"}>
+            <ReplaySearch />
           </div>
         )}
       </main>

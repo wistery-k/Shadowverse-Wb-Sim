@@ -6,8 +6,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { AGENTS } from "../ai/registry";
-import { ALL_CARDS, CLASS_IDS, CLASS_NAMES, type ClassId } from "../cards";
-import type { GameState, PlayerIndex } from "../engine";
+import { CLASS_IDS, CLASS_NAMES, type ClassId } from "../cards";
+import { knownCards, type GameState, type PlayerIndex } from "../engine";
 import { REPLAY_API, type ReplayFileEntry, type ReplayFileList } from "../replays/api";
 import { ReplayLibrary, readStreamText, type FileStatus, type SearchResult } from "../replays/library";
 import {
@@ -81,7 +81,8 @@ const PRESETS: { label: string; apply: (q: ReplayQuery) => ReplayQuery }[] = [
 ];
 
 /** カード名を選ぶ候補（同じ名前は 1 つ） */
-const CARD_NAMES = [...new Set(ALL_CARDS.map((c) => c.name))];
+// 画面のカードの表から（アズヴォルト環境のページでは、入口が先に足した前期のローテーションのカードも）
+const CARD_NAMES = [...new Set(knownCards().map((c) => c.name))];
 
 const CARD_KINDS: ReadonlySet<CondKind> = new Set(["played", "evolved", "attacked", "entered", "left", "survived", "onBoard", "inHand"]);
 

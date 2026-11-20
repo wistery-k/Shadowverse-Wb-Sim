@@ -4,8 +4,9 @@
 // 条件は「いつ（このターン・前の自分のターン・これより前のどれか…）」と「何が（プレイした・場にいた・数値…）」の組で、全部を満たすターンを探す。
 // 込み入った条件は JavaScript の式でも書ける（開発サーバーだけの機能なので、式はそのまま実行する）。
 
-import { ALL_CARDS, CARDS_BY_ID, CLASS_NAMES, type ClassId } from "../cards";
+import { CLASS_NAMES, type ClassId } from "../cards";
 import type { PlayerIndex } from "../engine";
+import { findCard, knownCards } from "../engine/registry";
 import type { BoardSnap, LoadedGame, SideSnap, TurnEventKind, TurnIndex } from "./types";
 
 export type Who = "me" | "opp" | "any";
@@ -136,17 +137,19 @@ export function emptyQuery(): ReplayQuery {
 
 // ---- カード名 ----
 
-/** カード名の指定に合うカードID（空なら null = どのカードでも）。同じ名前のカードがあればそれだけ、無ければ名前の一部が合うもの */
+/** カード名の指定に合うカードID（空なら null = どのカードでも）。同じ名前のカードがあればそれだけ、無ければ名前の一部が合うもの。
+ *  カードは画面のカードの表から引く（アズヴォルト環境のページでは前期のローテーションのカードも） */
 export function cardIdsOf(text: string): Set<string> | null {
   const t = text.trim();
   if (t === "") return null;
-  const exact = ALL_CARDS.filter((c) => c.name === t);
-  const ids = new Set((exact.length > 0 ? exact : ALL_CARDS.filter((c) => c.name.includes(t))).map((c) => c.id));
-  if (CARDS_BY_ID.has(t)) ids.add(t);
+  const all = knownCards();
+  const exact = all.filter((c) => c.name === t);
+  const ids = new Set((exact.length > 0 ? exact : all.filter((c) => c.name.includes(t))).map((c) => c.id));
+  if (findCard(t)) ids.add(t);
   return ids;
 }
 
-const nameOf = (id: string): string => CARDS_BY_ID.get(id)?.name ?? id;
+const nameOf = (id: string): string => findCard(id)?.name ?? id;
 
 // ---- 条件を確かめる ----
 
