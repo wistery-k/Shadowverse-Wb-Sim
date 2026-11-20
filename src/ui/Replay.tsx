@@ -23,6 +23,8 @@ interface Props {
   initialBottom?: PlayerIndex;
   /** 戻るボタンの文言 */
   backLabel?: string;
+  /** この試合の URL（src/sim/gameLink.ts。開くと、そのときのページの版で同じ試合を打ち直す） */
+  link?: string | undefined;
 }
 
 const SPEEDS = [
@@ -31,7 +33,7 @@ const SPEEDS = [
   { ms: 200, label: "速い" },
 ];
 
-export function Replay({ record, entrants, onClose, onSandbox, initialStep, initialBottom, backLabel }: Props) {
+export function Replay({ record, entrants, onClose, onSandbox, initialStep, initialBottom, backLabel, link }: Props) {
   const actions = record.actions ?? [];
   const states = useMemo(() => replayStates(seatDecks(record, entrants), record.seed, actions), [record, entrants]);
   const classes = useMemo(() => leaderClasses(states[0]!), [states]);
@@ -236,7 +238,7 @@ export function Replay({ record, entrants, onClose, onSandbox, initialStep, init
           {names[0]} vs {names[1]} / 勝者: {winnerName} / {record.turns} ターン / seed {record.seed}
         </span>
       </div>
-      <Reproduce record={record} entrants={entrants} names={names} />
+      <Reproduce record={record} entrants={entrants} names={names} link={link} />
       <div class={`game${previewing ? " previewing" : ""}`}>
         {side(opponent(bottom), true)}
         {side(bottom, false)}
@@ -365,15 +367,23 @@ export function Replay({ record, entrants, onClose, onSandbox, initialStep, init
 
 const REPO_URL = "https://github.com/wistery-k/Shadowverse-Wb-Sim";
 
+function safeDecodeURI(s: string): string {
+  try {
+    return decodeURI(s);
+  } catch {
+    return s;
+  }
+}
+
 /** 試合を手元で再現するための情報（コミット・両者の AI とデッキ・コマンド） */
-function Reproduce({ record, entrants, names }: { record: GameRecord; entrants: readonly Entrant[]; names: [string, string] }) {
-  const [copied, setCopied] = useState(false);
+function Reproduce({ record, entrants, names, link }: { record: GameRecord; entrants: readonly Entrant[]; names: [string, string]; link: string | undefined }) {
+  const [copied, setCopied] = useState<"command" | "link" | null>(null);
   const seats = record.aIsPlayer0 ? [entrants[record.a]!, entrants[record.b]!] : [entrants[record.b]!, entrants[record.a]!];
   const command = [...(__BUILD_COMMIT__ ? [`git checkout ${__BUILD_COMMIT__}`] : []), reproduceCommand(record, entrants, currentNets())].join("\n");
-  const copy = () => {
-    void navigator.clipboard?.writeText(command).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+  const copy = (what: "command" | "link", text: string) => {
+    void navigator.clipboard?.writeText(text).then(() => {
+      setCopied(what);
+      setTimeout(() => setCopied(null), 1500);
     });
   };
   return (
@@ -398,10 +408,26 @@ function Reproduce({ record, entrants, names }: { record: GameRecord; entrants: 
       ))}
       <div class="repro-command">
         <pre>{command}</pre>
-        <button type="button" onClick={copy}>
-          {copied ? "コピーしました" : "コピー"}
+        <button type="button" onClick={() => copy("command", command)}>
+          {copied === "command" ? "コピーしました" : "コピー"}
         </button>
       </div>
+      {link && (
+        <>
+          <div class="repro-command">
+            <a class="repro-link" href={link}>
+              {/* 表示は日本語のデッキの名前を読めるようにする（リンクとコピーは % の形のまま） */}
+              {safeDecodeURI(link)}
+            </a>
+            <button type="button" onClick={() => copy("link", link)}>
+              {copied === "link" ? "コピーしました" : "URL をコピー"}
+            </button>
+          </div>
+          <div class="muted">
+            この試合の URL（seed・両者の AI とデッキ）。開くと、そのときのページの版で同じ試合を打ち直します。版が同じなら同じ試合になり、版が違うと手が変わることがあります。
+          </div>
+        </>
+      )}
     </div>
   );
 }

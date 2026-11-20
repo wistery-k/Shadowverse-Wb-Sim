@@ -3,6 +3,7 @@
 
 import rep10Text from "../../data/pools/azvaldt/sets/rep10.txt?raw";
 import { PRO_DECKS, PRO_EVENTS, proDeck } from "../record/decks";
+import { sameCards, type LinkDecks } from "../sim/gameLink";
 import type { DeckOption } from "../ui/Simulate";
 
 /** 組のファイル（data/pools/azvaldt/sets/*.txt。1 行に 1 つのデッキのファイルの道、# の後は注）のデッキの ID（`<大会>/<チーム>_<クラス>`） */
@@ -39,3 +40,15 @@ export const AZVALDT_DECK_OPTIONS: readonly DeckOption[] = PRO_DECKS.map((d) => 
     group: ev ? `${ev.name}（${ev.date}）` : d.event,
   };
 });
+
+/**
+ * 試合の URL（src/sim/gameLink.ts）のデッキの書き方: 取り込んだプロのデッキの ID だけ（カードの列は書かない・読まない。
+ * このページで選べるのはプロのデッキだけなので。CLAUDE.md「決定済みの前提」のアズヴォルト環境のページの条件）
+ */
+export const AZVALDT_LINK_DECKS: LinkDecks = {
+  encode: (cards) => AZVALDT_DECK_OPTIONS.find((o) => sameCards(o.cards, cards))?.key ?? null,
+  decode(param) {
+    const o = AZVALDT_DECK_OPTIONS.find((x) => x.key === param);
+    return o ? { cards: [...o.cards], label: o.label } : `このページで選べるデッキ（取り込んだプロのデッキ）にありません: ${param}`;
+  },
+};

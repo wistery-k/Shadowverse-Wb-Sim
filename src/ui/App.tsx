@@ -1,5 +1,6 @@
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { createGame, rngFrom, type Action, type GameState, type PlayerIndex } from "../engine";
+import { isGameHash, STARTER_LINK_DECKS } from "../sim/gameLink";
 import { buildHumanRecord } from "../sim/humanRecord";
 import { compareMatch, OPPONENTS as COMPARE_OPPONENTS } from "../sim/humanCompare";
 import { DeckSelect, resolveDeck, type DeckChoice } from "./DeckSelect";
@@ -93,8 +94,16 @@ const TABS: readonly [Tab, string][] = [
 ];
 
 export function App() {
-  // URL が #misses（問題集の問）なら問題集を開く
-  const [tab, setTabState] = useState<Tab>(() => (isMissesHash() ? "misses" : "play"));
+  // URL が #misses（問題集の問）なら問題集を、#game（AI 同士の試合。src/sim/gameLink.ts）なら AI対戦を開く
+  const [tab, setTabState] = useState<Tab>(() => (isMissesHash() ? "misses" : isGameHash() ? "sim" : "play"));
+  // 試合の URL を同じページに貼ったら、AI対戦のタブに移る（試合を打ち直すのは Simulate）
+  useEffect(() => {
+    const onHash = () => {
+      if (isGameHash()) setTabState("sim");
+    };
+    addEventListener("hashchange", onHash);
+    return () => removeEventListener("hashchange", onHash);
+  }, []);
   // リプレイ検索は、最初に開くまで作らない（開くと手元のファイルの一覧を取りに行く）
   const [replaysOpened, setReplaysOpened] = useState(false);
   // 問題集も、最初に開くまで作らない（開くと問のデータを読み込む）
@@ -192,6 +201,7 @@ export function App() {
             agents={SIM_AGENTS}
             defaults={SIM_DEFAULTS}
             storageKey="svwb-sim:simulate-selection:v1"
+            links={STARTER_LINK_DECKS}
             {...(SANDBOX ? { onSandbox: openSandbox } : {})}
           />
         </div>
