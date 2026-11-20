@@ -2028,6 +2028,106 @@ fn line_table(runs: &[TurnRun], cards: bool) {
     }
 }
 
+/// `survey turns --why`: 局面 start から、r 回目の決定化と AI の乱数で、記録した手（turn）を打ち進め、候補の並び plan を打ち終えた後に
+/// AI が初めて考え直す判断で、AI が読む候補（読み直した候補と足した候補）と点数を出す。
+/// 乱数は playout_ends_with と同じ取り方（判断ごとに MatchRng の乱数を 1 つ使う）なので、選ぶ手は記録の手と同じになるはず（違えば書く）
+fn why_at(
+    opts: &SearchOptions,
+    start: &GameState,
+    p: PlayerIndex,
+    plan: &[Action],
+    seed: u32,
+    r: u32,
+    turn: &[(Action, String)],
+) -> Result<Vec<String>, String> {
+    reset_lethal();
+    reset_exact_lethal_cache();
+    let det = determinize(start, p, &mut Rng::new(mix(seed, 1_000_000 + r)), false);
+    let x = mix(seed, 2_000_000 + r);
+    let mut rng = MatchRng::with_shared(x, x);
+    // 候補の並びのうち、playout が並びとして打つ手（ターン終了と、最初の打てない手の前まで）
+    let mut t = det.clone();
+    let mut planned = 0;
+    for a in plan {
+        if matches!(a, Action::EndTurn) || !is_legal(&t, a) {
+            break;
+        }
+        t = apply_legal(&t, a);
+        planned += 1;
+    }
+    let mut s = det;
+    let mut k = 0usize;
+    for (a, _) in turn {
+        if s.phase == Phase::Ended || s.turn != start.turn {
+            break;
+        }
+        let mine = acting_player(&s) == p;
+        let legal = legal_actions(&s);
+        let mut dr = Rng {
+            state: rng.next(&s, acting_player(&s), false).state,
+        };
+        if mine && k >= planned.max(1) {
+            let agent = SearchAgent::new(opts.clone());
+            let names = ["-".to_string(), "-".to_string()];
+            let mut out = vec![String::new(), "### 考え直す局面".into(), String::new()];
+            for l in describe(&s, p, &names) {
+                out.push(format!("    {l}"));
+            }
+            let sv = agent
+                .survey_plans(&s, &legal, &mut dr, 4)
+                .ok_or("候補が作れません（打てる手が 1 つ）")?;
+            if sv.lethal {
+                out.push("リーサルを見つけた（候補を比べない）".into());
+                return Ok(out);
+            }
+            let root = sv.root.as_ref().unwrap_or(&s);
+            out.push(String::new());
+            out.push(format!(
+                "### AI が読む候補（ビームの終局面 {}）",
+                sv.terminals
+            ));
+            out.push(String::new());
+            out.push("| 選ぶ | 種類 | 選ぶときの値 | ターン末の点数（順位） | 読んだ並び（ビームの終局面まで） |".into());
+            out.push("| --- | --- | ---: | ---: | --- |".into());
+            for pl in &sv.plans {
+                let kind = if pl.cut {
+                    CUT
+                } else if pl.top {
+                    READ
+                } else {
+                    EXTRA
+                };
+                out.push(format!(
+                    "| {} | {kind} | {} | {:.2}（{}） | {} |",
+                    if pl.chosen { "○" } else { "" },
+                    pl.value.map_or("-".to_string(), |v| format!("{v:.3}")),
+                    pl.turn_end,
+                    pl.rank + 1,
+                    texts(root, &pl.full, p).join(" → ")
+                ));
+            }
+            let chosen = sv
+                .plans
+                .iter()
+                .find(|x| x.chosen)
+                .and_then(|x| x.steps.first());
+            if chosen != Some(a) {
+                out.push(String::new());
+                out.push(format!(
+                    "（この判断の手が記録と違う: 記録は「{}」）",
+                    step_text(&s, a, p)
+                ));
+            }
+            return Ok(out);
+        }
+        if mine {
+            k += 1;
+        }
+        s = apply_legal(&s, a);
+    }
+    Err("この回は、並びを打ち終えた後に AI が考え直す判断がありません".into())
+}
+
 /// svwb survey turns: 調査の結果の 1 局面の打ち比べを、run と同じ乱数・同じ打ち方で打ち直し、回ごとに、始めのターンに実際に打った手順
 /// （候補の手と、その後に AI が打った続き。ターン終了まで）と勝ち負けを記録する（2026-11-19。ユーザーの依頼。docs/survey.md「回ごとのターンの手順」）。
 /// 候補の並び（steps）や読んだ並び（full）はターンの終わりまでとは限らないので、打ち比べが実際にどの手順で勝っていたかはこれで見る。
@@ -2037,8 +2137,8 @@ fn line_table(runs: &[TurnRun], cards: bool) {
 /// しなかった回の勝率も出す
 fn turns(argv: &[String]) -> Result<(), String> {
     let (flags, files) = parse_flags(argv)?;
-    check_flags(&flags, &["pos", "stage", "out", "cards"])?;
-    let usage = "svwb survey turns <結果.jsonl>… --pos <試合>:<手の番号> [--stage 2] [--out <回ごと.jsonl>] [--cards <カード名>,…]";
+    check_flags(&flags, &["pos", "stage", "out", "cards", "why"])?;
+    let usage = "svwb survey turns <結果.jsonl>… --pos <試合>:<手の番号> [--stage 2] [--out <回ごと.jsonl>] [--cards <カード名>,…] [--why <回>,…]";
     let pos = flag(&flags, "pos").ok_or_else(|| format!("--pos を渡してください（{usage}）"))?;
     let (g, i) = pos
         .split_once(':')
@@ -2305,6 +2405,47 @@ fn turns(argv: &[String]) -> Result<(), String> {
                     ws.len(),
                     ws.iter().sum::<f64>()
                 );
+            }
+        }
+    }
+    // --why: 指定した回で、候補の並びを打ち終えて AI が初めて考え直す判断の候補と点数（同じ乱数で考え直させる）
+    let why: Vec<u32> = match flag(&flags, "why") {
+        None => Vec::new(),
+        Some(v) => v
+            .split(',')
+            .map(|x| {
+                x.trim()
+                    .parse::<u32>()
+                    .map_err(|_| format!("--why は回の番号の並び: {v}"))
+            })
+            .collect::<Result<_, _>>()?,
+    };
+    for &r in &why {
+        if r < from || r >= from + n {
+            return Err(format!(
+                "--why の回 {r} は {from}〜{} の外です",
+                from + n - 1
+            ));
+        }
+        for k in 0..cands.len() {
+            let plan = &plans[cands[k]];
+            let turn = &res[k * n as usize + (r - from) as usize].1;
+            println!();
+            println!(
+                "## 回 {r}・候補 {}（{}）: 並びの後に AI が初めて考え直す判断",
+                cands[k],
+                role(k)
+            );
+            println!();
+            println!("この回の手順: {}", turn_steps(turn, false).join(" → "));
+            let start = state_from_json(&Json::parse(&state)?)?;
+            match why_at(&opts, &start, p, plan, seed, r, turn) {
+                Ok(lines) => {
+                    for l in lines {
+                        println!("{l}");
+                    }
+                }
+                Err(e) => println!("（{e}）"),
             }
         }
     }
