@@ -13,8 +13,10 @@ use std::sync::{Arc, OnceLock};
 /// バフを受けたナイトと素のナイトを区別できない（docs/ai-notes.md「補正の入力に攻撃力・体力を足す」）。
 /// 最後の 2 つ（2026-11-13）は山札の中身: 自分の山札に残っているカードの枚数（myDeckCards）と、相手のまだ見えていないカード
 /// （伏せた手札・山札・どれか分からない捨てたカード）の枚数（oppUnseen）。どちらも決定化で並べ直しても変わらない（ai/determinize.rs は
-/// 自分の山札は順番だけを、相手は伏せた手札・山札・どれか分からない捨てたカードを合わせた中で配り直す）。docs/value-net.md「入力」
-pub const ZONES: [&str; 16] = [
+/// 自分の山札は順番だけを、相手は伏せた手札・山札・どれか分からない捨てたカードを合わせた中で配り直す）。docs/value-net.md「入力」。
+/// 最後の 2 つ（2026-11-20）は、自分の手札のカードに付いた攻撃力・体力の変化（カードごとの合計を 5 で割る。ダストデイズの山札の強化を
+/// 受けて引いたカードなど。docs/ai-notes/14-2026-11-16.md「ダストデイズの山札の強化を補正の入力に足す」）
+pub const ZONES: [&str; 18] = [
     "myHand",
     "myHandBoost",
     "myBoard",
@@ -31,17 +33,21 @@ pub const ZONES: [&str; 16] = [
     "oppBoardDef",
     "myDeckCards",
     "oppUnseen",
+    "myHandAtkMod",
+    "myHandDefMod",
 ];
 /// 山札の中身の入力（ZONES の添字）
 const ZONE_MY_DECK: usize = 14;
 const ZONE_OPP_UNSEEN: usize = 15;
+/// 手札のカードに付いた攻撃力の変化（体力はその次）
+const ZONE_MY_HAND_ATK_MOD: usize = 16;
 /// 数値の入力（ZONES と同じく、モデルはこの並びの部分列を持つ）。
 /// "after" より後ろは場のフォロワーの合計とキーワードを持つ数（同上）。
 /// "imagined" は、探索が相手のターンを読んだ後の想像の局面か（ValuePhase::Imagined。docs/ai-notes.md「読みの中の相手のずれを学習で直す」）。
-/// 最後の 4 つ（2026-11-20）は、自分の山札・手札のフォロワーに付いた攻撃力・体力の変化の合計（山札は 20、手札は 5 で割る）。
-/// ダストデイズのクレストの山札の強化（buffDeck）や手札のフォロワーへのバフは、場に出るまでどの入力にも出なかった
-/// （docs/ai-notes/14-2026-11-16.md「エルフの山札の強化（ダストデイズ）を AI が見ているか」）。山札は deck_kept の分で、決定化で並べ直しても変わらない
-pub const SCALARS: [&str; 38] = [
+/// 最後の 2 つ（2026-11-20）は、自分の山札のフォロワーに付いた攻撃力・体力の変化の合計（20 で割る）。
+/// ダストデイズのクレストの山札の強化（buffDeck）は、場に出るまでどの入力にも出なかった
+/// （docs/ai-notes/14-2026-11-16.md「エルフの山札の強化（ダストデイズ）を AI が見ているか」）。deck_kept の分で、決定化で並べ直しても変わらない
+pub const SCALARS: [&str; 36] = [
     "myHp",
     "oppHp",
     "myMaxPp",
@@ -78,8 +84,6 @@ pub const SCALARS: [&str; 38] = [
     "imagined",
     "myDeckAtkMod",
     "myDeckDefMod",
-    "myHandAtkMod",
-    "myHandDefMod",
 ];
 
 /// 場のカード 1 枚ごとの数値の入力（場のカードのネットワーク。valueNet.ts の BOARD_FEATURES。モデルはこの並びの部分列を持つ）。
@@ -662,6 +666,16 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
     for h in &me.hand {
         add(0, card_k(h.card), 1.0);
         add(1, card_k(h.card), h.boosts.min(10) as f64 / 5.0);
+        add(
+            ZONE_MY_HAND_ATK_MOD,
+            card_k(h.card),
+            h.attack_mod as f64 / 5.0,
+        );
+        add(
+            ZONE_MY_HAND_ATK_MOD + 1,
+            card_k(h.card),
+            h.defense_mod as f64 / 5.0,
+        );
     }
     for c in &me.board {
         add(2, card_k(c.card), 1.0);
@@ -728,9 +742,8 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
     let base = net.n_zones * v;
     let b = |x: bool| if x { 1.0 } else { 0.0 };
     let (m, o) = (&sums[0], &sums[1]);
-    // 山札・手札のフォロワーに付いた攻撃力・体力の変化（山札は手札から戻ったカードの状態と同じく deck_kept に持つ）
+    // 山札のフォロワーに付いた攻撃力・体力の変化（山札は手札から戻ったカードの状態と同じく deck_kept に持つ）
     let (deck_atk, deck_def) = follower_mods(me.deck_kept.iter());
-    let (hand_atk, hand_def) = follower_mods(me.hand.iter());
     let scalars: [f64; SCALARS.len()] = [
         me.leader_hp as f64 / 20.0,
         opp.leader_hp as f64 / 20.0,
@@ -768,8 +781,6 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
         b(phase == ValuePhase::Imagined),
         deck_atk / 20.0,
         deck_def / 20.0,
-        hand_atk / 5.0,
-        hand_def / 5.0,
     ];
     // 数値の入力の添字（base + k）はカードごとの入力の後ろで、項目ごとに違う（前は set で入れていたが、同じ添字は無いので同じ）
     for (j, &x) in scalars.iter().enumerate() {
@@ -781,7 +792,7 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
     }
 }
 
-/// 手札・山札のフォロワーに付いた攻撃力・体力の変化の合計
+/// 山札のフォロワーに付いた攻撃力・体力の変化の合計
 fn follower_mods<'a>(cards: impl Iterator<Item = &'a HandCard>) -> (f64, f64) {
     cards
         .filter(|h| card(h.card).ctype == CardType::Follower)

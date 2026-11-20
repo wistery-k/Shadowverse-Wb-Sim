@@ -20,7 +20,8 @@ import { CARD_ABILITIES, CREST_ABILITIES } from "../src/cards/abilities";
  * カード・クレストごとの入力の種類。モデルはこの並びの部分列を持つ（足す前のモデルも読める）。
  * 10〜13 は場のフォロワーの攻撃力・体力（カードごとの合計を 5 で割る）。
  * 最後の 2 つ（2026-11-13）は山札の中身: 自分の山札に残っているカードの枚数と、相手のまだ見えていないカード（伏せた手札・山札・
- * どれか分からない捨てたカード）の枚数。どちらも決定化で並べ直しても変わらない（rust/engine/src/ai/valuenet.rs の ZONES）
+ * どれか分からない捨てたカード）の枚数。どちらも決定化で並べ直しても変わらない（rust/engine/src/ai/valuenet.rs の ZONES）。
+ * その後の 2 つ（2026-11-20）は、自分の手札のカードに付いた攻撃力・体力の変化（カードごとの合計 / 5）
  */
 export const VALUE_ZONES = [
   "myHand",
@@ -39,12 +40,14 @@ export const VALUE_ZONES = [
   "oppBoardDef",
   "myDeckCards",
   "oppUnseen",
+  "myHandAtkMod",
+  "myHandDefMod",
 ] as const;
 
 /**
  * 数値の入力（おおよそ 0〜1 に収まるように割る。VALUE_ZONES と同じく、モデルはこの並びの部分列を持つ）。"first" より後ろは場のフォロワーの合計とキーワードを持つ数。
  * "imagined" は、探索が相手のターンを読んだ後の想像の局面か（自己対戦の "ph": 2。docs/ai-notes.md「読みの中の相手のずれを学習で直す・資源の介入」）。
- * 最後の 4 つ（2026-11-20）は、自分の山札・手札のフォロワーに付いた攻撃力・体力の変化の合計（ダストデイズの山札の強化など。rust/engine/src/ai/valuenet.rs の SCALARS）
+ * 最後の 2 つ（2026-11-20）は、自分の山札のフォロワーに付いた攻撃力・体力の変化の合計（ダストデイズの山札の強化。rust/engine/src/ai/valuenet.rs の SCALARS）
  */
 export const VALUE_SCALARS = [
   "myHp",
@@ -83,8 +86,6 @@ export const VALUE_SCALARS = [
   "imagined",
   "myDeckAtkMod",
   "myDeckDefMod",
-  "myHandAtkMod",
-  "myHandDefMod",
 ] as const;
 
 /**

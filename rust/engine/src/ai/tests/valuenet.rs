@@ -668,8 +668,8 @@ fn deck_inputs_do_not_change_with_determinize() {
 
 #[test]
 fn deck_and_hand_buffs_are_inputs() {
-    // 自分の山札・手札のフォロワーに付いた攻撃力・体力の変化（ダストデイズのクレストの山札の強化など）は数値の入力に出て、
-    // 決定化で並べ直しても変わらない（docs/value-net.md「入力」）
+    // 自分の山札のフォロワーに付いた攻撃力・体力の変化の合計（ダストデイズのクレストの山札の強化）は数値の入力に、
+    // 手札のカードに付いた変化はカードごとの入力に出て、決定化で並べ直しても変わらない（docs/value-net.md「入力」）
     use crate::ai::determinize::determinize;
     use crate::ai::valuenet::{SCALARS, ZONES};
     use crate::data::CardType;
@@ -678,6 +678,14 @@ fn deck_and_hand_buffs_are_inputs() {
     let scalar = |x: &[(usize, f64)], name: &str| -> f64 {
         let at = ZONES.len() * v + SCALARS.iter().position(|z| *z == name).unwrap();
         x.iter().find(|(i, _)| *i == at).map_or(0.0, |(_, x)| *x)
+    };
+    // カードごとの入力 name の値（カードの添字と値）
+    let zone = |x: &[(usize, f64)], name: &str| -> Vec<(usize, f64)> {
+        let from = ZONES.iter().position(|z| *z == name).unwrap() * v;
+        x.iter()
+            .filter(|(i, _)| (from..from + v).contains(i))
+            .map(|&(i, x)| (i - from, x))
+            .collect()
     };
     let follower = |c: crate::data::CardIdx| card(c).ctype == CardType::Follower;
     let states = played_states();
@@ -692,13 +700,11 @@ fn deck_and_hand_buffs_are_inputs() {
         .expect("手札と山札にフォロワーがある局面");
     let p = s.active;
     let x = net.encode(s, p, ValuePhase::End);
-    for name in [
-        "myDeckAtkMod",
-        "myDeckDefMod",
-        "myHandAtkMod",
-        "myHandDefMod",
-    ] {
+    for name in ["myDeckAtkMod", "myDeckDefMod"] {
         assert_eq!(scalar(&x, name), 0.0, "{name}");
+    }
+    for name in ["myHandAtkMod", "myHandDefMod"] {
+        assert!(zone(&x, name).is_empty(), "{name}");
     }
     // 山札のフォロワーを全部 +1/+2（buffDeck と同じく deck_kept に持つ）、手札のフォロワー 1 枚を +3/+0
     let mut t = s.clone();
@@ -726,8 +732,12 @@ fn deck_and_hand_buffs_are_inputs() {
     let n = picked.len() as f64;
     assert_eq!(scalar(&y, "myDeckAtkMod"), n / 20.0);
     assert_eq!(scalar(&y, "myDeckDefMod"), 2.0 * n / 20.0);
-    assert_eq!(scalar(&y, "myHandAtkMod"), 3.0 / 5.0);
-    assert_eq!(scalar(&y, "myHandDefMod"), 0.0);
+    // 変えた 1 枚の分だけが、手札の入力（myHand）と同じカードの添字に出る
+    let got = zone(&y, "myHandAtkMod");
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].1, 3.0 / 5.0);
+    assert!(zone(&y, "myHand").iter().any(|&(c, _)| c == got[0].0));
+    assert!(zone(&y, "myHandDefMod").is_empty());
     assert_ne!(
         net.eval(&t, p, ValuePhase::End).to_bits(),
         net.eval(s, p, ValuePhase::End).to_bits()

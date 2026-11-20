@@ -194,6 +194,8 @@ export function rowCanOccur(zone: string, vocabId: string): boolean {
     case "myBoardDef":
     case "oppBoardAtk":
     case "oppBoardDef":
+    case "myHandAtkMod":
+    case "myHandDefMod":
       return c.type === "follower";
     default:
       return true;
