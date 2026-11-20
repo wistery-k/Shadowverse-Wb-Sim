@@ -7,7 +7,8 @@
 //   山札から手札に入ったカードのほかにも違いが出る手（ランダムな結果が出た手）。その後の手はみな一例。
 //   山札を混ぜただけ・山札からランダムに手札に加えただけの手は、ランダムの後にしない（後で引いたカードを使う手が一例になる）。
 //   打ち直すのは 3 通りだけなので、まれにしか結果の変わらないランダムは見逃すことがある
-// - 考え直した手: 調査で読んだ並びを問の局面で打ちきれず、AI が考え直して打った手（並びの rethink から後。みな一例）
+// - 考え直した手: 調査で読んだ並びを問の局面で打ちきれず、AI が考え直して打った手と、読んだ並びを打ちきった後に AI が打った続き
+//   （並びの rethink から後。みな一例）
 
 import { actingPlayer, tryApplyAction } from "../engine/game";
 import type { Action, GameState } from "../engine/types";
@@ -76,7 +77,7 @@ function randomResult(before: GameState, a: Action, after: GameState, inDeck: Re
 
 /**
  * 手順の手ごとの注釈。states[k] は actions[k] を打つ前の局面（states[0] が問の局面。打った後の局面が無い手は、そこで止める）。
- * rethink は AI が考え直した最初の手の番号（無ければ null）。「ターン終了」は一例にしない（手順の終わりを示すだけ）
+ * rethink は AI が考え直した（続けた）最初の手の番号（無ければ null）。「ターン終了」は一例にしない（手順の終わりを示すだけ）
  */
 export function stepNotes(states: readonly GameState[], actions: readonly Action[], rethink: number | null = null): StepNote[] {
   const start = states[0];
