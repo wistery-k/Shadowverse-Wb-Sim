@@ -89,6 +89,7 @@
 
 | 種類 | p | ほかの項目 | いつ |
 | --- | --- | --- | --- |
+| `mulligan` | マリガンをした側 | `c`・`i`・`ret`（返したら true） | 初手のカード 1 枚ごとに 1 つ（`pre` に入る。2026-11-20 から。ダストデイズの調べ） |
 | `play` | 行動した側 | `c`・`i`・`mode`（`"accelerate"`・`"crystal"`・`"enhance"`。アクセラレート・結晶はプレイしたときの姿が違うもの（`as` がその姿のカード）、エンハンスはエンハンスのコストを払ったもの）・`ougi`（【奥義】を持つカードを奥義ゲージ 10 以上でプレイしたら 1、15 以上なら 2（解放奥義）。効果が奥義の条件を見るかによらない） | 手札からプレイした |
 | `attack` | 行動した側 | `c`・`i`・`t`（攻撃先のカード ID か `"leader"`）・`ti` | 攻撃した |
 | `act`・`fuse`・`extraPp` | 行動した側 | `c`・`i`（`fuse` は素材の `m` も） | アクト・融合・エクストラPP を使った |
@@ -147,7 +148,7 @@ svwb kifu seats <棋譜>… [--where '<条件>,…'] [--out 席.jsonl]
 | `crest` | クレストの能力の誘発・クレストの出入り（値を付けなければクレストのものだけ、`crest~クキシロ` で名前も） |
 | `holds` | `turnEnd` の、持っているクレスト（`holds~ダストデイズ`。どれかが合えばよい。`!~`・`!=` はどれにも合わない） |
 | `own`・`opp` | その席の自分のターン・相手のターンに起きた |
-| `search`・`burned`・`ep` | 上の表の同じ名前の項目が true |
+| `search`・`burned`・`ep`・`ret` | 上の表の同じ名前の項目が true |
 | `turn`・`tc` | 全体のターン番号・その手番のプレイヤーの何ターン目か |
 | `n`・`pp`・`ab`・`playable`・`combo`・`i`・`ougi` | 数の項目（`playable` は数。`playable>0 pp>0` で、プレイできるカードと PP を残してターンを終えた。`combo=2 playable>0` で、あと 1 枚打てたのにコンボ 2 で終えた） |
 
@@ -168,6 +169,9 @@ svwb kifu count data/kifu/kukishiro-check --where 'deck~クキシロ' --event 't
 # ダストデイズのクレストを持って終えたターンと、そのうちあと 1 枚打てたのにコンボ 2 で終えたターン（2026-11-20。棋譜は共有フォルダの data/kifu/night-20261117-0328/）
 svwb kifu count data/kifu/night-20261117-0328 --where 'deck~コンボE' --event 'turnEnd holds~ダストデイズ' --by agent
 svwb kifu count data/kifu/night-20261117-0328 --where 'deck~コンボE' --event 'turnEnd holds~ダストデイズ combo=2 playable>0' --by agent
+# 初手にあったダストデイズと、マリガンで返したダストデイズ（先攻・後攻ごと）
+svwb kifu count data/kifu/night-20261117-0328 --where 'deck~コンボE' --event 'mulligan card~ダストデイズ' --by agent,first
+svwb kifu count data/kifu/night-20261117-0328 --where 'deck~コンボE' --event 'mulligan card~ダストデイズ ret' --by agent,first
 ```
 
 本体は `rust/engine/src/runner/kifu_cmd.rs`。

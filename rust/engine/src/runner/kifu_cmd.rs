@@ -352,7 +352,8 @@ pub struct EventSpec {
     conds: Vec<Cond>,
 }
 
-const EVENT_KINDS: [&str; 22] = [
+const EVENT_KINDS: [&str; 23] = [
+    "mulligan",
     "play",
     "attack",
     "act",
@@ -460,7 +461,7 @@ pub fn event_ok(spec: &EventSpec, e: &Json, turn: &Json) -> Result<bool, String>
                 let own = p.is_some() && p == num_field(turn, "p");
                 flag(own == (c.key == "own"))?
             }
-            "search" | "burned" | "ep" => flag(e.get(&c.key) == Some(&Json::Bool(true)))?,
+            "search" | "burned" | "ep" | "ret" => flag(e.get(&c.key) == Some(&Json::Bool(true)))?,
             "turn" => num_ok(c, num_field(turn, "n").unwrap_or(0.0))?,
             "tc" => num_ok(c, num_field(turn, "tc").unwrap_or(0.0))?,
             key @ ("n" | "pp" | "ab" | "playable" | "i" | "ougi" | "combo") => match num_field(e, key) {
@@ -469,7 +470,7 @@ pub fn event_ok(spec: &EventSpec, e: &Json, turn: &Json) -> Result<bool, String>
             },
             key => {
                 return Err(format!(
-                    "知らない出来事の条件: {key}（card・crest・holds・target・as・mode・own・opp・search・burned・ep・turn・tc・n・pp・ab・playable・combo・i・ougi）"
+                    "知らない出来事の条件: {key}（card・crest・holds・target・as・mode・own・opp・search・burned・ep・ret・turn・tc・n・pp・ab・playable・combo・i・ougi）"
                 ))
             }
         };

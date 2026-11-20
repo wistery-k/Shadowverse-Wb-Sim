@@ -43,7 +43,8 @@ export const VALUE_ZONES = [
 
 /**
  * 数値の入力（おおよそ 0〜1 に収まるように割る。VALUE_ZONES と同じく、モデルはこの並びの部分列を持つ）。"first" より後ろは場のフォロワーの合計とキーワードを持つ数。
- * 最後の "imagined" は、探索が相手のターンを読んだ後の想像の局面か（自己対戦の "ph": 2。docs/ai-notes.md「読みの中の相手のずれを学習で直す・資源の介入」）
+ * "imagined" は、探索が相手のターンを読んだ後の想像の局面か（自己対戦の "ph": 2。docs/ai-notes.md「読みの中の相手のずれを学習で直す・資源の介入」）。
+ * 最後の 4 つ（2026-11-20）は、自分の山札・手札のフォロワーに付いた攻撃力・体力の変化の合計（ダストデイズの山札の強化など。rust/engine/src/ai/valuenet.rs の SCALARS）
  */
 export const VALUE_SCALARS = [
   "myHp",
@@ -80,6 +81,10 @@ export const VALUE_SCALARS = [
   "myAmbush",
   "oppAmbush",
   "imagined",
+  "myDeckAtkMod",
+  "myDeckDefMod",
+  "myHandAtkMod",
+  "myHandDefMod",
 ] as const;
 
 /**

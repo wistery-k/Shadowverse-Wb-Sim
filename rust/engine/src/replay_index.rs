@@ -195,6 +195,14 @@ fn action_events(prev: &GameState, a: &Action, at: usize, out: &mut Vec<Json>) {
                 out.push(e);
             }
         }
+        // マリガン: 初手のカードごとに 1 つ（返したものは ret が true）
+        Action::Mulligan { player, swap } => {
+            for h in prev.players[*player].hand.iter() {
+                let mut e = event("mulligan", *player, at, h.card, h.iid);
+                e.set("ret", Json::Bool(swap.contains(&h.iid)));
+                out.push(e);
+            }
+        }
         _ => {}
     }
 }
@@ -658,6 +666,40 @@ mod tests {
             .filter(|x| matches!(x, Action::Play(_)))
             .count();
         assert_eq!(plays, expected);
+    }
+
+    /// マリガンは初手のカード 1 枚ごとに 1 つ（pre に入る）で、返したもの（ret）は行動の swap と同じ
+    #[test]
+    fn mulligan_events_match_the_swaps() {
+        let mut returned = 0;
+        for seed in 1..6 {
+            let (a, b, actions) = random_game(seed);
+            let idx = replay_index([&a, &b], seed, &actions).expect("打ち直せる");
+            let s = create_game([&a, &b], seed);
+            let pre = arr(idx.get("pre").unwrap());
+            for a in &actions {
+                let Action::Mulligan { player, swap } = a else {
+                    continue;
+                };
+                let evs: Vec<&Json> = pre
+                    .iter()
+                    .filter(|e| {
+                        e.get("k") == Some(&Json::Str("mulligan".into()))
+                            && n(e, "p") == *player as f64
+                    })
+                    .collect();
+                assert_eq!(evs.len(), s.players[*player].hand.len());
+                let rets: Vec<f64> = evs
+                    .iter()
+                    .filter(|e| e.get("ret") == Some(&Json::Bool(true)))
+                    .map(|e| n(e, "i"))
+                    .collect();
+                assert_eq!(rets.len(), swap.len());
+                assert!(swap.iter().all(|i| rets.contains(&(*i as f64))));
+                returned += swap.len();
+            }
+        }
+        assert!(returned > 0);
     }
 
     /// 進化ポイント・超進化ポイントを使った進化（ep）は、進化・超進化の行動と同じ数で、同じフォロワー

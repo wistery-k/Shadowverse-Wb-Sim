@@ -1,0 +1,52 @@
+# 新しいプールの学び直し 4 回目（R4）: 補正に、自分の山札・手札のフォロワーに付いた攻撃力・体力の変化（myDeckAtkMod・myDeckDefMod・myHandAtkMod・myHandDefMod）を
+# 入力として足して学び直す（ユーザーの依頼 2026-11-20。ダストデイズの山札の強化が見えず、マリガン・出し方・進化まで打ち方全体に響いている、という指摘）。
+# 調べは docs/ai-notes/14-2026-11-16.md「エルフの山札の強化（ダストデイズ）を AI が見ているか」と、その続きの節。
+#
+# R3（night/pool-r3.txt）と同じ流れ。違いは:
+#   - 出発の補正を、R3 に足した 4 つの入力の行を 0 で足したもの（td extend。R3 と同じ値・同じ手）にした。R3 の補正・見込みはリポジトリの凍結した写し（rust/engine/yardstick/pool-r3-*.json）から
+#   - 自己対戦の試合番号を 7300000 から（R1 7000000〜・R2 7100000〜・R3 7200000〜）
+#   - 同じ自己対戦から、足した入力なし（--dropInputs）でも学ぶ（c.json）。入力の効き目と、学び直しをもう 1 回したことの効き目を分けるため
+#   - compare を 2 つ: S2 の形の R4 対 R3（採るかの判断）と、入力あり対なし（見込みはどちらも R3 のもの。入力の効き目）
+#
+# 回す前に決めた問いと線:
+#   問い 1（採るか）: R4 対 R3、84 個のデッキの鏡の 1.2 万試合。差 − 2 SE > 0 なら R4 を新しいプールの補正にする（S2 と同じ線）。
+#   問い 2（入力の効き目）: 入力あり（r.json）対なし（c.json）、同じ見込み（R3）で 1.2 万試合。全体と、コンボE の絡む組（kifu winrate --where 'side=A,pair~コンボE'）を見る。
+#     コンボE の絡む組は全体の 4 分の 1 ほど（84 個のうち 12 個がダストデイズを入れたエルフ）で、誤差は全体の 2 倍ほど（± 0.8）。差 − 2 SE > 0 なら「入力が効いた」
+#   線ではないが見る数字（棋譜を svwb kifu count で数える。R3 の値は 2026-11-17 の物差しの棋譜の コンボE（VL）の 800 席）:
+#     マリガンでダストデイズを返した割合 15%（37/249）・先攻 4 ターン目（進化できない）に出したダストデイズ 114/566・後攻 3 ターン目にエクストラPP で出した 25 回（進化 1）・
+#     出したダストデイズのうち進化しないまま場を離れた 47%・クレストを持った席 61%・クレストの誘発 1.84/席
+#
+# 見込み（PC、svwb-docker・28 スレッド。R3 の実測から）: R3 は全部で 9 時間（自己対戦 7 時間 55 分 = 0.475 秒/試合・学習 12 分・beam-gap 12 分・compare 1.2 万試合 35 分・profile 3 分）。
+#   R4 の自己対戦は R3 の補正（足した行は 0 で、計算しない）で打つので R3 の補正の速さ。R3 の profile の 1 手は R2 とほぼ同じなので 0.50 秒/試合のまま。
+#   入力なしの学習（12 分）と compare 1 つ（35 分）が増えるので、10 時間ほど。1 晩に収まらなければ、止まったところから次の夜に続ける（同じ券）
+# 朝: 止まったときのまとめ（台帳の行・棋譜）を push してもらい、ingest する。モデル（@/ の *.json）・自己対戦は pack-run --max-mb 300 で共有フォルダへ
+
+# 0. 出発の補正: R3 の補正に 4 つの入力の行を 0 で足したもの。見込みは R3 のものを写すだけ
+td extend --model rust/engine/yardstick/pool-r3-net.json --out @/v0.json --est 120
+td extend --model rust/engine/yardstick/pool-r3-potential.json --out @/v0pot.json --est 10
+
+# 1. 自己対戦 6 万試合（g7300000〜7359999）。3000 試合ずつ s-1〜s-20。R1〜R3 と同じ打ち方
+td selfplay --model @/v0.json --decks @data/pools/azvaldt/sets/all84.txt --games 60000 --start 7300000 --chunk 3000 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --potential @/v0pot.json --out @/s-{k}.jsonl.gz --est 0.50
+
+# 2. 学習（R1〜R3 と同じ学び方）、間引き、属性で埋める → r.json（入力あり）
+td train --impl rust --model @/v0.json --data @/s-{1..20}.jsonl.gz --out @/rt.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 1200
+td prune --impl rust --model @/rt.json --data @/s-{1..20}.jsonl.gz --out @/rp.json --est 90
+td attr --model @/rp.json --out @/r.json --keepA 0 --est 60
+
+# 2'. 同じ自己対戦から、足した 4 つの入力なしで学ぶ → c.json（入力の効き目を分けるため）
+td train --impl rust --model @/v0.json --data @/s-{1..20}.jsonl.gz --out @/ct.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --dropInputs myDeckAtkMod,myDeckDefMod,myHandAtkMod,myHandDefMod --est 1200
+td prune --impl rust --model @/ct.json --data @/s-{1..20}.jsonl.gz --out @/cp.json --est 90
+td attr --model @/cp.json --out @/c.json --keepA 0 --est 60
+
+# 3. 見込みを、学んだ補正（入力あり）の点数で学び直す（R1〜R3 と同じ）
+beam-gap --games 2000 --from 1000 --chunk 500 --decks @data/pools/azvaldt/sets/all84.txt --vocab @/r.json --ref '{"beamWidth":4096,"potentialNet":null,"valueNet":"@/r.json"}' --variants '{"w32":{"beamWidth":32,"potentialNet":null,"valueNet":"@/r.json"}}' --sample 100 --inputs @/pot-{k}.jsonl --out @/pot-{k}-rows.jsonl --est 0.36
+potential train --data @/pot-{1..4}.jsonl --valid 2800-2999 --out @/rpot.json --est 180
+
+# 4. 問い 1: R4 対 R3（S2 の形。84 個のデッキの鏡の compare、1.2 万試合）
+compare 6000 '{"valueNet":"@/r.json","potentialNet":"@/rpot.json"}' '{"valueNet":"@/v0.json","potentialNet":"@/v0pot.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 新しいプール-R4-強化の入力 --est 0.17
+
+# 5. 問い 2: 入力あり 対 なし（同じ自己対戦・同じ学び方。見込みはどちらも R3 のもの）、1.2 万試合
+compare 6000 '{"valueNet":"@/r.json","potentialNet":"@/v0pot.json"}' '{"valueNet":"@/c.json","potentialNet":"@/v0pot.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 新しいプール-R4-強化の入力あり対なし --est 0.17
+
+# 6. 線ではないが毎回見る数字（R1〜R3 と同じ。PP とプレイできるカードを残して終えたターンの割合: R3 11%）
+profile --opts '{"valueNet":"@/r.json","potentialNet":"@/rpot.json"}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.16

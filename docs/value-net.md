@@ -117,7 +117,7 @@ z（1 つ）── (c + z) / a を S に足す
 カードを替えるので、それを入れたときだけ `oppUnseen` が並べ直しで変わる。足した入力の行が 0 のモデル（`td extend` で広げたもの）は、元のモデルと同じ値・同じ速さ
 （行が 0 の入力は足さない）
 
-### 数値の入力（34 個、添字 3968〜4001）
+### 数値の入力（38 個。今の既定のモデルは初めの 34 個）
 
 おおよそ 0〜1 に収まるように割ってある。
 
@@ -137,8 +137,14 @@ z（1 つ）── (c + z) / a を S に足す
 | `myAtkSum`・`myDefSum`・`oppAtkSum`・`oppDefSum` | 場のフォロワーの攻撃力・体力の合計 | 20 |
 | `myWard`・`oppWard`・`myBane`・`oppBane`・`myBarrier`・`oppBarrier`・`myAmbush`・`oppAmbush` | 守護・必殺・バリア・潜伏を持つフォロワーの数 | 2 |
 | `imagined` | 想像の局面なら 1（同上） | 0 か 1 |
+| `myDeckAtkMod`・`myDeckDefMod` | 自分の山札のフォロワーに付いた攻撃力・体力の変化の合計（ダストデイズのクレストの山札の強化など。`deck_kept` の分） | 20 |
+| `myHandAtkMod`・`myHandDefMod` | 自分の手札のフォロワーに付いた攻撃力・体力の変化の合計 | 5 |
 
-表の行は名前をまとめて書いたもの。入力の並びは `valuenet.rs` の `SCALARS` の順（`myHp`, `oppHp`, `myMaxPp`, … , `oppAmbush`, `imagined`）。
+表の行は名前をまとめて書いたもの。入力の並びは `valuenet.rs` の `SCALARS` の順（`myHp`, `oppHp`, `myMaxPp`, … , `oppAmbush`, `imagined`, `myDeckAtkMod`, … , `myHandDefMod`）。
+
+最後の 4 つは 2026-11-20 に足した（今の既定のモデルには無い。行が 0 のモデルは `td extend` で作る）。山札・手札のフォロワーへのバフは、場に出るまでどの入力にも出ず、
+ダストデイズのクレストでコンボ 3 でターンを終えても局面の値が変わらなかった（[ai-notes/14-2026-11-16.md](ai-notes/14-2026-11-16.md)「エルフの山札の強化（ダストデイズ）を AI が見ているか」）。
+自分の山札の強化は、決定化で並べ直しても変わらない（カードの iid ごとに持つ）。相手の山札・伏せた手札の変化は、決定化が配り直すので入れない（テスト `deck_and_hand_buffs_are_inputs`）
 
 ### 局面の種類
 

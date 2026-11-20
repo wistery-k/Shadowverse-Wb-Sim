@@ -667,6 +667,88 @@ fn deck_inputs_do_not_change_with_determinize() {
 }
 
 #[test]
+fn deck_and_hand_buffs_are_inputs() {
+    // 自分の山札・手札のフォロワーに付いた攻撃力・体力の変化（ダストデイズのクレストの山札の強化など）は数値の入力に出て、
+    // 決定化で並べ直しても変わらない（docs/value-net.md「入力」）
+    use crate::ai::determinize::determinize;
+    use crate::ai::valuenet::{SCALARS, ZONES};
+    use crate::data::CardType;
+    let net = full_model(6);
+    let v = net.layout_json().matches("\"crest:").count() + data().cards.len();
+    let scalar = |x: &[(usize, f64)], name: &str| -> f64 {
+        let at = ZONES.len() * v + SCALARS.iter().position(|z| *z == name).unwrap();
+        x.iter().find(|(i, _)| *i == at).map_or(0.0, |(_, x)| *x)
+    };
+    let follower = |c: crate::data::CardIdx| card(c).ctype == CardType::Follower;
+    let states = played_states();
+    let s = states
+        .iter()
+        .find(|s| {
+            let me = &s.players[s.active];
+            s.phase == Phase::Main
+                && me.hand.iter().any(|h| follower(h.card))
+                && me.deck.iter().filter(|r| follower(r.card)).count() >= 5
+        })
+        .expect("手札と山札にフォロワーがある局面");
+    let p = s.active;
+    let x = net.encode(s, p, ValuePhase::End);
+    for name in [
+        "myDeckAtkMod",
+        "myDeckDefMod",
+        "myHandAtkMod",
+        "myHandDefMod",
+    ] {
+        assert_eq!(scalar(&x, name), 0.0, "{name}");
+    }
+    // 山札のフォロワーを全部 +1/+2（buffDeck と同じく deck_kept に持つ）、手札のフォロワー 1 枚を +3/+0
+    let mut t = s.clone();
+    let picked: Vec<_> = t.players[p]
+        .deck
+        .iter()
+        .filter(|r| follower(r.card))
+        .map(|r| (r.iid, r.card))
+        .collect();
+    for &(iid, c) in &picked {
+        let mut h = t
+            .take_kept(p, iid)
+            .unwrap_or_else(|| t.new_hand_card(c, Some(iid)));
+        h.attack_mod += 1;
+        h.defense_mod += 2;
+        t.players[p].deck_kept.push(h);
+    }
+    let i = t.players[p]
+        .hand
+        .iter()
+        .position(|h| follower(h.card))
+        .unwrap();
+    t.players[p].hand.make_mut()[i].attack_mod += 3;
+    let y = net.encode(&t, p, ValuePhase::End);
+    let n = picked.len() as f64;
+    assert_eq!(scalar(&y, "myDeckAtkMod"), n / 20.0);
+    assert_eq!(scalar(&y, "myDeckDefMod"), 2.0 * n / 20.0);
+    assert_eq!(scalar(&y, "myHandAtkMod"), 3.0 / 5.0);
+    assert_eq!(scalar(&y, "myHandDefMod"), 0.0);
+    assert_ne!(
+        net.eval(&t, p, ValuePhase::End).to_bits(),
+        net.eval(s, p, ValuePhase::End).to_bits()
+    );
+    // 相手から見た入力は変わらない（相手の山札・手札の変化は入れない）
+    let q = opponent(p);
+    assert_eq!(
+        net.encode(&t, q, ValuePhase::End),
+        net.encode(s, q, ValuePhase::End)
+    );
+    // 自分の山札の順番を並べ直しても同じ
+    let mut rng = Rng::new(5);
+    for _ in 0..4 {
+        assert_eq!(
+            net.encode(&determinize(&t, p, &mut rng, false), p, ValuePhase::End),
+            y
+        );
+    }
+}
+
+#[test]
 fn extended_model_keeps_values_and_layout() {
     // 山札の中身の入力を重み 0 で足したモデル（npm run td -- extend）は、足す前のモデルと同じ値を出す。入力の並びは先頭の行に書く形で出す
     use crate::ai::valuenet::ZONES;

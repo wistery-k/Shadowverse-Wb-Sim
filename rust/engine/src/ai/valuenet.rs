@@ -1,7 +1,7 @@
 //! 学習した評価の補正（src/ai/valueNet.ts の encodeState・forwardValueNet・valueNetExtraEval）。
 
 use super::aidata::{ai_data, weights_with, RawValueNet, RawValueNetBoard, Weights};
-use crate::data::{data, Ability, Kw, AMBUSH, BANE, BARRIER, KEYWORD_NAMES, WARD};
+use crate::data::{data, Ability, CardType, Kw, AMBUSH, BANE, BARRIER, KEYWORD_NAMES, WARD};
 use crate::state::*;
 use crate::state_json::ability_json_texts;
 use std::cell::RefCell;
@@ -37,8 +37,11 @@ const ZONE_MY_DECK: usize = 14;
 const ZONE_OPP_UNSEEN: usize = 15;
 /// 数値の入力（ZONES と同じく、モデルはこの並びの部分列を持つ）。
 /// "after" より後ろは場のフォロワーの合計とキーワードを持つ数（同上）。
-/// 最後の "imagined" は、探索が相手のターンを読んだ後の想像の局面か（ValuePhase::Imagined。docs/ai-notes.md「読みの中の相手のずれを学習で直す」）
-pub const SCALARS: [&str; 34] = [
+/// "imagined" は、探索が相手のターンを読んだ後の想像の局面か（ValuePhase::Imagined。docs/ai-notes.md「読みの中の相手のずれを学習で直す」）。
+/// 最後の 4 つ（2026-11-20）は、自分の山札・手札のフォロワーに付いた攻撃力・体力の変化の合計（山札は 20、手札は 5 で割る）。
+/// ダストデイズのクレストの山札の強化（buffDeck）や手札のフォロワーへのバフは、場に出るまでどの入力にも出なかった
+/// （docs/ai-notes/14-2026-11-16.md「エルフの山札の強化（ダストデイズ）を AI が見ているか」）。山札は deck_kept の分で、決定化で並べ直しても変わらない
+pub const SCALARS: [&str; 38] = [
     "myHp",
     "oppHp",
     "myMaxPp",
@@ -73,6 +76,10 @@ pub const SCALARS: [&str; 34] = [
     "myAmbush",
     "oppAmbush",
     "imagined",
+    "myDeckAtkMod",
+    "myDeckDefMod",
+    "myHandAtkMod",
+    "myHandDefMod",
 ];
 
 /// 場のカード 1 枚ごとの数値の入力（場のカードのネットワーク。valueNet.ts の BOARD_FEATURES。モデルはこの並びの部分列を持つ）。
@@ -721,6 +728,9 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
     let base = net.n_zones * v;
     let b = |x: bool| if x { 1.0 } else { 0.0 };
     let (m, o) = (&sums[0], &sums[1]);
+    // 山札・手札のフォロワーに付いた攻撃力・体力の変化（山札は手札から戻ったカードの状態と同じく deck_kept に持つ）
+    let (deck_atk, deck_def) = follower_mods(me.deck_kept.iter());
+    let (hand_atk, hand_def) = follower_mods(me.hand.iter());
     let scalars: [f64; SCALARS.len()] = [
         me.leader_hp as f64 / 20.0,
         opp.leader_hp as f64 / 20.0,
@@ -756,6 +766,10 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
         m[5] / 2.0,
         o[5] / 2.0,
         b(phase == ValuePhase::Imagined),
+        deck_atk / 20.0,
+        deck_def / 20.0,
+        hand_atk / 5.0,
+        hand_def / 5.0,
     ];
     // 数値の入力の添字（base + k）はカードごとの入力の後ろで、項目ごとに違う（前は set で入れていたが、同じ添字は無いので同じ）
     for (j, &x) in scalars.iter().enumerate() {
@@ -765,6 +779,15 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
             }
         }
     }
+}
+
+/// 手札・山札のフォロワーに付いた攻撃力・体力の変化の合計
+fn follower_mods<'a>(cards: impl Iterator<Item = &'a HandCard>) -> (f64, f64) {
+    cards
+        .filter(|h| card(h.card).ctype == CardType::Follower)
+        .fold((0.0, 0.0), |(a, d), h| {
+            (a + h.attack_mod as f64, d + h.defense_mod as f64)
+        })
 }
 
 /// cards のカードごとの枚数を、vocab の添字の小さい順に acc に入れる（添字は base + vocab の添字。vocab に無いカードは入れない）
