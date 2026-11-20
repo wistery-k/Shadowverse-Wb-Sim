@@ -1061,6 +1061,84 @@ progress {
 .branch-tag.actual {
   background: var(--muted);
 }
+.branch-tag.line {
+  background: var(--muted);
+}
+.branch-line-item {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.branch-remove {
+  padding: 0 6px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.branch-builder {
+  display: grid;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+}
+.branch-builder select {
+  max-width: 100%;
+}
+.branch-draft {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: draft;
+}
+.branch-draft li {
+  counter-increment: draft;
+  display: flex;
+  align-items: center;
+}
+.branch-draft li + li::before {
+  content: "→";
+  margin: 0 4px;
+  color: var(--muted);
+}
+.branch-draft button::before {
+  content: counter(draft) ". ";
+  color: var(--muted);
+}
+.branch-preview {
+  color: var(--accent);
+  font-weight: bold;
+}
+.game.previewing .side {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+.branch-turns td {
+  background: var(--bg);
+}
+.branch-tally {
+  display: grid;
+  gap: 4px;
+}
+.branch-tally table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.branch-tally th,
+.branch-tally td {
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-size: 12px;
+}
+.branch-result td button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
 .thought-steps {
   font-size: 12px;
 }
