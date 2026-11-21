@@ -46,6 +46,17 @@ pub struct NetModel {
     pub has_board: bool,
     /// 属性の分（{names, a}。学習はそのまま書き出し、間引きは扱わない）
     pub attr: Option<Json>,
+    /// リーサルの出力（相手が次のターンにリーサルを持つ確率。最後の隠れ層から。実験用。docs/value-net.md「リーサルの出力（実験）」）
+    pub lethal_head: Option<LethalHead>,
+    /// 勝つ確率の形（"logit" か "survival"。無ければ "logit"。"survival" はリーサルの出力 p と生き延びたときの勝率 s で (1 − p) × s）
+    pub win_form: Option<String>,
+}
+
+/// リーサルの出力の重み（最後の隠れ層 → 確率のロジット）
+#[derive(Clone)]
+pub struct LethalHead {
+    pub w: Vec<f64>,
+    pub b: f64,
 }
 
 fn json_nums(v: Option<&Json>, k: &str) -> Result<Vec<f64>, String> {
@@ -165,6 +176,21 @@ impl NetModel {
             ])),
             Some(_) => return Err("ValueNetModel の attr がオブジェクトではありません".into()),
         };
+        let lethal_head = match json.get("lethalHead") {
+            None => None,
+            Some(h @ Json::Obj(_)) => Some(LethalHead {
+                w: json_nums(h.get("w"), "lethalHead.w")?,
+                b: json_num(h.get("b"), "lethalHead.b")?,
+            }),
+            Some(_) => {
+                return Err("ValueNetModel の lethalHead がオブジェクトではありません".into())
+            }
+        };
+        let win_form = match json.get("winForm") {
+            None => None,
+            Some(Json::Str(f)) if f == "logit" || f == "survival" => Some(f.clone()),
+            Some(_) => return Err("ValueNetModel の winForm は \"logit\" か \"survival\"".into()),
+        };
         let m = NetModel {
             vocab: json_strs(json.get("vocab"), "vocab")?,
             zones: json_strs(json.get("zones"), "zones")?,
@@ -181,6 +207,8 @@ impl NetModel {
             base_weights,
             has_board: json.get("board").is_some(),
             attr,
+            lethal_head,
+            win_form,
         };
         if !is_subsequence(&m.zones, &ZONES) || !is_subsequence(&m.scalars, &SCALARS) {
             return Err("ValueNetModel の入力の並びが今のコードと違います".into());
@@ -201,7 +229,20 @@ impl NetModel {
         {
             return Err("ValueNetModel の重みの大きさが合いません".into());
         }
+        if let Some(h) = &m.lethal_head {
+            if h.w.len() != *sizes.last().expect("層") {
+                return Err("ValueNetModel の lethalHead の重みの大きさが合いません".into());
+            }
+        }
+        if m.survival() && m.lethal_head.is_none() {
+            return Err("ValueNetModel の winForm \"survival\" には lethalHead が要ります".into());
+        }
         Ok(m)
+    }
+
+    /// 勝つ確率が (1 − リーサルの出力) × 生き延びたときの勝率 の形か
+    pub fn survival(&self) -> bool {
+        self.win_form.as_deref() == Some("survival")
     }
 
     /// 局面から作る入力の数（ゾーン × vocab ＋ 数値の入力。場のカードのネットワークは扱わないので、最初の層の入力の数と同じ）
@@ -231,7 +272,7 @@ impl NetModel {
         m
     }
 
-    /// JSON（parseValueNetModel の項目の順番: kind・version・vocab・zones・scalars・hidden・w1・b1・layers・w2・b2・a・c・baseWeights・attr）
+    /// JSON（parseValueNetModel の項目の順番: kind・version・vocab・zones・scalars・hidden・w1・b1・layers・w2・b2・a・c・baseWeights・attr・lethalHead・winForm）
     pub fn to_json(&self, num: impl Fn(f64) -> Json) -> Json {
         let strs = |xs: &[String]| Json::Arr(xs.iter().map(|x| Json::Str(x.clone())).collect());
         let arr = |xs: &[f64]| Json::Arr(xs.iter().map(|&x| num(x)).collect());
@@ -260,6 +301,15 @@ impl NetModel {
         items.push(("baseWeights".into(), self.base_weights.clone()));
         if let Some(a) = &self.attr {
             items.push(("attr".into(), a.clone()));
+        }
+        if let Some(h) = &self.lethal_head {
+            items.push((
+                "lethalHead".into(),
+                Json::Obj(vec![("w".into(), arr(&h.w)), ("b".into(), num(h.b))]),
+            ));
+        }
+        if let Some(f) = &self.win_form {
+            items.push(("winForm".into(), Json::Str(f.clone())));
         }
         Json::Obj(items)
     }
@@ -520,6 +570,15 @@ struct RawSample {
     qe: Option<f64>,
     #[serde(default)]
     qr: Option<f64>,
+    /// ターン末の局面のまま相手の番になったら、相手がリーサルを持つか（svwb td selfplay --lethalLabel 1。1 か 0）
+    #[serde(default)]
+    ol: Option<f64>,
+    /// 次の相手のターンに負けたか（svwb td selfplay --lostLabel 1。1 か 0）
+    #[serde(default)]
+    ln: Option<f64>,
+    /// 次の相手のターンの最初の手がランダムな手（--eps）だったか（--lostLabel 1。1 か 0）
+    #[serde(default)]
+    oe: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -600,6 +659,9 @@ struct PSample {
     ex: bool,
     qe: Option<f64>,
     qr: Option<f64>,
+    ol: Option<bool>,
+    ln: Option<bool>,
+    oe: bool,
     x: Vec<(u16, f32)>,
 }
 
@@ -682,6 +744,9 @@ fn parse_game(line: &[u8], map: Option<&[i32]>, n: usize) -> Result<PGame, Strin
                     ex: x.ex.is_some_and(|e| e != 0.0 && !e.is_nan()),
                     qe: x.qe,
                     qr: x.qr,
+                    ol: x.ol.map(|o| o != 0.0),
+                    ln: x.ln.map(|o| o != 0.0),
+                    oe: x.oe.is_some_and(|e| e != 0.0),
                     x: remap(&x.x, &x.v, map, n)?,
                 })
             })
@@ -797,6 +862,8 @@ pub struct Dataset {
     pub flags: Vec<u8>,
     /// 探索の値（無ければ NaN。報告だけに使う）
     pub q: Vec<f64>,
+    /// リーサルの出力の印（0: 無し、1: 持たない、2: 持つ。LoadOptions::lethal_target の印）
+    pub lethal: Vec<u8>,
     pub pairs: Vec<IvPair>,
 }
 
@@ -837,6 +904,16 @@ impl Dataset {
         }
     }
 
+    /// 局面 i のリーサルの出力の印（1 か 0。無ければ None）
+    #[inline]
+    pub fn lethal_label(&self, i: usize) -> Option<f64> {
+        match self.lethal[i] {
+            0 => None,
+            1 => Some(0.0),
+            _ => Some(1.0),
+        }
+    }
+
     /// 局面 i の入力（行の番号と値）を out に書く
     #[inline]
     pub fn inputs(&self, i: usize, out: &mut Vec<(usize, f64)>) {
@@ -856,11 +933,22 @@ impl Dataset {
             + self.anchor.len() * 4
             + self.flags.len()
             + self.q.len() * 8
+            + self.lethal.len()
     }
 }
 
 /// 試合（両方の席のデッキの名前）を読まないかを決める関数（--excludeDecks・--onlyDecks）
 pub type SkipFn<'a> = dyn Fn(&[String; 2]) -> bool + Sync + 'a;
+
+/// リーサルの出力（td train --lethalHead）で学ぶ印（--lethalTarget）
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LethalTarget {
+    /// 次の相手のターンに実際に負けたか（自己対戦の "ln"。svwb td selfplay --lostLabel 1）。
+    /// 次の相手のターンの最初の手がランダムな手（"oe"）だった局面は、印を付けない（その相手はリーサルがあってもランダムに打つ）
+    Lost,
+    /// 本当の局面で、相手の番の初めにリーサル探索がリーサルを見つけるか（"ol"。svwb td selfplay --lethalLabel 1）
+    Search,
+}
 
 /// loadData の読み方
 pub struct LoadOptions<'a> {
@@ -870,6 +958,8 @@ pub struct LoadOptions<'a> {
     pub iv_res: bool,
     pub search_mix: f64,
     pub s_source: SSource,
+    /// d.lethal に入れる印
+    pub lethal_target: LethalTarget,
     /// 真を返した試合（デッキの組）は読まない（--excludeDecks・--onlyDecks）
     pub skip_game: Option<&'a SkipFn<'a>>,
     /// 入力をこの並び（学ぶモデルの並び）に読み替える
@@ -919,6 +1009,7 @@ pub fn load_data(files: &[String], opts: &LoadOptions) -> Result<Dataset, String
         anchor: Vec::new(),
         flags: Vec::new(),
         q: Vec::new(),
+        lethal: Vec::new(),
         pairs: Vec::new(),
     };
     let mut code_of: FastMap<u32, usize> = FastMap::default();
@@ -951,6 +1042,7 @@ pub fn load_data(files: &[String], opts: &LoadOptions) -> Result<Dataset, String
     d.anchor.shrink_to_fit();
     d.flags.shrink_to_fit();
     d.q.shrink_to_fit();
+    d.lethal.shrink_to_fit();
     d.pairs.shrink_to_fit();
     Ok(d)
 }
@@ -1037,6 +1129,15 @@ fn add_game(
                 _ => f64::NAN,
             };
             d.q.push(qv);
+            let label = match opts.lethal_target {
+                LethalTarget::Search => x.ol,
+                LethalTarget::Lost => x.ln.filter(|_| !x.oe),
+            };
+            d.lethal.push(match label {
+                None => 0,
+                Some(false) => 1,
+                Some(true) => 2,
+            });
             if x.ph == 2 {
                 d.anchor.push(prev as i32);
             } else {

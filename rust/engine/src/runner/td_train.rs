@@ -3,6 +3,7 @@
 //!   svwb td train --model m0.json --data d0.jsonl[,d1.jsonl.gz] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001]
 //!     [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--imaginedWeight 1] [--ivRes 1] [--best 0] [--bestOn end,after]
 //!     [--base default|zero|search] [--excludeDecks <デッキ>,…|--onlyDecks <デッキ>,…] [--dropInputs <入力>,…]
+//!     [--lethalHead aux|survival] [--lethalWeight 1] [--lethalTarget lost|search]
 //!   svwb td prune --model m.json --data d0.jsonl[,…] --out mp.json [--excludeDecks …|--onlyDecks …]
 //!
 //! 移したのは学び直しの流れ（night/relearn-b.txt）が使う引数だけ。実験用の引数（--attr・--cmpWeight・--v1Only・--searchTarget・--seat・--exclude 等）と
@@ -17,12 +18,23 @@
 //! - 勾配を足して Adam で更新するのは、重みの行ごとにスレッドに分ける（1 つの重みの勾配は、局面の順に足す。TypeScript 版と同じ順）
 //! - 最初の層の行（入力ごと）の Adam は、その行がミニバッチに出たときと、全局面の予測の前にまとめて行う。出ないミニバッチでは勾配が 0 で、
 //!   TypeScript 版も更新の式を毎回当てているので、その回の分を同じ式・同じ順で後から当てる（重みの値は同じ。メモリを読む量が減り、行ごとに並べられる）
+//!
+//! リーサルの出力（実験。TypeScript 版には無い。docs/value-net.md「リーサルの出力（実験）」）: 最後の隠れ層から、相手が次のターンにリーサルを持つ確率
+//! q = σ(bp + wp·h) も出し、自己対戦の印で一緒に学ぶ。印は `--lethalTarget lost`（既定）なら次の相手のターンに実際に負けたか
+//! （svwb td selfplay --lostLabel 1 の "ln"。次の相手のターンの最初の手がランダムな手だった局面（"oe"）は除く）、
+//! `search` なら本当の局面で相手の番の初めにリーサル探索がリーサルを見つけるか（--lethalLabel 1 の "ol"。比べる用）。
+//! - `--lethalHead aux`（X）: 勝つ確率はこれまでどおり σ(a·S + c + z)。損失に --lethalWeight × q の交差エントロピーを足す（推論は勝つ確率だけを使う）
+//! - `--lethalHead survival`（Z）: 勝つ確率を (1 − q) × σ(c + z)（σ(c + z) は生き延びたときの勝率）にし、その勝つ確率を λ 収益に合わせ、q の交差エントロピーも足す。
+//!   出発点の評価は 0（--base zero）だけ
+//!
+//! 出力の無いモデルに付けるときは、wp を 0、bp を学習側の局面の印の割合のロジットで始める。出力を持つモデルはそのまま続きを学ぶ（--lethalHead は省くか同じ形）。
+//! 出力の無いモデルの学習は今までと同じ計算（TypeScript 版と同じ重み）
 
 use super::fixed;
 use super::parallel::{parallel_map, thread_count};
 use super::td_data::{
-    js_to_uint32, load_data, used_inputs, Dataset, IvPair, IvZone, Layer, LoadOptions, NetModel,
-    SSource, F_EXPLORED, F_HOLDOUT, F_IV,
+    js_to_uint32, load_data, used_inputs, Dataset, IvPair, IvZone, Layer, LethalHead, LethalTarget,
+    LoadOptions, NetModel, SSource, F_EXPLORED, F_HOLDOUT, F_IV,
 };
 use crate::ai::aidata::AI_DATA_JSON;
 use crate::data::data;
@@ -36,7 +48,7 @@ use std::time::Instant;
 type Args = [(String, String)];
 
 /// Rust 版の td train が扱う引数（学び直しの流れが使うものと、学習の基本の --batch・--fitA）
-const TRAIN_ARGS: [&str; 20] = [
+const TRAIN_ARGS: [&str; 23] = [
     "model",
     "data",
     "out",
@@ -57,6 +69,9 @@ const TRAIN_ARGS: [&str; 20] = [
     "excludeDecks",
     "onlyDecks",
     "dropInputs",
+    "lethalHead",
+    "lethalWeight",
+    "lethalTarget",
 ];
 
 const PRUNE_ARGS: [&str; 5] = ["model", "data", "out", "excludeDecks", "onlyDecks"];
@@ -313,7 +328,7 @@ struct Part {
     layers: Vec<Rows>,
 }
 
-/// 毎回更新する重み: [b1 | 足した層の b… | w2 | b2 | c | a]（スレッド 0 が受け持つ）
+/// 毎回更新する重み: [b1 | 足した層の b… | w2 | b2 | c | a]（リーサルの出力があれば後ろに [wp… | bp]）（スレッド 0 が受け持つ）
 struct Dense {
     r: Rows,
     decay: Vec<f64>,
@@ -326,6 +341,8 @@ struct Slot<'a> {
     dz: f64,
     s: f64,
     loss: f64,
+    /// リーサルの出力のロジットの勾配
+    dzp: f64,
 }
 
 /// ネットワークの形と、重みの場所
@@ -342,11 +359,18 @@ struct Shape {
     o_b2: usize,
     o_c: usize,
     o_a: usize,
+    /// リーサルの出力の wp の場所（bp はその後ろ、最後の隠れ層の大きさだけ先）
+    o_wp: Option<usize>,
 }
 
 impl Shape {
     fn slot_len(&self) -> usize {
-        2 * self.act_len + 3
+        2 * self.act_len + 4
+    }
+
+    fn last_acts<'a>(&self, acts: &'a [f64]) -> &'a [f64] {
+        let last = self.sizes.len() - 1;
+        &acts[self.act_off[last]..self.act_off[last] + self.sizes[last]]
     }
 }
 
@@ -426,15 +450,31 @@ impl View<'_> {
         z
     }
 
-    /// 出力の勾配 dz から、各隠れ層の値の勾配を dacts に書く（td-main.ts の backward の、勾配を足す前の分）
-    fn deltas(&self, dz: f64, acts: &[f64], dacts: &mut [f64]) {
+    /// リーサルの出力のロジット（前向きの計算の後の acts から）
+    fn lethal_z(&self, acts: &[f64]) -> f64 {
+        let sh = self.shape;
+        let ow = sh.o_wp.expect("リーサルの出力");
+        let hl = sh.last_acts(acts);
+        let mut z = self.d(ow + hl.len());
+        for (j, &x) in hl.iter().enumerate() {
+            z += x * self.d(ow + j);
+        }
+        z
+    }
+
+    /// 出力の勾配 dz（とリーサルの出力の勾配 dzp）から、各隠れ層の値の勾配を dacts に書く（td-main.ts の backward の、勾配を足す前の分）
+    fn deltas(&self, dz: f64, dzp: f64, acts: &[f64], dacts: &mut [f64]) {
         let sh = self.shape;
         let l = sh.sizes.len() - 1;
         {
             let (o, m) = (sh.act_off[l], sh.sizes[l]);
             for j in 0..m {
                 dacts[o + j] = if acts[o + j] > 0.0 {
-                    dz * self.d(sh.o_w2 + j)
+                    let g = dz * self.d(sh.o_w2 + j);
+                    match sh.o_wp {
+                        None => g,
+                        Some(ow) => g + dzp * self.d(ow + j),
+                    }
                 } else {
                     0.0
                 };
@@ -462,6 +502,15 @@ impl View<'_> {
     }
 }
 
+/// リーサルの出力の学び方
+#[derive(Clone, Copy)]
+struct LethalOpts {
+    /// 勝つ確率を (1 − q) × σ(c + z) にする（Z）。偽なら補助の出力（X）
+    survival: bool,
+    /// 損失の q の交差エントロピーの重み
+    weight: f64,
+}
+
 /// 学習の状態（重みをスレッドの受け持ちに分けて持つ）
 struct Learner {
     shape: Shape,
@@ -470,10 +519,60 @@ struct Learner {
     l2: f64,
     lr: f64,
     fit_a: bool,
+    lethal: Option<LethalOpts>,
+}
+
+/// 局面 1 つの勝つ確率と、出力の勾配（dz・dzp）と、勝つ確率の目標に対する交差エントロピー。
+/// リーサルの出力が無ければ今までと同じ式（td-main.ts の train）
+#[allow(clippy::too_many_arguments)]
+fn output_grad(
+    lethal: Option<LethalOpts>,
+    ma: f64,
+    mc: f64,
+    z: f64,
+    zp: f64,
+    s: f64,
+    target: f64,
+    w: f64,
+    y: Option<f64>,
+    nb: f64,
+) -> (f64, f64, f64, f64) {
+    let Some(lo) = lethal else {
+        let p = sigmoid(ma * s + mc + z);
+        return (p, (w * (p - target)) / nb, 0.0, bce(p, target));
+    };
+    let q = sigmoid(zp);
+    let sup = y.map_or(0.0, |y| w * lo.weight * (q - y));
+    if lo.survival {
+        // win = (1 − q)·σ(c + z)（S は 0）。d bce(win)/dz = (win − G)(1 − sv)/(1 − win)、d/dzp = −(win − G)·q/(1 − win)
+        let sv = sigmoid(ma * s + mc + z);
+        let win = (1.0 - q) * sv;
+        let rest = (1.0 - win).max(1e-9);
+        let e = w * (win - target);
+        let dz = (e * (1.0 - sv) / rest) / nb;
+        let dzp = (-e * q / rest + sup) / nb;
+        (win, dz, dzp, bce(win, target))
+    } else {
+        let p = sigmoid(ma * s + mc + z);
+        (p, (w * (p - target)) / nb, sup / nb, bce(p, target))
+    }
+}
+
+/// 勝つ確率の補正を点数にしたもの（評価 1 点あたりのロジット a で割る）。survival なら logit(win) / a（S は 0）
+fn score_of(win: f64, ma: f64) -> f64 {
+    let w = win.clamp(1e-12, 1.0 - 1e-12);
+    jsmath::log(w / (1.0 - w)) / ma
 }
 
 impl Learner {
-    fn new(model: &NetModel, seen_rows: &[bool], l2: f64, lr: f64, fit_a: bool) -> Learner {
+    fn new(
+        model: &NetModel,
+        seen_rows: &[bool],
+        l2: f64,
+        lr: f64,
+        fit_a: bool,
+        lethal: Option<(&LethalHead, LethalOpts)>,
+    ) -> Learner {
         let t = thread_count().max(1);
         let h = model.hidden;
         let sizes = model.layer_sizes();
@@ -495,9 +594,12 @@ impl Learner {
         let o_w2 = o;
         let o_b2 = o_w2 + sizes[sizes.len() - 1];
         let (o_c, o_a) = (o_b2 + 1, o_b2 + 2);
+        let last = sizes[sizes.len() - 1];
+        let o_wp = lethal.map(|_| o_a + 1);
+        let n_dense = o_a + 1 + lethal.map_or(0, |_| last + 1);
         let mut dense = Dense {
-            r: Rows::new(o_a + 1, 1),
-            decay: vec![0.0; o_a + 1],
+            r: Rows::new(n_dense, 1),
+            decay: vec![0.0; n_dense],
         };
         dense.r.p[..h].copy_from_slice(&model.b1);
         for (k, l) in model.layers.iter().enumerate() {
@@ -508,6 +610,11 @@ impl Learner {
         dense.r.p[o_c] = model.c;
         dense.r.p[o_a] = model.a;
         dense.decay[o_w2..o_b2].fill(l2);
+        if let (Some(ow), Some((head, _))) = (o_wp, lethal) {
+            dense.r.p[ow..ow + last].copy_from_slice(&head.w);
+            dense.r.p[ow + last] = head.b;
+            dense.decay[ow..ow + last].fill(l2);
+        }
         let parts = (0..t)
             .map(|tid| {
                 let n_local = if n_in > tid {
@@ -563,12 +670,14 @@ impl Learner {
                 o_b2,
                 o_c,
                 o_a,
+                o_wp,
             },
             parts,
             dense: RwLock::new(dense),
             l2,
             lr,
             fit_a,
+            lethal: lethal.map(|(_, o)| o),
         }
     }
 
@@ -606,8 +715,9 @@ impl Learner {
         });
     }
 
-    /// 全局面の勝つ確率の予測と、補正 (c + L) / a の絶対値の和（td-main.ts の predictAll。和は局面の順に足す）
-    fn predict_all(&self, d: &Dataset) -> (Vec<f64>, f64) {
+    /// 全局面の勝つ確率の予測と、補正 (c + L) / a の絶対値の和（td-main.ts の predictAll。和は局面の順に足す）と、
+    /// リーサルの出力の確率（出力が無ければ空）
+    fn predict_all(&self, d: &Dataset) -> (Vec<f64>, f64, Vec<f64>) {
         let n = d.len();
         let t = self.shape.t;
         let chunk = n.div_ceil(t).max(1);
@@ -624,25 +734,42 @@ impl Learner {
                 let mut buf = Vec::new();
                 let mut v = Vec::with_capacity(b - a);
                 let mut abs = Vec::with_capacity(b - a);
+                let mut qs = Vec::new();
                 for i in a..b {
                     d.inputs(i, &mut buf);
                     let z = view.forward(&buf, &mut acts);
-                    v.push(sigmoid(ma * d.s_at(i) + mc + z));
-                    abs.push(((mc + z) / ma).abs());
+                    let Some(lo) = self.lethal else {
+                        v.push(sigmoid(ma * d.s_at(i) + mc + z));
+                        abs.push(((mc + z) / ma).abs());
+                        continue;
+                    };
+                    let q = sigmoid(view.lethal_z(&acts));
+                    qs.push(q);
+                    let sv = sigmoid(ma * d.s_at(i) + mc + z);
+                    if lo.survival {
+                        let win = (1.0 - q) * sv;
+                        v.push(win);
+                        abs.push(score_of(win, ma).abs());
+                    } else {
+                        v.push(sv);
+                        abs.push(((mc + z) / ma).abs());
+                    }
                 }
-                (v, abs)
+                (v, abs, qs)
             },
             |_, _, _, _| {},
         );
         let mut v = Vec::with_capacity(n);
+        let mut qs = Vec::new();
         let mut sum = 0.0;
-        for (pv, pa) in parts {
+        for (pv, pa, pq) in parts {
             v.extend(pv);
+            qs.extend(pq);
             for x in pa {
                 sum += x;
             }
         }
-        (v, sum)
+        (v, sum, qs)
     }
 
     /// 1 エポック分のミニバッチを学ぶ。返すのは学習の TD（交差エントロピー）の和
@@ -689,13 +816,28 @@ impl Learner {
                         d.inputs(i, &mut buf);
                         let z = view.forward(&buf, acts);
                         let s = d.s_at(i);
-                        let p = sigmoid(ma * s + mc + z);
-                        let loss = bce(p, targets[i]);
-                        let dz = (weight(i) * (p - targets[i])) / nb as f64;
-                        view.deltas(dz, acts, dacts);
+                        let zp = if self.lethal.is_some() {
+                            view.lethal_z(acts)
+                        } else {
+                            0.0
+                        };
+                        let (_, dz, dzp, loss) = output_grad(
+                            self.lethal,
+                            ma,
+                            mc,
+                            z,
+                            zp,
+                            s,
+                            targets[i],
+                            weight(i),
+                            d.lethal_label(i),
+                            nb as f64,
+                        );
+                        view.deltas(dz, dzp, acts, dacts);
                         rest[0] = dz;
                         rest[1] = s;
                         rest[2] = loss;
+                        rest[3] = dzp;
                     }
                 }
                 barrier.wait();
@@ -711,6 +853,7 @@ impl Learner {
                             dz: s[2 * sh.act_len],
                             s: s[2 * sh.act_len + 1],
                             loss: s[2 * sh.act_len + 2],
+                            dzp: s[2 * sh.act_len + 3],
                         }
                     };
                     let c = cs[step as usize];
@@ -794,6 +937,12 @@ impl Learner {
                             }
                             for (gj, &x) in g[..h].iter_mut().zip(&sl.dacts[..h]) {
                                 *gj += x;
+                            }
+                            if let Some(ow) = sh.o_wp {
+                                for (j, &x) in hl.iter().enumerate() {
+                                    g[ow + j] += sl.dzp * x;
+                                }
+                                g[ow + hl.len()] += sl.dzp;
                             }
                             loss_sum += sl.loss;
                         }
@@ -1150,6 +1299,36 @@ fn report(label: &str, d: &Dataset, v: &[f64], targets: &[f64]) {
     println!("{label}: {}", parts.join(" / "));
 }
 
+/// 確かめ用のターン末（ランダムに打った局面を除く）のうち印のある局面での、リーサルの出力の交差エントロピーと AUC。
+/// 並べて、印の割合だけで当てたときの交差エントロピーと、勝つ確率の低さの AUC
+fn lethal_report(d: &Dataset, v: &[f64], q: &[f64]) -> String {
+    let (mut pq, mut pv, mut y) = (Vec::new(), Vec::new(), Vec::new());
+    for i in 0..v.len() {
+        if !d.has(i, F_HOLDOUT) || d.has(i, F_EXPLORED) {
+            continue;
+        }
+        let Some(l) = d.lethal_label(i) else {
+            continue;
+        };
+        pq.push(q[i]);
+        pv.push(1.0 - v[i]);
+        y.push(l);
+    }
+    let n = y.len();
+    let pos = y.iter().filter(|&&x| x == 1.0).count();
+    let nf = n.max(1) as f64;
+    let ce = pq.iter().zip(&y).map(|(&p, &t)| bce(p, t)).sum::<f64>() / nf;
+    let rate = pos as f64 / nf;
+    let ce0 = y.iter().map(|&t| bce(rate, t)).sum::<f64>() / nf;
+    format!(
+        "リーサルの出力（確かめ用のターン末 {n}、相手がリーサルを持つ {pos}）: 交差エントロピー {}（割合だけなら {}） AUC {}（勝つ確率の低さの AUC {}）",
+        fixed(ce, 4),
+        fixed(ce0, 4),
+        fixed(auc(&pq, &y), 3),
+        fixed(auc(&pv, &y), 3)
+    )
+}
+
 // ---- 書き出し ----
 
 fn write_json(path: &str, j: &Json) -> Result<(), String> {
@@ -1203,6 +1382,32 @@ pub fn train(args: &Args) -> Result<(), String> {
             best_on.push(ph);
         }
     }
+    // --lethalHead aux|survival: リーサルの出力を付けて学ぶ（出力を持つモデルなら、省くか同じ形）
+    let survival = match (arg(args, "lethalHead"), &model.lethal_head) {
+        (None, None) => None,
+        (None, Some(_)) => Some(model.survival()),
+        (Some("aux"), h) if h.is_none() || !model.survival() => Some(false),
+        (Some("survival"), h) if h.is_none() || model.survival() => Some(true),
+        (Some(x @ ("aux" | "survival")), Some(_)) => {
+            return Err(format!(
+                "--lethalHead {x}: このモデルのリーサルの出力は {} の形です",
+                if model.survival() { "survival" } else { "aux" }
+            ))
+        }
+        (Some(x), _) => return Err(format!("--lethalHead は aux か survival: {x}")),
+    };
+    let lethal_weight = num_arg(args, "lethalWeight", 1.0)?;
+    if arg(args, "lethalWeight").is_some() && survival.is_none() {
+        return Err("--lethalWeight はリーサルの出力（--lethalHead）を学ぶときだけ".into());
+    }
+    let lethal_target = match arg(args, "lethalTarget") {
+        None | Some("lost") => LethalTarget::Lost,
+        Some("search") => LethalTarget::Search,
+        Some(x) => return Err(format!("--lethalTarget は lost か search: {x}")),
+    };
+    if arg(args, "lethalTarget").is_some() && survival.is_none() {
+        return Err("--lethalTarget はリーサルの出力（--lethalHead）を学ぶときだけ".into());
+    }
     let base_arg = arg(args, "base");
     let base_weights = match base_arg {
         None => model.base_weights.clone(),
@@ -1215,6 +1420,9 @@ pub fn train(args: &Args) -> Result<(), String> {
     let t0 = Instant::now();
     let skip = deck_filter(args)?;
     let s_source = s_source_of(&base_weights);
+    if survival == Some(true) && s_source != SSource::Zero {
+        return Err("--lethalHead survival は出発点の評価が 0 のとき（--base zero）だけ".into());
+    }
     let layout = model.layout();
     let fallback = model0.layout();
     let d = load_data(
@@ -1226,6 +1434,7 @@ pub fn train(args: &Args) -> Result<(), String> {
             iv_res,
             search_mix: 0.5,
             s_source,
+            lethal_target,
             skip_game: skip.as_deref(),
             layout: &layout,
             fallback: &fallback,
@@ -1271,10 +1480,64 @@ pub fn train(args: &Args) -> Result<(), String> {
         "入力 {n_b} のうち、読んだ局面に出た {rows} 個の行の重みを学ぶ（出ない行は動かさない）"
     );
 
-    let learner = Learner::new(&model, &seen, l2, lr, fit_a);
     let mut order: Vec<u32> = (0..n as u32)
         .filter(|&i| !d.has(i as usize, F_HOLDOUT) && !d.has(i as usize, F_EXPLORED))
         .collect();
+    // リーサルの出力: 出力の無いモデルに付けるなら wp は 0、bp は学習側の局面の印の割合のロジットで始める
+    let head = match survival {
+        None => None,
+        Some(sv) => {
+            let (mut labeled, mut pos) = (0usize, 0usize);
+            for &i in &order {
+                if let Some(y) = d.lethal_label(i as usize) {
+                    labeled += 1;
+                    if y == 1.0 {
+                        pos += 1;
+                    }
+                }
+            }
+            if labeled == 0 {
+                return Err(match lethal_target {
+                    LethalTarget::Lost => "次の相手のターンに負けたかの印（\"ln\"）のある局面がありません（svwb td selfplay --lostLabel 1 で作った自己対戦が要ります）",
+                    LethalTarget::Search => "リーサルの印（\"ol\"）のある局面がありません（svwb td selfplay --lethalLabel 1 で作った自己対戦が要ります）",
+                }
+                .into());
+            }
+            let rate = (pos as f64 / labeled as f64).clamp(1e-4, 1.0 - 1e-4);
+            let head = match &model.lethal_head {
+                Some(h) => h.clone(),
+                None => LethalHead {
+                    w: vec![0.0; *model.layer_sizes().last().expect("層")],
+                    b: jsmath::log(rate / (1.0 - rate)),
+                },
+            };
+            println!(
+                "リーサルの出力を{}学ぶ（{}、重み {lethal_weight}、印 {}）: 学習側の印のある局面 {labeled}、印が 1 {pos}（{}%）",
+                if model.lethal_head.is_some() { "続けて" } else { "付けて" },
+                if sv { "survival: 勝つ確率 = (1 − q) × 生き延びたときの勝率" } else { "aux: 補助の出力" },
+                match lethal_target {
+                    LethalTarget::Lost => "lost: 次の相手のターンに負けた（相手の最初の手がランダムな局面は除く）",
+                    LethalTarget::Search => "search: リーサル探索が相手のリーサルを見つける",
+                },
+                fixed(rate * 100.0, 2)
+            );
+            Some((
+                head,
+                LethalOpts {
+                    survival: sv,
+                    weight: lethal_weight,
+                },
+            ))
+        }
+    };
+    let learner = Learner::new(
+        &model,
+        &seen,
+        l2,
+        lr,
+        fit_a,
+        head.as_ref().map(|(h, o)| (h, *o)),
+    );
     let steps_per_epoch = order.len().div_ceil(batch);
     let total_steps = steps_per_epoch * epochs;
     if total_steps >= u32::MAX as usize {
@@ -1298,13 +1561,16 @@ pub fn train(args: &Args) -> Result<(), String> {
         }
     };
 
-    let (v0, abs0) = learner.predict_all(&d);
+    let (v0, abs0, q0) = learner.predict_all(&d);
     if d.q.iter().any(|x| !x.is_nan()) {
         if let Some(line) = search_report(&d, &v0) {
             println!("探索の値（--searchTarget 0、--searchMix 0.5）: {line}");
         }
     }
     report("学習前", &d, &v0, &lambda_returns(&d, &v0, lambda));
+    if head.is_some() {
+        println!("  {}", lethal_report(&d, &v0, &q0));
+    }
     // --best 1: 確かめ用の局面の勝敗の交差エントロピーが一番小さかったエポックの重み
     let mut best_loss = holdout_loss(&d, &v0, &best_on);
     let mut best_epoch = 0;
@@ -1328,7 +1594,7 @@ pub fn train(args: &Args) -> Result<(), String> {
         let loss_sum = learner.epoch(&d, &order, batch, &targets, &weight, step, &cs);
         step += steps_per_epoch as u32;
         learner.flush(step, &cs);
-        let (v, abs) = learner.predict_all(&d);
+        let (v, abs, qv) = learner.predict_all(&d);
         report(
             &format!(
                 "エポック {}（学習の TD {}、a {}、c {}）",
@@ -1341,6 +1607,9 @@ pub fn train(args: &Args) -> Result<(), String> {
             &v,
             &lambda_returns(&d, &v, lambda),
         );
+        if head.is_some() {
+            println!("  {}", lethal_report(&d, &v, &qv));
+        }
         let loss = holdout_loss(&d, &v, &best_on);
         if keep_best && loss < best_loss {
             best_loss = loss;
@@ -1393,6 +1662,16 @@ pub fn train(args: &Args) -> Result<(), String> {
     m.b2 = dense[sh.o_b2];
     m.c = dense[sh.o_c];
     m.a = dense[sh.o_a];
+    if let Some(ow) = sh.o_wp {
+        let last = *sh.sizes.last().expect("層");
+        m.lethal_head = Some(LethalHead {
+            w: dense[ow..ow + last].to_vec(),
+            b: dense[ow + last],
+        });
+        if learner.lethal.is_some_and(|o| o.survival) {
+            m.win_form = Some("survival".into());
+        }
+    }
     // 書き出す重みは 6 桁に丸める（td-main.ts の round(x, 6)。属性の分 attr は読んだまま）
     let j = m.to_json(|x| Json::Num(round_precision(x, 6)));
     write_json(out, &j)?;
@@ -1497,6 +1776,267 @@ mod tests {
         assert_eq!(a.p, b.p);
         assert_eq!(a.m1, b.m1);
         assert_eq!(a.m2, b.m2);
+    }
+
+    /// リーサルの出力の勾配（X・Z）が、損失 w·bce(勝つ確率, G) + w·λ·bce(q, y) の数値微分と合う
+    #[test]
+    fn lethal_gradients_match_finite_differences() {
+        let (ma, mc, s, nb) = (0.0126, 0.16, 0.0, 4.0);
+        for survival in [false, true] {
+            let lo = LethalOpts {
+                survival,
+                weight: 0.7,
+            };
+            for &(z, zp, g, w, y) in &[
+                (0.3, -1.2, 0.8, 1.0, Some(0.0)),
+                (-1.5, 0.4, 0.1, 0.5, Some(1.0)),
+                (2.0, -3.0, 1.0, 1.0, None),
+                (-0.2, 1.5, 0.0, 2.0, Some(1.0)),
+            ] {
+                let loss = |z: f64, zp: f64| {
+                    let q = sigmoid(zp);
+                    let sv = sigmoid(ma * s + mc + z);
+                    let win = if survival { (1.0 - q) * sv } else { sv };
+                    let sup = y.map_or(0.0, |y| w * lo.weight * bce(q, y));
+                    (w * bce(win, g) + sup) / nb
+                };
+                let (win, dz, dzp, l) = output_grad(Some(lo), ma, mc, z, zp, s, g, w, y, nb);
+                let h = 1e-6;
+                let nz = (loss(z + h, zp) - loss(z - h, zp)) / (2.0 * h);
+                let nzp = (loss(z, zp + h) - loss(z, zp - h)) / (2.0 * h);
+                assert!((dz - nz).abs() < 1e-6, "dz {dz} {nz} {survival}");
+                assert!((dzp - nzp).abs() < 1e-6, "dzp {dzp} {nzp} {survival}");
+                let q = sigmoid(zp);
+                let sv = sigmoid(ma * s + mc + z);
+                assert_eq!(win, if survival { (1.0 - q) * sv } else { sv });
+                assert_eq!(l, bce(win, g));
+            }
+        }
+        // 出力が無ければ今までの式
+        let (p, dz, dzp, l) = output_grad(None, ma, mc, 0.3, 9.0, 0.5, 0.8, 1.0, Some(1.0), nb);
+        let p0 = sigmoid(ma * 0.5 + mc + 0.3);
+        assert_eq!((p, dz, dzp, l), (p0, (p0 - 0.8) / nb, 0.0, bce(p0, 0.8)));
+    }
+
+    /// 照らし合わせのデータの各ターン末に、負けた席の最後のターン末だけ 1 のリーサルの印を付けたもの
+    fn labeled_fixture(dir: &std::path::Path, tmp: &std::path::Path) -> String {
+        let text = std::fs::read_to_string(dir.join("data.jsonl")).unwrap();
+        let mut out = String::new();
+        for line in text.lines() {
+            let mut j = Json::parse(line).unwrap();
+            if let (Some(Json::Num(w)), Some(Json::Arr(seqs))) =
+                (j.get("winner").cloned(), j.take("samples"))
+            {
+                let seqs = seqs
+                    .into_iter()
+                    .enumerate()
+                    .map(|(p, seq)| {
+                        let Json::Arr(mut xs) = seq else { panic!() };
+                        let ends: Vec<usize> = (0..xs.len())
+                            .filter(|&k| xs[k].get("ph") == Some(&Json::Num(0.0)))
+                            .collect();
+                        for (n, &k) in ends.iter().enumerate() {
+                            let last = Some(&k) == ends.last() && w != p as f64;
+                            let flag = |b: bool| Json::Num(if b { 1.0 } else { 0.0 });
+                            xs[k].set("ol", flag(last));
+                            xs[k].set("ln", flag(last));
+                            // 次の相手のターンの最初の手がランダムな手だった局面（負けた局面は残す。小さなデータで出力が学べるように）
+                            xs[k].set("oe", flag(n % 4 == 3 && !last));
+                        }
+                        Json::Arr(xs)
+                    })
+                    .collect();
+                j.set("samples", Json::Arr(seqs));
+            }
+            out.push_str(&j.stringify());
+            out.push('\n');
+        }
+        let path = tmp.join("labeled.jsonl");
+        std::fs::write(&path, out).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    /// --lethalTarget: lost は "ln"（次の相手のターンの最初の手がランダムな手だった局面 "oe" は除く）、search は "ol" を印にする
+    #[test]
+    fn lethal_target_picks_label() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/td-train");
+        let tmp = std::env::temp_dir().join(format!("svwb-td-target-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let data = labeled_fixture(&dir, &tmp);
+        let m = NetModel::load(&dir.join("model.json").to_string_lossy()).unwrap();
+        let load = |t: LethalTarget| {
+            load_data(
+                std::slice::from_ref(&data),
+                &LoadOptions {
+                    holdout: 0.0,
+                    iv_weight: 1.0,
+                    imagined_weight: 1.0,
+                    iv_res: true,
+                    search_mix: 0.5,
+                    s_source: SSource::Zero,
+                    lethal_target: t,
+                    skip_game: None,
+                    layout: &m.layout(),
+                    fallback: &m.layout(),
+                },
+            )
+            .unwrap()
+        };
+        let (lost, search) = (load(LethalTarget::Lost), load(LethalTarget::Search));
+        assert_eq!(lost.len(), search.len());
+        let ends = (0..search.len()).filter(|&i| search.phase(i) == 0).count();
+        let labeled = |d: &Dataset| {
+            (0..d.len())
+                .filter(|&i| d.lethal_label(i).is_some())
+                .count()
+        };
+        assert_eq!(labeled(&search), ends);
+        assert!(
+            labeled(&lost) < ends && labeled(&lost) > ends / 2,
+            "{} / {ends}",
+            labeled(&lost)
+        );
+        for i in 0..lost.len() {
+            if let Some(y) = lost.lethal_label(i) {
+                assert_eq!(search.lethal_label(i), Some(y));
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// X（aux）・Z（survival）を学ぶと、出力の重みを書き、学習側のリーサルの印を割合だけより当てる。
+    /// 印のあるデータでも、出力を付けなければ印の無いデータと同じモデルを書く
+    #[test]
+    fn lethal_heads_train() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/td-train");
+        let tmp = std::env::temp_dir().join(format!("svwb-td-lethal-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let data = labeled_fixture(&dir, &tmp);
+        let model = dir.join("model.json").to_string_lossy().into_owned();
+        let run = |from: &str, extra: &[(&str, &str)], data: &str, name: &str| -> String {
+            let out = tmp.join(name).to_string_lossy().into_owned();
+            let mut args: Vec<(String, String)> = [
+                ("model", from),
+                ("data", data),
+                ("out", out.as_str()),
+                ("epochs", "3"),
+                ("lr", "0.01"),
+                ("batch", "8"),
+                ("holdout", "0"),
+                ("base", "zero"),
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+            args.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+            train(&args).unwrap();
+            out
+        };
+        let plain = dir.join("data.jsonl").to_string_lossy().into_owned();
+        let c0 = std::fs::read_to_string(run(&model, &[], &plain, "c0.json")).unwrap();
+        let c1 = std::fs::read_to_string(run(&model, &[], &data, "c1.json")).unwrap();
+        assert!(c0 == c1, "印があっても、出力を付けなければ同じ");
+        for (form, name) in [("aux", "x.json"), ("survival", "z.json")] {
+            let out = run(
+                &model,
+                &[("lethalHead", form), ("lethalWeight", "2")],
+                &data,
+                name,
+            );
+            let m = NetModel::load(&out).unwrap();
+            let head = m.lethal_head.clone().expect("リーサルの出力");
+            assert_eq!(head.w.len(), *m.layer_sizes().last().unwrap());
+            assert_eq!(m.survival(), form == "survival");
+            // 推論側（aidata・valuenet）も読める
+            let raw: crate::ai::aidata::RawValueNet =
+                serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+            let net = crate::ai::valuenet::ValueNet::new(raw).unwrap();
+            assert!(net.has_lethal_head());
+            // 学習側の印に対する交差エントロピーが、割合だけより小さい
+            let d = load_data(
+                std::slice::from_ref(&data),
+                &LoadOptions {
+                    holdout: 0.0,
+                    iv_weight: 1.0,
+                    imagined_weight: 1.0,
+                    iv_res: true,
+                    search_mix: 0.5,
+                    s_source: SSource::Zero,
+                    lethal_target: LethalTarget::Lost,
+                    skip_game: None,
+                    layout: &m.layout(),
+                    fallback: &m.layout(),
+                },
+            )
+            .unwrap();
+            let seen = vec![true; m.input_size()];
+            let lo = LethalOpts {
+                survival: m.survival(),
+                weight: 1.0,
+            };
+            let learner = Learner::new(&m, &seen, 0.0, 0.0, false, Some((&head, lo)));
+            let (v, _, q) = learner.predict_all(&d);
+            let (mut ce, mut n, mut pos) = (0.0, 0.0, 0.0);
+            for i in 0..d.len() {
+                if let Some(y) = d.lethal_label(i) {
+                    ce += bce(q[i], y);
+                    n += 1.0;
+                    pos += y;
+                    if m.survival() {
+                        assert!(v[i] <= 1.0 - q[i]);
+                    }
+                }
+            }
+            let ce0 = (0..d.len())
+                .filter_map(|i| d.lethal_label(i))
+                .map(|y| bce(pos / n, y))
+                .sum::<f64>();
+            assert!(n > 20.0 && pos > 3.0, "印 {n}・{pos}");
+            assert!(ce < ce0, "{form}: {} < {}", ce / n, ce0 / n);
+            // 続きを学ぶ: 省けばそのまま、違う形はエラー
+            let again = run(&out, &[], &data, &format!("again-{name}"));
+            assert_eq!(NetModel::load(&again).unwrap().survival(), m.survival());
+            run(
+                &out,
+                &[("lethalHead", form)],
+                &data,
+                &format!("again2-{name}"),
+            );
+            let other = if form == "aux" { "survival" } else { "aux" };
+            let mut args = vec![
+                ("model".to_string(), out.clone()),
+                ("data".to_string(), data.clone()),
+                (
+                    "out".to_string(),
+                    tmp.join("bad.json").to_string_lossy().into_owned(),
+                ),
+                ("lethalHead".to_string(), other.to_string()),
+            ];
+            assert!(train(&args).unwrap_err().contains("の形です"));
+            args.pop();
+            args.push(("lethalWeight".into(), "1".into()));
+            args[0].1 = model.clone();
+            assert!(train(&args).unwrap_err().contains("--lethalHead"));
+        }
+        // 印の無いデータで出力を付けるのはエラー、survival は出発点 0 のときだけ
+        let mut args: Vec<(String, String)> = vec![
+            ("model".into(), model.clone()),
+            ("data".into(), plain.clone()),
+            (
+                "out".into(),
+                tmp.join("bad.json").to_string_lossy().into_owned(),
+            ),
+            ("lethalHead".into(), "aux".into()),
+        ];
+        assert!(train(&args).unwrap_err().contains("--lostLabel"));
+        args.push(("lethalTarget".into(), "search".into()));
+        assert!(train(&args).unwrap_err().contains("--lethalLabel"));
+        args.pop();
+        args[1].1 = data.clone();
+        args[3].1 = "survival".into();
+        args.push(("base".into(), "default".into()));
+        assert!(train(&args).unwrap_err().contains("--base zero"));
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// TypeScript 版が書いた照らし合わせの出力（rust/engine/tests/td-train/README.md）と、同じファイルを書く。

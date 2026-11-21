@@ -179,9 +179,19 @@ fn pos_seed(rec: &GameRec, i: usize) -> u32 {
 
 /// 試合の i 手目の前の局面と、試合でその局面を考えたときの AI の乱数（play_match の MatchRng と同じ）
 fn rebuild(rec: &GameRec, i: usize) -> (GameState, Rng) {
-    let mut s = create_game([&rec.decks[0], &rec.decks[1]], rec.seed);
-    let mut mrng = MatchRng::new(rec.seed);
-    for a in &rec.actions[..i] {
+    rebuild_from(&rec.decks, rec.seed, &rec.actions, i)
+}
+
+/// rebuild の、デッキ・シード・行動の列から作るもの（survey values は棋譜から作る）
+fn rebuild_from(
+    decks: &[Vec<CardIdx>; 2],
+    seed: u32,
+    actions: &[Action],
+    i: usize,
+) -> (GameState, Rng) {
+    let mut s = create_game([&decks[0], &decks[1]], seed);
+    let mut mrng = MatchRng::new(seed);
+    for a in &actions[..i] {
         let actor = acting_player(&s);
         mrng.next(&s, actor, false);
         s = apply_legal(&s, a);
@@ -2644,13 +2654,226 @@ fn turns(argv: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+const VALUES_TAG: u32 = 0x5641_4c55;
+
+/// survey values の 1 局面: 棋譜 rep から局面 row を作り直して候補を作り、候補ごとの終局面の値の行（JSON Lines）を返す
+#[allow(clippy::too_many_arguments)]
+fn candidate_values(
+    row: &Value,
+    rep: &kifu::Replay,
+    opts: &SearchOptions,
+    extra: usize,
+    score_opts: &SearchOptions,
+    net: &crate::ai::valuenet::ValueNet,
+    scale: f64,
+    reads: u32,
+) -> Result<String, String> {
+    use super::kifu_cmd::{feature_cells, LOSS_SCORE};
+    let sig = |x: f64| 100.0 / (1.0 + (-scale * x).exp());
+    let mix_r = score_opts.rescore_mix;
+    let g = row["g"].as_u64().unwrap_or(0);
+    let i = row["i"].as_u64().unwrap_or(0) as usize;
+    let p = row["p"].as_u64().unwrap_or(0) as PlayerIndex;
+    if i > rep.actions.len() {
+        return Err(format!("局面 {g}:{i}: 棋譜の行動が足りません"));
+    }
+    let (s, mut rng) = rebuild_from(&rep.decks, rep.seed, &rep.actions, i);
+    let same_state = serde_json::from_str::<Value>(&state_to_json(&s).stringify())
+        .is_ok_and(|x| x == row["state"]);
+    reset_lethal();
+    reset_exact_lethal_cache();
+    let agent = SearchAgent::new(opts.clone());
+    let legal = legal_actions(&s);
+    let Some(sv) = agent.survey_plans(&s, &legal, &mut rng, extra) else {
+        return Ok(String::new());
+    };
+    let rec_plans = row["plans"].as_array().cloned().unwrap_or_default();
+    let same_plans = sv.plans.len() == rec_plans.len()
+        && sv
+            .plans
+            .iter()
+            .zip(&rec_plans)
+            .all(|(a, b)| actions_json(&a.steps) == b["steps"]);
+    let root = sv.root.as_ref().unwrap_or(&s);
+    let scorer = SearchAgent::new(score_opts.clone());
+    let base = seed_of(&[VALUES_TAG, g as u32, i as u32]);
+    let seeds: Vec<u32> = (0..reads).map(|k| mix(base, k)).collect();
+    let mut text = String::new();
+    for (k, pl) in sv.plans.iter().enumerate() {
+        let mut t = root.clone();
+        let mut whole = true;
+        for a in &pl.full {
+            if !is_legal(&t, a) {
+                whole = false;
+                break;
+            }
+            t = apply_legal(&t, a);
+        }
+        let q = 1 - p;
+        let end = scorer.turn_end_value(&t, p);
+        let mut cells: Vec<(String, Json)> = vec![
+            ("g".into(), Json::Num(g as f64)),
+            ("i".into(), Json::Num(i as f64)),
+            ("p".into(), Json::Num(p as f64)),
+            ("k".into(), Json::Num(k as f64)),
+            ("match".into(), Json::Bool(same_state && same_plans)),
+            ("whole".into(), Json::Bool(whole)),
+            ("chosen".into(), Json::Bool(pl.chosen)),
+            ("top".into(), Json::Bool(pl.top)),
+            ("cut".into(), Json::Bool(pl.cut)),
+            (
+                "deck".into(),
+                Json::Str(row["deck"].as_str().unwrap_or("").into()),
+            ),
+            (
+                "opp".into(),
+                Json::Str(row["opp"].as_str().unwrap_or("").into()),
+            ),
+            ("turn".into(), Json::Num(t.turn as f64)),
+            ("hp".into(), Json::Num(t.players[p].leader_hp as f64)),
+            ("oppHp".into(), Json::Num(t.players[q].leader_hp as f64)),
+            ("ended".into(), Json::Bool(t.phase == Phase::Ended)),
+            ("end".into(), Json::Num(end)),
+            ("endWin".into(), Json::Num(sig(end))),
+        ];
+        if reads > 0 && t.phase != Phase::Ended {
+            let rv = scorer.read_values(&t, p, &seeds);
+            let n = rv.len() as f64;
+            cells.extend([
+                (
+                    "readLoss".into(),
+                    Json::Num(rv.iter().filter(|&&x| x <= LOSS_SCORE).count() as f64 / n),
+                ),
+                (
+                    "readWin".into(),
+                    Json::Num(rv.iter().map(|&x| sig(x)).sum::<f64>() / n),
+                ),
+                (
+                    "pickWin".into(),
+                    Json::Num(
+                        rv.iter()
+                            .map(|&x| sig((1.0 - mix_r) * x + mix_r * end))
+                            .sum::<f64>()
+                            / n,
+                    ),
+                ),
+            ]);
+        }
+        if t.phase != Phase::Ended {
+            cells.extend(feature_cells(&scorer, &t, p, net));
+        }
+        text.push_str(&Json::Obj(cells).stringify());
+        text.push('\n');
+    }
+    Ok(text)
+}
+
+/// svwb survey values: 結果の局面の候補ごとに、AI が読んだ並びの終局面に、別の設定（`--score`）の探索 AI が付ける値と補正の入力を書く
+/// （2026-11-21、測定のみ。docs/ai-notes/14-2026-11-16.md「死ぬ確率と生き延びたときの勝率で候補を選んだら」）。
+/// 局面は棋譜（`--kifu`。調査の試合の棋譜）を打ち直して作り、調査を打った AI（試合の行の opts）に試合と同じ乱数で考えさせる。
+/// 出た候補の手が結果の行と同じかを `match` に書く。終局面は、考えた決定化の局面（`Survey::root`）で読んだ並び（`full`）を打ったもの。
+/// 値は kifu values と同じ（`end`・`endWin`・`readLoss`・`readWin`・`pickWin`・`x`・`v`・`extra`）。読みの引き直しの種は局面ごとに決め、候補で同じ
+fn values(argv: &[String]) -> Result<(), String> {
+    use super::kifu_cmd::{kifu_files, read_text};
+    let (flags, files) = parse_flags(argv)?;
+    check_flags(&flags, &["kifu", "score", "reads", "out"])?;
+    let usage = "svwb survey values <結果.jsonl>… --kifu <棋譜>[,<棋譜>…] --score '<設定>' [--reads 12] --out <候補.jsonl>";
+    let out = flag(&flags, "out")
+        .ok_or_else(|| format!("--out を渡してください（{usage}）"))?
+        .to_string();
+    let kifu_in: Vec<String> = flag(&flags, "kifu")
+        .ok_or_else(|| format!("--kifu を渡してください（{usage}）"))?
+        .split(',')
+        .map(|x| x.trim().to_string())
+        .filter(|x| !x.is_empty())
+        .collect();
+    let score_text = flag(&flags, "score").unwrap_or("{}").to_string();
+    let score_opts = compare_options(&score_text).map_err(|e| format!("--score の設定: {e}"))?;
+    let net = match Json::parse(&score_text)?.get("valueNet") {
+        Some(Json::Str(path)) => crate::ai::valuenet::ValueNet::load(path)?,
+        _ => return Err("--score には valueNet（入力の並びを決める補正）が要ります".into()),
+    };
+    let scale = net.a();
+    let reads = num_flag(&flags, "reads", 12)?;
+    if files.is_empty() {
+        return Err(format!("調査の結果（jsonl）を渡してください（{usage}）"));
+    }
+    let mut games: BTreeMap<u64, Value> = BTreeMap::new();
+    let mut pos: Vec<Value> = Vec::new();
+    for f in &files {
+        for v in read_rows(f)? {
+            if v["game"] == json!(true) {
+                games.insert(v["g"].as_u64().unwrap_or(u64::MAX), v);
+            } else if v["skip"].is_null() && v["plans"].as_array().is_some_and(|x| !x.is_empty()) {
+                pos.push(v);
+            }
+        }
+    }
+    let opts_text = run_opts(&games)?;
+    let opts = compare_options(&opts_text).map_err(|e| format!("試合の行の opts: {e}"))?;
+    let extra = games
+        .values()
+        .find_map(|g| g["extra"].as_u64())
+        .unwrap_or(4) as usize;
+    let want: HashSet<u64> = pos.iter().filter_map(|v| v["g"].as_u64()).collect();
+    let mut reps: BTreeMap<u64, kifu::Replay> = BTreeMap::new();
+    for f in kifu_files(&kifu_in)? {
+        for l in read_text(&f)?.lines() {
+            if !l.starts_with("{\"kind\":\"replay\"") {
+                continue;
+            }
+            let j = Json::parse(l)?;
+            let Some(Json::Num(g)) = j.get("g") else {
+                continue;
+            };
+            let g = *g as u64;
+            if want.contains(&g) && !reps.contains_key(&g) {
+                reps.insert(g, kifu::parse_replay(&j)?);
+            }
+        }
+    }
+    let items: Vec<(&Value, &kifu::Replay)> = pos
+        .iter()
+        .filter_map(|v| Some((v, reps.get(&v["g"].as_u64()?)?)))
+        .collect();
+    eprintln!(
+        "局面 {}（棋譜の無い局面 {}）、候補の値は {score_text}、読み {reads} 回、{} スレッド",
+        items.len(),
+        pos.len() - items.len(),
+        thread_count()
+    );
+    let results = parallel_map(
+        &items,
+        |&(row, rep), _| candidate_values(row, rep, &opts, extra, &score_opts, &net, scale, reads),
+        |done, total, _, _| {
+            if done % 50 == 0 || done == total {
+                eprintln!("{done}/{total}");
+            }
+        },
+    );
+    let mut sink = std::io::BufWriter::new(
+        std::fs::File::create(&out).map_err(|e| format!("{out} に書けません: {e}"))?,
+    );
+    let mut rows = 0usize;
+    for r in results {
+        let text = r?;
+        rows += text.lines().count();
+        sink.write_all(text.as_bytes())
+            .map_err(|e| format!("書けません: {e}"))?;
+    }
+    sink.flush().map_err(|e| format!("書けません: {e}"))?;
+    println!("候補 {rows} 行: {out}");
+    Ok(())
+}
+
 pub fn main(argv: &[String]) -> Result<(), String> {
     match argv.first().map(|s| s.as_str()) {
         Some("run") => run(&argv[1..]),
         Some("report") => report(&argv[1..]),
         Some("recheck") => recheck(&argv[1..]),
         Some("turns") => turns(&argv[1..]),
-        _ => Err("使い方: svwb survey run --out <結果.jsonl> --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8] | survey report <結果.jsonl>… [--label 名前] [--no-ledger] [--top 20] [--states <フォルダ>] | survey recheck <結果.jsonl>… --out <打ち直し.jsonl> [--m 32] [--peek 1] [--batch 16] | survey turns <結果.jsonl>… --pos <試合>:<手の番号> [--stage 2] [--out <回ごと.jsonl>] [--cards <カード名>,…]".into()),
+        Some("values") => values(&argv[1..]),
+        _ => Err("使い方: svwb survey run --out <結果.jsonl> --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8] | survey report <結果.jsonl>… [--label 名前] [--no-ledger] [--top 20] [--states <フォルダ>] | survey recheck <結果.jsonl>… --out <打ち直し.jsonl> [--m 32] [--peek 1] [--batch 16] | survey turns <結果.jsonl>… --pos <試合>:<手の番号> [--stage 2] [--out <回ごと.jsonl>] [--cards <カード名>,…] | survey values <結果.jsonl>… --kifu <棋譜>[,…] --score '<設定>' [--reads 12] --out <候補.jsonl>".into()),
     }
 }
 
@@ -2926,6 +3149,60 @@ mod tests {
 
     /// 自己対戦の局面を作り直すと試合で打った手を選び、候補は AI の選ぶ手を 1 つだけ含み、打つ手がどれも違う。
     /// 同じ乱数の続きは同じ結果になる
+    #[test]
+    fn candidate_values_rebuild_the_same_candidates() {
+        // survey values: 試合の行動の列から局面を作り直し、調査と同じ候補を作って、候補ごとの終局面に値と入力を付ける
+        let rec = play_game(5, None, &SearchOptions::default());
+        let cfg = Cfg {
+            rate: 1.0,
+            m: 2,
+            extra: 4,
+            confirm: 0,
+            flag: 10.0,
+            opts: SearchOptions::default(),
+            opts_text: "{}".into(),
+        };
+        let recs = [rec];
+        let (i, p) = *recs[0]
+            .starts
+            .iter()
+            .find(|(i, p)| {
+                let (s, _) = rebuild(&recs[0], *i);
+                s.players[*p].turn_count >= 3 && legal_actions(&s).len() > 3
+            })
+            .expect("手の多い局面");
+        let prep = prepare(&recs, 0, i, p, &cfg);
+        assert!(prep.skip.is_none());
+        let rep = kifu::Replay {
+            decks: recs[0].decks.clone(),
+            seed: recs[0].seed,
+            actions: recs[0].actions.clone(),
+        };
+        let net = crate::ai::valuenet::default_value_net();
+        let opts = SearchOptions::default();
+        let text = candidate_values(&prep.row, &rep, &opts, 4, &opts, net, net.a(), 2).unwrap();
+        let rows: Vec<Json> = text.lines().map(|l| Json::parse(l).unwrap()).collect();
+        assert_eq!(rows.len(), prep.plans.len());
+        for (k, r) in rows.iter().enumerate() {
+            assert_eq!(r.get("k"), Some(&Json::Num(k as f64)));
+            assert_eq!(r.get("match"), Some(&Json::Bool(true)));
+            assert_eq!(r.get("whole"), Some(&Json::Bool(true)));
+            assert_eq!(r.get("chosen"), Some(&Json::Bool(prep.plans[k].chosen)));
+            if r.get("ended") == Some(&Json::Bool(false)) {
+                let Some(Json::Num(w)) = r.get("pickWin") else {
+                    panic!("pickWin が無い")
+                };
+                assert!((0.0..=100.0).contains(w));
+                assert!(matches!(r.get("x"), Some(Json::Arr(x)) if !x.is_empty()));
+            }
+        }
+        // 同じ局面からは同じ行（読みの種は局面ごとに決まる）
+        assert_eq!(
+            candidate_values(&prep.row, &rep, &opts, 4, &opts, net, net.a(), 2).unwrap(),
+            text
+        );
+    }
+
     #[test]
     fn prepares_candidates_from_a_self_play_position() {
         let rec = play_game(3, None, &SearchOptions::default());

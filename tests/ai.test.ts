@@ -124,6 +124,19 @@ describe("TD 学習の評価の補正のモデル（scripts/valueNet.ts）", () 
     expect(() => parseValueNetModel({ ...m, w2: ["x"] })).toThrow();
   });
 
+  it("リーサルの出力（lethalHead・winForm）は読み直しても残り、TypeScript の計算は扱わない（keepHead なら通す）", () => {
+    const m = { ...model(2, (i) => (i % 7) / 10, 0.5), lethalHead: { w: [0.25, -1], b: -3 }, winForm: "survival" as const };
+    const back = parseValueNetModel(JSON.parse(JSON.stringify(m)) as unknown);
+    expect(back).toEqual(m);
+    expect(Object.keys(back).slice(-2)).toEqual(["lethalHead", "winForm"]);
+    expect(() => compileValueNet(back)).toThrow(/リーサルの出力/);
+    expect(() => compileValueNet(back, { keepHead: true })).not.toThrow();
+    expect(() => compileValueNet({ ...back, lethalHead: { w: [1], b: 0 } }, { keepHead: true })).toThrow();
+    const { lethalHead: _h, ...noHead } = back;
+    expect(() => compileValueNet(noHead, { keepHead: true })).toThrow(/survival/);
+    expect(() => parseValueNetModel({ ...m, winForm: "other" })).toThrow();
+  });
+
   it("隠れ層を重ねたモデル（layers）を読み、単位行列の層を挟んでも出力は同じ", () => {
     const m = model(3, (i) => ((i * 31) % 11) / 10 - 0.5, 0.7);
     const identity = { w: Array.from({ length: 9 }, (_, k) => (k % 4 === 0 ? 1 : 0)), b: [0, 0, 0] };

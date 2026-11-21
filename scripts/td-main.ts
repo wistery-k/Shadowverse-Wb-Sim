@@ -317,7 +317,7 @@ function extend(args: Args): number {
   const raw = JSON.parse(readFileSync(path, "utf8")) as { kind?: unknown };
   if (raw.kind === "potential-net") return extendPotential(parsePotential(raw, path), range, out);
   const model = loadValueNet(path);
-  compileValueNet(model);
+  compileValueNet(model, { keepHead: true });
   const H = model.hidden;
   const V0 = model.vocab.length;
   const vocab = widenVocab(model.vocab, range);
@@ -2128,7 +2128,7 @@ function attr(args: Args): number {
   const raw = JSON.parse(readFileSync(path, "utf8")) as { kind?: unknown };
   if (raw.kind === "potential-net") return attrPotential(parsePotential(raw, path), args);
   const model = loadValueNet(path);
-  compileValueNet(model);
+  compileValueNet(model, { keepHead: true });
   const out = need(args, "out");
   const H = model.hidden, V = model.vocab.length, ZV = model.zones.length * V, n = baseInputSize(model);
   const basis = attrBasis(model, numArg(args, "minSupport", 3));

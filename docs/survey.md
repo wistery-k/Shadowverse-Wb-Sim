@@ -102,6 +102,7 @@ npm run svwb -- survey run --out 結果.jsonl --games a-b [--rate 0.1] [--m 32] 
 npm run svwb -- survey report 結果.jsonl… [--label 名前] [--no-ledger] [--top 20] [--states <フォルダ>]
 npm run svwb -- survey recheck 結果.jsonl… --out 打ち直し.jsonl [--m 32] [--peek 1] [--batch 16]
 npm run svwb -- survey turns 結果.jsonl… --pos <試合>:<手の番号> [--stage 2] [--out 回ごと.jsonl] [--cards <カード名>,…] [--why <回>,… [--explain <回数>]]
+npm run svwb -- survey values 結果.jsonl… --kifu <棋譜>[,<棋譜>…] --score '<設定>' [--reads 12] --out 候補.jsonl
 ```
 
 | 引数 | 既定 | 意味 |
@@ -127,6 +128,9 @@ npm run svwb -- survey turns 結果.jsonl… --pos <試合>:<手の番号> [--st
 | `turns --cards` | なし | 並べたカードを、このターンにプレイした回としなかった回の勝率も出す |
 | `turns --why` | なし | 並べた回（`r`）で、候補の並びを打ち終えた後に AI が初めて考え直す判断の局面と、AI が読む候補（読み直した候補・打ち切った候補・足した候補）の、選ぶときの値とターン末の点数を出す。同じ乱数で考え直させるので、選ぶ手は記録の手と同じになる（違えば書く） |
 | `turns --explain` | なし | `--why` の局面で、選ぶときの値の内訳（`review explain` と同じ数字。読み直した終局面ごとの選ぶ値・読み・ターン末・引き直しごとの点数）と、最初の手ごとの最善の終局面（3 つまで）について、引き直しごとの相手の手札と読んだ後の局面、読みの中の相手のビームの幅と深さを変えて（8・8、64・8、8・16、64・16）引き直し 48 回で負けを読んだ回数、その並びでターンを終えて今の AI で `<回数>` 回打った勝ち負け（相手の次のターンに負けた回数と、最初に負けた回の手）を出す |
+| `values --kifu` | （要る） | 調査の試合の棋譜（`run` が書いたもの。ファイルかフォルダをコンマで並べる）。局面を棋譜から作り直し、調査を打った AI（試合の行の `opts`）に試合と同じ乱数で考えさせて、候補を作り直す（2026-11-21、測定のみ。[ai-notes/14](ai-notes/14-2026-11-16.md)「死ぬ確率と生き延びたときの勝率で候補を選んだら」） |
+| `values --score` | `{}` | 候補の終局面（考えた決定化の局面で、読んだ並び `full` を打ったビームの終局面）に値を付ける探索 AI の設定（`valueNet` が要る）。1 候補 1 行で、`g`・`i`・`k`（候補の添字）・`match`（局面と候補の手が結果の行と同じか）・`chosen`・`top`・`cut`・`hp`・`oppHp`・`ended` と、`kifu values` と同じ `end`・`endWin`・`readLoss`・`readWin`・`pickWin`・`x`・`v`・`extra`（[kifu.md](kifu.md)「ターン末の値」） |
+| `values --reads` | 12 | 読みの引き直しの数（種は局面ごとに決め、候補で同じ） |
 | `recheck --batch` | 16 | まとめて打って書く局面の数。出力に既にある局面は飛ばす（同じ引数で再開できる）。台帳には書かない |
 
 - `run` は出力に既にある試合を飛ばす（同じ引数で再開できる）。試合の行の無い局面の行（途中で止めたもの）は、再開のときに消す
