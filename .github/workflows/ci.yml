@@ -44,6 +44,7 @@ jobs:
           fetch-depth: 0
           filter: blob:none
       - id: diff
+        name: check と rust を回すかを決める（前の push の CI を待つことがある）
         env:
           TARGET: ${{ github.base_ref || 'main' }}
           ACTION: ${{ github.event.action }}
