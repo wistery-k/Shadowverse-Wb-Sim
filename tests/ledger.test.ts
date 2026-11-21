@@ -53,7 +53,7 @@ const line = (x: unknown) => JSON.stringify(x);
 /** Rust の misses run が書く形の 1 行（runner/ledger.rs の misses_row_has_the_fields_in_order と同じ） */
 const MISSES_LINE = `{"v":1,"kind":"misses","date":"2026-11-10","at":"2026-11-10T09:00:00Z","commit":"bcb49c2","branch":"main","label":"定例","a":{},"problems":2,"set":"91c86c68","trials":24,"seed":1,"n":48,"passes":25,"rate":0.520833,"se":0.012,"perProblem":{"a":[24,24],"b":[1,24]},"seconds":5,"threads":4,"machine":"cloud","cmd":"misses run --label '定例'"}`;
 
-/** Rust の survey report が書く形の 1 行（runner/ledger.rs の append_survey・runner/survey.rs の report） */
+/** Rust の survey report が書く形の 1 行（runner/ledger.rs の survey_row_has_the_fields_in_order と同じ） */
 const SURVEY_LINE = `{"v":1,"kind":"survey","date":"2026-11-11","at":"2026-11-11T06:19:12Z","commit":"c99c9f8+","branch":"b","label":"試し","a":{},"g":[0,1],"games":2,"rate":0.15,"m":4,"extra":4,"confirm":4,"flag":0,"turnStarts":37,"positions":6,"compared":6,"gain4":[-38.5417,38.5417],"gain8":[-38.5417,38.5417],"gain2":[3.5,2.25],"gain2Extra":[0,0],"flagged":6,"misses":0,"missesPerGame":[0,0],"splitAny":0.25,"splitPair":0.1304,"pairSe":11.3268,"perRollout":1.162,"seconds":190.6,"machines":["vm"],"commits":["c99c9f8+"],"cmd":"survey report t1.jsonl --label '試し'"}`;
 
 describe("台帳の読み込み", () => {
