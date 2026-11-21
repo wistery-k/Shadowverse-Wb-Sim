@@ -3,7 +3,7 @@
 // Rust（cargo）が要る。カードのデータ等は npm run rust-data で書き出してから作る（中身が変わらなければ作り直さない）。
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -11,5 +11,7 @@ const run = (cmd, args) => execFileSync(cmd, args, { cwd: root, stdio: ["ignore"
 
 run(process.execPath, [join(root, "scripts/vite-run.mjs"), "scripts/rust-data-main.ts", "--quiet"]);
 run("cargo", ["build", "--quiet", "--release", "--manifest-path", "rust/Cargo.toml", "-p", "svwb-engine"]);
-const r = spawnSync(join(root, "rust/target/release/svwb"), process.argv.slice(2), { stdio: "inherit" });
+// cargo の置き場は CARGO_TARGET_DIR があればそこ（scripts/build-wasm.mjs と同じ）
+const target = process.env.CARGO_TARGET_DIR ? resolve(root, process.env.CARGO_TARGET_DIR) : join(root, "rust/target");
+const r = spawnSync(join(target, "release/svwb"), process.argv.slice(2), { stdio: "inherit" });
 process.exit(r.status ?? 1);

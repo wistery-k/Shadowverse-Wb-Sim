@@ -1,6 +1,6 @@
-// アズヴォルト環境のページの AI（WASM の探索 AI に、ページが読み込んだ R3 の補正と見込みを入れたもの）が、
-// コマンドの R3（compare・misses の --opts の valueNet・potentialNet）と同じ値の補正を持ち、決まった局面から同じ手を打つか。
-// 局面と手は tests/fixtures/browser-r3.json（コマンドの R3 の手を rust/engine/tests/browser_r3.rs が確かめる）
+// アズヴォルト環境のページの AI（WASM の探索 AI に、ページが読み込んだ補正と見込み（今は R4。2026-11-21 に R3 から替えた）を入れたもの）が、
+// コマンドの同じ補正（compare・misses の --opts の valueNet・potentialNet。rust/engine/yardstick/<PAGE_NET>-*）と同じ値の補正を持ち、決まった局面から同じ手を打つか。
+// 局面と手は tests/fixtures/browser-azvaldt.json（コマンドの側の手を rust/engine/tests/browser_azvaldt.rs が確かめる）
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { actingPlayer, applyAction, createGame, legalActions, selectNets, type Action, type GameState } from "../src/engine";
@@ -8,6 +8,9 @@ import { callEngine, currentNets, netsChecksum, netsChecksumOfJson } from "../sr
 
 // エンジンを使う前に選ぶ（このファイルの WASM はアズヴォルト環境の補正を入れる）
 selectNets("azvaldt");
+
+/** ページの補正の凍結した写し（rust/engine/yardstick/<PAGE_NET>-net.json・-potential.json。rust/engine/tests/browser_azvaldt.rs と同じ） */
+const PAGE_NET = "pool-r4";
 
 const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -19,7 +22,7 @@ interface Row {
   actions: Action[];
 }
 
-/** 1 つの AI で、局面の手番の側のターンの終わりまで打つ（rust/engine/tests/browser_r3.rs と同じ。マリガンは 1 回だけ） */
+/** 1 つの AI で、局面の手番の側のターンの終わりまで打つ（rust/engine/tests/browser_azvaldt.rs と同じ。マリガンは 1 回だけ） */
 function play(start: GameState, seed: number): Action[] {
   const handle = callEngine({ f: "agentNew", name: "search" }) as number;
   try {
@@ -43,15 +46,15 @@ function play(start: GameState, seed: number): Action[] {
 }
 
 describe("補正のファイル（アズヴォルト環境）", () => {
-  it("WASM に入れた補正と見込みが、R3 の JSON（data/pools/azvaldt/・コマンドの yardstick/pool-r3-*）を serde_json で読んだものと同じ", () => {
+  it("WASM に入れた補正と見込みが、ページの JSON（data/pools/azvaldt/・コマンドの yardstick/<PAGE_NET>-*）を serde_json で読んだものと同じ", () => {
     expect(currentNets()).toBe("azvaldt");
     const loaded = netsChecksum();
     expect(loaded).toBe(netsChecksumOfJson(read("data/pools/azvaldt/value-net.json"), read("data/pools/azvaldt/potential-net.json")));
-    expect(loaded).toBe(netsChecksumOfJson(read("rust/engine/yardstick/pool-r3-net.json"), read("rust/engine/yardstick/pool-r3-potential.json")));
+    expect(loaded).toBe(netsChecksumOfJson(read(`rust/engine/yardstick/${PAGE_NET}-net.json`), read(`rust/engine/yardstick/${PAGE_NET}-potential.json`)));
   });
 
-  const rows = JSON.parse(read("tests/fixtures/browser-r3.json")) as Row[];
-  it.each(rows.map((r, i) => [r.problem ?? `マリガン ${i}`, r] as const))("%s から、コマンドの R3 と同じ手を打つ", (_name, row) => {
+  const rows = JSON.parse(read("tests/fixtures/browser-azvaldt.json")) as Row[];
+  it.each(rows.map((r, i) => [r.problem ?? `マリガン ${i}`, r] as const))("%s から、コマンドの同じ補正と同じ手を打つ", (_name, row) => {
     const start: GameState = row.problem
       ? ((JSON.parse(read(row.problem)) as { state: GameState }).state)
       : createGame({ decks: row.decks!, seed: row.gameSeed! });

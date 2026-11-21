@@ -5,7 +5,7 @@
 | ページ | URL | 入口 | タブ | 探索 AI の補正 |
 | --- | --- | --- | --- | --- |
 | スターター | `/Shadowverse-Wb-Sim/` | `index.html`・`src/main.tsx`・`src/ui/App.tsx` | 対戦・デッキ・AI対戦・人間との比較・問題集（開発サーバーではサンドボックス等も） | `starter`（`data/value-net.json`・`data/potential-net.json`） |
-| アズヴォルト環境 | `/Shadowverse-Wb-Sim/azvaldt/` | `azvaldt/index.html`・`src/azvaldt/main.tsx`・`src/azvaldt/App.tsx` | AI対戦（総当たり）・問題集 | `azvaldt`（`data/pools/azvaldt/` の R3） |
+| アズヴォルト環境 | `/Shadowverse-Wb-Sim/azvaldt/` | `azvaldt/index.html`・`src/azvaldt/main.tsx`・`src/azvaldt/App.tsx` | AI対戦（総当たり）・問題集 | `azvaldt`（`data/pools/azvaldt/` の R4。2026-11-21 までは R3） |
 
 `vite build` は 2 つの入口を束ね（`vite.config.ts` の `rollupOptions.input`）、画面の共通の部分は 1 つのチャンクにまとまる。
 ページの上の端に、もう片方のページへのリンクがある。
@@ -34,6 +34,8 @@
 
 - WASM は 12.1MB → 3.0MB（gzip で 4.05MB → 0.73MB）。スターターのページは、AI を動かすところまでで 4.14MB → 3.32MB、AI を動かさなければ 0.80MB
 - 補正のファイルは、補正と見込みの JSON の gzip（スターター 3.41MB、R3 6.18MB）より 27% 小さい
+- 上の表のアズヴォルト環境は R3 のとき。R4 にした後（2026-11-21）は、補正のファイルが 4.96MB（JSON の gzip 6.68MB より 26% 小さい）。
+  R4 は手札のカードごとの攻撃力・体力の変化の入力（カードごとの行）を足したので、R3 の 4.53MB より 1 割ほど大きい
 - アズヴォルト環境のページは、スターターの補正（`starter-*.bin`）を一度も取りに行かない（スターターのページも `azvaldt-*.bin` を取りに行かない）
 - 公開サイト（GitHub Pages）が WASM・JS を gzip で送るかは、作業環境から公開サイトに届かないので確かめていない。
   送らなければ、開いたときはスターター 12.3MB → 3.2MB、アズヴォルト環境 3.5MB。補正のファイルは gzip 済みなので、どちらでも同じ大きさ。
@@ -82,7 +84,7 @@
 - **AI対戦（総当たり）**: スターターのページと同じ画面（`src/ui/Simulate.tsx`）に、選べるデッキ・AI・既定を渡したもの
   - デッキ: 取り込んだプロのデッキ 84 個（`data/pools/azvaldt/decks/`。`src/azvaldt/decks.ts`）だけ。大会ごとにまとめて出し、「代表 10 型」「全部」でまとめて選べる。
     既定は代表 10 型（`data/pools/azvaldt/sets/rep10.txt`。物差しと同じ組）。貼り付け・自作・編集は付けない
-  - AI: 探索（このページの補正 R3）・貪欲法・ランダム。既定は探索だけ
+  - AI: 探索（このページの補正 R4）・貪欲法・ランダム。既定は探索だけ
   - 1 組の試合数の既定は 2（席を入れ替えて 1 回ずつ）。代表 10 型の 45 組で 90 試合
   - 試合のリプレイ・「AI の考え」・「打ち比べ」はスターターのページと同じ（「サンドボックスで開く」は出さない）。
     リプレイの「再現」のコマンドには `--pool azvaldt` が付く（`npm run game -- … --pool azvaldt`。前期のローテーションのカードを足し、補正をこのページと同じにする）
@@ -92,17 +94,22 @@
   引いたカード・ランダムな結果に頼る手は色を変えて「一例」と添える（`misses/azvaldt/lines/`。2026-11-19、ユーザーの依頼）
 - 付けないもの: 人間と AI の対戦・デッキの編集や貼り付け・サンドボックス・試合の記録・リプレイ検索・局面の入力（CLAUDE.md の線引き）
 
-### R3 の試合の時間
+### ページの試合の時間
+
+R3 のときに測った。R4 は測り直していない（PC の profile で 1 手の思考は R4 43.4 ミリ秒・R3 50.8 ミリ秒で、同じほど。版が違う）。
+
 
 - Node の WASM で、代表 10 型の R3 どうしの 1 試合は 2.9〜11.5 秒（平均 5.7 秒）
 - ヘッドレスの Chromium（Claude のクラウド環境、4 スレッド。Worker 3 つ）で、既定のまま（代表 10 型を R3 で 1 組 2 試合、90 試合）回すと 105 秒（Worker 1 つで 1 試合 3.5 秒ほど）。
   Worker の数は `navigator.hardwareConcurrency - 1`（24 まで。`src/sim/pool.ts`）なので、スレッドの多い PC ではもっと早い。既定の 1 組 2 試合はここから決めた（4 スレッドのマシンでも 2 分ほどで、組ごとに席を入れ替えた 2 試合がそろう）
 
-### ブラウザの R3 とコマンドの R3
+### ブラウザの探索 AI とコマンドの探索 AI
 
-ページの R3 は、WASM の探索 AI の既定の設定に、ページが読み込んだ補正と見込みを入れたもの。コマンドの R3 は
-`--opts '{"valueNet":"rust/engine/yardstick/pool-r3-net.json","potentialNet":"rust/engine/yardstick/pool-r3-potential.json"}'`。
-同じ局面（`misses/azvaldt/` の 12 問と、代表 10 型のデッキのマリガン 2 つ）から同じ乱数で打った手を `tests/fixtures/browser-r3.json` に書き、
-CLI（`rust/engine/tests/browser_r3.rs`）と WASM（`tests/nets-azvaldt.test.ts`）の両方で比べる。
-読み込んだ補正の指紋も、JSON を serde_json で読んだものと比べる（`data/pools/azvaldt/` と `rust/engine/yardstick/pool-r3-*.json` の両方）。
+ページの探索 AI（今は R4）は、WASM の探索 AI の既定の設定に、ページが読み込んだ補正と見込みを入れたもの。コマンドの R4 は
+`--opts '{"valueNet":"rust/engine/yardstick/pool-r4-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}'`。
+同じ局面（`misses/azvaldt/` の 12 問と、代表 10 型のデッキのマリガン 2 つ）から同じ乱数で打った手を `tests/fixtures/browser-azvaldt.json` に書き、
+CLI（`rust/engine/tests/browser_azvaldt.rs`）と WASM（`tests/nets-azvaldt.test.ts`）の両方で比べる。
+読み込んだ補正の指紋も、JSON を serde_json で読んだものと比べる（`data/pools/azvaldt/` と `rust/engine/yardstick/pool-r4-*.json` の両方）。
+ページの補正を入れ替えるときは、`data/pools/azvaldt/` と `rust/engine/yardstick/pool-<版>-*.json` を同じファイルにし、両方のテストの `PAGE_NET` を直して、
+表を `SVWB_WRITE_FIXTURE=1 cargo test --release --test browser_azvaldt` で書き直す。R3 → R4 では 14 行のうち 11 行の手が変わった（2026-11-21）。
 2026-11-19 には、ブラウザで打った 1 試合（R3 どうし）を、リプレイの「再現」のコマンドで打ち直して同じ手数・ターン数になることも確かめた。

@@ -7,7 +7,7 @@
 
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -15,7 +15,9 @@ const run = (cmd, args) => execFileSync(cmd, args, { cwd: root, stdio: ["ignore"
 
 run(process.execPath, [join(root, "scripts/vite-run.mjs"), "scripts/rust-data-main.ts", "--quiet"]);
 run("cargo", ["build", "--quiet", "--manifest-path", "rust/Cargo.toml", "-p", "svwb-wasm", "--profile", "wasm", "--target", "wasm32-unknown-unknown"]);
-const built = join(root, "rust/target/wasm32-unknown-unknown/wasm/svwb_wasm.wasm");
+// cargo の置き場は CARGO_TARGET_DIR があればそこ（夜のキューの go は、回のソース src/ でも /workspace の rust/target を使い回す。scripts/night-main.ts）
+const target = process.env.CARGO_TARGET_DIR ? resolve(root, process.env.CARGO_TARGET_DIR) : join(root, "rust/target");
+const built = join(target, "wasm32-unknown-unknown/wasm/svwb_wasm.wasm");
 const dest = join(root, "src/engine/svwb.wasm");
 if (!existsSync(dest) || !readFileSync(dest).equals(readFileSync(built))) copyFileSync(built, dest);
 run(process.execPath, [join(root, "scripts/pack-nets.ts"), "--quiet"]);

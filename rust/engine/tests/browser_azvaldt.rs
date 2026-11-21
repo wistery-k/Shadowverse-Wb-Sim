@@ -1,15 +1,16 @@
-//! ブラウザのアズヴォルト環境のページの AI が、コマンドの R3 と同じ手を選ぶか（ユーザーの依頼 2026-11-19）。
+//! ブラウザのアズヴォルト環境のページの AI が、コマンドの同じ補正（今は R4）と同じ手を選ぶか（ユーザーの依頼 2026-11-19。R3 から R4 にしたのは 2026-11-21）。
 //!
 //! ページの AI は、WASM の探索 AI（`search`）に、ページが読み込んだ補正と見込み（data/pools/azvaldt/ の JSON を詰めたもの。
-//! scripts/pack-nets.ts、src/engine/wasm.ts）を既定として入れたもの。コマンドの R3 は、compare・misses の
-//! `--opts '{"valueNet":"rust/engine/yardstick/pool-r3-net.json","potentialNet":"rust/engine/yardstick/pool-r3-potential.json"}'`。
+//! scripts/pack-nets.ts、src/engine/wasm.ts）を既定として入れたもの。コマンドの側は、compare・misses の
+//! `--opts '{"valueNet":"rust/engine/yardstick/pool-r4-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}'`（下の PAGE_NET）。
 //!
-//! ここではコマンドの R3 が決まった局面（新しいプールの問題集 misses/azvaldt/ の 12 問と、代表 10 型のデッキのマリガン）から打つ手を求め、
-//! tests/fixtures/browser-r3.json と比べる。問の局面からは、1 つの AI でそのターンの終わりまで打つ（並びを覚えて使い回す経路も通る。
+//! ここではコマンドの側が決まった局面（新しいプールの問題集 misses/azvaldt/ の 12 問と、代表 10 型のデッキのマリガン）から打つ手を求め、
+//! tests/fixtures/browser-azvaldt.json と比べる。問の局面からは、1 つの AI でそのターンの終わりまで打つ（並びを覚えて使い回す経路も通る。
 //! 判断ごとの乱数は「局面のシード + 何手目か」）。マリガンは最初の 1 回だけ。
 //! 同じファイルを、ブラウザの経路（WASM）で tests/nets-azvaldt.test.ts が比べる。
-//! 両方が通れば、ブラウザの R3 はこれらの局面でコマンドの R3 と同じ手を選ぶ。
-//! ファイルを書き直すのは、R3 の手が意図して変わったとき（探索 AI の既定を変えた等）だけ: `SVWB_WRITE_FIXTURE=1 cargo test --release --test browser_r3`
+//! 両方が通れば、ブラウザの AI はこれらの局面でコマンドの同じ補正と同じ手を選ぶ。
+//! ファイルを書き直すのは、ページの補正を替えたときか、手が意図して変わったとき（探索 AI の既定を変えた等）だけ:
+//! `SVWB_WRITE_FIXTURE=1 cargo test --release --test browser_azvaldt`
 
 use std::fs;
 use svwb_engine::ai::{Agent, Rng};
@@ -24,6 +25,9 @@ use svwb_engine::{acting_player, apply_action, create_game, Action, Phase};
 
 /// 1 つの局面から打つ手の上限
 const MAX_STEPS: u32 = 60;
+
+/// ページの補正の凍結した写し（rust/engine/yardstick/<PAGE_NET>-net.json・-potential.json。data/pools/azvaldt/ と同じ中身）
+const PAGE_NET: &str = "pool-r4";
 
 fn root() -> String {
     format!("{}/../..", env!("CARGO_MANIFEST_DIR"))
@@ -88,12 +92,12 @@ fn positions() -> Vec<Position> {
 }
 
 #[test]
-fn browser_r3_matches_command_r3() {
+fn browser_matches_command() {
     let dir = format!("{}/rust/engine/yardstick", root());
     let opts = compare_options(&format!(
-        r#"{{"valueNet":"{dir}/pool-r3-net.json","potentialNet":"{dir}/pool-r3-potential.json"}}"#
+        r#"{{"valueNet":"{dir}/{PAGE_NET}-net.json","potentialNet":"{dir}/{PAGE_NET}-potential.json"}}"#
     ))
-    .expect("R3 の設定");
+    .expect("ページの補正の設定");
     let mut rows = Vec::new();
     for p in positions() {
         let mut agent = svwb_engine::ai::search::SearchAgent::new(opts.clone());
@@ -127,7 +131,7 @@ fn browser_r3_matches_command_r3() {
         row.push(("actions".into(), Json::Arr(actions)));
         rows.push(Json::Obj(row));
     }
-    let path = format!("{}/tests/fixtures/browser-r3.json", root());
+    let path = format!("{}/tests/fixtures/browser-azvaldt.json", root());
     // 1 行に 1 局面
     let text = format!(
         "[\n{}\n]\n",
@@ -141,17 +145,17 @@ fn browser_r3_matches_command_r3() {
         fs::write(&path, &text).expect("書き出し");
         return;
     }
-    let saved = fs::read_to_string(&path).expect("tests/fixtures/browser-r3.json");
+    let saved = fs::read_to_string(&path).expect("tests/fixtures/browser-azvaldt.json");
     let saved = Json::parse(&saved).expect("JSON");
     let Json::Arr(saved) = saved else {
-        panic!("tests/fixtures/browser-r3.json は配列")
+        panic!("tests/fixtures/browser-azvaldt.json は配列")
     };
     assert_eq!(saved.len(), rows.len(), "局面の数が違います");
     for (i, (s, r)) in saved.iter().zip(&rows).enumerate() {
         assert_eq!(
             s.get("actions").map(|a| a.stringify()),
             r.get("actions").map(|a| a.stringify()),
-            "局面 {i}（{}）でコマンドの R3 の手が変わりました",
+            "局面 {i}（{}）でコマンドの {PAGE_NET} の手が変わりました",
             r.get("problem")
                 .map(|x| x.stringify())
                 .unwrap_or_else(|| "マリガン".into())
