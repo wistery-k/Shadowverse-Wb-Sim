@@ -4,7 +4,7 @@
 //!   svwb kifu winrate <棋譜>… [--where '<条件>,…'] [--by <分け方>,…]
 //!   svwb kifu events <棋譜>… [--where '<条件>,…'] [--event '…'] [--out 出来事.jsonl]
 //!   svwb kifu seats <棋譜>… [--where '<条件>,…'] [--out 席.jsonl]
-//!   svwb kifu values <棋譜>… [--opts '<設定>'] [--reads N] [--opp-lethal 1] [--where '<条件>,…'] [--out ターン末.jsonl]
+//!   svwb kifu values <棋譜>… [--opts '<設定>'] [--reads N] [--opp-lethal 1] [--true-lethal 1] [--features 1] [--where '<条件>,…'] [--out ターン末.jsonl]
 //!
 //! - 棋譜は、ファイルかフォルダ（中の `.jsonl`・`.jsonl.gz` を全部。`.tmp` は読まない）。`.gz` は `gzip -dc` で読む
 //! - count・events は試合を打ち直して出来事の列（replay_index.rs）にする。打ち直せない試合（エンジンの版が違って打てない手がある）と、
@@ -1194,6 +1194,85 @@ fn ward_count(s: &crate::state::GameState, p: usize) -> f64 {
         .count() as f64
 }
 
+/// 補正の入力に無い、リーサルの見込みに要りそうな公開の数（`--features 1` の "extra"。p から見たターン末の局面 s。
+/// docs/ai-notes/14-2026-11-16.md「補正の入力に無く、リーサルを見込むのに要りそうなもの」）
+fn lethal_extras(s: &crate::state::GameState, p: usize) -> Vec<(String, Json)> {
+    use crate::state::HandEv;
+    let q = 1 - p;
+    let mut out: Vec<(String, f64)> = Vec::new();
+    for (side, x) in [("my", p), ("opp", q)] {
+        let pl = &s.players[x];
+        let cds: Vec<i32> = pl
+            .board
+            .iter()
+            .filter(|b| !b.is_follower)
+            .filter_map(|b| b.countdown)
+            .collect();
+        out.push((format!("{side}CdN"), cds.len() as f64));
+        out.push((
+            format!("{side}Cd1"),
+            cds.iter().filter(|&&c| c <= 1).count() as f64,
+        ));
+        out.push((
+            format!("{side}Cd2"),
+            cds.iter().filter(|&&c| c <= 2).count() as f64,
+        ));
+        out.push((
+            format!("{side}CdMin"),
+            cds.iter().copied().min().unwrap_or(10) as f64,
+        ));
+        out.push((format!("{side}CrestN"), pl.crests.len() as f64));
+        out.push((
+            format!("{side}CrestCd"),
+            pl.crests.iter().filter_map(|c| c.countdown).sum::<i32>() as f64,
+        ));
+        out.push((
+            format!("{side}Faith"),
+            pl.crests.iter().filter_map(|c| c.faith).sum::<i32>() as f64,
+        ));
+        out.push((
+            format!("{side}Evolved"),
+            pl.evolved_count.unwrap_or(0) as f64,
+        ));
+        out.push((
+            format!("{side}Entered"),
+            pl.followers_entered.unwrap_or(0) as f64,
+        ));
+        out.push((
+            format!("{side}EnteredMaxSame"),
+            pl.entered_counts.iter().map(|&(_, n)| n).max().unwrap_or(0) as f64,
+        ));
+        out.push((
+            format!("{side}DestroyedAmulets"),
+            pl.destroyed_amulets.len() as f64,
+        ));
+        out.push((
+            format!("{side}DamageZero"),
+            f64::from(u8::from(
+                pl.leader_damage_zero_until.is_some_and(|u| s.turn < u),
+            )),
+        ));
+        // 手札のスペルブースト（公開の出来事から分かる数）: ゲームを通した回数と、最後にカードが手札に入ってからの回数
+        let mut total = 0.0;
+        let mut since = 0.0;
+        for e in pl.hand_log.to_vec() {
+            match e {
+                HandEv::Boost { times } => {
+                    total += f64::from(times);
+                    since += f64::from(times);
+                }
+                HandEv::BoostOne { times } => total += f64::from(times),
+                HandEv::In { .. } | HandEv::InWith { .. } => since = 0.0,
+                _ => {}
+            }
+        }
+        out.push((format!("{side}BoostTotal"), total));
+        out.push((format!("{side}BoostSinceIn"), since));
+    }
+    out.push(("turn".into(), s.turn as f64));
+    out.into_iter().map(|(k, x)| (k, Json::Num(x))).collect()
+}
+
 /// 1 試合を打ち直し、合った席のターン末ごとに、渡した設定の探索 AI が付ける値と、その後の決着の印を 1 行ずつ書く
 #[allow(clippy::too_many_arguments)]
 fn value_rows(
@@ -1204,6 +1283,8 @@ fn value_rows(
     scale: f64,
     reads: u32,
     opp_lethal: bool,
+    true_lethal: bool,
+    features: Option<&crate::ai::valuenet::ValueNet>,
     files: &[String],
 ) -> Result<Result<String, String>, String> {
     use crate::game::{apply_legal, create_game, is_legal};
@@ -1360,6 +1441,39 @@ fn value_rows(
                 ]);
             }
         }
+        if true_lethal {
+            // 本当の局面のままターンを終え、相手の番の初めに、このAI のリーサル探索が相手の勝てる並びを見つけるか
+            let found = match crate::game::try_apply_action(&e.s, &Action::EndTurn) {
+                None => false,
+                Some(after) if after.phase == Phase::Ended => after.winner == Some(q),
+                Some(after) if after.active == q => agent.finds_lethal(&after, q),
+                Some(_) => false,
+            };
+            row.push(("oppLethal".into(), Json::Bool(found)));
+        }
+        if let Some(net) = features {
+            // 補正がターン末に見る局面（合流する相打ちとターン終了時の処理の後。turn_end_value と同じ）の入力
+            let settled = if agent.opts.settle_trades {
+                crate::ai::converging::settle_converging_trades_with(&e.s, p, agent.opts.dominance)
+            } else {
+                None
+            };
+            let base = settled.as_ref().unwrap_or(&e.s);
+            let resolved = crate::game::resolve_turn_end(base);
+            let at = resolved.as_ref().unwrap_or(base);
+            let enc = net.encode(at, p, crate::ai::valuenet::ValuePhase::End);
+            row.extend([
+                (
+                    "x".into(),
+                    Json::Arr(enc.iter().map(|&(i, _)| Json::Num(i as f64)).collect()),
+                ),
+                (
+                    "v".into(),
+                    Json::Arr(enc.iter().map(|&(_, x)| Json::Num(x)).collect()),
+                ),
+                ("extra".into(), Json::Obj(lethal_extras(at, p))),
+            ]);
+        }
         out.push_str(&Json::Obj(row).stringify());
         out.push('\n');
     }
@@ -1368,7 +1482,15 @@ fn value_rows(
 
 fn values(argv: &[String]) -> Result<(), String> {
     let a = parse_args(argv)?;
-    a.check(&["opts", "reads", "opp-lethal", "where", "out"])?;
+    a.check(&[
+        "opts",
+        "reads",
+        "opp-lethal",
+        "true-lethal",
+        "features",
+        "where",
+        "out",
+    ])?;
     let text = a.one("opts").unwrap_or_else(|| "{}".into());
     let opts = super::options::compare_options(&text)?;
     // 点数を勝率にする a（σ(a·点数)。渡した補正のもの。docs/value-net.md）
@@ -1391,6 +1513,28 @@ fn values(argv: &[String]) -> Result<(), String> {
     if opp_lethal && reads == 0 {
         return Err("--opp-lethal には --reads が要ります".into());
     }
+    // 本当の局面のまま相手の番にリーサル探索をした印（oppLethal）と、補正の入力（x・v）と足りない入力（extra）。
+    // リーサルの確率を出すネットの学習データ（docs/ai-notes/14-2026-11-16.md「リーサルの確率を出すネット」）
+    let on = |k: &str| -> Result<bool, String> {
+        match a.one(k).as_deref() {
+            None | Some("0") => Ok(false),
+            Some("1") => Ok(true),
+            Some(x) => Err(format!("--{k} は 0 か 1: {x}")),
+        }
+    };
+    let true_lethal = on("true-lethal")?;
+    let features =
+        if on("features")? {
+            match Json::parse(&text)?.get("valueNet") {
+                Some(Json::Str(path)) => Some(crate::ai::valuenet::ValueNet::load(path)?),
+                _ => return Err(
+                    "--features 1 には --opts の valueNet（入力の並びを決めるモデル）が要ります"
+                        .into(),
+                ),
+            }
+        } else {
+            None
+        };
     let conds = parse_where(&a.all("where"))?;
     let files = kifu_files(&a.inputs)?;
     let lines = read_lines(&files)?;
@@ -1409,10 +1553,19 @@ fn values(argv: &[String]) -> Result<(), String> {
                 return Ok(Ok((m.engine, String::new())));
             }
             let agent = crate::ai::search::SearchAgent::new(opts.clone());
-            Ok(
-                value_rows(&v, &m, ok_seat, &agent, scale, reads, opp_lethal, &files)?
-                    .map(|text| (m.engine.clone(), text)),
-            )
+            Ok(value_rows(
+                &v,
+                &m,
+                ok_seat,
+                &agent,
+                scale,
+                reads,
+                opp_lethal,
+                true_lethal,
+                features.as_ref(),
+                &files,
+            )?
+            .map(|text| (m.engine.clone(), text)))
         },
         |_, _, _, _| {},
     );
@@ -1622,9 +1775,20 @@ mod tests {
             let files = vec!["k.jsonl".to_string()];
             // 3 試合目だけ、読みの中の相手のリーサル探索も付ける（遅いので）
             let opp_lethal = done == 2;
-            let text = value_rows(&v, &m, [true, true], &agent, 0.01, 2, opp_lethal, &files)
-                .unwrap()
-                .unwrap();
+            let text = value_rows(
+                &v,
+                &m,
+                [true, true],
+                &agent,
+                0.01,
+                2,
+                opp_lethal,
+                opp_lethal,
+                opp_lethal.then(crate::ai::valuenet::default_value_net),
+                &files,
+            )
+            .unwrap()
+            .unwrap();
             let rows: Vec<Json> = text.lines().map(|l| Json::parse(l).unwrap()).collect();
             assert_eq!(rows.len(), ends);
             let last = s.turn as f64;
@@ -1651,8 +1815,16 @@ mod tests {
                         num_field(r, "pickWinL").unwrap(),
                     );
                     assert!(pwl <= pw + 1e-9);
+                    // 本当の局面のリーサルの印と、補正の入力（添字と値が同じ数だけ）・足りない入力
+                    assert!(matches!(r.get("oppLethal"), Some(Json::Bool(_))));
+                    let (Some(Json::Arr(x)), Some(Json::Arr(xv))) = (r.get("x"), r.get("v")) else {
+                        panic!("x・v が無い")
+                    };
+                    assert!(!x.is_empty() && x.len() == xv.len());
+                    assert!(num_field(r.get("extra").unwrap(), "oppCdMin").is_some());
                 } else {
                     assert!(r.get("readLossL").is_none());
+                    assert!(r.get("oppLethal").is_none() && r.get("x").is_none());
                 }
             }
             done += 1;
