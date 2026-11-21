@@ -1,4 +1,4 @@
-# 補正にリーサルの出力を足して学ぶ（C・X・Z）の 1 晩目（案。回す夜はまだ決めていない）。
+# 補正にリーサルの出力を足して学ぶ（C・X・Z）のキュー（案。回す夜はまだ決めていない）。見込みは 14 時間 40 分で、2 晩にかかる。
 # ユーザー決定 2026-11-21: 次に補正を学び直す夜に相乗りし、同じ自己対戦から C・X・Z を作る。台帳は「保留（次の学び直しで測る）」。
 # 形と学び方は docs/value-net.md「リーサルの出力（実験）」、経緯と比べ方は docs/ai-notes/14-2026-11-16.md「リーサルの出力を足して学ぶ準備」。
 #
@@ -13,20 +13,23 @@
 #   手順 2（朝、クラウド環境。学びに使っていない試合で比べる）: R4 対 R3 の compare の棋譜（night-20261121b、1.2 万試合）の A の席のターン末で、
 #     svwb kifu values を C・X・Z の補正で付け、three.py（共有フォルダの logs/lethal-auc-2026-11-21/heads/）で、勝敗の交差エントロピー・AUC（全部・体力 10 以下）、
 #     値の帯 × 次の相手のターンに負けた割合、値 50% 以上のまま負けた行の数を比べる。印（oppLethal）は 1 回だけ付ける。
-#     X・Z のうち、全部の行の勝敗の交差エントロピーが C より小さい方（2 つとも C より悪ければ、値 50% 以上のまま負けた行が少ない方）を手順 3 に出す。
-#     どちらも全部の行の交差エントロピーが C より 2 SE 以上悪ければ、手順 3 は回さずユーザーに返す
-#   手順 3（2 晩目、別のキュー）: 選んだ 1 つ 対 C（見込みはどちらも R4 のもの）、84 個のデッキの鏡の compare 4 万試合（PC で 2 時間ほど）。
+#     X・Z のうち、全部の行の勝敗の交差エントロピーが C より小さい方（2 つとも C より悪ければ、値 50% 以上のまま負けた行が少ない方）を「主」にする。
+#     手順 2 は compare の結果を見る前に済ませ、主を決めてから compare の結果を開く
+#   手順 3（下の 4・5）: X 対 C と Z 対 C（見込みはどちらも R4 のもの）、84 個のデッキの鏡の compare 4 万試合ずつ（PC で 1 時間 53 分ずつ）。
 #     見込みの差は大きくて +0.5 ポイント（リーサルを見誤る局面は負けの 12.5%、値の高い行の 1% ほど。前の調べで候補の選び方は変わらなかった）。
-#     誤差は 1.2 万試合で ± 0.38 だったので 4 万試合で ± 0.21。差 − 2 SE > 0 なら「出力を足して学んだ方が強い」（+0.5 なら越える。+0.4 だと半々）。
-#     越えなければ C と変わらないとして、台帳を「やめた」にする
+#     誤差は 1.2 万試合で ± 0.38 だったので 4 万試合で ± 0.21。主の差 − 2 SE > 0 なら「出力を足して学んだ方が強い」として採否をユーザーに出す（+0.5 なら越える。+0.4 だと半々）。
+#     主が越えなければ、C と変わらないとして台帳を「やめた」にする（主でない方だけが越えたら、2 つ比べた分の偶然もありうるので、採らずにユーザーに返す）
+#   （元の段取りは「良い方だけを別の夜に」だった。このキューは 2 晩にかかり、2 晩目は自己対戦の残りと学習で 2 時間ほどしか使わないので、空く時間に 2 つとも回す案にした。
+#     良い方だけにするなら 4・5 を消し、手順 2 の後に 1 つだけを別のキューで回す。3 晩になる）
 #   線ではないが見る数字: 学習の報告のリーサルの出力の AUC・交差エントロピー（確かめ用のターン末）、C・X・Z の補正 (c + L) / a の絶対値の平均、profile の PP を残して終えたターン
 #
-# 見込み（PC、svwb-docker・28 スレッド）: 自己対戦は R4 と同じ 0.50 秒/試合に印の分（クラウド環境の小さな確かめで測る）を足す。学習は 3 つで 12 分 × 3、
-# 間引き・属性で埋めるのが 3 つで 7 分ほど。全部で 9 時間ほど。1 晩に収まらなければ、止まったところから次の夜に続ける（同じ券）
-# 朝: 止まったときのまとめを push してもらい、ingest する。モデル（c.json・x.json・z.json）・自己対戦は pack-run --max-mb 300 で共有フォルダへ
+# 見込み（PC、svwb-docker・28 スレッド）: 自己対戦は R4 の 0.50 秒/試合に、印の分の 15%（クラウド環境の 120 試合ずつで、印あり 362 秒・なし 314 秒）を足して
+# 0.58 秒/試合・9 時間 40 分。学習は 3 つで 20 分ほどずつ（R4 の見込み。X・Z は出力の分が少し重い）、間引き・属性で埋めるのが 3 つで 8 分ほど。compare は 2 つで 3 時間 47 分。
+# 全部で 14 時間 40 分（plan の見込み）。22 時に始めると、止める時刻（7 時）に自己対戦の区切り 19 の前で止まり、2 晩目に続きから（同じ券）
+# 朝: 止まったときのまとめを push してもらい、ingest する。1 晩目の後はモデルがまだ無い。2 晩目の後に、モデル（c.json・x.json・z.json）・自己対戦を pack-run --max-mb 300 で共有フォルダへ
 
 # 1. 自己対戦 6 万試合（g7400000〜7459999。R4 は 7300000〜）。R4 と同じ打ち方に、ターン末ごとの相手のリーサルの印（--lethalLabel 1）を足す
-td selfplay --model rust/engine/yardstick/pool-r4-net.json --decks @data/pools/azvaldt/sets/all84.txt --games 60000 --start 7400000 --chunk 3000 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --lethalLabel 1 --potential rust/engine/yardstick/pool-r4-potential.json --out @/s-{k}.jsonl.gz --est 0.52
+td selfplay --model rust/engine/yardstick/pool-r4-net.json --decks @data/pools/azvaldt/sets/all84.txt --games 60000 --start 7400000 --chunk 3000 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --lethalLabel 1 --potential rust/engine/yardstick/pool-r4-potential.json --out @/s-{k}.jsonl.gz --est 0.58
 
 # 2. C: 今までと同じ学び方（R1〜R4 と同じ）、間引き、属性で埋める
 td train --impl rust --model rust/engine/yardstick/pool-r4-net.json --data @/s-{1..20}.jsonl.gz --out @/ct.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 1200
@@ -46,5 +49,8 @@ td attr --model @/zp.json --out @/z.json --keepA 0 --est 60
 # 3. 線ではないが毎回見る数字（C。R1〜R4 と同じ）
 profile --opts '{"valueNet":"@/c.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.16
 
-# 2 晩目（手順 3。手順 2 で選んだ方を、1 晩目の回のフォルダから写して）:
-# compare 20000 '{"valueNet":"<選んだ方>","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' '{"valueNet":"<c.json>","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label リーサルの出力-<X|Z>対C --est 0.17
+# 4. 手順 3: X 対 C（4 万試合。見込みはどちらも R4 のもの）
+compare 20000 '{"valueNet":"@/x.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' '{"valueNet":"@/c.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label リーサルの出力-X対C --est 0.17
+
+# 5. 手順 3: Z 対 C（4 万試合）
+compare 20000 '{"valueNet":"@/z.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' '{"valueNet":"@/c.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label リーサルの出力-Z対C --est 0.17
