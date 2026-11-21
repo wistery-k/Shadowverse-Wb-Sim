@@ -1,0 +1,24 @@
+# 補正にリーサルの出力を足して学ぶ（C・X・Z）の 2 晩目（案。1 晩目 night/lethal-heads-1.txt の翌朝に、選んだほうに書き換えてから券を出す）。見込み 2 時間 28 分。
+# 1 晩目の回（lethal-heads-1）のフォルダのモデルを写し、C 対 R4 と、選んだほう対 C を回す。選ばなかったほうの compare は回さない（ユーザー決定 2026-11-21）。
+# 今は選んだほうを X（x.json）としてある。Z を選んだら、0. の 2 行目を z.json に、2. の名前を リーサルの出力-Z対C に替える。
+#
+# 回す前に決めた問いと線:
+#   選んだほう対 C（下の 2。84 個のデッキの鏡の compare 4 万試合、PC で 1 時間 53 分。見込みはどちらも R4 のもの）:
+#     見込みの差は大きくて +0.5 ポイント（リーサルを見誤る局面は負けの 12.5%、値の高い行の 1% ほど。前の調べで候補の選び方は変わらなかった）。
+#     誤差は 1.2 万試合で ± 0.38 だったので 4 万試合で ± 0.21。差 − 2 SE > 0 なら「出力を足して学んだ方が強い」として採否をユーザーに出す（+0.5 なら越える。+0.4 だと半々）。
+#     越えなければ、C と変わらないとして区切り、台帳を「やめた」にする
+#   C 対 R4（下の 1。1.2 万試合、± 0.38。R4 のときと同じ大きさ）: いつもの学び直しの線（差 − 2 SE > 0 なら、C を次の既定（R5）の候補としてユーザーに出す）。
+#     選んだほうの採否には使わない（採否は選んだほう対 C）。どれを既定にするかは、2 つの結果を見てユーザーと決める
+#
+# 見込み（PC、svwb-docker・28 スレッド）: compare は 0.17 秒/試合（R4 対 R3 の実測から）で、C 対 R4 34 分・選んだほう対 C 1 時間 53 分。写すのは数秒
+# 朝: finish で compare の行を台帳に足す
+
+# 0. 1 晩目の回のフォルダ（PC のコンテナの /home/wk/svwb-data/night/lethal-heads-1/）のモデルを写す（td extend は語彙を替えない写し。リーサルの出力も残す）
+td extend --model /home/wk/svwb-data/night/lethal-heads-1/c.json --out @/c.json --est 10
+td extend --model /home/wk/svwb-data/night/lethal-heads-1/x.json --out @/h.json --est 10
+
+# 1. C 対 R4（1.2 万試合。見込みはどちらも R4 のもの）
+compare 6000 '{"valueNet":"@/c.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' '{"valueNet":"rust/engine/yardstick/pool-r4-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label リーサルの出力-C対R4 --est 0.17
+
+# 2. 選んだほう対 C（4 万試合）
+compare 20000 '{"valueNet":"@/h.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' '{"valueNet":"@/c.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label リーサルの出力-X対C --est 0.17
