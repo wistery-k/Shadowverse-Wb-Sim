@@ -96,6 +96,20 @@ pub struct RawValueNet {
     /// 場のカードのネットワーク（valueNet.ts の board。無ければ使わない）
     #[serde(default)]
     pub board: Option<RawValueNetBoard>,
+    /// 相手の次のターンにリーサルがある確率の出力（実験。最後の隠れ層 → 1 つ。無ければ使わない）。docs/value-net.md「リーサルの出力（実験）」
+    #[serde(default, rename = "lethalHead")]
+    pub lethal_head: Option<RawLethalHead>,
+    /// 勝つ確率の出し方。無いか "logit" なら今までどおり σ(a·S + c + z)（リーサルの出力は学ぶときだけ使う）、
+    /// "survival" なら (1 − リーサルの確率) × σ(c + z)（z は生き残った場合の勝率のロジット。出発点の評価 S が 0 のモデルだけ）
+    #[serde(default, rename = "winForm")]
+    pub win_form: Option<String>,
+}
+
+/// リーサルの確率の出力（最後の隠れ層の値 h から σ(b + Σ w·h)）
+#[derive(Deserialize, Clone)]
+pub struct RawLethalHead {
+    pub w: Vec<f64>,
+    pub b: f64,
 }
 
 /// 場のカードのネットワーク（valueNet.ts の ValueNetBoard）

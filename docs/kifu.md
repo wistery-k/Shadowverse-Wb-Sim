@@ -193,6 +193,7 @@ svwb kifu count data/kifu/night-20261117-0328 --where 'deck~コンボE' --event 
 | `lostNext`・`wonNext` | 次の相手のターンに負けた（`endIn` 1 で相手の勝ち）・自分の次のターンに勝った（`endIn` 2 で自分の勝ち） |
 | `finalSteps`・`finalMoves` | 決着したターンの行動の数（全部・選択とターン終了を除く。リーサルの長さの目安） |
 | `end`・`endWin` | ビームがこのターン末に付ける点数（`SearchAgent::turn_end_value`。合流する相打ちとターン終了時の処理の後に評価し、残り PP の罰を引く）と、σ(a·点数) の勝率（%。a は `--opts` の補正のもの） |
+| `netLethal` | `--opts` の `valueNet` にリーサルの出力（`lethalHead`）があるときだけ。補正がターン末に見る局面での、その出力の確率（相手が次のターンにリーサルを持つ確率、%。[value-net.md](value-net.md)「リーサルの出力（実験）」） |
 | `readLoss`・`readWin`・`pickWin` | `--reads N` のときだけ。相手の手札を N 通り引き直して相手のターンを読んだ点数（`read_values`。探索の読み直しと同じ）のうち、相手のリーサルになった割合・引き直しごとに勝率にした平均・探索が選ぶときの値（読みとターン末を `rescoreMix` で混ぜた点数）を引き直しごとに勝率にした平均。引き直しの種は試合のシードとターン番号から作る（試合のときの種とは違う） |
 | `readLethal`・`readLossL`・`pickWinL` | `--opp-lethal 1` のときだけ（`--reads` が要る）。読みの中の相手が、相手のターンの初めにリーサル探索（`--opts` の AI と同じもの。`SearchAgent::finds_lethal`）を先にしたら、の数。引き直しごとに、読みと同じ決定化の局面（`read_view`）でターンを終えて探す。リーサル探索が見つけた引き直しの割合・それを負けとした `readLoss`・`pickWin`（調べもの用。AI の振る舞いは変えない） |
 | `oppLethal` | `--true-lethal 1` のときだけ。本当の局面のまま（相手の手札・山札の順番・乱数もそのまま）ターンを終え、相手の番の初めに `--opts` の AI のリーサル探索（`finds_lethal`）が相手の勝てる並びを見つけるか。ターン終了で決着したら相手の勝ちかどうか（リーサルの確率を出すネットの印。[ai-notes/14](ai-notes/14-2026-11-16.md)「リーサルの確率を出すネット」） |

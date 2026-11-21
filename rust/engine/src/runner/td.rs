@@ -1,6 +1,6 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--searchValue 0] [--sampling classic|default] [--potential p.json|null] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--kifu k.jsonl | --no-kifu] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--searchValue 0] [--lethalLabel 0] [--sampling classic|default] [--potential p.json|null] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--kifu k.jsonl | --no-kifu] --out d0.jsonl
 //!
 //! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・既定の幅（今は 256）、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
 //! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
@@ -33,6 +33,11 @@
 //! 探索が相手のターンまで読んだ想像の局面（引き直しごとに 1 つ。相手のターンで決着したものも含む）の勝つ確率の平均。どちらも --model の評価で、
 //! 点数 v を σ(a × v) にしたもの。探索しなかったターンには無い）。学習（npm run td -- train --searchTarget）が、λ 収益の次の局面の予測の
 //! 代わりに混ぜる。打つ手は変わらない。docs/ai-notes.md「補正の学習の目標に探索の値を使う」
+//!
+//! --lethalLabel 1 なら、各ターン末の局面に、相手の次のターンのリーサルの印を書く（"ol": 1 か 0。本当の局面のままターンを終え、
+//! 相手の番の初めに、このモデルの設定のリーサル探索が相手の勝てる並びを見つけるか。svwb kifu values --true-lethal の oppLethal と同じ）。
+//! リーサル探索のメモ（スレッドごと）を試合の探索と分けるため別のスレッドで調べるので、打つ手は変わらない（同じ試合になる）。
+//! 補正にリーサルの出力を足して一緒に学ぶ実験（td train の lethalHead。docs/value-net.md「リーサルの出力（実験）」）用
 //!
 //! --cmp k なら、各試合で 1 つの自分のターンの最初（--iv と同じ選び方）から、探索が読んだ点数の高い順に最初の手の違う並びを k 個まで選び、
 //! 並びごとにターン末から最後まで --rollouts 回打った勝ち数を書き出す（"cmp" 付きの行。打ち比べ）。r 回目はどの並びも同じ乱数で
@@ -151,6 +156,8 @@ struct Model {
     imagined: usize,
     /// ターン末の局面に探索の値の材料（"qe"・"qr"）も書く（--searchValue。打つ手は変わらない）
     search_value: bool,
+    /// ターン末の局面に相手の次のターンのリーサルの印（"ol"）も書く（--lethalLabel。打つ手は変わらない）
+    lethal_label: bool,
     /// 固定した相手の設定（--frozen）。あれば、学ぶ側でない席はこの設定で打つ
     frozen: Option<SearchOptions>,
     /// もとの試合（介入していない試合）の棋譜も書く（runner/kifu.rs。回と、学ぶ側・固定した側の席。打つ手は変わらない）
@@ -195,6 +202,7 @@ fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Mo
         s_default: None,
         imagined: 0,
         search_value: false,
+        lethal_label: false,
         frozen: None,
         kifu: None,
     })
@@ -222,7 +230,8 @@ struct Summary {
 
 /// 局面 1 つ（{"ph":…,"s":…,"x":[…],"v":[…]}、ランダムに打った局面は "ex":1、board なら場のカードの属性 "b"、--sDefault なら基準の重みの評価 "sd" も）。
 /// ph は 0: ターン末、1: 自分のターンの最初、2: 探索が相手のターンを読んだ後の想像の局面（--imagined）。
-/// q（--searchValue。ターン末の局面だけ）があれば、探索の値の材料 "qe"・"qr"（search_value の (ターン末, 読みの平均)）も書く
+/// q（--searchValue。ターン末の局面だけ）があれば、探索の値の材料 "qe"・"qr"（search_value の (ターン末, 読みの平均)）も書く。
+/// ol（--lethalLabel。ターン末の局面だけ）があれば、相手の次のターンのリーサルの印 "ol" も書く
 #[allow(clippy::too_many_arguments)]
 fn write_sample(
     out: &mut String,
@@ -233,6 +242,7 @@ fn write_sample(
     explored: bool,
     board: bool,
     q: Option<(f64, f64)>,
+    ol: Option<bool>,
 ) {
     let x = m.net.encode(s, p, phase);
     out.push_str(&format!(
@@ -284,7 +294,47 @@ fn write_sample(
             js_num(round_precision(qr, 6))
         ));
     }
+    if let Some(ol) = ol {
+        out.push_str(if ol { ",\"ol\":1" } else { ",\"ol\":0" });
+    }
     out.push('}');
+}
+
+/// 本当の局面 s（p がターンを終える前）のまま p がターンを終え、相手の番の初めに、opts のリーサル探索が相手の勝てる並びを見つけるか
+/// （--lethalLabel の "ol"。svwb kifu values --true-lethal の oppLethal と同じ）。リーサル探索はメモ（全探索の局面数の上限を含む）を
+/// スレッドごとに持ち、ターンをまたいで使い回すので、試合を打つスレッドとは別のスレッドで調べる（試合の探索に響かない）。
+/// 局面はスレッドをまたげないので、JSON（state_json。ブラウザとの受け渡しと同じ形）にして渡す
+fn opp_lethal_label(opts: &SearchOptions, s: &GameState, p: PlayerIndex) -> bool {
+    let q = opponent(p);
+    match crate::game::try_apply_action(s, &Action::EndTurn) {
+        None => false,
+        Some(after) if after.phase == Phase::Ended => after.winner == Some(q),
+        Some(after) if after.active == q => {
+            let text = crate::state_json::state_to_json(&after).stringify();
+            let (ward, expand, exact) = (
+                opts.lethal_ward_blocked,
+                opts.lethal_expand_choices,
+                opts.lethal_exact_states,
+            );
+            std::thread::scope(|sc| {
+                sc.spawn(move || {
+                    let after = Json::parse(&text)
+                        .and_then(|j| crate::state_json::state_from_json(&j))
+                        .expect("局面の JSON");
+                    let opts = SearchOptions {
+                        lethal_ward_blocked: ward,
+                        lethal_expand_choices: expand,
+                        lethal_exact_states: exact,
+                        ..SearchOptions::default()
+                    };
+                    SearchAgent::new(opts).finds_lethal(&after, q)
+                })
+                .join()
+                .expect("リーサルの印のスレッドが止まりました")
+            })
+        }
+        Some(_) => false,
+    }
 }
 
 /// m の評価（出発点の評価 S と補正）で見た、局面 s の p の勝つ確率 σ(a × 点数)。終わった局面は勝ち負け（1・0）
@@ -554,12 +604,13 @@ fn play_out(
                     s: &GameState,
                     phase: ValuePhase,
                     ex: bool,
-                    q: Option<(f64, f64)>| {
+                    q: Option<(f64, f64)>,
+                    ol: Option<bool>| {
             if counts[actor] > 0 {
                 samples[actor].push(',');
             }
             counts[actor] += 1;
-            write_sample(&mut samples[actor], m, s, actor, phase, ex, m.board, q);
+            write_sample(&mut samples[actor], m, s, actor, phase, ex, m.board, q, ol);
         };
         // 自分のターンの最初の局面（相手のターンを読んだ後に探索が評価する局面と同じ）
         if state.phase == Phase::Main
@@ -604,6 +655,7 @@ fn play_out(
                 ValuePhase::After,
                 action.is_some(),
                 None,
+                None,
             );
         }
         let action = match action {
@@ -623,7 +675,18 @@ fn play_out(
                 } else {
                     None
                 };
-                push(&mut samples, &mut counts, end, ValuePhase::End, false, q);
+                let ol = m
+                    .lethal_label
+                    .then(|| opp_lethal_label(&m.opts, &state, actor));
+                push(
+                    &mut samples,
+                    &mut counts,
+                    end,
+                    ValuePhase::End,
+                    false,
+                    q,
+                    ol,
+                );
                 // そのターンに選んだ並びの想像の局面から m.imagined 個（試合の乱数とは別の乱数で選ぶ）
                 let mut reads: Vec<_> = reads
                     .into_iter()
@@ -637,6 +700,7 @@ fn play_out(
                         &x,
                         ValuePhase::Imagined,
                         false,
+                        None,
                         None,
                     );
                 }
@@ -744,14 +808,34 @@ fn compare_plans(
             continue;
         }
         let mut json = String::new();
-        write_sample(&mut json, m, label, p, ValuePhase::End, false, false, None);
+        write_sample(
+            &mut json,
+            m,
+            label,
+            p,
+            ValuePhase::End,
+            false,
+            false,
+            None,
+            None,
+        );
         // ターン末が同じ局面になる並び（入力と点数が同じ）は 1 つだけ（--board でも選ぶ並びは変えない）
         if cands.iter().any(|x| x.2 == json) {
             continue;
         }
         let full = if m.board {
             let mut full = String::new();
-            write_sample(&mut full, m, label, p, ValuePhase::End, false, true, None);
+            write_sample(
+                &mut full,
+                m,
+                label,
+                p,
+                ValuePhase::End,
+                false,
+                true,
+                None,
+                None,
+            );
             full
         } else {
             json.clone()
@@ -1115,6 +1199,11 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
         x => return Err(format!("--searchValue は 0 か 1: {x}")),
     };
     m.opts.record_reads = m.imagined > 0 || m.search_value;
+    m.lethal_label = match arg(args, "lethalLabel").unwrap_or("0") {
+        "0" => false,
+        "1" => true,
+        x => return Err(format!("--lethalLabel は 0 か 1: {x}")),
+    };
     m.check = match arg(args, "check").unwrap_or("0") {
         "0" => false,
         "1" => true,
@@ -1499,6 +1588,53 @@ mod tests {
             let plain: serde_json::Value = serde_json::from_str(&plain.line).expect("JSON");
             assert_eq!(plain, v);
         }
+    }
+
+    #[test]
+    fn lethal_label_on_turn_ends_without_changing_games() {
+        // --lethalLabel 1 を付けても試合は同じ（介入した試合も）。印 "ol"（0 か 1）は、ターン末の局面に必ず付き、他の局面には付かない
+        let decks = compare_decks();
+        let mut ll = imagined_model(0);
+        ll.lethal_label = true;
+        let (mut ends, mut found) = (0, 0);
+        for (g, iv) in [(3u32, 0.0), (10, 1.0), (21, 0.0)] {
+            let plain = play_one(
+                g,
+                &decks,
+                None,
+                &imagined_model(0),
+                0.1,
+                iv,
+                IvZone::Hand,
+                0.0,
+                None,
+            );
+            let with = play_one(g, &decks, None, &ll, 0.1, iv, IvZone::Hand, 0.0, None);
+            let (pl, wl): (Vec<&str>, Vec<&str>) =
+                (plain.line.lines().collect(), with.line.lines().collect());
+            assert_eq!(pl.len(), wl.len());
+            for (pl, wl) in pl.iter().zip(&wl) {
+                let mut v: serde_json::Value = serde_json::from_str(wl).expect("JSON");
+                for seq in v["samples"].as_array_mut().expect("局面") {
+                    for x in seq.as_array_mut().expect("局面の列") {
+                        let o = x.as_object_mut().expect("局面");
+                        let ol = o.remove("ol");
+                        if o["ph"] == 0 {
+                            ends += 1;
+                            let ol = ol.and_then(|x| x.as_i64()).expect("ターン末の印");
+                            assert!(ol == 0 || ol == 1, "{ol}");
+                            found += ol;
+                        } else {
+                            assert!(ol.is_none(), "{o:?}");
+                        }
+                    }
+                }
+                let plain: serde_json::Value = serde_json::from_str(pl).expect("JSON");
+                assert_eq!(plain, v);
+            }
+        }
+        // 試合の終わりには、負けた側の最後のターン末で相手にリーサルがある
+        assert!(ends > 0 && found > 0, "{found}/{ends}");
     }
 
     #[test]

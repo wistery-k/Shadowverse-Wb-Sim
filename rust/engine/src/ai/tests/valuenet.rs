@@ -2,7 +2,7 @@
 //! モデルの JSON の読み込みは TypeScript 側（tests/ai.test.ts。学習は scripts/valueNet.ts）でも確かめる
 
 use super::*;
-use crate::ai::aidata::{RawValueNet, RawValueNetLayer};
+use crate::ai::aidata::{RawLethalHead, RawValueNet, RawValueNetLayer};
 use crate::ai::search::{SearchAgent, SearchOptions};
 use crate::ai::valuenet::{default_value_net, ValueNet, ValuePhase};
 use std::sync::Arc;
@@ -34,6 +34,8 @@ fn model(hidden: usize, fill: impl Fn(usize) -> f64, w2: f64) -> RawValueNet {
         c: 0.0,
         base_weights: serde_json::Map::new(),
         board: None,
+        lethal_head: None,
+        win_form: None,
     }
 }
 
@@ -840,4 +842,101 @@ fn add_rows_matches_row_by_row_bitwise() {
         add_rows_in::<32>(&w, &rows, &mut got);
         assert_eq!(bits(&got), bits(&want), "add_rows_in::<32>（隠れ層 {m}）");
     }
+}
+
+#[test]
+fn lethal_head_does_not_change_the_value_unless_survival() {
+    // リーサルの出力を足したモデル（実験 X。winForm なし）は、出力を足す前と同じ補正をビットまで同じに返す。
+    // リーサルの確率は出力があるときだけ出す（docs/value-net.md「リーサルの出力（実験）」）
+    let c = model(4, |i| ((i * 31) % 11) as f64 / 10.0 - 0.5, 0.7);
+    let x = RawValueNet {
+        lethal_head: Some(RawLethalHead {
+            w: vec![0.3, -0.2, 0.5, 0.1],
+            b: -1.0,
+        }),
+        ..c.clone()
+    };
+    let s = mid_game();
+    let (nc, nx) = (
+        ValueNet::new(c.clone()).expect("モデル"),
+        ValueNet::new(x).expect("モデル"),
+    );
+    assert!(!nc.has_lethal_head() && nx.has_lethal_head());
+    for p in 0..2 {
+        for phase in [ValuePhase::End, ValuePhase::After, ValuePhase::Imagined] {
+            assert_ne!(nc.eval(&s, p, phase), 0.0);
+            assert_eq!(
+                nc.eval(&s, p, phase).to_bits(),
+                nx.eval(&s, p, phase).to_bits()
+            );
+            assert_eq!(nc.lethal_prob(&s, p, phase), None);
+            let q = nx.lethal_prob(&s, p, phase).expect("リーサルの確率");
+            assert!(q > 0.0 && q < 1.0);
+        }
+    }
+    // 大きさの合わない出力は読まない
+    let bad = RawValueNet {
+        lethal_head: Some(RawLethalHead {
+            w: vec![0.0; 3],
+            b: 0.0,
+        }),
+        ..c
+    };
+    assert!(ValueNet::new(bad).is_err());
+}
+
+#[test]
+fn survival_form_multiplies_the_survival_probability() {
+    // winForm "survival"（実験 Z）: 勝つ確率 = (1 − リーサルの確率) × σ(c + z)。補正はそのロジットを a で割ったもの
+    let c = model(4, |i| ((i * 31) % 11) as f64 / 10.0 - 0.5, 0.7);
+    let with = |w: Vec<f64>, b: f64| RawValueNet {
+        lethal_head: Some(RawLethalHead { w, b }),
+        win_form: Some("survival".into()),
+        ..c.clone()
+    };
+    let s = mid_game();
+    let nc = ValueNet::new(c.clone()).expect("モデル");
+    // リーサルの確率がほぼ 0 なら、今までの形と同じ値（ロジットを行き来する丸めの分だけ違う）
+    let near = ValueNet::new(with(vec![0.0; 4], -40.0)).expect("モデル");
+    // リーサルの確率が 1/2 なら、勝つ確率が半分
+    let half = ValueNet::new(with(vec![0.0; 4], 0.0)).expect("モデル");
+    let sig = |x: f64| 1.0 / (1.0 + (-x).exp());
+    for p in 0..2 {
+        for phase in [ValuePhase::End, ValuePhase::Imagined] {
+            let v = nc.eval(&s, p, phase);
+            assert!((near.eval(&s, p, phase) - v).abs() < 1e-6 * v.abs().max(1.0));
+            let win = sig(c.a * half.eval(&s, p, phase));
+            assert!((win - 0.5 * sig(c.a * v)).abs() < 1e-12);
+            assert_eq!(half.lethal_prob(&s, p, phase), Some(0.5));
+        }
+    }
+    // リーサルの出力が無い・出発点の評価が 0 でない・知らない形は読まない
+    let no_head = RawValueNet {
+        win_form: Some("survival".into()),
+        ..c.clone()
+    };
+    assert!(ValueNet::new(no_head).is_err());
+    let mut base = serde_json::Map::new();
+    base.insert("myHp".into(), serde_json::json!(1.0));
+    let with_base = RawValueNet {
+        base_weights: base,
+        ..with(vec![0.0; 4], 0.0)
+    };
+    assert!(ValueNet::new(with_base).is_err());
+    let unknown = RawValueNet {
+        win_form: Some("product".into()),
+        ..with(vec![0.0; 4], 0.0)
+    };
+    assert!(ValueNet::new(unknown).is_err());
+    // JSON の lethalHead・winForm を読む
+    let json = serde_json::json!({
+        "kind": c.kind, "version": c.version, "vocab": c.vocab, "zones": c.zones, "scalars": c.scalars,
+        "hidden": c.hidden, "w1": c.w1, "b1": c.b1, "w2": c.w2, "b2": c.b2, "a": c.a, "c": c.c, "baseWeights": {},
+        "lethalHead": {"w": [0.0, 0.0, 0.0, 0.0], "b": 0.0}, "winForm": "survival"
+    });
+    let read = ValueNet::new(serde_json::from_value(json).expect("モデルの JSON")).expect("モデル");
+    assert_eq!(
+        read.eval(&s, 0, ValuePhase::End),
+        half.eval(&s, 0, ValuePhase::End)
+    );
 }

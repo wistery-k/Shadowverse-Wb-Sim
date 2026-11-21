@@ -174,6 +174,10 @@ pub struct ValueNet {
     /// 広げただけのモデルは広げる前と同じ値を、ほぼ同じ速さで出す）
     zero_row: Vec<bool>,
     board: Option<BoardNet>,
+    /// リーサルの確率の出力（重み・バイアス。実験。docs/value-net.md「リーサルの出力（実験）」）
+    lethal: Option<(Vec<f64>, f64)>,
+    /// 勝つ確率を (1 − リーサルの確率) × σ(c + z) で出す（winForm "survival"）
+    survival: bool,
 }
 
 /// 場のカードのネットワーク（valueNet.ts の CompiledBoard）。場のカード 1 枚ずつを同じ層に通し、最後の層の値（ReLU の後）を
@@ -391,8 +395,24 @@ impl ValueNet {
             || raw.b1.len() != raw.hidden
             || !layers_ok
             || raw.w2.len() != last
+            || raw.lethal_head.as_ref().is_some_and(|l| l.w.len() != last)
         {
             return Err("ValueNetModel の重みの大きさが合いません".into());
+        }
+        let survival = match raw.win_form.as_deref() {
+            None | Some("logit") => false,
+            Some("survival") => true,
+            Some(f) => {
+                return Err(format!(
+                    "ValueNetModel の winForm は logit か survival: {f}"
+                ))
+            }
+        };
+        if survival && raw.lethal_head.is_none() {
+            return Err("winForm が survival のモデルには lethalHead が要ります".into());
+        }
+        if survival && !base_is_zero(&raw.base_weights) {
+            return Err("winForm が survival のモデルは、出発点の評価が 0（td train --base zero）のものだけ".into());
         }
         let d = data();
         let mut vocab_card = vec![None; d.cards.len()];
@@ -431,6 +451,8 @@ impl ValueNet {
             n_base,
             zero_row,
             board,
+            lethal: raw.lethal_head.map(|l| (l.w, l.b)),
+            survival,
         })
     }
 
@@ -493,12 +515,57 @@ impl ValueNet {
         acc.entries
     }
 
-    /// 探索の extraEval（評価の点数の単位の補正。valueNetExtraEval）
+    /// 探索の extraEval（評価の点数の単位の補正。valueNetExtraEval）。
+    /// winForm が survival なら、勝つ確率 (1 − リーサルの確率) × σ(c + z) のロジットを a で割ったもの（出発点の評価は 0）
     pub fn eval(&self, s: &GameState, p: PlayerIndex, phase: ValuePhase) -> f64 {
         let _p = crate::prof::scope(crate::prof::Sec::ValueNet);
         if s.phase == Phase::Ended {
             return 0.0;
         }
+        self.last_hidden(s, p, phase, |h| {
+            let mut z = self.b2;
+            for (&hj, &w2) in h.iter().zip(&self.w2) {
+                z += hj * w2;
+            }
+            if !self.survival {
+                return (self.c + z) / self.a;
+            }
+            let q = self.lethal_of(h);
+            let win = ((1.0 - q) / (1.0 + (-(self.c + z)).exp())).clamp(1e-12, 1.0 - 1e-12);
+            (win / (1.0 - win)).ln() / self.a
+        })
+    }
+
+    /// リーサルの確率の出力を持つか（実験）
+    pub fn has_lethal_head(&self) -> bool {
+        self.lethal.is_some()
+    }
+
+    /// 相手の次のターンにリーサルがある確率の出力（0〜1。学んだのはターン末の局面だけ）。出力が無いモデル・終わった局面は None
+    pub fn lethal_prob(&self, s: &GameState, p: PlayerIndex, phase: ValuePhase) -> Option<f64> {
+        if self.lethal.is_none() || s.phase == Phase::Ended {
+            return None;
+        }
+        Some(self.last_hidden(s, p, phase, |h| self.lethal_of(h)))
+    }
+
+    fn lethal_of(&self, h: &[f64]) -> f64 {
+        let (w, b) = self.lethal.as_ref().expect("リーサルの出力");
+        let mut z = *b;
+        for (&hj, &wj) in h.iter().zip(w) {
+            z += hj * wj;
+        }
+        1.0 / (1.0 + (-z).exp())
+    }
+
+    /// 最後の隠れ層の値（ReLU の後）を f に渡す
+    fn last_hidden<R>(
+        &self,
+        s: &GameState,
+        p: PlayerIndex,
+        phase: ValuePhase,
+        f: impl FnOnce(&[f64]) -> R,
+    ) -> R {
         let hn = self.hidden;
         BUF.with(|buf| {
             let (acc, h, h2, rows) = &mut *buf.borrow_mut();
@@ -542,13 +609,18 @@ impl ValueNet {
                 relu(h2);
                 std::mem::swap(h, h2);
             }
-            let mut z = self.b2;
-            for (&hj, &w2) in h.iter().zip(&self.w2) {
-                z += hj * w2;
-            }
-            (self.c + z) / self.a
+            f(h)
         })
     }
+}
+
+/// 出発点の評価の重みが全部 0（td train --base zero の baseWeights。数は 0、入れ子の重みは空）
+fn base_is_zero(w: &serde_json::Map<String, serde_json::Value>) -> bool {
+    w.values().all(|v| match v {
+        serde_json::Value::Number(n) => n.as_f64() == Some(0.0),
+        serde_json::Value::Object(o) => o.is_empty(),
+        _ => false,
+    })
 }
 
 /// 既定の補正（default_value_net。WASM では install_default_value_net で入れる）

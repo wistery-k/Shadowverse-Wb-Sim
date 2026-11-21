@@ -205,6 +205,13 @@ export interface ValueNetModel {
    * w1 のゾーン z・カード c の行 = Σ_k 属性 k(c) · a[z,k,·] + カードごとの残り。a はゾーン × names × 隠れ層の大きさ
    */
   attr?: ValueNetAttr;
+  /**
+   * リーサルの出力（相手が次のターンにリーサルを持つ確率。最後の隠れ層から。実験用。Rust の svwb td train --lethalHead が書く。docs/value-net.md「リーサルの出力（実験）」）。
+   * このファイルの計算（td train・check・eval 等）は扱わない。td extend・td attr は w1 だけを変えて、そのまま書き出す
+   */
+  lethalHead?: { w: number[]; b: number };
+  /** 勝つ確率の形（無ければ "logit"。"survival" は (1 − リーサルの出力) × 生き延びたときの勝率） */
+  winForm?: "logit" | "survival";
 }
 
 /** 最初の層のカードの行の、属性で表す分 */
@@ -268,6 +275,15 @@ export function parseValueNetModel(raw: unknown): ValueNetModel {
     const r = o.attr as Record<string, unknown>;
     attr = { names: strsOf(r.names, "attr.names"), a: numsOf(r.a, "attr.a") };
   }
+  let lethalHead: ValueNetModel["lethalHead"];
+  if (o.lethalHead !== undefined) {
+    if (typeof o.lethalHead !== "object" || o.lethalHead === null) throw new Error("ValueNetModel の lethalHead がオブジェクトではありません");
+    const r = o.lethalHead as Record<string, unknown>;
+    if (typeof r.b !== "number" || !Number.isFinite(r.b)) throw new Error("ValueNetModel の lethalHead.b が数ではありません");
+    lethalHead = { w: numsOf(r.w, "lethalHead.w"), b: r.b };
+  }
+  if (o.winForm !== undefined && o.winForm !== "logit" && o.winForm !== "survival") throw new Error('ValueNetModel の winForm は "logit" か "survival"');
+  const winForm = o.winForm as ValueNetModel["winForm"];
   return {
     kind: "td-value-net",
     version: 1,
@@ -285,6 +301,8 @@ export function parseValueNetModel(raw: unknown): ValueNetModel {
     baseWeights: baseWeights as Record<string, unknown>,
     ...(board ? { board } : {}),
     ...(attr ? { attr } : {}),
+    ...(lethalHead ? { lethalHead } : {}),
+    ...(winForm ? { winForm } : {}),
   };
 }
 
@@ -351,13 +369,22 @@ export function layerSizes(m: Pick<ValueNetModel, "hidden" | "layers">): number[
   return [m.hidden, ...(m.layers ?? []).map((l) => l.b.length)];
 }
 
-export function compileValueNet(model: ValueNetModel): CompiledValueNet {
+/**
+ * 大きさを確かめて、計算用の形にする。リーサルの出力（lethalHead・winForm）を持つモデルは、このファイルの計算では扱わないので
+ * エラーにする（keepHead: 真なら、w1 だけを変えて書き出す用に通す。td extend・td attr）
+ */
+export function compileValueNet(model: ValueNetModel, opts: { keepHead?: boolean } = {}): CompiledValueNet {
   if (!isSubsequence(model.zones, VALUE_ZONES) || !isSubsequence(model.scalars, VALUE_SCALARS)) throw new Error("ValueNetModel の入力の並びが今のコードと違います");
   const n = inputSize(model);
   const sizes = layerSizes(model);
   const layersOk = (model.layers ?? []).every((l, i) => l.b.length > 0 && l.w.length === sizes[i]! * l.b.length);
   if (model.w1.length !== n * model.hidden || model.b1.length !== model.hidden || !layersOk || model.w2.length !== sizes[sizes.length - 1]) {
     throw new Error("ValueNetModel の重みの大きさが合いません");
+  }
+  if (model.lethalHead && model.lethalHead.w.length !== sizes[sizes.length - 1]) throw new Error("ValueNetModel の lethalHead の重みの大きさが合いません");
+  if (model.winForm === "survival" && !model.lethalHead) throw new Error('ValueNetModel の winForm "survival" には lethalHead が要ります');
+  if ((model.lethalHead || model.winForm) && !opts.keepHead) {
+    throw new Error("リーサルの出力（lethalHead・winForm）を持つモデルは、TypeScript の計算では扱いません（Rust の svwb で。docs/value-net.md「リーサルの出力（実験）」）");
   }
   const index = new Map(model.vocab.map((id, i): [string, number] => [id, i]));
   return {
