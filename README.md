@@ -102,6 +102,9 @@ npm run pack-run   # PC で回した 1 回分の出力（自己対戦・モデ�
 
 各コマンドが受け付ける引数の一覧は [`docs/commands.md`](docs/commands.md) にまとめてあります。
 
+PR では CI（`.github/workflows/ci.yml`）が、変わったファイルに合わせて TypeScript の型チェック・テスト・ビルド（check）と Rust のテスト（rust）を回します。
+ドキュメント（`*.md`・`docs/`）だけの PR では両方飛ばし、コードの PR でも前の push から md を直しただけの push では、前の push の CI の結果を使います（くわしくはワークフローの先頭のコメント）。
+
 ## 公開
 
 `main` ブランチへの push で GitHub Actions がビルドし GitHub Pages へデプロイします。

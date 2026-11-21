@@ -1431,67 +1431,38 @@ fn report(argv: &[String]) -> Result<(), String> {
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .collect();
-        let num = Json::Num;
-        let r6 = |x: f64| {
-            if x.is_finite() {
-                num((x * 1e4).round() / 1e4)
-            } else {
-                Json::Null
-            }
-        };
-        let pair = |m: f64, se: f64| Json::Arr(vec![r6(m), r6(se)]);
-        ledger::append_survey(
-            &label,
-            vec![
-                (
-                    "a".into(),
-                    Json::parse(&opts_text).unwrap_or_else(|_| Json::Str(opts_text.clone())),
-                ),
-                (
-                    "g".into(),
-                    Json::Arr(vec![num(first_game as f64), num(last_game as f64)]),
-                ),
-                ("games".into(), num(n_games as f64)),
-                ("rate".into(), r6(cfg0["rate"].as_f64().unwrap_or(f64::NAN))),
-                ("m".into(), r6(cfg0["m"].as_f64().unwrap_or(f64::NAN))),
-                (
-                    "extra".into(),
-                    r6(cfg0["extra"].as_f64().unwrap_or(f64::NAN)),
-                ),
-                (
-                    "confirm".into(),
-                    r6(cfg0["confirm"].as_f64().unwrap_or(f64::NAN)),
-                ),
-                ("flag".into(), r6(cfg0["flag"].as_f64().unwrap_or(f64::NAN))),
-                ("turnStarts".into(), num(turn_starts as f64)),
-                ("positions".into(), num(n as f64)),
-                ("compared".into(), num(compared.len() as f64)),
-                ("gain4".into(), pair(m4 * per_seat, se4 * per_seat)),
-                ("gain8".into(), pair(m8 * per_seat, se8 * per_seat)),
-                ("gain2".into(), pair(m2 * per_seat, se2 * per_seat)),
-                ("gain2Extra".into(), pair(m2x * per_seat, se2x * per_seat)),
-                ("flagged".into(), num(flagged as f64)),
-                ("misses".into(), num(misses.len() as f64)),
-                (
-                    "missesPerGame".into(),
-                    pair(miss_rate * per_seat, miss_se * per_seat),
-                ),
-                ("splitAny".into(), r6(mean(&split_any))),
-                ("splitPair".into(), r6(mean(&split_pair))),
-                ("pairSe".into(), r6(mean(&pair_se))),
-                ("perRollout".into(), r6(sec / n_roll.max(1.0))),
-                ("seconds".into(), r6((sec * 10.0).round() / 10.0)),
-                (
-                    "machines".into(),
-                    Json::Arr(machines.into_iter().map(Json::Str).collect()),
-                ),
-                (
-                    "commits".into(),
-                    Json::Arr(commits.into_iter().map(Json::Str).collect()),
-                ),
-                ("cmd".into(), Json::Str(ledger::shell_line(&cmd))),
-            ],
-        );
+        let setting = |k: &str| cfg0[k].as_f64().unwrap_or(f64::NAN);
+        let scaled = |m: f64, se: f64| [m * per_seat, se * per_seat];
+        ledger::append_survey(&ledger::SurveyRun {
+            argv: cmd,
+            label,
+            a: opts_text,
+            first: first_game,
+            last: last_game,
+            games: n_games,
+            rate: setting("rate"),
+            m: setting("m"),
+            extra: setting("extra"),
+            confirm: setting("confirm"),
+            flag: setting("flag"),
+            turn_starts,
+            positions: n,
+            compared: compared.len(),
+            gain4: scaled(m4, se4),
+            gain8: scaled(m8, se8),
+            gain2: scaled(m2, se2),
+            gain2_extra: scaled(m2x, se2x),
+            flagged,
+            misses: misses.len(),
+            misses_per_game: scaled(miss_rate, miss_se),
+            split_any: mean(&split_any),
+            split_pair: mean(&split_pair),
+            pair_se: mean(&pair_se),
+            per_rollout: sec / n_roll.max(1.0),
+            seconds: sec,
+            machines,
+            commits,
+        });
     }
     Ok(())
 }

@@ -123,7 +123,7 @@ npm run ledger -- items --in-default             # 今の既定に入ってい�
 npm run ledger -- items --grep drawSplit --all   # 項目の判定の移り変わり
 npm run ledger -- decide --item '自分のターンのビームを幅 256 に' --decision 採用 --from-label 幅256 \
   --keys beamWidth --ref 'docs/ai-notes/12-2026-11-05.md「…」' --note '思考 1.08 倍'
-npm run ledger -- check                          # 全部の行が形に合うか（npm test でも確かめる）
+npm run ledger -- check                          # 全部の行が形に合うか（npm test は今の台帳を読まないので、手で直したときに）
 ```
 
 - `sum` は、回ごとの標準誤差を試合数で重みを付けて合わせる（回どうしは別の試合番号の前提）。試合番号が重なる回は「重なりあり」と出す（同じ試合を 2 回数えている）

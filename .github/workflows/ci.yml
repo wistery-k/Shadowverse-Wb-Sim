@@ -6,17 +6,34 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  # changes が、前の push の CI の結果を読む
+  actions: read
+
 jobs:
   # 変わったファイルから、下の check と rust のどちらを回すかを決める。
-  # - ドキュメント（*.md と docs/ の下）と夜のキューのジョブのファイル（night/ の下。PC で回すコマンドの並びで、テストもビルドも読まない）だけなら、両方飛ばす
+  # - ドキュメント（*.md と docs/ の下。台帳 docs/ledger.jsonl も）と夜のキューのジョブのファイル（night/ の下。PC で回すコマンドの並びで、テストもビルドも読まない）だけなら、両方飛ばす。
+  #   テストはリポジトリの台帳を読まない（台帳を書く側・読む側は決まった行で確かめる。今の台帳の行の形は npm run ledger -- check）
   # - それに加えて、画面（src/ui/ の下）と TypeScript のテスト（tests/ の下）だけなら、rust を飛ばす
   #   （Rust に埋め込むデータ（npm run rust-data）も Rust のテストも、この 2 つを読まない。エンジンと AI は check の npm test でも WASM で動く）
   # - ほかのファイルが 1 つでもあれば、両方回す（rust/・data/・src/cards/・src/engine/・src/ai/・scripts/・misses/・records/ 等は、Rust のビルドやテストが読む）
   # 比べる相手は PR ならマージ先、手動実行なら main との分かれ目（そこからの変更をまとめて見る）。
+  #
+  # 前の push との差（PR への 2 回目からの push）: PR 全体ではコードが変わっていても、前の push から変わったのが
+  # 上の「飛ばせる」ファイルだけで、前の push の CI が通っていれば、そのジョブは前の結果を使って飛ばす
+  # （コードの PR で md を手直ししただけの push で、check と rust を回し直さないため。ユーザーの依頼 2026-11-21）。
+  # 前の push の CI がまだ動いていれば、終わるまで待つ（30 分まで）。通らなかった・取り消された・見つからないときは、いつもどおり回す。
+  # 前の push の CI も同じ理由で飛ばしていたなら、さらに前の結果を使っている（通ったものをたどる）。
+  # main がその間に進んでいても前の結果を使う（main が進んだだけで回し直さないのと同じ）。
+  # 全部回し直したいときは、手動実行（Actions タブの Run workflow でブランチを選ぶ。前の結果は使わない）。
+  #
   # ワークフローごと paths-ignore で止めると、必須のチェックにしたときに「待ち」のまま残ってマージできないので、
   # ジョブの if で飛ばす（飛ばしたジョブは成功の扱いになる）。
   changes:
     runs-on: ubuntu-latest
+    # ふだんは 10 秒ほど。前の push の CI を待つときだけ長い
+    timeout-minutes: 40
     outputs:
       code: ${{ steps.diff.outputs.code }}
       rust: ${{ steps.diff.outputs.rust }}
@@ -27,36 +44,120 @@ jobs:
           fetch-depth: 0
           filter: blob:none
       - id: diff
+        name: check と rust を回すかを決める（前の push の CI を待つことがある）
         env:
           TARGET: ${{ github.base_ref || 'main' }}
+          ACTION: ${{ github.event.action }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
-          code=false
-          rust=false
-          if ! files=$(git diff --name-only --no-renames "origin/$TARGET...HEAD"); then
-            echo "origin/$TARGET と比べられないので、すべて調べる"
+          # 標準入力のファイルの一覧を見て、code（check が要る）と rust（rust が要る）を決める
+          classify() {
+            code=false
+            rust=false
+            while IFS= read -r f; do
+              case "$f" in
+                tests/* | src/ui/*)
+                  if [ "$code" = false ]; then echo "  check が読むファイル: $f"; fi
+                  code=true
+                  ;;
+                '' | docs/* | *.md | night/*) ;;
+                *)
+                  echo "  Rust のビルドやテストが読みうるファイル: $f"
+                  code=true
+                  rust=true
+                  break
+                  ;;
+              esac
+            done
+          }
+
+          # 前の push（$BEFORE）の CI が通ったか。動いていれば終わるまで待つ（30 分まで）
+          before_passed() {
+            local deadline=$((SECONDS + 1800)) st
+            while :; do
+              if ! st=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$BEFORE&event=pull_request&per_page=1" \
+                --jq '.workflow_runs[0] // {} | "\(.status) \(.conclusion) \(.html_url)"'); then
+                echo "前の push の CI を調べられない"
+                return 1
+              fi
+              set -- $st
+              case "$1 $2" in
+                "completed success")
+                  echo "前の push の CI は通っている: $3"
+                  prev_url=$3
+                  return 0
+                  ;;
+                "null null")
+                  echo "前の push の CI が見つからない"
+                  return 1
+                  ;;
+                completed*)
+                  echo "前の push の CI が通っていない（$2）: $3"
+                  return 1
+                  ;;
+              esac
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "前の push の CI が 30 分で終わらなかった: $3"
+                return 1
+              fi
+              echo "前の push の CI（$1）が終わるのを待つ: $3"
+              sleep 30
+            done
+          }
+
+          echo "マージ先（origin/$TARGET）からの変更:"
+          if files=$(git diff --name-only --no-renames "origin/$TARGET...HEAD"); then
+            classify <<< "$files"
+          else
+            echo "  origin/$TARGET と比べられないので、すべて調べる"
             code=true
             rust=true
           fi
-          while IFS= read -r f; do
-            case "$f" in
-              '' | docs/* | *.md | night/*) ;;
-              tests/* | src/ui/*)
-                if [ "$code" = false ]; then echo "画面か TypeScript のテストの変更: $f"; fi
-                code=true
-                ;;
-              *)
-                echo "Rust のビルドやテストが読みうるファイルの変更: $f"
-                code=true
-                rust=true
-                break
-                ;;
-            esac
-          done <<< "$files"
-          if [ "$code" = false ]; then
-            echo "ドキュメントと夜のキューのジョブのファイルだけの変更なので check と rust を飛ばす"
-          elif [ "$rust" = false ]; then
-            echo "画面と TypeScript のテストだけの変更なので rust を飛ばす"
+          note=""
+
+          if [ "$ACTION" = synchronize ] && [ "$code" = true ]; then
+            pr_code=$code
+            pr_rust=$rust
+            echo "前の push（${BEFORE::7}）からの変更:"
+            if { git cat-file -e "$BEFORE^{commit}" 2>/dev/null || git fetch -q --no-tags --filter=blob:none origin "$BEFORE"; } &&
+              inc=$(git diff --name-only --no-renames "$BEFORE" "$AFTER"); then
+              classify <<< "$inc"
+              inc_code=$code
+              inc_rust=$rust
+            else
+              echo "  前の push と比べられない"
+              inc_code=true
+              inc_rust=true
+            fi
+            code=$pr_code
+            rust=$pr_rust
+            if [ "$inc_code" = false ]; then
+              if before_passed; then
+                code=false
+                rust=false
+                note="前の push から変わったのはドキュメントと夜のキューのジョブのファイルだけなので、check と rust は前の push の結果（$prev_url）を使う"
+              fi
+            elif [ "$inc_rust" = false ] && [ "$pr_rust" = true ]; then
+              if before_passed; then
+                rust=false
+                note="前の push から変わったのは画面・TypeScript のテストとドキュメントだけなので、rust は前の push の結果（$prev_url）を使う"
+              fi
+            fi
           fi
+
+          if [ -n "$note" ]; then
+            echo "$note"
+          elif [ "$code" = false ]; then
+            note="ドキュメントと夜のキューのジョブのファイルだけの変更なので check と rust を飛ばす"
+            echo "$note"
+          elif [ "$rust" = false ]; then
+            note="画面と TypeScript のテストだけの変更なので rust を飛ばす"
+            echo "$note"
+          fi
+          if [ -n "$note" ]; then echo "$note" >> "$GITHUB_STEP_SUMMARY"; fi
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "rust=$rust" >> "$GITHUB_OUTPUT"
 

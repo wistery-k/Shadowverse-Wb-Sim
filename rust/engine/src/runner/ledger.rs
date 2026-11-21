@@ -401,21 +401,109 @@ pub fn append_misses(run: &MissesRun) {
     ));
 }
 
-/// 候補の打ち比べ調査（`svwb survey report`。runner/survey.rs）の 1 行を台帳に足す。fields は `label` の後に並べる項目
-pub fn append_survey(label: &str, fields: Vec<(String, Json)>) {
-    let (date, at, commit, branch) = now_context();
+/// 候補の打ち比べ調査の 1 回（`svwb survey report`。runner/survey.rs）。数（件数を除く）は台帳に書くとき小数 4 桁に丸める
+#[derive(Clone)]
+pub struct SurveyRun {
+    /// 台帳の cmd に書く引数（`survey report …`）
+    pub argv: Vec<String>,
+    pub label: String,
+    /// 探索 AI の設定の JSON の文字列（JSON として読めなければ文字列のまま書く）
+    pub a: String,
+    /// 試合番号の範囲と、試合の数
+    pub first: u64,
+    pub last: u64,
+    pub games: usize,
+    /// 調査の設定（試合の行の rate・m・extra・confirm・flag）。無ければ NaN（null と書く）
+    pub rate: f64,
+    pub m: f64,
+    pub extra: f64,
+    pub confirm: f64,
+    pub flag: f64,
+    /// 自分のターンの最初の局面の数・選んだ局面の数・打ち比べた局面の数
+    pub turn_starts: u64,
+    pub positions: usize,
+    pub compared: usize,
+    /// 選び直す得の [平均, 標準誤差]（1 試合 1 席あたり）
+    pub gain4: [f64; 2],
+    pub gain8: [f64; 2],
+    pub gain2: [f64; 2],
+    pub gain2_extra: [f64; 2],
+    /// 二段目に回した局面と、大きなミスの数、大きなミスの [平均, 標準誤差]（1 試合 1 席あたり）
+    pub flagged: usize,
+    pub misses: usize,
+    pub misses_per_game: [f64; 2],
+    /// 候補どうしで勝ち負けが割れる割合、1 局面の差の標準誤差の平均
+    pub split_any: f64,
+    pub split_pair: f64,
+    pub pair_se: f64,
+    /// 1 回の打ち切りあたりの秒と、合計の秒（0.1 秒に丸める）
+    pub per_rollout: f64,
+    pub seconds: f64,
+    /// 回したマシンとコミット（試合の行から。重なりを除いて並べたもの）
+    pub machines: Vec<String>,
+    pub commits: Vec<String>,
+}
+
+/// 候補の打ち比べ調査の 1 回の台帳の行（日付・時刻・コミット・ブランチを渡す形。試すため）
+pub fn survey_row_with(run: &SurveyRun, date: &str, at: &str, commit: &str, branch: &str) -> Json {
+    let num = Json::Num;
     let s = |x: &str| Json::Str(x.to_string());
-    let mut items: Vec<(String, Json)> = vec![
-        ("v".into(), Json::Num(LEDGER_VERSION as f64)),
+    let r4 = |x: f64| {
+        if x.is_finite() {
+            num((x * 1e4).round() / 1e4)
+        } else {
+            Json::Null
+        }
+    };
+    let pair = |[m, se]: [f64; 2]| Json::Arr(vec![r4(m), r4(se)]);
+    let strs = |v: &[String]| Json::Arr(v.iter().map(|x| s(x)).collect());
+    Json::Obj(vec![
+        ("v".into(), num(LEDGER_VERSION as f64)),
         ("kind".into(), s("survey")),
-        ("date".into(), s(&date)),
-        ("at".into(), s(&at)),
-        ("commit".into(), s(&commit)),
-        ("branch".into(), s(&branch)),
-        ("label".into(), s(label)),
-    ];
-    items.extend(fields);
-    append_line(&Json::Obj(items));
+        ("date".into(), s(date)),
+        ("at".into(), s(at)),
+        ("commit".into(), s(commit)),
+        ("branch".into(), s(branch)),
+        ("label".into(), s(&run.label)),
+        (
+            "a".into(),
+            Json::parse(&run.a).unwrap_or_else(|_| s(&run.a)),
+        ),
+        (
+            "g".into(),
+            Json::Arr(vec![num(run.first as f64), num(run.last as f64)]),
+        ),
+        ("games".into(), num(run.games as f64)),
+        ("rate".into(), r4(run.rate)),
+        ("m".into(), r4(run.m)),
+        ("extra".into(), r4(run.extra)),
+        ("confirm".into(), r4(run.confirm)),
+        ("flag".into(), r4(run.flag)),
+        ("turnStarts".into(), num(run.turn_starts as f64)),
+        ("positions".into(), num(run.positions as f64)),
+        ("compared".into(), num(run.compared as f64)),
+        ("gain4".into(), pair(run.gain4)),
+        ("gain8".into(), pair(run.gain8)),
+        ("gain2".into(), pair(run.gain2)),
+        ("gain2Extra".into(), pair(run.gain2_extra)),
+        ("flagged".into(), num(run.flagged as f64)),
+        ("misses".into(), num(run.misses as f64)),
+        ("missesPerGame".into(), pair(run.misses_per_game)),
+        ("splitAny".into(), r4(run.split_any)),
+        ("splitPair".into(), r4(run.split_pair)),
+        ("pairSe".into(), r4(run.pair_se)),
+        ("perRollout".into(), r4(run.per_rollout)),
+        ("seconds".into(), r4((run.seconds * 10.0).round() / 10.0)),
+        ("machines".into(), strs(&run.machines)),
+        ("commits".into(), strs(&run.commits)),
+        ("cmd".into(), s(&shell_line(&run.argv))),
+    ])
+}
+
+/// 候補の打ち比べ調査の 1 回を台帳に足す（書けなければ注意を出すだけ）
+pub fn append_survey(run: &SurveyRun) {
+    let (date, at, commit, branch) = now_context();
+    append_line(&survey_row_with(run, &date, &at, &commit, &branch));
 }
 
 /// 台帳に 1 行足す（書けなければ注意を出すだけ）
@@ -536,6 +624,62 @@ mod tests {
             text,
             r#"{"v":1,"kind":"misses","date":"2026-11-10","at":"2026-11-10T09:00:00Z","commit":"bcb49c2","branch":"main","label":"定例","a":{},"problems":2,"set":"91c86c68","trials":24,"seed":1,"n":48,"passes":25,"rate":0.520833,"se":0.012,"perProblem":{"a":[24,24],"b":[1,24]},"seconds":5,"threads":4,"machine":"cloud","cmd":"misses run --label '定例'"}"#
         );
+    }
+
+    #[test]
+    fn survey_row_has_the_fields_in_order() {
+        // tests/ledger.test.ts の SURVEY_LINE と同じ行になる（読む側はその行で確かめる）
+        let run = SurveyRun {
+            argv: vec![
+                "survey".into(),
+                "report".into(),
+                "t1.jsonl".into(),
+                "--label".into(),
+                "試し".into(),
+            ],
+            label: "試し".into(),
+            a: "{}".into(),
+            first: 0,
+            last: 1,
+            games: 2,
+            rate: 0.15,
+            m: 4.0,
+            extra: 4.0,
+            confirm: 4.0,
+            flag: 0.0,
+            turn_starts: 37,
+            positions: 6,
+            compared: 6,
+            gain4: [-38.541666, 38.541666],
+            gain8: [-38.541666, 38.541666],
+            gain2: [3.5, 2.25],
+            gain2_extra: [0.0, 0.0],
+            flagged: 6,
+            misses: 0,
+            misses_per_game: [0.0, 0.0],
+            split_any: 0.25,
+            split_pair: 0.130434,
+            pair_se: 11.326794,
+            per_rollout: 1.16201,
+            seconds: 190.63,
+            machines: vec!["vm".into()],
+            commits: vec!["c99c9f8+".into()],
+        };
+        let text = survey_row_with(&run, "2026-11-11", "2026-11-11T06:19:12Z", "c99c9f8+", "b")
+            .stringify();
+        assert_eq!(
+            text,
+            r#"{"v":1,"kind":"survey","date":"2026-11-11","at":"2026-11-11T06:19:12Z","commit":"c99c9f8+","branch":"b","label":"試し","a":{},"g":[0,1],"games":2,"rate":0.15,"m":4,"extra":4,"confirm":4,"flag":0,"turnStarts":37,"positions":6,"compared":6,"gain4":[-38.5417,38.5417],"gain8":[-38.5417,38.5417],"gain2":[3.5,2.25],"gain2Extra":[0,0],"flagged":6,"misses":0,"missesPerGame":[0,0],"splitAny":0.25,"splitPair":0.1304,"pairSe":11.3268,"perRollout":1.162,"seconds":190.6,"machines":["vm"],"commits":["c99c9f8+"],"cmd":"survey report t1.jsonl --label '試し'"}"#
+        );
+        // 設定が無ければ null、設定が JSON でなければ文字列のまま
+        let odd = SurveyRun {
+            rate: f64::NAN,
+            a: "x".into(),
+            ..run
+        };
+        let text = survey_row_with(&odd, "d", "t", "c", "b").stringify();
+        assert!(text.contains(r#""label":"試し","a":"x","#), "{text}");
+        assert!(text.contains(r#""rate":null,"#), "{text}");
     }
 
     #[test]
