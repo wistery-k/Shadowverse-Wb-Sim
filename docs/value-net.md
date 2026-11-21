@@ -280,6 +280,26 @@ V   = 今学んでいるモデルの予測 σ(a·S + c + z)。エポックの最
 | `eval` | モデルどうしの予測を同じ局面で比べる |
 | `check` | 自己対戦で書いた補正の値（Rust）と、学習側（TypeScript）の計算が同じか確かめる |
 
+### リーサルの出力（実験）
+
+2026-11-21 から。既定の補正・ブラウザの補正は持たない。次の学び直しの夜に、同じ自己対戦から 3 つ学んで比べる（ユーザー決定 2026-11-21。
+[ai-notes/14](ai-notes/14-2026-11-16.md)「死ぬ確率と生き延びたときの勝率で候補を選んだら」の終わり）:
+
+| 名前 | 形 | 損失 | 探索が使う値 |
+| --- | --- | --- | --- |
+| C | 今のまま（出力 1 つ） | 勝つ確率 σ(a·S + c + z) と λ 収益 G の交差エントロピー | (c + z) / a |
+| X（`--lethalHead aux`） | 最後の隠れ層から、相手が次のターンにリーサルを持つ確率 q = σ(bp + wp·h) も出す | C の損失 ＋ `--lethalWeight` × q と印の交差エントロピー | C と同じ（q は使わない。学び方だけが違う） |
+| Z（`--lethalHead survival`） | 勝つ確率を (1 − q) × σ(c + z) にする（σ(c + z) は生き延びたときの勝率） | その勝つ確率と G の交差エントロピー ＋ `--lethalWeight` × q と印の交差エントロピー | logit((1 − q) × σ(c + z)) / a。出発点の評価は 0（`--base zero`）だけ |
+
+- 印: 自己対戦の各ターン末で、本当の局面のままターンを終え、相手の番の初めにリーサル探索（`finds_lethal`。印は打ち手の設定のリーサル探索の項目で探す）が相手の勝てる並びを見つけるか
+  （`svwb td selfplay --lethalLabel 1` が `"ol": 1|0` を書く。打つ手・試合は変わらない。ターン終了で決着したら相手の勝ちかどうか）。#292 の `kifu values --true-lethal 1` の `oppLethal` と同じ印
+- 出力の無いモデルに付けるときは wp を 0、bp を学習側の局面の印の割合のロジットで始める。Z は最初、勝つ確率がその割合だけ下がった所から学ぶ
+- `td train` は確かめ用のターン末で、リーサルの出力の交差エントロピー（割合だけで当てたときと並べて）と AUC（勝つ確率の低さの AUC と並べて）も出す。`--best` の判定は今までどおり勝つ確率の交差エントロピー
+- モデルのファイルには `"lethalHead": {"w": [...], "b": ...}` と、Z なら `"winForm": "survival"` を足す（無ければ今までの形）。推論は Rust（`ValueNet::eval`、`lethal_prob`）。
+  TypeScript の計算（`npm run td -- train`・`check`・`eval` 等）はこの形を扱わずエラーにし、`td extend`・`td attr` は w1 だけを変えてそのまま書き出す
+- 出力の無いモデルの学習は今までと同じ計算（TypeScript 版と同じ重み。`fixtures_match_typescript`）。印のあるデータでも、出力を付けなければ同じモデルを書く
+- `svwb kifu values --opts '{"valueNet":"<出力のあるモデル>"}'` は、ターン末ごとにリーサルの出力の確率（`netLethal`、%）も書く。比べ方は [ai-notes/14](ai-notes/14-2026-11-16.md)「リーサルの出力を足して学ぶ準備」
+
 ## 今の既定までの経緯
 
 | 採用日 | 名前 | 変えたこと | 節 |
@@ -327,7 +347,8 @@ V   = 今学んでいるモデルの予測 σ(a·S + c + z)。エポックの最
 - `rust/engine/src/ai/valuenet.rs`: 入力の並び（`ZONES`・`SCALARS`・`BOARD_FEATURES`）、局面から入力を作る `encode`、推論 `ValueNet::eval`、既定の補正 `default_value_net`
 - `rust/engine/src/ai/tests/valuenet.rs`: 見えない情報を入力にしない、補正 0 なら探索が変わらない、大きさの検査、広げたモデルが同じ補正を返す、隠れ層を重ねる、場のカードのネットワーク、想像の局面の入力、層の計算（`add_rows`）が行ごとに足す形とビットまで同じ
 - `rust/engine/src/ai/search.rs`: 探索での使い方（`eval_state`・`eval_after`・`parts`）
-- `rust/engine/src/runner/td.rs`: 自己対戦（`td selfplay`）の打ち方と書き出す形
+- `rust/engine/src/runner/td.rs`: 自己対戦（`td selfplay`）の打ち方と書き出す形（`--lethalLabel 1` の印）
+- `rust/engine/src/runner/td_train.rs`: 学習（`td train`・`td prune`）。リーサルの出力の勾配の数値微分との照らし合わせ（`lethal_gradients_match_finite_differences`）と、X・Z を小さなデータで学ぶテスト（`lethal_heads_train`）
 - `scripts/valueNet.ts`: モデルの JSON の型・検証と、学習側の順伝播（Rust と同じ計算）
 - `scripts/td-main.ts`: `init`・`train`・`prune`・`attr` などのコマンド
 - `scripts/cardAttrs.ts`: カードの属性（`td attr`）

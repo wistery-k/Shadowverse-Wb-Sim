@@ -1,0 +1,50 @@
+# 補正にリーサルの出力を足して学ぶ（C・X・Z）の 1 晩目（案。回す夜はまだ決めていない）。
+# ユーザー決定 2026-11-21: 次に補正を学び直す夜に相乗りし、同じ自己対戦から C・X・Z を作る。台帳は「保留（次の学び直しで測る）」。
+# 形と学び方は docs/value-net.md「リーサルの出力（実験）」、経緯と比べ方は docs/ai-notes/14-2026-11-16.md「リーサルの出力を足して学ぶ準備」。
+#
+# 次の学び直しの夜が別の変更（入力を足す等）を持つなら、その夜のキューに次を足す:
+#   - td selfplay の行に --lethalLabel 1（打つ手・試合は変わらない。印の分だけ遅くなる）
+#   - 下の 2'・2'' の X・Z の学習（その夜の C と同じ出発のモデル・同じ引数に --lethalHead を足すだけ）
+# この案は、ほかに変更の無いときの形（R4 から同じ流れで学び直す）。
+#
+#   C: 今までどおり（出力 1 つ）。X: --lethalHead aux（打つときは勝つ確率の出力だけ）。Z: --lethalHead survival（勝つ確率 = (1 − p) × s）
+#
+# 回す前に決めた問いと線:
+#   手順 2（朝、クラウド環境。学びに使っていない試合で比べる）: R4 対 R3 の compare の棋譜（night-20261121b、1.2 万試合）の A の席のターン末で、
+#     svwb kifu values を C・X・Z の補正で付け、three.py（共有フォルダの logs/lethal-auc-2026-11-21/heads/）で、勝敗の交差エントロピー・AUC（全部・体力 10 以下）、
+#     値の帯 × 次の相手のターンに負けた割合、値 50% 以上のまま負けた行の数を比べる。印（oppLethal）は 1 回だけ付ける。
+#     X・Z のうち、全部の行の勝敗の交差エントロピーが C より小さい方（2 つとも C より悪ければ、値 50% 以上のまま負けた行が少ない方）を手順 3 に出す。
+#     どちらも全部の行の交差エントロピーが C より 2 SE 以上悪ければ、手順 3 は回さずユーザーに返す
+#   手順 3（2 晩目、別のキュー）: 選んだ 1 つ 対 C（見込みはどちらも R4 のもの）、84 個のデッキの鏡の compare 4 万試合（PC で 2 時間ほど）。
+#     見込みの差は大きくて +0.5 ポイント（リーサルを見誤る局面は負けの 12.5%、値の高い行の 1% ほど。前の調べで候補の選び方は変わらなかった）。
+#     誤差は 1.2 万試合で ± 0.38 だったので 4 万試合で ± 0.21。差 − 2 SE > 0 なら「出力を足して学んだ方が強い」（+0.5 なら越える。+0.4 だと半々）。
+#     越えなければ C と変わらないとして、台帳を「やめた」にする
+#   線ではないが見る数字: 学習の報告のリーサルの出力の AUC・交差エントロピー（確かめ用のターン末）、C・X・Z の補正 (c + L) / a の絶対値の平均、profile の PP を残して終えたターン
+#
+# 見込み（PC、svwb-docker・28 スレッド）: 自己対戦は R4 と同じ 0.50 秒/試合に印の分（クラウド環境の小さな確かめで測る）を足す。学習は 3 つで 12 分 × 3、
+# 間引き・属性で埋めるのが 3 つで 7 分ほど。全部で 9 時間ほど。1 晩に収まらなければ、止まったところから次の夜に続ける（同じ券）
+# 朝: 止まったときのまとめを push してもらい、ingest する。モデル（c.json・x.json・z.json）・自己対戦は pack-run --max-mb 300 で共有フォルダへ
+
+# 1. 自己対戦 6 万試合（g7400000〜7459999。R4 は 7300000〜）。R4 と同じ打ち方に、ターン末ごとの相手のリーサルの印（--lethalLabel 1）を足す
+td selfplay --model rust/engine/yardstick/pool-r4-net.json --decks @data/pools/azvaldt/sets/all84.txt --games 60000 --start 7400000 --chunk 3000 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --lethalLabel 1 --potential rust/engine/yardstick/pool-r4-potential.json --out @/s-{k}.jsonl.gz --est 0.52
+
+# 2. C: 今までと同じ学び方（R1〜R4 と同じ）、間引き、属性で埋める
+td train --impl rust --model rust/engine/yardstick/pool-r4-net.json --data @/s-{1..20}.jsonl.gz --out @/ct.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 1200
+td prune --impl rust --model @/ct.json --data @/s-{1..20}.jsonl.gz --out @/cp.json --est 90
+td attr --model @/cp.json --out @/c.json --keepA 0 --est 60
+
+# 2'. X: リーサルの出力を補助に足して一緒に学ぶ（勝つ確率は C と同じ形）
+td train --impl rust --model rust/engine/yardstick/pool-r4-net.json --data @/s-{1..20}.jsonl.gz --out @/xt.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead aux --est 1300
+td prune --impl rust --model @/xt.json --data @/s-{1..20}.jsonl.gz --out @/xp.json --est 90
+td attr --model @/xp.json --out @/x.json --keepA 0 --est 60
+
+# 2''. Z: 勝つ確率を (1 − リーサルの出力) × 生き延びたときの勝率 にして学ぶ
+td train --impl rust --model rust/engine/yardstick/pool-r4-net.json --data @/s-{1..20}.jsonl.gz --out @/zt.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --est 1300
+td prune --impl rust --model @/zt.json --data @/s-{1..20}.jsonl.gz --out @/zp.json --est 90
+td attr --model @/zp.json --out @/z.json --keepA 0 --est 60
+
+# 3. 線ではないが毎回見る数字（C。R1〜R4 と同じ）
+profile --opts '{"valueNet":"@/c.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.16
+
+# 2 晩目（手順 3。手順 2 で選んだ方を、1 晩目の回のフォルダから写して）:
+# compare 20000 '{"valueNet":"<選んだ方>","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' '{"valueNet":"<c.json>","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label リーサルの出力-<X|Z>対C --est 0.17

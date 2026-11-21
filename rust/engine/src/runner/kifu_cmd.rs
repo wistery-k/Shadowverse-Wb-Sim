@@ -1275,12 +1275,13 @@ fn lethal_extras(s: &crate::state::GameState, p: usize) -> Vec<(String, Json)> {
 
 /// ターン末の局面 s（p の手番）の、補正の入力（`--features 1` の x・v）と足りない入力（extra）。
 /// 局面は補正がターン末に見るもの（合流する相打ちとターン終了時の処理の後。turn_end_value と同じ）。survey values も使う
-pub(crate) fn feature_cells(
+/// 補正がターン末に見る局面（合流する相打ちとターン終了時の処理の後。探索の end_score と同じ）で f を呼ぶ
+fn at_turn_end<R>(
     agent: &crate::ai::search::SearchAgent,
     s: &crate::state::GameState,
     p: usize,
-    net: &crate::ai::valuenet::ValueNet,
-) -> Vec<(String, Json)> {
+    f: impl FnOnce(&crate::state::GameState) -> R,
+) -> R {
     let settled = if agent.opts.settle_trades {
         crate::ai::converging::settle_converging_trades_with(s, p, agent.opts.dominance)
     } else {
@@ -1288,7 +1289,23 @@ pub(crate) fn feature_cells(
     };
     let base = settled.as_ref().unwrap_or(s);
     let resolved = crate::game::resolve_turn_end(base);
-    let at = resolved.as_ref().unwrap_or(base);
+    f(resolved.as_ref().unwrap_or(base))
+}
+
+pub(crate) fn feature_cells(
+    agent: &crate::ai::search::SearchAgent,
+    s: &crate::state::GameState,
+    p: usize,
+    net: &crate::ai::valuenet::ValueNet,
+) -> Vec<(String, Json)> {
+    at_turn_end(agent, s, p, |at| feature_cells_at(at, p, net))
+}
+
+fn feature_cells_at(
+    at: &crate::state::GameState,
+    p: usize,
+    net: &crate::ai::valuenet::ValueNet,
+) -> Vec<(String, Json)> {
     let enc = net.encode(at, p, crate::ai::valuenet::ValuePhase::End);
     vec![
         (
@@ -1315,6 +1332,7 @@ fn value_rows(
     opp_lethal: bool,
     true_lethal: bool,
     features: Option<&crate::ai::valuenet::ValueNet>,
+    head: Option<&crate::ai::valuenet::ValueNet>,
     files: &[String],
 ) -> Result<Result<String, String>, String> {
     use crate::game::{apply_legal, create_game, is_legal};
@@ -1418,6 +1436,16 @@ fn value_rows(
             ("end".into(), Json::Num(end)),
             ("endWin".into(), Json::Num(sig(end))),
         ]);
+        if let Some(net) = head {
+            // 補正のリーサルの出力（相手が次のターンにリーサルを持つ確率、%）
+            let q = at_turn_end(agent, &e.s, p, |at| {
+                net.lethal_prob(at, p, crate::ai::valuenet::ValuePhase::End)
+            });
+            row.push((
+                "netLethal".into(),
+                q.map_or(Json::Null, |q| Json::Num(100.0 * q)),
+            ));
+        }
         if reads > 0 {
             let base = super::human_plan::mix(r.seed, e.n as u32);
             let seeds: Vec<u32> = (0..reads)
@@ -1545,6 +1573,14 @@ fn values(argv: &[String]) -> Result<(), String> {
         } else {
             None
         };
+    // 補正にリーサルの出力（lethalHead）があれば、その確率も書く（netLethal。docs/value-net.md「リーサルの出力（実験）」）
+    let head = match Json::parse(&text)?.get("valueNet") {
+        Some(Json::Str(path)) => {
+            let net = crate::ai::valuenet::ValueNet::load(path)?;
+            net.has_lethal_head().then_some(net)
+        }
+        _ => None,
+    };
     let conds = parse_where(&a.all("where"))?;
     let files = kifu_files(&a.inputs)?;
     let lines = read_lines(&files)?;
@@ -1573,6 +1609,7 @@ fn values(argv: &[String]) -> Result<(), String> {
                 opp_lethal,
                 true_lethal,
                 features.as_ref(),
+                head.as_ref(),
                 &files,
             )?
             .map(|text| (m.engine.clone(), text)))
@@ -1795,6 +1832,7 @@ mod tests {
                 opp_lethal,
                 opp_lethal,
                 opp_lethal.then(crate::ai::valuenet::default_value_net),
+                None,
                 &files,
             )
             .unwrap()
