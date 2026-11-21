@@ -113,7 +113,7 @@ svwb kifu count <棋譜>… --event '<種類>[|<種類>…] [<条件>…]' [--wh
 svwb kifu winrate <棋譜>… [--where '<条件>,…'] [--by <分け方>,…]
 svwb kifu events <棋譜>… [--where '<条件>,…'] [--event '…'] [--out 出来事.jsonl]
 svwb kifu seats <棋譜>… [--where '<条件>,…'] [--out 席.jsonl]
-svwb kifu values <棋譜>… [--opts '<設定>'] [--reads N] [--opp-lethal 1] [--where '<条件>,…'] [--out ターン末.jsonl]
+svwb kifu values <棋譜>… [--opts '<設定>'] [--reads N] [--opp-lethal 1] [--true-lethal 1] [--features 1] [--where '<条件>,…'] [--out ターン末.jsonl]
 ```
 
 - 棋譜は、ファイルかフォルダ（中の `.jsonl`・`.jsonl.gz` を全部。`.tmp` は読まない）。何個並べてもよい。`npm run svwb -- kifu …` でも同じ
@@ -195,8 +195,10 @@ svwb kifu count data/kifu/night-20261117-0328 --where 'deck~コンボE' --event 
 | `end`・`endWin` | ビームがこのターン末に付ける点数（`SearchAgent::turn_end_value`。合流する相打ちとターン終了時の処理の後に評価し、残り PP の罰を引く）と、σ(a·点数) の勝率（%。a は `--opts` の補正のもの） |
 | `readLoss`・`readWin`・`pickWin` | `--reads N` のときだけ。相手の手札を N 通り引き直して相手のターンを読んだ点数（`read_values`。探索の読み直しと同じ）のうち、相手のリーサルになった割合・引き直しごとに勝率にした平均・探索が選ぶときの値（読みとターン末を `rescoreMix` で混ぜた点数）を引き直しごとに勝率にした平均。引き直しの種は試合のシードとターン番号から作る（試合のときの種とは違う） |
 | `readLethal`・`readLossL`・`pickWinL` | `--opp-lethal 1` のときだけ（`--reads` が要る）。読みの中の相手が、相手のターンの初めにリーサル探索（`--opts` の AI と同じもの。`SearchAgent::finds_lethal`）を先にしたら、の数。引き直しごとに、読みと同じ決定化の局面（`read_view`）でターンを終えて探す。リーサル探索が見つけた引き直しの割合・それを負けとした `readLoss`・`pickWin`（調べもの用。AI の振る舞いは変えない） |
+| `oppLethal` | `--true-lethal 1` のときだけ。本当の局面のまま（相手の手札・山札の順番・乱数もそのまま）ターンを終え、相手の番の初めに `--opts` の AI のリーサル探索（`finds_lethal`）が相手の勝てる並びを見つけるか。ターン終了で決着したら相手の勝ちかどうか（リーサルの確率を出すネットの印。[ai-notes/14](ai-notes/14-2026-11-16.md)「リーサルの確率を出すネット」） |
+| `x`・`v`・`extra` | `--features 1` のときだけ（`--opts` の `valueNet` が要る）。補正がターン末に見る局面（合流する相打ちとターン終了時の処理の後）の補正の入力の添字と値（`ValueNet::encode`）と、補正の入力に無い公開の数（`my`・`opp` ごとのアミュレットのカウントダウン `CdN`・`Cd1`・`Cd2`・`CdMin`、クレスト `CrestN`・`CrestCd`・`Faith`、`Evolved`・`Entered`・`EnteredMaxSame`・`DestroyedAmulets`・`DamageZero`、手札のスペルブースト `BoostTotal`・`BoostSinceIn`、`turn`） |
 
-- 速さ（クラウド環境の 4 スレッド）: 新しいプールの 600 試合・ターン末 1 万で、`--reads 12` 込みで 18 秒、`--opp-lethal 1` も付けると 5 分半（リーサル探索が引き直しごとに走る）
+- 速さ（クラウド環境の 4 スレッド）: 新しいプールの 600 試合・ターン末 1 万で、`--reads 12` 込みで 18 秒、`--opp-lethal 1` も付けると 5 分半（リーサル探索が引き直しごとに走る）。`--true-lethal 1 --features 1` だけなら 42 秒
 - 打ち直せない試合・勝者の違う試合は書かず、count と同じく数を出す
 
 `svwb profile` の報告の「仕組みを使った回数」「PP を残して終えた」「クレストの能力が誘発した回数」も、打った試合をこの出来事の列にして、
