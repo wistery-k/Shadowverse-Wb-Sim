@@ -390,10 +390,10 @@ npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mul
 npm run svwb -- mulligan-data --games 6000 [--start 0] [--seed 1] [--flip 0.5] --out d.jsonl
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
                 [--sampling classic|default] [--potential p.json|null] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
-                [--sDefault 0] [--searchValue 0] [--lethalLabel 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--kifu k.jsonl | --no-kifu]
+                [--sDefault 0] [--searchValue 0] [--lethalLabel 0] [--lostLabel 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--kifu k.jsonl | --no-kifu]
 npm run svwb -- td train --model m0.json --data d0.jsonl[,d1.jsonl.gz] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001]
                 [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--imaginedWeight 1] [--ivRes 1] [--best 0] [--bestOn end,after]
-                [--base default|zero|search] [--excludeDecks <デッキ>,…|--onlyDecks <デッキ>,…] [--dropInputs <入力>,…] [--lethalHead aux|survival] [--lethalWeight 1]
+                [--base default|zero|search] [--excludeDecks <デッキ>,…|--onlyDecks <デッキ>,…] [--dropInputs <入力>,…] [--lethalHead aux|survival] [--lethalWeight 1] [--lethalTarget lost|search]
 npm run svwb -- td prune --model m.json --data d0.jsonl[,…] --out mp.json [--excludeDecks …|--onlyDecks …]
 npm run svwb -- deep-gap play --out gap.jsonl [--games 100] [--start 0] [--deep '<設定の JSON>'] [--k 4] [--evalSeeds 48] [--turns 1-30]   # 棋譜も書く（--kifu k.jsonl | --no-kifu）
 npm run svwb -- deep-gap rollout --in gap.jsonl[,…] --out roll.jsonl [--top 200] [--random 200] [--seed 1] [--m 48]
@@ -434,8 +434,10 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
   （手で作った項を外した補正を、同じ自己対戦から学ぶ。docs/ai-notes.md「評価関数の手作りの項を外す」）。
   `--searchValue 1` で、ターン末の局面に探索の値の材料（`"qe"`・`"qr"`。そのターンに選んだ並びのターン末と、相手のターンを読んだ後の勝つ確率）も書く（打つ手は変わらない）。
   `td train --searchTarget` がこれを読む（docs/ai-notes.md「補正の学習の目標に探索の値を使う」）
-  `--lethalLabel 1` で、ターン末の局面に相手のリーサルの印（`"ol": 1|0`。本当の局面のままターンを終え、相手の番の初めにリーサル探索が相手の勝てる並びを見つけるか）も書く（打つ手は変わらない）。
-  `td train --lethalHead` がこれを読む（[value-net.md](value-net.md)「リーサルの出力（実験）」）
+  `--lostLabel 1` で、ターン末の局面に次の相手のターンに負けたかの印（`"ln": 1|0`。`kifu values` の `lostNext` と同じ）と、次の相手のターンの最初の手が `--eps` のランダムな手だったか（`"oe": 1|0`）も書く
+  （試合の結果から書くだけで、打つ手も速さも変わらない）。`td train --lethalHead` が既定でこれを読む（`"oe": 1` の局面は除く）。
+  `--lethalLabel 1` で、ターン末の局面に相手のリーサルの印（`"ol": 1|0`。本当の局面のままターンを終え、相手の番の初めにリーサル探索が相手の勝てる並びを見つけるか）も書く（打つ手は変わらない。15% 遅くなる）。
+  `td train --lethalHead … --lethalTarget search` がこれを読む（比べる用。[value-net.md](value-net.md)「リーサルの出力（実験）」）
   `--potential <ファイル>` で、ビームの並べ替えに使う学習した見込みを組み込みの既定（`data/potential-net.json`）の代わりにそのファイルにする（`null` なら使わない。compare の `"potentialNet"` と同じ。
   `--sampling default` だけ）。学び直しの 2 回目から、前の回で学び直した見込みで打つ用（`night/pool-r1.txt`）
   もとの試合（介入した試合・打ち比べは除く）ごとの棋譜も既定で書く（[kifu.md](kifu.md)。`--kifu k.jsonl` で書く先を、`--no-kifu` で書かない。前の名前の `--replays` も使える）
@@ -446,7 +448,7 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
   データを詰めた配列で持つのでメモリが少なく、ミニバッチの中の局面ごとの計算と、重みの行ごとの更新をスレッド（`THREADS`）に分ける（スレッドの数で結果は変わらない）。
   `npm run td -- train … --impl rust` でも呼べる。夜のキューの `td train`・`td prune` の行は 2026-11-15 からこちらが既定（`--impl ts` で TypeScript 版）。
   時間とメモリは docs/ai-notes.md「補正の学習を Rust に移す」。
-  `--lethalHead aux|survival`・`--lethalWeight` は Rust 版だけの実験用の引数で、補正にリーサルの出力を付けて一緒に学ぶ（[value-net.md](value-net.md)「リーサルの出力（実験）」）
+  `--lethalHead aux|survival`・`--lethalWeight`・`--lethalTarget lost|search` は Rust 版だけの実験用の引数で、補正にリーサルの出力（次の相手のターンに負ける確率）を付けて一緒に学ぶ（[value-net.md](value-net.md)「リーサルの出力（実験）」）
 - `deep-gap`: 今の既定の AI どうしの自己対戦（`ai-play` と同じ試合）の、自分のターンの最初の局面ごとに、試合のターンと深い読み（`--deep`。既定は
   ビーム 2048（今の既定が幅 512 になる 2026-10-26 までは 512）・読み直す最初の手 8・最初の手ごとの終局面 3・相手の手札の引き直し 48・相手のターンのビーム 32。読む深さは今の既定と同じで、広く・多く読む）のターンを比べる。
   食い違った局面は、手番の側から見た決定化を `--k` 通り作って両方に打たせ、深い読みの点数（別の引き直し `--evalSeeds` 通り。引き直しごとに勝率にしてから平均する）で見た勝率の差と、

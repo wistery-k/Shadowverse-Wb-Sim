@@ -1,6 +1,6 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--searchValue 0] [--lethalLabel 0] [--sampling classic|default] [--potential p.json|null] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--kifu k.jsonl | --no-kifu] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--searchValue 0] [--lethalLabel 0] [--lostLabel 0] [--sampling classic|default] [--potential p.json|null] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--kifu k.jsonl | --no-kifu] --out d0.jsonl
 //!
 //! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・既定の幅（今は 256）、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
 //! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
@@ -37,7 +37,12 @@
 //! --lethalLabel 1 なら、各ターン末の局面に、相手の次のターンのリーサルの印を書く（"ol": 1 か 0。本当の局面のままターンを終え、
 //! 相手の番の初めに、このモデルの設定のリーサル探索が相手の勝てる並びを見つけるか。svwb kifu values --true-lethal の oppLethal と同じ）。
 //! リーサル探索のメモ（スレッドごと）を試合の探索と分けるため別のスレッドで調べるので、打つ手は変わらない（同じ試合になる）。
-//! 補正にリーサルの出力を足して一緒に学ぶ実験（td train の lethalHead。docs/value-net.md「リーサルの出力（実験）」）用
+//! 補正にリーサルの出力を足して一緒に学ぶ実験（td train の lethalHead。docs/value-net.md「リーサルの出力（実験）」）で、比べる用の印
+//!
+//! --lostLabel 1 なら、各ターン末の局面に、次の相手のターンに実際に負けたかの印を書く（"ln": 1 か 0。試合が次のターン（相手のターン。
+//! その初めと終わりの処理も含む）で終わり、相手が勝ったら 1。svwb kifu values の lostNext と同じ）と、次の相手のターンの最初の手が
+//! --eps のランダムな手だったか（"oe": 1 か 0。その相手は、リーサルがあっても最初の手をランダムに打つ）。試合の結果から書くだけで、
+//! 探索しないので、打つ手も速さも変わらない。td train の lethalHead の既定の印（--lethalTarget lost）。"oe" が 1 の局面は学ばない
 //!
 //! --cmp k なら、各試合で 1 つの自分のターンの最初（--iv と同じ選び方）から、探索が読んだ点数の高い順に最初の手の違う並びを k 個まで選び、
 //! 並びごとにターン末から最後まで --rollouts 回打った勝ち数を書き出す（"cmp" 付きの行。打ち比べ）。r 回目はどの並びも同じ乱数で
@@ -158,6 +163,8 @@ struct Model {
     search_value: bool,
     /// ターン末の局面に相手の次のターンのリーサルの印（"ol"）も書く（--lethalLabel。打つ手は変わらない）
     lethal_label: bool,
+    /// ターン末の局面に、次の相手のターンに負けたかの印（"ln"）と、その相手の最初の手がランダムな手だったか（"oe"）も書く（--lostLabel。打つ手は変わらない）
+    lost_label: bool,
     /// 固定した相手の設定（--frozen）。あれば、学ぶ側でない席はこの設定で打つ
     frozen: Option<SearchOptions>,
     /// もとの試合（介入していない試合）の棋譜も書く（runner/kifu.rs。回と、学ぶ側・固定した側の席。打つ手は変わらない）
@@ -203,6 +210,7 @@ fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Mo
         imagined: 0,
         search_value: false,
         lethal_label: false,
+        lost_label: false,
         frozen: None,
         kifu: None,
     })
@@ -231,7 +239,8 @@ struct Summary {
 /// 局面 1 つ（{"ph":…,"s":…,"x":[…],"v":[…]}、ランダムに打った局面は "ex":1、board なら場のカードの属性 "b"、--sDefault なら基準の重みの評価 "sd" も）。
 /// ph は 0: ターン末、1: 自分のターンの最初、2: 探索が相手のターンを読んだ後の想像の局面（--imagined）。
 /// q（--searchValue。ターン末の局面だけ）があれば、探索の値の材料 "qe"・"qr"（search_value の (ターン末, 読みの平均)）も書く。
-/// ol（--lethalLabel。ターン末の局面だけ）があれば、相手の次のターンのリーサルの印 "ol" も書く
+/// ol（--lethalLabel。ターン末の局面だけ）があれば、相手の次のターンのリーサルの印 "ol" も書く。
+/// ターン末の局面で m.lost_label（--lostLabel）なら、最後に ",\"ln\":0,\"oe\":0" を書く（試合が進んでから、play_out が数字を 1 に書き換える）
 #[allow(clippy::too_many_arguments)]
 fn write_sample(
     out: &mut String,
@@ -297,7 +306,19 @@ fn write_sample(
     if let Some(ol) = ol {
         out.push_str(if ol { ",\"ol\":1" } else { ",\"ol\":0" });
     }
+    if m.lost_label && matches!(phase, ValuePhase::End) {
+        out.push_str(LOST_FIELDS);
+    }
     out.push('}');
+}
+
+/// --lostLabel のターン末の局面の最後に書く印（数字は play_out が後から 1 に書き換える）
+const LOST_FIELDS: &str = ",\"ln\":0,\"oe\":0";
+
+/// 文字列の i バイト目の数字の 0 を 1 にする（--lostLabel の印）
+fn set_flag(out: &mut String, i: usize) {
+    debug_assert_eq!(&out[i..i + 1], "0");
+    out.replace_range(i..i + 1, "1");
 }
 
 /// 本当の局面 s（p がターンを終える前）のまま p がターンを終え、相手の番の初めに、opts のリーサル探索が相手の勝てる並びを見つけるか
@@ -586,6 +607,8 @@ fn play_out(
     // 介入するプレイヤーの、相手のターンの間の山札（ターンの始めに引いたカードを見分ける）
     let mut pre_deck: Vec<Iid> = Vec::new();
     let mut log: Vec<Action> = Vec::new();
+    // --lostLabel: 自分の次のターンの手を打つ前の、最後のターン末の局面の "ln" の数字の場所と、そのターン
+    let mut open_end: [Option<(usize, i32)>; 2] = [None, None];
     let mut n = 0;
     while state.phase != Phase::Ended {
         n += 1;
@@ -647,7 +670,14 @@ fn play_out(
                 action =
                     Some(choices[(next_float() * choices.len() as f64).floor() as usize].clone());
                 explored += 1;
+                // 相手の 1 つ前のターン末の局面に、次の相手（このターン）の最初の手がランダムな手だった印
+                if let Some((i, t)) = open_end[opponent(actor)] {
+                    if t + 1 == state.turn {
+                        set_flag(&mut samples[opponent(actor)], i + 7);
+                    }
+                }
             }
+            open_end[actor] = None;
             push(
                 &mut samples,
                 &mut counts,
@@ -687,6 +717,11 @@ fn play_out(
                     q,
                     ol,
                 );
+                if m.lost_label {
+                    // 局面は ,"ln":0,"oe":0} で終わる。"ln" の数字の場所（"oe" の数字はその 7 バイト後）
+                    let i = samples[actor].len() - "0,\"oe\":0}".len();
+                    open_end[actor] = Some((i, state.turn));
+                }
                 // そのターンに選んだ並びの想像の局面から m.imagined 個（試合の乱数とは別の乱数で選ぶ）
                 let mut reads: Vec<_> = reads
                     .into_iter()
@@ -709,6 +744,14 @@ fn play_out(
         state = apply_action(&state, &action);
         if m.kifu.is_some() {
             log.push(action);
+        }
+    }
+    // 次の相手のターンに負けた（kifu values の lostNext と同じ: 試合がターン末の次のターンで終わり、相手が勝った）
+    if let Some(w) = state.winner {
+        if let Some((i, t)) = open_end[opponent(w)] {
+            if state.turn == t + 1 {
+                set_flag(&mut samples[opponent(w)], i);
+            }
         }
     }
     Played {
@@ -1204,6 +1247,11 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
         "1" => true,
         x => return Err(format!("--lethalLabel は 0 か 1: {x}")),
     };
+    m.lost_label = match arg(args, "lostLabel").unwrap_or("0") {
+        "0" => false,
+        "1" => true,
+        x => return Err(format!("--lostLabel は 0 か 1: {x}")),
+    };
     m.check = match arg(args, "check").unwrap_or("0") {
         "0" => false,
         "1" => true,
@@ -1635,6 +1683,85 @@ mod tests {
         }
         // 試合の終わりには、負けた側の最後のターン末で相手にリーサルがある
         assert!(ends > 0 && found > 0, "{found}/{ends}");
+    }
+
+    #[test]
+    fn lost_label_on_turn_ends_without_changing_games() {
+        // --lostLabel 1 を付けても試合は同じ（介入した試合も）。"ln"・"oe"（0 か 1）は、ターン末の局面に必ず付き、他の局面には付かない。
+        // "ln" が 1 なのは、負けた側の最後のターン末（その後に自分のターンの最初の局面が無い）だけ。
+        // "oe" が 1 なのは、次の相手のターンの最初の局面が "ex"（ランダムな手）のときだけ（相手が最初の手番の試合の、相手の最初のターンは除く）
+        let decks = compare_decks();
+        let mut lm = imagined_model(1);
+        lm.lost_label = true;
+        let (mut ends, mut lost, mut oe, mut ex) = (0, 0, 0, 0);
+        for (g, iv) in [(3u32, 0.0), (10, 1.0), (21, 0.0), (30, 0.0), (44, 1.0)] {
+            let plain = play_one(
+                g,
+                &decks,
+                None,
+                &imagined_model(1),
+                0.3,
+                iv,
+                IvZone::Hand,
+                0.0,
+                None,
+            );
+            let with = play_one(g, &decks, None, &lm, 0.3, iv, IvZone::Hand, 0.0, None);
+            let (pl, wl): (Vec<&str>, Vec<&str>) =
+                (plain.line.lines().collect(), with.line.lines().collect());
+            assert_eq!(pl.len(), wl.len());
+            for (pl, wl) in pl.iter().zip(&wl) {
+                let mut v: serde_json::Value = serde_json::from_str(wl).expect("JSON");
+                let loser = 1 - v["winner"].as_u64().expect("勝者") as usize;
+                // 席ごとの (ph, ln, oe, ex) の列
+                let mut seqs: Vec<Vec<(i64, i64, i64, bool)>> = Vec::new();
+                for seq in v["samples"].as_array_mut().expect("局面") {
+                    let mut out = Vec::new();
+                    for x in seq.as_array_mut().expect("局面の列") {
+                        let o = x.as_object_mut().expect("局面");
+                        let (ln, e) = (o.remove("ln"), o.remove("oe"));
+                        let ph = o["ph"].as_i64().expect("ph");
+                        let flag = |f: Option<serde_json::Value>| {
+                            let f = f.and_then(|x| x.as_i64()).expect("ターン末の印");
+                            assert!(f == 0 || f == 1, "{f}");
+                            f
+                        };
+                        let (ln, e) = if ph == 0 {
+                            ends += 1;
+                            (flag(ln), flag(e))
+                        } else {
+                            assert!(ln.is_none() && e.is_none(), "{o:?}");
+                            (0, 0)
+                        };
+                        out.push((ph, ln, e, o.contains_key("ex")));
+                    }
+                    seqs.push(out);
+                }
+                for (p, seq) in seqs.iter().enumerate() {
+                    let at: Vec<usize> = (0..seq.len()).filter(|&i| seq[i].1 == 1).collect();
+                    assert!(at.len() <= 1, "{at:?}");
+                    if let Some(&i) = at.first() {
+                        assert_eq!(p, loser);
+                        assert!(
+                            seq[i + 1..].iter().all(|x| x.0 == 2),
+                            "負けた後に自分のターンがある"
+                        );
+                        lost += 1;
+                    }
+                    let flagged = seq.iter().filter(|x| x.2 == 1).count();
+                    let opp_ex = seqs[1 - p].iter().filter(|x| x.0 == 1 && x.3).count();
+                    assert!(
+                        flagged <= opp_ex && opp_ex <= flagged + 1,
+                        "{flagged} {opp_ex}"
+                    );
+                    oe += flagged;
+                    ex += opp_ex;
+                }
+                let plain: serde_json::Value = serde_json::from_str(pl).expect("JSON");
+                assert_eq!(plain, v);
+            }
+        }
+        assert!(ends > 0 && lost > 0 && oe > 0, "{lost} {oe}/{ex} {ends}");
     }
 
     #[test]

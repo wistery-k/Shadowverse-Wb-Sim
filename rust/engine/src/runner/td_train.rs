@@ -3,7 +3,7 @@
 //!   svwb td train --model m0.json --data d0.jsonl[,d1.jsonl.gz] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001]
 //!     [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--imaginedWeight 1] [--ivRes 1] [--best 0] [--bestOn end,after]
 //!     [--base default|zero|search] [--excludeDecks <デッキ>,…|--onlyDecks <デッキ>,…] [--dropInputs <入力>,…]
-//!     [--lethalHead aux|survival] [--lethalWeight 1]
+//!     [--lethalHead aux|survival] [--lethalWeight 1] [--lethalTarget lost|search]
 //!   svwb td prune --model m.json --data d0.jsonl[,…] --out mp.json [--excludeDecks …|--onlyDecks …]
 //!
 //! 移したのは学び直しの流れ（night/relearn-b.txt）が使う引数だけ。実験用の引数（--attr・--cmpWeight・--v1Only・--searchTarget・--seat・--exclude 等）と
@@ -20,7 +20,9 @@
 //!   TypeScript 版も更新の式を毎回当てているので、その回の分を同じ式・同じ順で後から当てる（重みの値は同じ。メモリを読む量が減り、行ごとに並べられる）
 //!
 //! リーサルの出力（実験。TypeScript 版には無い。docs/value-net.md「リーサルの出力（実験）」）: 最後の隠れ層から、相手が次のターンにリーサルを持つ確率
-//! q = σ(bp + wp·h) も出し、自己対戦の印（svwb td selfplay --lethalLabel 1 の "ol"）で一緒に学ぶ。
+//! q = σ(bp + wp·h) も出し、自己対戦の印で一緒に学ぶ。印は `--lethalTarget lost`（既定）なら次の相手のターンに実際に負けたか
+//! （svwb td selfplay --lostLabel 1 の "ln"。次の相手のターンの最初の手がランダムな手だった局面（"oe"）は除く）、
+//! `search` なら本当の局面で相手の番の初めにリーサル探索がリーサルを見つけるか（--lethalLabel 1 の "ol"。比べる用）。
 //! - `--lethalHead aux`（X）: 勝つ確率はこれまでどおり σ(a·S + c + z)。損失に --lethalWeight × q の交差エントロピーを足す（推論は勝つ確率だけを使う）
 //! - `--lethalHead survival`（Z）: 勝つ確率を (1 − q) × σ(c + z)（σ(c + z) は生き延びたときの勝率）にし、その勝つ確率を λ 収益に合わせ、q の交差エントロピーも足す。
 //!   出発点の評価は 0（--base zero）だけ
@@ -31,8 +33,8 @@
 use super::fixed;
 use super::parallel::{parallel_map, thread_count};
 use super::td_data::{
-    js_to_uint32, load_data, used_inputs, Dataset, IvPair, IvZone, Layer, LethalHead, LoadOptions,
-    NetModel, SSource, F_EXPLORED, F_HOLDOUT, F_IV,
+    js_to_uint32, load_data, used_inputs, Dataset, IvPair, IvZone, Layer, LethalHead, LethalTarget,
+    LoadOptions, NetModel, SSource, F_EXPLORED, F_HOLDOUT, F_IV,
 };
 use crate::ai::aidata::AI_DATA_JSON;
 use crate::data::data;
@@ -46,7 +48,7 @@ use std::time::Instant;
 type Args = [(String, String)];
 
 /// Rust 版の td train が扱う引数（学び直しの流れが使うものと、学習の基本の --batch・--fitA）
-const TRAIN_ARGS: [&str; 22] = [
+const TRAIN_ARGS: [&str; 23] = [
     "model",
     "data",
     "out",
@@ -69,6 +71,7 @@ const TRAIN_ARGS: [&str; 22] = [
     "dropInputs",
     "lethalHead",
     "lethalWeight",
+    "lethalTarget",
 ];
 
 const PRUNE_ARGS: [&str; 5] = ["model", "data", "out", "excludeDecks", "onlyDecks"];
@@ -1397,6 +1400,14 @@ pub fn train(args: &Args) -> Result<(), String> {
     if arg(args, "lethalWeight").is_some() && survival.is_none() {
         return Err("--lethalWeight はリーサルの出力（--lethalHead）を学ぶときだけ".into());
     }
+    let lethal_target = match arg(args, "lethalTarget") {
+        None | Some("lost") => LethalTarget::Lost,
+        Some("search") => LethalTarget::Search,
+        Some(x) => return Err(format!("--lethalTarget は lost か search: {x}")),
+    };
+    if arg(args, "lethalTarget").is_some() && survival.is_none() {
+        return Err("--lethalTarget はリーサルの出力（--lethalHead）を学ぶときだけ".into());
+    }
     let base_arg = arg(args, "base");
     let base_weights = match base_arg {
         None => model.base_weights.clone(),
@@ -1423,6 +1434,7 @@ pub fn train(args: &Args) -> Result<(), String> {
             iv_res,
             search_mix: 0.5,
             s_source,
+            lethal_target,
             skip_game: skip.as_deref(),
             layout: &layout,
             fallback: &fallback,
@@ -1485,7 +1497,11 @@ pub fn train(args: &Args) -> Result<(), String> {
                 }
             }
             if labeled == 0 {
-                return Err("リーサルの印（\"ol\"）のある局面がありません（svwb td selfplay --lethalLabel 1 で作った自己対戦が要ります）".into());
+                return Err(match lethal_target {
+                    LethalTarget::Lost => "次の相手のターンに負けたかの印（\"ln\"）のある局面がありません（svwb td selfplay --lostLabel 1 で作った自己対戦が要ります）",
+                    LethalTarget::Search => "リーサルの印（\"ol\"）のある局面がありません（svwb td selfplay --lethalLabel 1 で作った自己対戦が要ります）",
+                }
+                .into());
             }
             let rate = (pos as f64 / labeled as f64).clamp(1e-4, 1.0 - 1e-4);
             let head = match &model.lethal_head {
@@ -1496,9 +1512,13 @@ pub fn train(args: &Args) -> Result<(), String> {
                 },
             };
             println!(
-                "リーサルの出力を{}学ぶ（{}、重み {lethal_weight}）: 学習側の印のある局面 {labeled}、相手がリーサルを持つ {pos}（{}%）",
+                "リーサルの出力を{}学ぶ（{}、重み {lethal_weight}、印 {}）: 学習側の印のある局面 {labeled}、印が 1 {pos}（{}%）",
                 if model.lethal_head.is_some() { "続けて" } else { "付けて" },
                 if sv { "survival: 勝つ確率 = (1 − q) × 生き延びたときの勝率" } else { "aux: 補助の出力" },
+                match lethal_target {
+                    LethalTarget::Lost => "lost: 次の相手のターンに負けた（相手の最初の手がランダムな局面は除く）",
+                    LethalTarget::Search => "search: リーサル探索が相手のリーサルを見つける",
+                },
                 fixed(rate * 100.0, 2)
             );
             Some((
@@ -1815,9 +1835,13 @@ mod tests {
                         let ends: Vec<usize> = (0..xs.len())
                             .filter(|&k| xs[k].get("ph") == Some(&Json::Num(0.0)))
                             .collect();
-                        for &k in &ends {
+                        for (n, &k) in ends.iter().enumerate() {
                             let last = Some(&k) == ends.last() && w != p as f64;
-                            xs[k].set("ol", Json::Num(if last { 1.0 } else { 0.0 }));
+                            let flag = |b: bool| Json::Num(if b { 1.0 } else { 0.0 });
+                            xs[k].set("ol", flag(last));
+                            xs[k].set("ln", flag(last));
+                            // 次の相手のターンの最初の手がランダムな手だった局面（負けた局面は残す。小さなデータで出力が学べるように）
+                            xs[k].set("oe", flag(n % 4 == 3 && !last));
                         }
                         Json::Arr(xs)
                     })
@@ -1830,6 +1854,54 @@ mod tests {
         let path = tmp.join("labeled.jsonl");
         std::fs::write(&path, out).unwrap();
         path.to_string_lossy().into_owned()
+    }
+
+    /// --lethalTarget: lost は "ln"（次の相手のターンの最初の手がランダムな手だった局面 "oe" は除く）、search は "ol" を印にする
+    #[test]
+    fn lethal_target_picks_label() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/td-train");
+        let tmp = std::env::temp_dir().join(format!("svwb-td-target-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let data = labeled_fixture(&dir, &tmp);
+        let m = NetModel::load(&dir.join("model.json").to_string_lossy()).unwrap();
+        let load = |t: LethalTarget| {
+            load_data(
+                std::slice::from_ref(&data),
+                &LoadOptions {
+                    holdout: 0.0,
+                    iv_weight: 1.0,
+                    imagined_weight: 1.0,
+                    iv_res: true,
+                    search_mix: 0.5,
+                    s_source: SSource::Zero,
+                    lethal_target: t,
+                    skip_game: None,
+                    layout: &m.layout(),
+                    fallback: &m.layout(),
+                },
+            )
+            .unwrap()
+        };
+        let (lost, search) = (load(LethalTarget::Lost), load(LethalTarget::Search));
+        assert_eq!(lost.len(), search.len());
+        let ends = (0..search.len()).filter(|&i| search.phase(i) == 0).count();
+        let labeled = |d: &Dataset| {
+            (0..d.len())
+                .filter(|&i| d.lethal_label(i).is_some())
+                .count()
+        };
+        assert_eq!(labeled(&search), ends);
+        assert!(
+            labeled(&lost) < ends && labeled(&lost) > ends / 2,
+            "{} / {ends}",
+            labeled(&lost)
+        );
+        for i in 0..lost.len() {
+            if let Some(y) = lost.lethal_label(i) {
+                assert_eq!(search.lethal_label(i), Some(y));
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// X（aux）・Z（survival）を学ぶと、出力の重みを書き、学習側のリーサルの印を割合だけより当てる。
@@ -1890,6 +1962,7 @@ mod tests {
                     iv_res: true,
                     search_mix: 0.5,
                     s_source: SSource::Zero,
+                    lethal_target: LethalTarget::Lost,
                     skip_game: None,
                     layout: &m.layout(),
                     fallback: &m.layout(),
@@ -1955,7 +2028,10 @@ mod tests {
             ),
             ("lethalHead".into(), "aux".into()),
         ];
+        assert!(train(&args).unwrap_err().contains("--lostLabel"));
+        args.push(("lethalTarget".into(), "search".into()));
         assert!(train(&args).unwrap_err().contains("--lethalLabel"));
+        args.pop();
         args[1].1 = data.clone();
         args[3].1 = "survival".into();
         args.push(("base".into(), "default".into()));

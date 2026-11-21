@@ -288,11 +288,18 @@ V   = 今学んでいるモデルの予測 σ(a·S + c + z)。エポックの最
 | 名前 | 形 | 損失 | 探索が使う値 |
 | --- | --- | --- | --- |
 | C | 今のまま（出力 1 つ） | 勝つ確率 σ(a·S + c + z) と λ 収益 G の交差エントロピー | (c + z) / a |
-| X（`--lethalHead aux`） | 最後の隠れ層から、相手が次のターンにリーサルを持つ確率 q = σ(bp + wp·h) も出す | C の損失 ＋ `--lethalWeight` × q と印の交差エントロピー | C と同じ（q は使わない。学び方だけが違う） |
+| X（`--lethalHead aux`） | 最後の隠れ層から、次の相手のターンに負ける確率 q = σ(bp + wp·h) も出す | C の損失 ＋ `--lethalWeight` × q と印の交差エントロピー | C と同じ（q は使わない。学び方だけが違う） |
 | Z（`--lethalHead survival`） | 勝つ確率を (1 − q) × σ(c + z) にする（σ(c + z) は生き延びたときの勝率） | その勝つ確率と G の交差エントロピー ＋ `--lethalWeight` × q と印の交差エントロピー | logit((1 − q) × σ(c + z)) / a。出発点の評価は 0（`--base zero`）だけ |
 
-- 印: 自己対戦の各ターン末で、本当の局面のままターンを終え、相手の番の初めにリーサル探索（`finds_lethal`。印は打ち手の設定のリーサル探索の項目で探す）が相手の勝てる並びを見つけるか
-  （`svwb td selfplay --lethalLabel 1` が `"ol": 1|0` を書く。打つ手・試合は変わらない。ターン終了で決着したら相手の勝ちかどうか）。#292 の `kifu values --true-lethal 1` の `oppLethal` と同じ印
+- 印（`td train --lethalTarget lost`、既定。ユーザー決定 2026-11-21）: 自己対戦の各ターン末で、次の相手のターン（その初めと終わりの処理も含む）に実際に負けたか
+  （`svwb td selfplay --lostLabel 1` が `"ln": 1|0` を書く。試合の結果から書くだけで、打つ手・試合・速さは変わらない。`kifu values` の `lostNext` と同じ印）。
+  Z の (1 − q) × s は、q を次の相手のターンに負ける確率、s を生き延びたときの勝率にすると、勝つ確率の分解としてそのまま合う。
+  `--eps` のランダムな手はターンの最初の 1 手だけで、リーサルを確かめる前に決まる（相手はリーサルがあっても最初の手をランダムに打つ）。
+  そこで、次の相手のターンの最初の手がランダムな手だった局面（`"oe": 1`。ターン末の 1 割ほど）は、出力の学びから除く（ランダムに打つかは局面によらず決まるので、除いても残りは偏らない）。
+  介入の試合（`--iv`・`--ivRes`）は、変えた局面から打った試合の結果なので、同じように付ける
+- 比べる用の印（`--lethalTarget search`）: 本当の局面のままターンを終え、相手の番の初めにリーサル探索（`finds_lethal`。打ち手の設定のリーサル探索の項目で探す）が相手の勝てる並びを見つけるか
+  （`svwb td selfplay --lethalLabel 1` が `"ol": 1|0` を書く。打つ手・試合は変わらないが、自己対戦が 15% 遅くなる）。#292 の `kifu values --true-lethal 1` の `oppLethal` と同じ印。
+  `lostNext` との食い違い（探索が見つけても相手の AI が打たない・ターン終了時の効果や引く手で勝つ）は [ai-notes/14](ai-notes/14-2026-11-16.md)「リーサルの出力を足して学ぶ準備」
 - 出力の無いモデルに付けるときは wp を 0、bp を学習側の局面の印の割合のロジットで始める。Z は最初、勝つ確率がその割合だけ下がった所から学ぶ
 - `td train` は確かめ用のターン末で、リーサルの出力の交差エントロピー（割合だけで当てたときと並べて）と AUC（勝つ確率の低さの AUC と並べて）も出す。`--best` の判定は今までどおり勝つ確率の交差エントロピー
 - モデルのファイルには `"lethalHead": {"w": [...], "b": ...}` と、Z なら `"winForm": "survival"` を足す（無ければ今までの形）。推論は Rust（`ValueNet::eval`、`lethal_prob`）。
@@ -347,8 +354,8 @@ V   = 今学んでいるモデルの予測 σ(a·S + c + z)。エポックの最
 - `rust/engine/src/ai/valuenet.rs`: 入力の並び（`ZONES`・`SCALARS`・`BOARD_FEATURES`）、局面から入力を作る `encode`、推論 `ValueNet::eval`、既定の補正 `default_value_net`
 - `rust/engine/src/ai/tests/valuenet.rs`: 見えない情報を入力にしない、補正 0 なら探索が変わらない、大きさの検査、広げたモデルが同じ補正を返す、隠れ層を重ねる、場のカードのネットワーク、想像の局面の入力、層の計算（`add_rows`）が行ごとに足す形とビットまで同じ
 - `rust/engine/src/ai/search.rs`: 探索での使い方（`eval_state`・`eval_after`・`parts`）
-- `rust/engine/src/runner/td.rs`: 自己対戦（`td selfplay`）の打ち方と書き出す形（`--lethalLabel 1` の印）
-- `rust/engine/src/runner/td_train.rs`: 学習（`td train`・`td prune`）。リーサルの出力の勾配の数値微分との照らし合わせ（`lethal_gradients_match_finite_differences`）と、X・Z を小さなデータで学ぶテスト（`lethal_heads_train`）
+- `rust/engine/src/runner/td.rs`: 自己対戦（`td selfplay`）の打ち方と書き出す形（`--lostLabel 1`・`--lethalLabel 1` の印）
+- `rust/engine/src/runner/td_train.rs`: 学習（`td train`・`td prune`）。リーサルの出力の勾配の数値微分との照らし合わせ（`lethal_gradients_match_finite_differences`）と、X・Z を小さなデータで学ぶテスト（`lethal_heads_train`）、印の選び方（`lethal_target_picks_label`）
 - `scripts/valueNet.ts`: モデルの JSON の型・検証と、学習側の順伝播（Rust と同じ計算）
 - `scripts/td-main.ts`: `init`・`train`・`prune`・`attr` などのコマンド
 - `scripts/cardAttrs.ts`: カードの属性（`td attr`）

@@ -573,6 +573,12 @@ struct RawSample {
     /// ターン末の局面のまま相手の番になったら、相手がリーサルを持つか（svwb td selfplay --lethalLabel 1。1 か 0）
     #[serde(default)]
     ol: Option<f64>,
+    /// 次の相手のターンに負けたか（svwb td selfplay --lostLabel 1。1 か 0）
+    #[serde(default)]
+    ln: Option<f64>,
+    /// 次の相手のターンの最初の手がランダムな手（--eps）だったか（--lostLabel 1。1 か 0）
+    #[serde(default)]
+    oe: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -654,6 +660,8 @@ struct PSample {
     qe: Option<f64>,
     qr: Option<f64>,
     ol: Option<bool>,
+    ln: Option<bool>,
+    oe: bool,
     x: Vec<(u16, f32)>,
 }
 
@@ -737,6 +745,8 @@ fn parse_game(line: &[u8], map: Option<&[i32]>, n: usize) -> Result<PGame, Strin
                     qe: x.qe,
                     qr: x.qr,
                     ol: x.ol.map(|o| o != 0.0),
+                    ln: x.ln.map(|o| o != 0.0),
+                    oe: x.oe.is_some_and(|e| e != 0.0),
                     x: remap(&x.x, &x.v, map, n)?,
                 })
             })
@@ -852,7 +862,7 @@ pub struct Dataset {
     pub flags: Vec<u8>,
     /// 探索の値（無ければ NaN。報告だけに使う）
     pub q: Vec<f64>,
-    /// 相手のリーサルの印（0: 無し、1: 持たない、2: 持つ。自己対戦の "ol"）
+    /// リーサルの出力の印（0: 無し、1: 持たない、2: 持つ。LoadOptions::lethal_target の印）
     pub lethal: Vec<u8>,
     pub pairs: Vec<IvPair>,
 }
@@ -894,7 +904,7 @@ impl Dataset {
         }
     }
 
-    /// 局面 i の相手のリーサルの印（1 か 0。無ければ None）
+    /// 局面 i のリーサルの出力の印（1 か 0。無ければ None）
     #[inline]
     pub fn lethal_label(&self, i: usize) -> Option<f64> {
         match self.lethal[i] {
@@ -930,6 +940,16 @@ impl Dataset {
 /// 試合（両方の席のデッキの名前）を読まないかを決める関数（--excludeDecks・--onlyDecks）
 pub type SkipFn<'a> = dyn Fn(&[String; 2]) -> bool + Sync + 'a;
 
+/// リーサルの出力（td train --lethalHead）で学ぶ印（--lethalTarget）
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LethalTarget {
+    /// 次の相手のターンに実際に負けたか（自己対戦の "ln"。svwb td selfplay --lostLabel 1）。
+    /// 次の相手のターンの最初の手がランダムな手（"oe"）だった局面は、印を付けない（その相手はリーサルがあってもランダムに打つ）
+    Lost,
+    /// 本当の局面で、相手の番の初めにリーサル探索がリーサルを見つけるか（"ol"。svwb td selfplay --lethalLabel 1）
+    Search,
+}
+
 /// loadData の読み方
 pub struct LoadOptions<'a> {
     pub holdout: f64,
@@ -938,6 +958,8 @@ pub struct LoadOptions<'a> {
     pub iv_res: bool,
     pub search_mix: f64,
     pub s_source: SSource,
+    /// d.lethal に入れる印
+    pub lethal_target: LethalTarget,
     /// 真を返した試合（デッキの組）は読まない（--excludeDecks・--onlyDecks）
     pub skip_game: Option<&'a SkipFn<'a>>,
     /// 入力をこの並び（学ぶモデルの並び）に読み替える
@@ -1107,7 +1129,11 @@ fn add_game(
                 _ => f64::NAN,
             };
             d.q.push(qv);
-            d.lethal.push(match x.ol {
+            let label = match opts.lethal_target {
+                LethalTarget::Search => x.ol,
+                LethalTarget::Lost => x.ln.filter(|_| !x.oe),
+            };
+            d.lethal.push(match label {
                 None => 0,
                 Some(false) => 1,
                 Some(true) => 2,
