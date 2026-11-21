@@ -113,6 +113,7 @@ svwb kifu count <棋譜>… --event '<種類>[|<種類>…] [<条件>…]' [--wh
 svwb kifu winrate <棋譜>… [--where '<条件>,…'] [--by <分け方>,…]
 svwb kifu events <棋譜>… [--where '<条件>,…'] [--event '…'] [--out 出来事.jsonl]
 svwb kifu seats <棋譜>… [--where '<条件>,…'] [--out 席.jsonl]
+svwb kifu values <棋譜>… [--opts '<設定>'] [--reads N] [--where '<条件>,…'] [--out ターン末.jsonl]
 ```
 
 - 棋譜は、ファイルかフォルダ（中の `.jsonl`・`.jsonl.gz` を全部。`.tmp` は読まない）。何個並べてもよい。`npm run svwb -- kifu …` でも同じ
@@ -175,6 +176,27 @@ svwb kifu count data/kifu/night-20261117-0328 --where 'deck~コンボE' --event 
 ```
 
 本体は `rust/engine/src/runner/kifu_cmd.rs`。
+
+## ターン末の値（svwb kifu values）
+
+棋譜を打ち直して、合った席（`--where`）のターン末（ターン終了を選ぶ直前で、選択の途中でないもの）ごとに、`--opts` の設定（compare と同じ JSON。既定は `{}`）の探索 AI が付ける値と、
+その後の決着の印を 1 行ずつ JSON で出す（2026-11-21。補正と読みが相手の次のターンのリーサルを見分けているかの調べ。[ai-notes/14](ai-notes/14-2026-11-16.md)「補正と読みは相手の次のターンのリーサルを見分けているか」）。
+棋譜を書いた AI と違う設定でも付けられる（R3 の試合の局面を R4 で採点する等）。試合は変えない。
+
+| 項目 | 中身 |
+| --- | --- |
+| `file`・`g`・`swap`・`seat`・`deck`・`opp`・`side`・`agent`・`first` | 棋譜・試合・席（seats の行と同じ） |
+| `turn`・`tc` | 全体のターン番号・その席の何ターン目か |
+| `hp`・`oppHp`・`oppHand`・`oppMaxPp` | 自分と相手のリーダーの体力・相手の手札の枚数・相手の PP 最大値（比べるための単純な数） |
+| `myAtk`・`oppAtk`・`myWard`・`oppWard` | 場のフォロワーの攻撃力の合計（攻撃できるかは見ない）・守護の数 |
+| `won`・`endIn` | 試合に勝ったか・決着したターンまでのターンの数（このターンの終わりに決着なら 0。決着しなければ null） |
+| `lostNext`・`wonNext` | 次の相手のターンに負けた（`endIn` 1 で相手の勝ち）・自分の次のターンに勝った（`endIn` 2 で自分の勝ち） |
+| `finalSteps`・`finalMoves` | 決着したターンの行動の数（全部・選択とターン終了を除く。リーサルの長さの目安） |
+| `end`・`endWin` | ビームがこのターン末に付ける点数（`SearchAgent::turn_end_value`。合流する相打ちとターン終了時の処理の後に評価し、残り PP の罰を引く）と、σ(a·点数) の勝率（%。a は `--opts` の補正のもの） |
+| `readLoss`・`readWin`・`pickWin` | `--reads N` のときだけ。相手の手札を N 通り引き直して相手のターンを読んだ点数（`read_values`。探索の読み直しと同じ）のうち、相手のリーサルになった割合・引き直しごとに勝率にした平均・探索が選ぶときの値（読みとターン末を `rescoreMix` で混ぜた点数）を引き直しごとに勝率にした平均。引き直しの種は試合のシードとターン番号から作る（試合のときの種とは違う） |
+
+- 速さ（クラウド環境の 4 スレッド）: 新しいプールの 600 試合・ターン末 1 万で、`--reads 12` 込みで 18 秒
+- 打ち直せない試合・勝者の違う試合は書かず、count と同じく数を出す
 
 `svwb profile` の報告の「仕組みを使った回数」「PP を残して終えた」「クレストの能力が誘発した回数」も、打った試合をこの出来事の列にして、
 同じ書き方の出来事で数える（2026-11-16 から。`rust/engine/src/runner/profile.rs` の `USAGE`）:
