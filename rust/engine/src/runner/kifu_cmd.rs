@@ -4,7 +4,7 @@
 //!   svwb kifu winrate <棋譜>… [--where '<条件>,…'] [--by <分け方>,…]
 //!   svwb kifu events <棋譜>… [--where '<条件>,…'] [--event '…'] [--out 出来事.jsonl]
 //!   svwb kifu seats <棋譜>… [--where '<条件>,…'] [--out 席.jsonl]
-//!   svwb kifu values <棋譜>… [--opts '<設定>'] [--reads N] [--where '<条件>,…'] [--out ターン末.jsonl]
+//!   svwb kifu values <棋譜>… [--opts '<設定>'] [--reads N] [--opp-lethal 1] [--where '<条件>,…'] [--out ターン末.jsonl]
 //!
 //! - 棋譜は、ファイルかフォルダ（中の `.jsonl`・`.jsonl.gz` を全部。`.tmp` は読まない）。`.gz` は `gzip -dc` で読む
 //! - count・events は試合を打ち直して出来事の列（replay_index.rs）にする。打ち直せない試合（エンジンの版が違って打てない手がある）と、
@@ -1203,6 +1203,7 @@ fn value_rows(
     agent: &crate::ai::search::SearchAgent,
     scale: f64,
     reads: u32,
+    opp_lethal: bool,
     files: &[String],
 ) -> Result<Result<String, String>, String> {
     use crate::game::{apply_legal, create_game, is_legal};
@@ -1325,6 +1326,39 @@ fn value_rows(
                 ("readWin".into(), Json::Num(read_win)),
                 ("pickWin".into(), Json::Num(pick_win)),
             ]);
+            if opp_lethal {
+                // 読みの中の相手が、相手のターンの初めにリーサル探索（このAI と同じもの）を先にしたら見つけるか。
+                // 引き直しごとに、読みと同じ決定化の局面（read_view）でターンを終え、相手の番で探す
+                let found: Vec<bool> = seeds
+                    .iter()
+                    .map(|&seed| {
+                        let view = agent.read_view(&e.s, p, seed);
+                        match crate::game::try_apply_action(&view, &crate::state::Action::EndTurn) {
+                            None => false,
+                            Some(after) if after.phase == Phase::Ended => after.winner == Some(q),
+                            Some(after) if after.active == q => agent.finds_lethal(&after, q),
+                            Some(_) => false,
+                        }
+                    })
+                    .collect();
+                let rvl: Vec<f64> = rv
+                    .iter()
+                    .zip(&found)
+                    .map(|(&x, &f)| if f { x.min(-1e6) } else { x })
+                    .collect();
+                let lethal = found.iter().filter(|&&f| f).count() as f64 / n;
+                let loss_l = rvl.iter().filter(|&&x| x <= LOSS_SCORE).count() as f64 / n;
+                let pick_win_l = rvl
+                    .iter()
+                    .map(|&x| sig((1.0 - mix) * x + mix * end))
+                    .sum::<f64>()
+                    / n;
+                row.extend([
+                    ("readLethal".into(), Json::Num(lethal)),
+                    ("readLossL".into(), Json::Num(loss_l)),
+                    ("pickWinL".into(), Json::Num(pick_win_l)),
+                ]);
+            }
         }
         out.push_str(&Json::Obj(row).stringify());
         out.push('\n');
@@ -1334,7 +1368,7 @@ fn value_rows(
 
 fn values(argv: &[String]) -> Result<(), String> {
     let a = parse_args(argv)?;
-    a.check(&["opts", "reads", "where", "out"])?;
+    a.check(&["opts", "reads", "opp-lethal", "where", "out"])?;
     let text = a.one("opts").unwrap_or_else(|| "{}".into());
     let opts = super::options::compare_options(&text)?;
     // 点数を勝率にする a（σ(a·点数)。渡した補正のもの。docs/value-net.md）
@@ -1348,6 +1382,15 @@ fn values(argv: &[String]) -> Result<(), String> {
             .parse::<u32>()
             .map_err(|_| format!("--reads は 0 以上の整数: {x}"))?,
     };
+    // 読みの中の相手がリーサル探索を先にしたら見つけるか（readLethal・readLossL・pickWinL。--reads が要る）
+    let opp_lethal = match a.one("opp-lethal").as_deref() {
+        None | Some("0") => false,
+        Some("1") => true,
+        Some(x) => return Err(format!("--opp-lethal は 0 か 1: {x}")),
+    };
+    if opp_lethal && reads == 0 {
+        return Err("--opp-lethal には --reads が要ります".into());
+    }
     let conds = parse_where(&a.all("where"))?;
     let files = kifu_files(&a.inputs)?;
     let lines = read_lines(&files)?;
@@ -1366,8 +1409,10 @@ fn values(argv: &[String]) -> Result<(), String> {
                 return Ok(Ok((m.engine, String::new())));
             }
             let agent = crate::ai::search::SearchAgent::new(opts.clone());
-            Ok(value_rows(&v, &m, ok_seat, &agent, scale, reads, &files)?
-                .map(|text| (m.engine.clone(), text)))
+            Ok(
+                value_rows(&v, &m, ok_seat, &agent, scale, reads, opp_lethal, &files)?
+                    .map(|text| (m.engine.clone(), text)),
+            )
         },
         |_, _, _, _| {},
     );
@@ -1575,7 +1620,9 @@ mod tests {
             let m = meta_of(0, &v);
             let agent = SearchAgent::new(SearchOptions::default());
             let files = vec!["k.jsonl".to_string()];
-            let text = value_rows(&v, &m, [true, true], &agent, 0.01, 2, &files)
+            // 3 試合目だけ、読みの中の相手のリーサル探索も付ける（遅いので）
+            let opp_lethal = done == 2;
+            let text = value_rows(&v, &m, [true, true], &agent, 0.01, 2, opp_lethal, &files)
                 .unwrap()
                 .unwrap();
             let rows: Vec<Json> = text.lines().map(|l| Json::parse(l).unwrap()).collect();
@@ -1593,6 +1640,20 @@ mod tests {
                 assert!((0.0..=100.0).contains(&x));
                 let loss = num_field(r, "readLoss").unwrap();
                 assert!((0.0..=1.0).contains(&loss));
+                if opp_lethal {
+                    // リーサル探索を足すと、負けを見る割合は減らず、選ぶときの値は上がらない
+                    let loss_l = num_field(r, "readLossL").unwrap();
+                    assert!(loss <= loss_l && loss_l <= 1.0);
+                    let lethal = num_field(r, "readLethal").unwrap();
+                    assert!((0.0..=loss_l).contains(&lethal));
+                    let (pw, pwl) = (
+                        num_field(r, "pickWin").unwrap(),
+                        num_field(r, "pickWinL").unwrap(),
+                    );
+                    assert!(pwl <= pw + 1e-9);
+                } else {
+                    assert!(r.get("readLossL").is_none());
+                }
             }
             done += 1;
             if done == 3 {
