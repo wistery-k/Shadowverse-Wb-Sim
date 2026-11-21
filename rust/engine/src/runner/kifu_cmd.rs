@@ -4,12 +4,15 @@
 //!   svwb kifu winrate <棋譜>… [--where '<条件>,…'] [--by <分け方>,…]
 //!   svwb kifu events <棋譜>… [--where '<条件>,…'] [--event '…'] [--out 出来事.jsonl]
 //!   svwb kifu seats <棋譜>… [--where '<条件>,…'] [--out 席.jsonl]
+//!   svwb kifu values <棋譜>… [--opts '<設定>'] [--reads N] [--where '<条件>,…'] [--out ターン末.jsonl]
 //!
 //! - 棋譜は、ファイルかフォルダ（中の `.jsonl`・`.jsonl.gz` を全部。`.tmp` は読まない）。`.gz` は `gzip -dc` で読む
 //! - count・events は試合を打ち直して出来事の列（replay_index.rs）にする。打ち直せない試合（エンジンの版が違って打てない手がある）と、
 //!   打ち直した勝者が棋譜と違う試合は数えず、その数を出す。winrate・seats は打ち直さない（棋譜の勝者を使う）
 //! - seats は、合った席ごとに 1 行（棋譜・回・試合番号・組・席・デッキ・相手・側・AI・案・先攻・勝ち）を JSON Lines で出す。
 //!   ランナーが前に書いていた試合ごとの勝ち負けの行（rhino-compare・deck-compare の `--out`）の代わり。表にない比べ方（組ごとの入れ替わり等）は jq 等で
+//! - values は、合った席のターン末ごとに、--opts の探索 AI が付けるターン末の値（と --reads N なら相手のターンを読んだ値）と、
+//!   その後の決着の印（次の相手のターンに負け・自分の次のターンに勝ち）を 1 行ずつ出す（docs/kifu.md「ターン末の値」）
 //! - 席を単位にする: `--where` は席ごとに見る（その席から見た自分・相手）。条件は「,」で区切り、全部に合う席だけを数える
 //! - 勝率の誤差は、同じ棋譜の同じ試合番号（席とデッキを入れ替えた組）をまとまりにした誤差（compare の組の誤差と同じ）
 
@@ -1159,13 +1162,251 @@ fn seats(argv: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+// ---------------------------------------------------------------- values
+
+/// 読みの点数を負け（相手のリーサル。-1e6）とみなす下限（deep_gap.rs と同じ）
+const LOSS_SCORE: f64 = -5e5;
+
+/// ターンを終えた局面（ターン終了を選ぶ直前で、選択の途中でないもの）
+struct TurnEndAt {
+    s: crate::state::GameState,
+    n: i32,
+    p: usize,
+    tc: i32,
+}
+
+/// 場のフォロワーの攻撃力の合計（攻撃できるかは見ない）
+fn atk_sum(s: &crate::state::GameState, p: usize) -> f64 {
+    s.players[p]
+        .board
+        .iter()
+        .filter(|b| b.is_follower)
+        .map(|b| b.attack_value() as f64)
+        .sum()
+}
+
+/// 場の守護のフォロワーの数
+fn ward_count(s: &crate::state::GameState, p: usize) -> f64 {
+    s.players[p]
+        .board
+        .iter()
+        .filter(|b| b.is_follower && b.has_keyword(crate::data::WARD))
+        .count() as f64
+}
+
+/// 1 試合を打ち直し、合った席のターン末ごとに、渡した設定の探索 AI が付ける値と、その後の決着の印を 1 行ずつ書く
+#[allow(clippy::too_many_arguments)]
+fn value_rows(
+    v: &Json,
+    m: &Meta,
+    ok_seat: [bool; 2],
+    agent: &crate::ai::search::SearchAgent,
+    scale: f64,
+    reads: u32,
+    files: &[String],
+) -> Result<Result<String, String>, String> {
+    use crate::game::{apply_legal, create_game, is_legal};
+    use crate::state::Phase;
+    let r = parse_replay(v)?;
+    let mut s = create_game([&r.decks[0], &r.decks[1]], r.seed);
+    let mut ends: Vec<TurnEndAt> = Vec::new();
+    // ターン番号ごとの行動の数（全部と、選択・ターン終了を除いたもの）
+    let mut steps: BTreeMap<i32, (u32, u32)> = BTreeMap::new();
+    for (i, act) in r.actions.iter().enumerate() {
+        if s.phase == Phase::Ended {
+            return Ok(Err(format!("{i} 手目: 決着した後にも行動があります")));
+        }
+        if !is_legal(&s, act) {
+            return Ok(Err(format!(
+                "{i} 手目が打てません（記録したときとエンジンの版が違う可能性があります）"
+            )));
+        }
+        if s.phase == Phase::Main {
+            let e = steps.entry(s.turn).or_insert((0, 0));
+            e.0 += 1;
+            if !matches!(act, Action::Choose(_) | Action::Mode(_) | Action::EndTurn) {
+                e.1 += 1;
+            }
+            if matches!(act, Action::EndTurn) && s.pending.is_none() && ok_seat[s.active] {
+                ends.push(TurnEndAt {
+                    s: s.clone(),
+                    n: s.turn,
+                    p: s.active,
+                    tc: s.players[s.active].turn_count,
+                });
+            }
+        }
+        s = apply_legal(&s, act);
+    }
+    if v.get("winner").is_some() && s.winner.map(|w| w as f64) != num_field(v, "winner") {
+        return Ok(Err(
+            "打ち直した勝者が棋譜と違う（エンジンの版が違う）".into()
+        ));
+    }
+    // 決着したターン（ターン終了時の処理で決着したらそのターン、次のターンの始めならそのターン）と、その行動の数
+    let ended = s.phase == Phase::Ended;
+    let end_n = ended.then_some(s.turn);
+    let (final_steps, final_moves) = end_n.and_then(|n| steps.get(&n).copied()).unwrap_or((0, 0));
+    let sig = |x: f64| 100.0 / (1.0 + (-scale * x).exp());
+    let mix = agent.opts.rescore_mix;
+    let mut out = String::new();
+    for e in &ends {
+        let p = e.p;
+        let q = 1 - p;
+        let end_in = end_n.map(|n| n - e.n);
+        let end = agent.turn_end_value(&e.s, p);
+        let mut row = vec![
+            (
+                "file".to_string(),
+                Json::Str(by_value("file", m, p, files)?),
+            ),
+            ("g".into(), Json::Num(m.g as f64)),
+        ];
+        if let Some(sw) = m.swap {
+            row.push(("swap".into(), Json::Bool(sw)));
+        }
+        row.extend([
+            ("seat".into(), Json::Num(p as f64)),
+            ("deck".into(), Json::Str(m.names[p].clone())),
+            ("opp".into(), Json::Str(m.names[q].clone())),
+            ("side".into(), Json::Str(m.sides[p].clone())),
+            ("agent".into(), Json::Str(m.agents[p].clone())),
+            (
+                "first".into(),
+                m.first.map_or(Json::Null, |f| Json::Bool(f == p)),
+            ),
+            ("turn".into(), Json::Num(e.n as f64)),
+            ("tc".into(), Json::Num(e.tc as f64)),
+            ("hp".into(), Json::Num(e.s.players[p].leader_hp as f64)),
+            ("oppHp".into(), Json::Num(e.s.players[q].leader_hp as f64)),
+            (
+                "oppHand".into(),
+                Json::Num(e.s.players[q].hand.len() as f64),
+            ),
+            ("oppMaxPp".into(), Json::Num(e.s.players[q].max_pp as f64)),
+            ("myAtk".into(), Json::Num(atk_sum(&e.s, p))),
+            ("oppAtk".into(), Json::Num(atk_sum(&e.s, q))),
+            ("myWard".into(), Json::Num(ward_count(&e.s, p))),
+            ("oppWard".into(), Json::Num(ward_count(&e.s, q))),
+            ("won".into(), Json::Bool(m.winner == Some(p))),
+            (
+                "endIn".into(),
+                end_in.map_or(Json::Null, |x| Json::Num(x as f64)),
+            ),
+            (
+                "lostNext".into(),
+                Json::Bool(end_in == Some(1) && m.winner == Some(q)),
+            ),
+            (
+                "wonNext".into(),
+                Json::Bool(end_in == Some(2) && m.winner == Some(p)),
+            ),
+            ("finalSteps".into(), Json::Num(final_steps as f64)),
+            ("finalMoves".into(), Json::Num(final_moves as f64)),
+            ("end".into(), Json::Num(end)),
+            ("endWin".into(), Json::Num(sig(end))),
+        ]);
+        if reads > 0 {
+            let base = super::human_plan::mix(r.seed, e.n as u32);
+            let seeds: Vec<u32> = (0..reads)
+                .map(|k| super::human_plan::mix(base, k))
+                .collect();
+            let rv = agent.read_values(&e.s, p, &seeds);
+            let n = rv.len() as f64;
+            let loss = rv.iter().filter(|&&x| x <= LOSS_SCORE).count() as f64 / n;
+            let read_win = rv.iter().map(|&x| sig(x)).sum::<f64>() / n;
+            let pick_win = rv
+                .iter()
+                .map(|&x| sig((1.0 - mix) * x + mix * end))
+                .sum::<f64>()
+                / n;
+            row.extend([
+                ("readLoss".into(), Json::Num(loss)),
+                ("readWin".into(), Json::Num(read_win)),
+                ("pickWin".into(), Json::Num(pick_win)),
+            ]);
+        }
+        out.push_str(&Json::Obj(row).stringify());
+        out.push('\n');
+    }
+    Ok(Ok(out))
+}
+
+fn values(argv: &[String]) -> Result<(), String> {
+    let a = parse_args(argv)?;
+    a.check(&["opts", "reads", "where", "out"])?;
+    let text = a.one("opts").unwrap_or_else(|| "{}".into());
+    let opts = super::options::compare_options(&text)?;
+    // 点数を勝率にする a（σ(a·点数)。渡した補正のもの。docs/value-net.md）
+    let scale = match Json::parse(&text)?.get("valueNet") {
+        Some(Json::Str(path)) => crate::ai::valuenet::ValueNet::load(path)?.a(),
+        _ => crate::ai::valuenet::default_value_net().a(),
+    };
+    let reads = match a.one("reads") {
+        None => 0,
+        Some(x) => x
+            .parse::<u32>()
+            .map_err(|_| format!("--reads は 0 以上の整数: {x}"))?,
+    };
+    let conds = parse_where(&a.all("where"))?;
+    let files = kifu_files(&a.inputs)?;
+    let lines = read_lines(&files)?;
+    let results = parallel_map(
+        &lines,
+        |l, _| -> Result<Result<(String, String), String>, String> {
+            let v = Json::parse(&l.text)?;
+            let m = meta_of(l.file, &v);
+            let mut ok_seat = [true, true];
+            for (seat, ok) in ok_seat.iter_mut().enumerate() {
+                for c in &conds {
+                    *ok &= seat_ok(c, &m, seat)?;
+                }
+            }
+            if !ok_seat[0] && !ok_seat[1] {
+                return Ok(Ok((m.engine, String::new())));
+            }
+            let agent = crate::ai::search::SearchAgent::new(opts.clone());
+            Ok(value_rows(&v, &m, ok_seat, &agent, scale, reads, &files)?
+                .map(|text| (m.engine.clone(), text)))
+        },
+        |_, _, _, _| {},
+    );
+    let mut sink: Box<dyn Write> = match a.one("out") {
+        Some(p) => Box::new(std::io::BufWriter::new(
+            std::fs::File::create(&p).map_err(|e| format!("{p} に書けません: {e}"))?,
+        )),
+        None => Box::new(std::io::BufWriter::new(std::io::stdout())),
+    };
+    let mut skipped = Vec::new();
+    let mut engines: BTreeMap<String, usize> = BTreeMap::new();
+    let mut rows = 0usize;
+    for (i, r) in results.into_iter().enumerate() {
+        match r? {
+            Err(why) => skipped.push((i + 1, why)),
+            Ok((engine, text)) => {
+                *engines.entry(engine).or_insert(0) += 1;
+                rows += text.lines().count();
+                sink.write_all(text.as_bytes())
+                    .map_err(|e| format!("書けません: {e}"))?;
+            }
+        }
+    }
+    sink.flush().map_err(|e| format!("書けません: {e}"))?;
+    report_skips(&skipped, &engines, lines.len());
+    if let Some(p) = a.one("out") {
+        println!("ターン末 {rows} 行: {p}");
+    }
+    Ok(())
+}
+
 pub fn main(argv: &[String]) -> Result<(), String> {
     match argv.first().map(|s| s.as_str()) {
         Some("count") => count(&argv[1..]),
         Some("winrate") => winrate(&argv[1..]),
         Some("events") => events(&argv[1..]),
         Some("seats") => seats(&argv[1..]),
-        _ => Err("使い方: svwb kifu count <棋譜>… --event '<種類> [<条件>…]' [--where '<条件>,…'] [--per seat|game|turn] [--by <分け方>,…] | kifu winrate <棋譜>… [--where …] [--by …] | kifu events <棋譜>… [--where …] [--event …] [--out 出来事.jsonl] | kifu seats <棋譜>… [--where …] [--out 席.jsonl]（docs/kifu.md「数える」）".into()),
+        Some("values") => values(&argv[1..]),
+        _ => Err("使い方: svwb kifu count <棋譜>… --event '<種類> [<条件>…]' [--where '<条件>,…'] [--per seat|game|turn] [--by <分け方>,…] | kifu winrate <棋譜>… [--where …] [--by …] | kifu events <棋譜>… [--where …] [--event …] [--out 出来事.jsonl] | kifu seats <棋譜>… [--where …] [--out 席.jsonl] | kifu values <棋譜>… [--opts '<設定>'] [--reads N] [--where …] [--out ターン末.jsonl]（docs/kifu.md「数える」「値」）".into()),
     }
 }
 
@@ -1281,6 +1522,84 @@ mod tests {
             &mine
         )
         .is_err());
+    }
+
+    /// kifu values: ターン末ごとに 1 行。負けた席の最後のターン末が lostNext、勝った席のその前のターン末が wonNext
+    #[test]
+    fn value_rows_mark_the_next_turns() {
+        use crate::ai::search::{SearchAgent, SearchOptions};
+        use crate::ai::{Agent, RandomAgent, Rng};
+        use crate::game::{apply_legal, create_game, legal_actions};
+        use crate::state::Phase;
+        use crate::state_json::action_to_json;
+        let decks = &data().decks;
+        let (d0, d1) = (decks[0].cards.clone(), decks[1].cards.clone());
+        let mut done = 0;
+        for seed in 1..40u32 {
+            let mut s = create_game([&d0, &d1], seed);
+            let mut rng = Rng::new(seed);
+            let mut actions = Vec::new();
+            let mut ends = 0;
+            while s.phase != Phase::Ended && actions.len() < 3000 {
+                let legal = legal_actions(&s);
+                let act = RandomAgent.choose_action(&s, &legal, &mut rng);
+                if matches!(act, Action::EndTurn) && s.pending.is_none() {
+                    ends += 1;
+                }
+                s = apply_legal(&s, &act);
+                actions.push(act);
+            }
+            let Some(w) = s.winner else { continue };
+            let ids = |d: &[CardIdx]| {
+                Json::Arr(
+                    d.iter()
+                        .map(|&c| Json::Str(crate::state::card(c).id.clone()))
+                        .collect(),
+                )
+            };
+            let v = Json::Obj(vec![
+                ("kind".into(), Json::Str("replay".into())),
+                ("g".into(), Json::Num(seed as f64)),
+                (
+                    "names".into(),
+                    Json::Arr(vec![Json::Str("a".into()), Json::Str("b".into())]),
+                ),
+                ("seed".into(), Json::Num(seed as f64)),
+                ("decks".into(), Json::Arr(vec![ids(&d0), ids(&d1)])),
+                ("winner".into(), Json::Num(w as f64)),
+                (
+                    "actions".into(),
+                    Json::Arr(actions.iter().map(action_to_json).collect()),
+                ),
+            ]);
+            let m = meta_of(0, &v);
+            let agent = SearchAgent::new(SearchOptions::default());
+            let files = vec!["k.jsonl".to_string()];
+            let text = value_rows(&v, &m, [true, true], &agent, 0.01, 2, &files)
+                .unwrap()
+                .unwrap();
+            let rows: Vec<Json> = text.lines().map(|l| Json::parse(l).unwrap()).collect();
+            assert_eq!(rows.len(), ends);
+            let last = s.turn as f64;
+            for r in &rows {
+                let seat = num_field(r, "seat").unwrap() as usize;
+                let turn = num_field(r, "turn").unwrap();
+                assert_eq!(r.get("endIn"), Some(&Json::Num(last - turn)));
+                let lost = r.get("lostNext") == Some(&Json::Bool(true));
+                let won = r.get("wonNext") == Some(&Json::Bool(true));
+                assert_eq!(lost, seat != w && turn == last - 1.0);
+                assert_eq!(won, seat == w && turn == last - 2.0);
+                let x = num_field(r, "endWin").unwrap();
+                assert!((0.0..=100.0).contains(&x));
+                let loss = num_field(r, "readLoss").unwrap();
+                assert!((0.0..=1.0).contains(&loss));
+            }
+            done += 1;
+            if done == 3 {
+                break;
+            }
+        }
+        assert_eq!(done, 3);
     }
 
     #[test]
