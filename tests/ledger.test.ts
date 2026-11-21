@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  DEFAULT_LEDGER,
   canonical,
   filterRuns,
   groupRuns,
@@ -100,13 +99,6 @@ describe("台帳の読み込み", () => {
     expect(p.surveys).toHaveLength(1);
     expect(p.surveys[0]).toMatchObject({ label: "試し", positions: 6, gain8: [-38.5417, 38.5417] });
     expect(p.errors).toEqual(["2 行目: gain8 が合いません"]);
-  });
-
-  it("リポジトリの docs/ledger.jsonl は全部の行が形に合う", () => {
-    const p = parseLedger(readFileSync(DEFAULT_LEDGER, "utf8"));
-    expect(p.errors).toEqual([]);
-    // 記録から写した、今の既定に入っている項目
-    expect(p.decisions.filter((d) => d.inDefault && d.source === "notes").length).toBeGreaterThan(20);
   });
 });
 

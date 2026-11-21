@@ -13,10 +13,10 @@ permissions:
 
 jobs:
   # 変わったファイルから、下の check と rust のどちらを回すかを決める。
-  # - ドキュメント（*.md と docs/ の下）と夜のキューのジョブのファイル（night/ の下。PC で回すコマンドの並びで、テストもビルドも読まない）だけなら、両方飛ばす。
-  #   ただし台帳（docs/ledger.jsonl）は check のテスト（tests/ledger.test.ts）が全部の行を読むので、下の画面・テストと同じ扱い
-  # - それに加えて、画面（src/ui/ の下）と TypeScript のテスト（tests/ の下）と台帳だけなら、rust を飛ばす
-  #   （Rust に埋め込むデータ（npm run rust-data）も Rust のテストも、この 3 つを読まない。エンジンと AI は check の npm test でも WASM で動く）
+  # - ドキュメント（*.md と docs/ の下。台帳 docs/ledger.jsonl も）と夜のキューのジョブのファイル（night/ の下。PC で回すコマンドの並びで、テストもビルドも読まない）だけなら、両方飛ばす。
+  #   テストはリポジトリの台帳を読まない（台帳を書く側・読む側は決まった行で確かめる。今の台帳の行の形は npm run ledger -- check）
+  # - それに加えて、画面（src/ui/ の下）と TypeScript のテスト（tests/ の下）だけなら、rust を飛ばす
+  #   （Rust に埋め込むデータ（npm run rust-data）も Rust のテストも、この 2 つを読まない。エンジンと AI は check の npm test でも WASM で動く）
   # - ほかのファイルが 1 つでもあれば、両方回す（rust/・data/・src/cards/・src/engine/・src/ai/・scripts/・misses/・records/ 等は、Rust のビルドやテストが読む）
   # 比べる相手は PR ならマージ先、手動実行なら main との分かれ目（そこからの変更をまとめて見る）。
   #
@@ -59,7 +59,7 @@ jobs:
             rust=false
             while IFS= read -r f; do
               case "$f" in
-                docs/ledger.jsonl | tests/* | src/ui/*)
+                tests/* | src/ui/*)
                   if [ "$code" = false ]; then echo "  check が読むファイル: $f"; fi
                   code=true
                   ;;
@@ -143,7 +143,7 @@ jobs:
             elif [ "$inc_rust" = false ] && [ "$pr_rust" = true ]; then
               if before_passed; then
                 rust=false
-                note="前の push から変わったのは画面・TypeScript のテスト・台帳とドキュメントだけなので、rust は前の push の結果（$prev_url）を使う"
+                note="前の push から変わったのは画面・TypeScript のテストとドキュメントだけなので、rust は前の push の結果（$prev_url）を使う"
               fi
             fi
           fi
@@ -154,7 +154,7 @@ jobs:
             note="ドキュメントと夜のキューのジョブのファイルだけの変更なので check と rust を飛ばす"
             echo "$note"
           elif [ "$rust" = false ]; then
-            note="画面・TypeScript のテスト・台帳だけの変更なので rust を飛ばす"
+            note="画面と TypeScript のテストだけの変更なので rust を飛ばす"
             echo "$note"
           fi
           if [ -n "$note" ]; then echo "$note" >> "$GITHUB_STEP_SUMMARY"; fi
