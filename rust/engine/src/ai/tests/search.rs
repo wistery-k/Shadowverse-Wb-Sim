@@ -54,6 +54,37 @@ fn reads_opponent_turn_from_pending_choice() {
     assert!(found);
 }
 
+#[test]
+fn peek_all_reads_the_real_state() {
+    // 実験用の peekAll では、読み直しの前の局面は本当の局面のまま（相手の手札・山札の順番・乱数を配り直さない）
+    let mut s = new_game(deck_at(0), deck_at(1), 7);
+    let mut rng = Rng::new(7);
+    let mut greedy = greedy_base();
+    while s.turn < 6 && s.phase != Phase::Ended {
+        let a = greedy.choose_action(&s, &legal_actions(&s), &mut rng);
+        s = apply(&s, &a);
+    }
+    while s.pending.is_some() {
+        let a = greedy.choose_action(&s, &legal_actions(&s), &mut rng);
+        s = apply(&s, &a);
+    }
+    let p = s.active;
+    let no_settle = SearchOptions {
+        settle_trades: false,
+        ..SearchOptions::default()
+    };
+    let all = SearchAgent::new(SearchOptions {
+        peek_all: true,
+        ..no_settle.clone()
+    });
+    let usual = SearchAgent::new(no_settle);
+    let js = |x: &GameState| crate::state_json::state_to_json(x).stringify();
+    for seed in 1..=3u32 {
+        assert_eq!(js(&all.read_view(&s, p, seed)), js(&s));
+        assert_ne!(js(&usual.read_view(&s, p, seed)), js(&s));
+    }
+}
+
 /// ロイヤルの 8 ターン目（PP 8・SEP 2）。相手は体力 20 で場に opp を置く
 fn geno_turn(geno_in_hand: bool, opp: &[&str]) -> GameState {
     let s = new_game(deck("アマリアロイヤル"), deck("ランプドラゴン"), 1);

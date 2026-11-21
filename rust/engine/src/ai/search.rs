@@ -249,6 +249,9 @@ pub struct SearchOptions {
     /// 同じ引き直しの種なら相手の手札が同じになる（oppHandCommon をどの手でも成り立たせる。docs/ai-notes.md「錬金釜を置くと点数が下がる理由」）
     pub read_own_deck_apart: bool,
     pub peek_opp_hand: bool,
+    /// 実験用: 読み直し（相手のターンの読み）で決定化をせず、相手の手札・両方の山札の順番・局面の乱数を本当のままで読む（peekOppHand より強い覗き。
+    /// 調べもの用で、実際の対戦では使えない。docs/ai-notes/14-2026-11-16.md「本当の手札で読んでも見つけない負けを分ける」）
+    pub peek_all: bool,
     /// 読み直し（相手のターンの読み）の決定化で、配り直した相手の伏せた手札に、手札の記録（公開の出来事）から見込んだスペルブースト等の回数をかけ直す
     /// （determinize_with。docs/ai-notes/13-2026-11-13.md「伏せた相手の手札のスペルブーストを決定化で見込む」）。
     /// 自分のターンのビームの決定化は前のまま（相手の手札は読み直しで配り直すので、効くのは読み直しの中）
@@ -344,6 +347,7 @@ impl Default for SearchOptions {
             // 2026-11-02 から（6400 試合で 50.6% ± 0.40。docs/ai-notes.md「錬金釜を置くと点数が下がる理由」）
             read_own_deck_apart: true,
             peek_opp_hand: false,
+            peek_all: false,
             opp_hand_boosts: false,
             rescore_mix: 0.5,
             rescore_race: Some(DEFAULT_RESCORE_RACE),
@@ -1529,6 +1533,9 @@ fn read_determinize(
     rng: &mut Rng,
     opts: &SearchOptions,
 ) -> GameState {
+    if opts.peek_all {
+        return base.clone();
+    }
     if opts.read_own_deck_apart {
         determinize_apart_with(base, p, rng, opts.peek_opp_hand, opts.opp_hand_boosts)
     } else {
