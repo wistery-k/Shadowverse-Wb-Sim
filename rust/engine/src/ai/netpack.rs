@@ -171,6 +171,11 @@ pub fn checksum(value: &RawValueNet, potential: &RawPotentialNet) -> String {
             nums(&l.b);
         }
     }
+    // リーサルの出力（ヘッダの JSON に残る。winForm が survival なら勝つ確率に効く）
+    if let Some(l) = &value.lethal_head {
+        nums(&l.w);
+        nums(&[l.b]);
+    }
     nums(&potential.w1);
     nums(&potential.b1);
     nums(&potential.w2);
@@ -200,14 +205,16 @@ pub fn checksum(value: &RawValueNet, potential: &RawPotentialNet) -> String {
         }
     }
     text(&format!(
-        "{} {} {} {} {} {} {}",
+        "{} {} {} {} {} {} {} {} {}",
         value.kind,
         value.version,
         value.hidden,
         potential.kind,
         potential.version,
         potential.hidden,
-        serde_json::to_string(&value.base_weights).unwrap_or_default()
+        serde_json::to_string(&value.base_weights).unwrap_or_default(),
+        value.lethal_head.is_some(),
+        value.win_form.as_deref().unwrap_or("logit")
     ));
     format!("{h:08x}")
 }

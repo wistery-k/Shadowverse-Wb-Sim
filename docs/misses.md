@@ -138,7 +138,7 @@ npm run misses -- duel <問の名前> [--line '<名前>=<手の JSON の配列>'
   手の JSON は記録や `misses/lines/` と同じ形（`{"type":"play","iid":47}` 等。`iid` は問の局面のもの。問のファイルや `misses/lines/` で確かめる）
 - **並びの後**: 並びが `{"type":"endTurn"}` で終わるなら、並びのとおりに打ってターンを終える（表の「ターンを終える」）。
   終わらないなら、調査や `cover` と同じく、並びの後の同じターンの続きを AI が打つ（「AI が続ける」。AI は残った PP や攻撃を使うので、「何もせずに残す」並びはこの形では測れない）。
-  どちらも、その後は両方の席を AI が最後まで打つ。続きを打つ AI は `--opts` の設定（既定は `{}`、今の既定。新しいプールの問は新しいプールの今の補正と見込み（R4。2026-11-21 までは R3）を渡す。2026-11-17 から）
+  どちらも、その後は両方の席を AI が最後まで打つ。続きを打つ AI は `--opts` の設定（既定は `{}`、今の既定。新しいプールの問は新しいプールの今の補正と見込み（補正 R5・見込み R4。2026-11-21 までは R3、2026-11-22 までは R4）を渡す。2026-11-17 から）
 - 同じ回は、どの並びも同じ決定化（手番の側から見て矛盾しない局面）と同じ AI の乱数で打つ。差は `--base` 番（既定は 1 番）との、同じ回どうしの差の平均で、± はその標準誤差。
   シードは `cover` と同じく問の名前から作るので、書き添えた 2 つの並びの数字は、同じ並びを選んだ `cover --m` と同じ回数なら一致する。
   `--peek` は相手の手札を実際のままにする（山札の中身と順番、乱数は回ごとに作り直す。`survey recheck` と同じ）。
@@ -365,10 +365,10 @@ npm run misses -- duel bishop-clear-g1689 --dir misses/peek --peek              
 ### 新しいプールの問（`misses/azvaldt/`。2026-11-17、12 問）
 
 前期のローテーション（能力調整後）のプールの問。段階 4 の S3 の調査（[survey.md](survey.md)「新しいプールの調査の結果」。R3 で打った 600 試合）の大きなミス 26 局面から。
-スターターの問（`misses/` のすぐ下）とは採点を分け、`--dir misses/azvaldt` で解かせる。AI はどれも素の探索 AI（`search`）で、新しいプールの今の補正（R4。2026-11-21 までは R3）で解かせる:
+スターターの問（`misses/` のすぐ下）とは採点を分け、`--dir misses/azvaldt` で解かせる。AI はどれも素の探索 AI（`search`）で、新しいプールの今の補正（補正 R5・見込み R4。2026-11-21 までは R3、2026-11-22 までは R4）で解かせる:
 
 ```sh
-npm run misses -- run --dir misses/azvaldt --opts '{"valueNet":"rust/engine/yardstick/pool-r4-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' --label <名前>
+npm run misses -- run --dir misses/azvaldt --opts '{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' --label <名前>
 npm run misses -- cover --dir misses/azvaldt --opts '<同じ設定>' --m 64
 ```
 
@@ -446,6 +446,9 @@ npm run misses -- cover --dir misses/azvaldt --opts '<同じ設定>' --m 64
 - R4（2026-11-21 からの新しいプールの補正。山札・手札の強化を入力に足して学び直した）は 29.5%（85/288）± 1.8（指紋 455addc9、台帳 `新しいプール-問題集-R4`。R3 は同じ指紋で 24.7%）。
   増えたのは `elf-dustdays-g1067`（ダストデイズを出さずに終える）0 → 15/24・`royal-firstmate-g1104` 14 → 24・`elf-assassin-g1567` 6/24（R3 0）・`dragon-abyss-g1281` 2/24（R3 0）、
   減ったのは `bishop-gem-g1029` 12 → 3・`witch-tico-g1006` 7 → 3・`bishop-miko-g1006` 19 → 16・`nightmare-macmillan-g1004` 18 → 16・`witch-researcher-g1461` 1 → 0。0/24 は 4 問
+- R5（2026-11-22 からの新しいプールの補正。R4 から同じ流れで学び直すときにリーサルの出力を足し、勝つ確率を (1 − q) × 生き延びたときの勝率にした Z）は 50.7%（146/288）± 1.8（指紋 455addc9、台帳 `新しいプール-問題集-R5`）。
+  出力なしで同じ流れの C は 25.7%（74/288）± 2.0（台帳 `リーサルの出力-問題集-C`）。C → R5 で増えたのは `royal-firstmate-g1104` 2 → 24（リーサル避け）・`dragon-abyss-g1281` 2 → 20・`elf-dustdays-g1067` 15 → 24・
+  `witch-researcher-g1461` 9 → 18・`witch-tico-g1006` 5 → 12・`nightmare-macmillan-g1004` 19 → 23（リーサル避け）・`bishop-gem-g1029` 3 → 6・`elf-assassin-g1567` 2 → 4、減ったのは `bishop-miko-g1006` 17 → 15。0/24 は 3 問（[ai-notes/14-2026-11-16.md](ai-notes/14-2026-11-16.md)「Z と C の打ち方の比べ」）
 
 ## 問題集のページ（ブラウザの「問題集」タブ）
 
@@ -491,8 +494,8 @@ npm run misses -- cover --dir misses/azvaldt --opts '<同じ設定>' --m 64
 - **問のデータ**: ビルドに入れ、問題集のタブを開いたときに読み込む（別のチャンク）。問を足してコミットすれば、次のデプロイでページに出る
 - **アズヴォルト環境のページ**（2026-11-19、ユーザーの依頼。CLAUDE.md「決定済みの前提」）: `azvaldt/index.html` の「問題集」タブは、同じ画面で `misses/azvaldt/*.json` だけを出す
   （`src/misses/azvaldtData.ts`。URL は `https://wistery-k.github.io/Shadowverse-Wb-Sim/azvaldt/#misses/<問の名前>`）。
-  「今の AI にこのターンを打たせる」と「AI の考え」の探索 AI は、そのページの補正（R4。2026-11-21 までは R3。`data/pools/azvaldt/`）で考える。
-  ページの探索 AI がコマンドの同じ補正（`--opts '{"valueNet":"rust/engine/yardstick/pool-r4-net.json",…}'`）と同じ手を選ぶことは、
+  「今の AI にこのターンを打たせる」と「AI の考え」の探索 AI は、そのページの補正（補正 R5・見込み R4。2026-11-21 までは R3、2026-11-22 までは R4。`data/pools/azvaldt/`）で考える。
+  ページの探索 AI がコマンドの同じ補正（`--opts '{"valueNet":"rust/engine/yardstick/pool-r5-net.json",…}'`）と同じ手を選ぶことは、
   `rust/engine/tests/browser_azvaldt.rs` と `tests/nets-azvaldt.test.ts` が同じ局面（この 12 問とマリガン 2 つ）で確かめる
 
 ### 調査の並び・手順の候補（`<問のフォルダ>/lines/<問>.json`）
@@ -528,7 +531,7 @@ npm run misses -- cover --dir misses/azvaldt --opts '<同じ設定>' --m 64
 1. 問の局面に `steps` を打つ
 2. `full` の残りを、打てる手の説明（`src/misses/stepText.ts`。Rust の `human_plan.rs` の `step_text` と同じ文字列）と突き合わせて手に戻す。
    同じ説明になる手が複数あれば（同じ名前のカード）、残りを最後まで戻せる方を選ぶ
-3. そこから先は問の AI（`--dir` のプールの補正。`misses/azvaldt/` はアズヴォルト環境のページの補正で、今は R4。今ある手順の候補は R3 のときに書いた。下の注）に、問の名前と並びの種類から作った乱数でターンの終わりまで打たせる（調査の打ち比べも、`steps` の後は AI が考え直して打つ）。
+3. そこから先は問の AI（`--dir` のプールの補正。`misses/azvaldt/` はアズヴォルト環境のページの補正で、今は R5。今ある手順の候補は R3 のときに書いた。下の注）に、問の名前と並びの種類から作った乱数でターンの終わりまで打たせる（調査の打ち比べも、`steps` の後は AI が考え直して打つ）。
    突き合わせられない説明が出たとき（ビームは AI から見た決定化の局面で読むので、引いたカードやランダムな結果が問の局面と違う）は考え直した手、
    `full` を打ちきった後に AI がすぐにはターンを終えなかったとき（`full` はビームの終局面までで、攻撃などを読まずに終わることがある）は AI が打った続きとして、
    AI が打った最初の手の番号を `rethink` に書く。`full` を打ちきって AI がすぐにターンを終えたら `rethink` は `null`
@@ -544,7 +547,9 @@ npm run misses -- cover --dir misses/azvaldt --opts '<同じ設定>' --m 64
 
 **ページの補正を R4 にした後（2026-11-21）**: `misses/azvaldt/lines/` は R3 で書いたまま書き直していない（問を作った AI と調査の並びは R3 なので、続きも R3 の手のまま見せる）。
 `--force` で書き直すと、続きは R4 が打つ（ページの補正を使うので）。R4 で `tests/misses-lines-ai.test.ts` を回すと、`elf-assassin-g1360` の AI の手だけ、
-R3 が森の神秘を 1 枚出して PP 1 を残して終えたところで、R4 は手札のもう 1 枚の森の神秘も出す。テストはこの 1 本を挙げて除く（`R4_CONTINUES`）
+R3 が森の神秘を 1 枚出して PP 1 を残して終えたところで、R4 は手札のもう 1 枚の森の神秘も出す。テストはこの 1 本を挙げて除く（`CONTINUES`）。
+**R5 にした後（2026-11-22）**: 同じく書き直していない。R5 では上の 1 本に加えて `royal-firstmate-g1104` の良い手も、副船長で攻撃して終えたところで、
+R5 は手札の黄金の首飾り（フォロワーに +0/+1 と守護）も出す。この 1 本も `CONTINUES` に足した
 
 `misses/azvaldt/` の 24 本のうち 20 本は `full` を全部手に戻せた。4 本は考え直した: `bishop-miko-g1006` の AI の手（8 手目から。刻みし約束のランダムなダメージの後）、
 `bishop-gem-g1029` の良い手（4 手目から。レ・フィーエの宝石で引いた 2 枚が読みと違う）、`witch-researcher-g1461` の AI の手（6 手目から）、

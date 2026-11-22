@@ -1,8 +1,9 @@
-//! ブラウザのアズヴォルト環境のページの AI が、コマンドの同じ補正（今は R4）と同じ手を選ぶか（ユーザーの依頼 2026-11-19。R3 から R4 にしたのは 2026-11-21）。
+//! ブラウザのアズヴォルト環境のページの AI が、コマンドの同じ補正（今は R5）と同じ手を選ぶか（ユーザーの依頼 2026-11-19。R3 から R4 にしたのは 2026-11-21、R5 にしたのは 2026-11-22）。
 //!
 //! ページの AI は、WASM の探索 AI（`search`）に、ページが読み込んだ補正と見込み（data/pools/azvaldt/ の JSON を詰めたもの。
 //! scripts/pack-nets.ts、src/engine/wasm.ts）を既定として入れたもの。コマンドの側は、compare・misses の
-//! `--opts '{"valueNet":"rust/engine/yardstick/pool-r4-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}'`（下の PAGE_NET）。
+//! `--opts '{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}'`（下の PAGE_NET・PAGE_POTENTIAL。
+//! R5 は補正だけを学び直したもので、見込みは R4 のまま）。
 //!
 //! ここではコマンドの側が決まった局面（新しいプールの問題集 misses/azvaldt/ の 12 問と、代表 10 型のデッキのマリガン）から打つ手を求め、
 //! tests/fixtures/browser-azvaldt.json と比べる。問の局面からは、1 つの AI でそのターンの終わりまで打つ（並びを覚えて使い回す経路も通る。
@@ -26,8 +27,10 @@ use svwb_engine::{acting_player, apply_action, create_game, Action, Phase};
 /// 1 つの局面から打つ手の上限
 const MAX_STEPS: u32 = 60;
 
-/// ページの補正の凍結した写し（rust/engine/yardstick/<PAGE_NET>-net.json・-potential.json。data/pools/azvaldt/ と同じ中身）
-const PAGE_NET: &str = "pool-r4";
+/// ページの補正の凍結した写し（rust/engine/yardstick/<PAGE_NET>-net.json。data/pools/azvaldt/value-net.json と同じ中身）
+const PAGE_NET: &str = "pool-r5";
+/// ページの見込みの凍結した写し（rust/engine/yardstick/<PAGE_POTENTIAL>-potential.json。data/pools/azvaldt/potential-net.json と同じ中身）
+const PAGE_POTENTIAL: &str = "pool-r4";
 
 fn root() -> String {
     format!("{}/../..", env!("CARGO_MANIFEST_DIR"))
@@ -95,7 +98,7 @@ fn positions() -> Vec<Position> {
 fn browser_matches_command() {
     let dir = format!("{}/rust/engine/yardstick", root());
     let opts = compare_options(&format!(
-        r#"{{"valueNet":"{dir}/{PAGE_NET}-net.json","potentialNet":"{dir}/{PAGE_NET}-potential.json"}}"#
+        r#"{{"valueNet":"{dir}/{PAGE_NET}-net.json","potentialNet":"{dir}/{PAGE_POTENTIAL}-potential.json"}}"#
     ))
     .expect("ページの補正の設定");
     let mut rows = Vec::new();

@@ -4,7 +4,7 @@
 //
 // 出力は src/engine/nets/<名前>.bin（ビルドの生成物なのでコミットしない）。ページは自分の分だけを読む（src/engine/wasm.ts）:
 // - starter: スターターのページ（data/value-net.json・data/potential-net.json。CLI が埋め込むものと同じ）
-// - azvaldt: アズヴォルト環境のページ（data/pools/azvaldt/ の補正と見込み。今は R4）
+// - azvaldt: アズヴォルト環境のページ（data/pools/azvaldt/ の補正と見込み。今は補正 R5・見込み R4）
 //
 //   node scripts/pack-nets.ts [--quiet]
 

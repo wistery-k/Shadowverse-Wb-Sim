@@ -3,21 +3,22 @@
 // royal-firstmate-g1104 の良い手が、波濤の副船長の超進化の後にリリムを攻撃せずに終わっていた）の再発を防ぐ。
 // 手順の候補を書く scripts/misses-lines-main.ts は、読みの後を AI にターンの終わりまで打たせる。ここでは乱数を変えても、
 // ターン終了の手前の局面で問の AI がターン終了を選ぶ（まだ打てる手を残していない）ことを確かめる。
-// 手順の候補は、ページの補正が R3 だったとき（2026-11-19）に R3 で書いた（調査の並びも R3 の手）。ページの補正を R4 にした後（2026-11-21）も
-// 書き直さず（問を作った AI の手のまま見せる）、ここでは今のページの補正（R4）で確かめる。R4 が R3 と違って続けて打つところは R4_CONTINUES に挙げて除く
+// 手順の候補は、ページの補正が R3 だったとき（2026-11-19）に R3 で書いた（調査の並びも R3 の手）。ページの補正を R4（2026-11-21）・R5（2026-11-22）にした後も
+// 書き直さず（問を作った AI の手のまま見せる）、ここでは今のページの補正（R5）で確かめる。今の補正が R3 と違って続けて打つところは CONTINUES に挙げて除く
 import { describe, expect, it } from "vitest";
 import { agentOf } from "../src/ai/registry";
 import { applyAction, legalActions, selectNets } from "../src/engine";
 import { rngFrom, seedOf } from "../src/engine/rng";
 
-// エンジンを使う前に選ぶ（アズヴォルト環境のページの補正。今は R4）
+// エンジンを使う前に選ぶ（アズヴォルト環境のページの補正。今は R5）
 selectNets("azvaldt");
 
 /**
- * 読みを打ちきった後に R3 はターンを終えたが、R4 は続けて打つ並び（"<問> <並びの種類>"）。
- * elf-assassin-g1360 の AI の手: 森の神秘を 1 枚出して PP 1 を残して終えたところで、R4 は手札のもう 1 枚の森の神秘（iid 96）も出す
+ * 読みを打ちきった後に R3 はターンを終えたが、今の補正は続けて打つ並び（"<問> <並びの種類>"）。
+ * - elf-assassin-g1360 の AI の手（R4 から）: 森の神秘を 1 枚出して PP 1 を残して終えたところで、手札のもう 1 枚の森の神秘（iid 96）も出す
+ * - royal-firstmate-g1104 の良い手（R5 から）: 波濤の副船長で攻撃して終えたところで、手札の黄金の首飾り（iid 97。この局面では PP 0 でも出せる）も出す
  */
-const R4_CONTINUES = new Set(["elf-assassin-g1360 ai"]);
+const CONTINUES = new Set(["elf-assassin-g1360 ai", "royal-firstmate-g1104 good"]);
 
 const { loadMisses } = await import("../src/misses/azvaldtData");
 await import("../src/record/pool");
@@ -35,7 +36,7 @@ describe("アズヴォルト環境の問題集の手順の候補の終わり", (
         expect(actions.at(-1)?.type, `${l.id} ${line.kind}`).toBe("endTurn");
         // 候補の打つ手（steps）でターンを終える並び（elf-dustdays-g1067 の良い手「何も出さずにターンを終える」）は、候補そのものの手
         if (line.steps.length === actions.length) continue;
-        if (R4_CONTINUES.has(`${l.id} ${line.kind}`)) continue;
+        if (CONTINUES.has(`${l.id} ${line.kind}`)) continue;
         let s = p.state;
         for (const a of actions.slice(0, -1)) s = applyAction(s, a);
         for (const seed of [1, 2, 3]) {

@@ -1,0 +1,9 @@
+# 新しいプールの物差しを R5 で測る（R5 = リーサルの出力を足して学んだ Z。2026-11-22 に新しいプールの既定にした）。見込み 50 分ほど。
+# 新しいプールの AI は補正 R5（rust/engine/yardstick/pool-r5-net.json。data/pools/azvaldt/value-net.json と同じ）と見込み R4（pool-r4-potential.json）。
+# 相手は物差しの pool-v0（段階 4 の出発の v0）と pool-r3（R3 を凍結したもの）。R3 のときは pool-v0 に 78.21% ± 0.44（2026-11-16、8000 試合）。
+# R4・R5 は pool-v0 も pool-r3 もまだ測っていない（R4 から R5 までの compare は R4 対 R3 52.13%・C 対 R4 51.16%・Z 対 C 50.48%）。
+# 見込み（PC、svwb-docker・28 スレッド）: 0.18 秒/試合（R3 の pool-v0 の実測）で、8000 試合ずつ 24 分
+# 朝: finish で yardstick の行を台帳に足し、docs/yardstick.md の新しいプールの表と STATE.md の数字を直す
+
+yardstick --ref pool-v0 --opts '{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' --games 4000 --start 0 --label 新しいプール-物差し-R5 --est 0.18
+yardstick --ref pool-r3 --opts '{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' --games 4000 --start 0 --label 新しいプール-強い物差し-R5 --est 0.18

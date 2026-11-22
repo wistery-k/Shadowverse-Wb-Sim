@@ -2,7 +2,7 @@
 // タブは「AI対戦（総当たり）」と「問題集」の 2 つだけ。AI 同士の試合と、問題集の決まった局面を表示・再生する。
 // 人間と AI の対戦・デッキの編集や貼り付け・サンドボックス・試合の記録・局面の入力は付けない（実際の対戦の支援にならないように。CLAUDE.md「ソフト打ち」）。
 // AI 同士の試合のリプレイは、seed・両者の AI・デッキ（プロのデッキの ID）を持つ URL（#game?…。src/sim/gameLink.ts）で開ける（ユーザーの依頼 2026-11-20。局面は URL に入らない）。
-// AI は探索 AI に、このページが読み込む補正と見込み R4（data/pools/azvaldt/。2026-11-21 に R3 から入れ替えた）を入れたもの（コマンドの R4 と同じ手を選ぶ。tests/nets-azvaldt.test.ts）
+// AI は探索 AI に、このページが読み込む補正 R5 と見込み（data/pools/azvaldt/。2026-11-21 に R3 から R4 に、2026-11-22 に R5 に入れ替えた。見込みは R4 のまま）を入れたもの（コマンドの R5 と同じ手を選ぶ。tests/nets-azvaldt.test.ts）
 
 import { useEffect, useState } from "preact/hooks";
 import { Footer } from "../ui/Footer";
@@ -11,16 +11,16 @@ import { Simulate, type DeckPreset } from "../ui/Simulate";
 import { isGameHash } from "../sim/gameLink";
 import { AZVALDT_DECK_OPTIONS, AZVALDT_LINK_DECKS, REP10_IDS } from "./decks";
 
-/** 総当たりで選べる AI（キーは src/ai/registry.ts。探索はこのページの補正 R4 で打つ） */
+/** 総当たりで選べる AI（キーは src/ai/registry.ts。探索はこのページの補正 R5 で打つ） */
 const AGENTS: Record<string, string> = {
-  search: "探索（補正 R4）",
+  search: "探索（補正 R5）",
   greedy: "貪欲法",
   random: "ランダム",
 };
 
 /**
  * 総当たりの最初の選択: 代表 10 型を探索 AI で、1組 2 試合（席を入れ替えて 1 回ずつ。45 組で 90 試合）。
- * R3 の 1 試合は Worker 1 つで 3.5 秒ほどで、4 スレッドのマシン（Worker 3 つ）で 90 試合が 2 分ほど（docs/browser.md「ページの試合の時間」。R4 は 1 手の思考が R3 と同じほど）
+ * R3 の 1 試合は Worker 1 つで 3.5 秒ほどで、4 スレッドのマシン（Worker 3 つ）で 90 試合が 2 分ほど（docs/browser.md「ページの試合の時間」。R4・R5 は 1 手の思考が R3 と同じほど）
  */
 const DEFAULTS = { decks: REP10_IDS, agents: ["search"], games: 2 };
 
@@ -99,7 +99,7 @@ export function AzvaldtApp() {
             note={
               <p class="muted">
                 デッキは、取り込んだプロのデッキ（プレミアシリーズ 3 回分）だけを選べます。カードは、これらのデッキに入るものだけを実装しています。
-                探索 AI は、このページ用に学習した補正 R4 で打ちます（初めて試合を始めるとき、補正のファイル 5MB ほどを読み込みます）。
+                探索 AI は、このページ用に学習した補正 R5 で打ちます（初めて試合を始めるとき、補正のファイル 5MB ほどを読み込みます）。
               </p>
             }
           />
