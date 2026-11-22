@@ -1,6 +1,7 @@
-# 補正にリーサルの出力を足して学ぶ（C・X・Z）の 2 晩目（案。1 晩目 night/lethal-heads-1.txt の翌朝に、選んだほうに書き換えてから券を出す）。見込み 2 時間 28 分。
+# 補正にリーサルの出力を足して学ぶ（C・X・Z）の 2 晩目。見込み 2 時間 28 分。
 # 1 晩目の回（lethal-heads-1）のフォルダのモデルを写し、C 対 R4 と、選んだほう対 C を回す。選ばなかったほうの compare は回さない（ユーザー決定 2026-11-21）。
-# 今は選んだほうを X（x.json）としてある。Z を選んだら、0. の 2 行目を z.json に、2. の名前を リーサルの出力-Z対C に替える。
+# 選んだほうは Z（2026-11-22 の朝、1 晩目の線どおり棋譜の上で選んだ。R4 対 R3 の compare の A の席 10 万 5815 ターン末で、勝敗の交差エントロピーが
+#   C 0.5252・X 0.5256（+0.0004 ± 0.0004）・Z 0.5223（−0.0029 ± 0.0008）。C より小さいのは Z だけ。docs/ai-notes/14-2026-11-16.md「1 晩目の結果と選んだほう」）
 #
 # 回す前に決めた問いと線:
 #   選んだほう対 C（下の 2。84 個のデッキの鏡の compare 4 万試合、PC で 1 時間 53 分。見込みはどちらも R4 のもの）:
@@ -15,10 +16,10 @@
 
 # 0. 1 晩目の回のフォルダ（PC のコンテナの /home/wk/svwb-data/night/lethal-heads-1/）のモデルを写す（td extend は語彙を替えない写し。リーサルの出力も残す）
 td extend --model /home/wk/svwb-data/night/lethal-heads-1/c.json --out @/c.json --est 10
-td extend --model /home/wk/svwb-data/night/lethal-heads-1/x.json --out @/h.json --est 10
+td extend --model /home/wk/svwb-data/night/lethal-heads-1/z.json --out @/h.json --est 10
 
 # 1. C 対 R4（1.2 万試合。見込みはどちらも R4 のもの）
 compare 6000 '{"valueNet":"@/c.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' '{"valueNet":"rust/engine/yardstick/pool-r4-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label リーサルの出力-C対R4 --est 0.17
 
-# 2. 選んだほう対 C（4 万試合）
-compare 20000 '{"valueNet":"@/h.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' '{"valueNet":"@/c.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label リーサルの出力-X対C --est 0.17
+# 2. 選んだほう（Z）対 C（4 万試合）
+compare 20000 '{"valueNet":"@/h.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' '{"valueNet":"@/c.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label リーサルの出力-Z対C --est 0.17
