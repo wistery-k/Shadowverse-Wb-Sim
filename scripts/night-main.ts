@@ -14,7 +14,9 @@
 // - ジョブのファイルは 1 行 1 ジョブで、svwb のコマンドと同じ形（compare・yardstick・profile・misses・survey）。# から行の終わりまでは書き添え
 // - 学び直しの流れ（docs/night.md「学び直しの流れ」）: td selfplay・beam-gap（--chunk 試合ずつ {k} を入れたファイルに書く）、
 //   td・potential（TypeScript の学習。--out のファイルを 1 つ作る）、pick（前の compare の結果で、決めておいた線を越えたかでファイルを選ぶ）。
-//   @/ は回のフォルダ、{1..20} は 1,2,…,20 に開く。作ったファイルがあれば済んだものとし、前のジョブの作るファイルが無ければ失敗にする
+//   @/ は回のフォルダ、{1..20} は 1,2,…,20 に開く。作ったファイルがあれば済んだものとし、前のジョブの作るファイルが無ければ失敗にする。
+//   @run:<回の名前>/<ファイル> は、同じ根の下の前の回のフォルダのファイル（前の夜に作ったモデルを読む。PC の中の道をジョブのファイルに書かない）。
+//   start のときにあるかを確かめ、無ければ始めない
 // - 回は ~/svwb-data/night/<名前>/ に置く（環境変数 SVWB_NIGHT_DIR か --root で替えられる）。区切りが済むたびに印を書き、
 //   やり直したときは済んだ区切りを飛ばす。電源が切れても、失うのは回していた区切りだけ
 // - 夕方: plan が計画の表と券（ブランチ・コミット・ジョブのファイル・止める時刻・計画の指紋の 1 行）を出す。ユーザーがホストで
@@ -430,8 +432,31 @@ export function jobInputs(job: Job): string[] {
   return [...new Set(words.flatMap((w) => w.match(/@\/[^\s",]+/g) ?? []))];
 }
 
-/** @/ を回のフォルダにする */
-export const atDir = (word: string, dir: string): string => word.split("@/").join(`${dir}/`);
+/** @/ を回のフォルダに、@run:<回の名前>/ を同じ根の下のその回のフォルダにする */
+export const atDir = (word: string, dir: string): string => word.split("@/").join(`${dir}/`).split("@run:").join(`${dirname(dir)}/`);
+
+/** ジョブが読む前の回のファイル（@run:<回の名前>/<ファイル> の形のまま） */
+export function jobRunRefs(job: Job): string[] {
+  return [...new Set(job.line.match(/@run:[^\s"',]+/g) ?? [])];
+}
+
+/** @run: の書き方を確かめる（回の名前は英数字と . _ -、ファイルは回のフォルダの中） */
+function checkRunRef(ref: string): void {
+  const m = /^@run:([A-Za-z0-9._-]+)\/(.+)$/.exec(ref);
+  if (m === null || m[1] === "." || m[1] === ".." || m[2]!.split("/").some((x) => x === "" || x === "." || x === "..")) {
+    throw new Error(`前の回のファイルは @run:<回の名前>/<回のフォルダの中のファイル> と書きます: ${ref}`);
+  }
+}
+
+/** 前の回のファイル（@run:）が根の下にあるかを確かめる（start・resume の前） */
+export function checkRunRefs(jobs: Job[], root: string): void {
+  for (const job of jobs) {
+    for (const ref of jobRunRefs(job)) {
+      const file = atDir(ref, join(root, "-"));
+      if (!existsSync(file)) throw new Error(`ジョブ ${job.index}: 前の回のファイル ${ref} がありません（${file}）`);
+    }
+  }
+}
 
 /** ジョブのファイルを読む（空の行と # で始まる行は飛ばす） */
 export function parseJobs(text: string): Job[] {
@@ -449,6 +474,7 @@ export function parseJobs(text: string): Job[] {
   // 回のフォルダのファイル（@/）は、前のジョブが作るものだけを読む（書き間違いを回す前に見つける）
   const made = new Set<string>();
   for (const job of jobs) {
+    for (const ref of jobRunRefs(job)) checkRunRef(ref);
     for (const f of jobInputs(job)) if (!made.has(f)) throw new Error(`ジョブ ${job.index}（${job.line.slice(0, 40)}…）: ${f} を作るジョブが前にありません`);
     const s = job.spec;
     if (s.kind === "pick" && jobs.filter((j) => j.index < job.index && j.spec.kind === "compare" && j.label === s.from).length !== 1) {
@@ -1617,13 +1643,16 @@ function run(cmd: string, args: string[]): void {
 /** 確かめるときの、回のフォルダのモデルの代わり（設定の JSON の鍵ごと） */
 const STAND_INS: Record<string, string> = { valueNet: "data/value-net.json", potentialNet: "data/potential-net.json" };
 
-/** 設定の JSON の中の @/（前のジョブが作るモデル）を、確かめる間だけ今の既定のモデルにする */
+/** 回のフォルダか前の回のフォルダのファイル（@/・@run:）を指す言葉か */
+const inRunDir = (word: string): boolean => word.includes("@/") || word.includes("@run:");
+
+/** 設定の JSON の中の @/・@run:（前のジョブ・前の回が作るモデル）を、確かめる間だけ今の既定のモデルにする */
 export function standIn(text: string): string {
-  if (!text.includes("@/")) return text;
+  if (!inRunDir(text)) return text;
   const walk = (v: unknown, key: string): unknown => {
-    if (typeof v === "string" && v.includes("@/")) {
+    if (typeof v === "string" && inRunDir(v)) {
       const s = STAND_INS[key];
-      if (s === undefined) throw new Error(`回のフォルダのファイル（@/）は ${Object.keys(STAND_INS).join("・")} にだけ書けます: ${key}`);
+      if (s === undefined) throw new Error(`回のフォルダのファイル（@/・@run:）は ${Object.keys(STAND_INS).join("・")} にだけ書けます: ${key}`);
       return s;
     }
     if (typeof v === "object" && v !== null && !Array.isArray(v)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x, k)]));
@@ -1647,7 +1676,7 @@ export function checkArgv(job: Job, tmp: string): string[] | undefined {
     const standInFor = (prev: string | undefined): string | undefined =>
       prev === "--model" || prev === "--vocab" ? STAND_INS.valueNet : prev === "--potential" ? STAND_INS.potentialNet : undefined;
     const sub = (a: string, prev: string | undefined): string =>
-      a.startsWith("{") ? standIn(a) : a.includes("@/") ? (standInFor(prev) ?? join(tmp, basename(a.split("{k}").join("0")))) : a;
+      a.startsWith("{") ? standIn(a) : inRunDir(a) ? (standInFor(prev) ?? join(tmp, basename(a.split("{k}").join("0")))) : a;
     const rest = s.args.map((a, i) => sub(a, s.args[i - 1]));
     return [...s.cmd, "--games", "0", s.startFlag, String(job.start), ...rest, s.outFlag, join(tmp, `check-${job.index}.tmp`)];
   }
@@ -1768,6 +1797,7 @@ export async function cmdStart(a: Args): Promise<number> {
     // go は CARGO_TARGET_DIR で /workspace のビルド結果の置き場を使い回す
     bin = join(process.env.CARGO_TARGET_DIR ? resolve(process.env.CARGO_TARGET_DIR) : join(REPO, "rust/target"), "release/svwb");
   }
+  checkRunRefs(jobs, root);
   validate(resolve(bin), jobs);
   mkdirSync(join(dir, "bin"), { recursive: true });
   // 夜の間にほかのセッションが組み立て直しても替わらないよう、写したものを回す
@@ -1829,6 +1859,7 @@ export async function cmdResume(a: Args): Promise<number> {
   }
   const active = activeRuns(root);
   if (active.length > 0) throw new Error(`ほかの回が動いています: ${active.join(", ")}（1 晩に 1 つ）`);
+  checkRunRefs(plan.jobs, root);
   if (gitState().commit !== plan.commit) {
     console.log(`注意: 今のチェックアウト（${gitState().commit}）は回のコミット（${plan.commit}）と違う。回すのは回のフォルダに写した svwb なので、結果は ${plan.commit} のもの`);
   }

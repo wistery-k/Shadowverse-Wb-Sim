@@ -35,6 +35,8 @@ fn model(hidden: usize, fill: impl Fn(usize) -> f64, w2: f64) -> RawValueNet {
         base_weights: serde_json::Map::new(),
         board: None,
         lethal_head: None,
+        win_head: None,
+        read_head: None,
         win_form: None,
     }
 }
@@ -761,6 +763,107 @@ fn deck_and_hand_buffs_are_inputs() {
 }
 
 #[test]
+fn amulet_and_crest_counts_are_inputs() {
+    // 相手の場のアミュレットのカウントと、両方のクレストのカウント・信仰値・信仰に付いた能力の数（2026-11-22）は
+    // クレスト・カードごとの入力に出て、決定化で並べ直しても変わらない（docs/value-net.md「入力」）
+    use crate::ai::determinize::determinize;
+    use crate::ai::valuenet::ZONES;
+    use crate::data::CardType;
+    let net = full_model(6);
+    let v = net.layout_json().matches("\"crest:").count() + data().cards.len();
+    let zone = |x: &[(usize, f64)], name: &str| -> Vec<(usize, f64)> {
+        let from = ZONES.iter().position(|z| *z == name).unwrap() * v;
+        x.iter()
+            .filter(|(i, _)| (from..from + v).contains(i))
+            .map(|&(i, x)| (i - from, x))
+            .collect()
+    };
+    let added = [
+        "oppBoardCountdown",
+        "myCrestCountdown",
+        "oppCrestCountdown",
+        "myCrestFaith",
+        "oppCrestFaith",
+        "myCrestStacks",
+        "oppCrestStacks",
+    ];
+    let amulet = data()
+        .cards
+        .iter()
+        .position(|c| c.ctype == CardType::Amulet && c.countdown.is_some())
+        .expect("カウントダウンを持つアミュレット") as crate::data::CardIdx;
+    let states = played_states();
+    let s = states
+        .iter()
+        .find(|s| {
+            s.phase == Phase::Main
+                && s.players.iter().all(|pl| pl.crests.is_empty())
+                && s.players[opponent(s.active)].board.len() < 5
+        })
+        .expect("クレストが無く、相手の場が空いている局面");
+    let p = s.active;
+    let q = opponent(p);
+    for name in added {
+        assert!(
+            zone(&net.encode(s, p, ValuePhase::End), name).is_empty(),
+            "{name}"
+        );
+    }
+    // 相手の場にカウント 2 のアミュレット、自分にカウント 2・信仰値 7・能力 2 つのクレスト、相手にカウント 1 のクレスト
+    let mut t = s.clone();
+    let mut b = t.new_board_card(amulet, None);
+    b.countdown = Some(2);
+    t.players[q].board.make_mut().push(b);
+    let crest = |t: &mut GameState, countdown, faith, stacks| CrestInstance {
+        iid: t.new_iid(),
+        crest: 0,
+        countdown,
+        order: 0,
+        used_once: Vec::new(),
+        faith,
+        stacks,
+    };
+    let mine = crest(&mut t, Some(2), Some(7), 2);
+    t.players[p].crests.make_mut().push(mine);
+    let theirs = crest(&mut t, Some(1), None, 0);
+    t.players[q].crests.make_mut().push(theirs);
+    let y = net.encode(&t, p, ValuePhase::End);
+    let one = |name: &str| {
+        let z = zone(&y, name);
+        assert_eq!(z.len(), 1, "{name}");
+        z[0]
+    };
+    let k = one("myCrest").0;
+    assert_eq!(one("myCrestCountdown"), (k, 2.0 / 3.0));
+    assert_eq!(one("myCrestFaith"), (k, 0.7));
+    assert_eq!(one("myCrestStacks"), (k, 2.0));
+    assert_eq!(one("oppCrestCountdown"), (k, 1.0 / 3.0));
+    assert!(zone(&y, "oppCrestFaith").is_empty());
+    assert!(zone(&y, "oppCrestStacks").is_empty());
+    let (c, x) = one("oppBoardCountdown");
+    assert_eq!(x, 2.0 / 3.0);
+    assert!(zone(&y, "oppBoard").iter().any(|&(i, _)| i == c));
+    assert_ne!(
+        net.eval(&t, p, ValuePhase::End).to_bits(),
+        net.eval(s, p, ValuePhase::End).to_bits()
+    );
+    // 相手から見ると、アミュレットは自分の側の入力（myBoardCountdown）に、クレストは逆の側に出る
+    let z = net.encode(&t, q, ValuePhase::End);
+    assert!(zone(&z, "myBoardCountdown").contains(&(c, 2.0 / 3.0)));
+    assert!(zone(&z, "oppBoardCountdown").is_empty());
+    assert_eq!(zone(&z, "oppCrestFaith"), vec![(k, 0.7)]);
+    assert_eq!(zone(&z, "myCrestCountdown"), vec![(k, 1.0 / 3.0)]);
+    // 決定化で並べ直しても同じ
+    let mut rng = Rng::new(7);
+    for _ in 0..4 {
+        assert_eq!(
+            net.encode(&determinize(&t, p, &mut rng, false), p, ValuePhase::End),
+            y
+        );
+    }
+}
+
+#[test]
 fn extended_model_keeps_values_and_layout() {
     // 山札の中身の入力を重み 0 で足したモデル（npm run td -- extend）は、足す前のモデルと同じ値を出す。入力の並びは先頭の行に書く形で出す
     use crate::ai::valuenet::ZONES;
@@ -939,4 +1042,77 @@ fn survival_form_multiplies_the_survival_probability() {
         read.eval(&s, 0, ValuePhase::End),
         half.eval(&s, 0, ValuePhase::End)
     );
+}
+
+#[test]
+fn survival_win_form_adds_the_win_probability() {
+    // winForm "survivalWin"（2026-11-22、R6 の候補）: 勝つ確率 = (1 − q) × (w + (1 − w) × σ(c + z))。
+    // 勝ちの出力 w が 0 に近ければ survival と同じ値、w が 1/2 なら生き延びたときの勝率が (1 + σ(c + z)) / 2。
+    // 勝ちの出力・読みの出力を足しても、winForm が survival のままなら補正はビットまで同じ
+    let c = model(4, |i| ((i * 31) % 11) as f64 / 10.0 - 0.5, 0.7);
+    let head = |b: f64| Some(RawLethalHead { w: vec![0.0; 4], b });
+    let z = RawValueNet {
+        lethal_head: head(0.0),
+        win_form: Some("survival".into()),
+        ..c.clone()
+    };
+    let with = |b: f64| RawValueNet {
+        win_head: head(b),
+        win_form: Some("survivalWin".into()),
+        ..z.clone()
+    };
+    let aux = RawValueNet {
+        win_head: Some(RawLethalHead {
+            w: vec![0.3, -0.2, 0.5, 0.1],
+            b: -1.0,
+        }),
+        read_head: Some(RawLethalHead {
+            w: vec![-0.1, 0.4, 0.0, 0.2],
+            b: 0.5,
+        }),
+        ..z.clone()
+    };
+    let s = mid_game();
+    let nz = ValueNet::new(z.clone()).expect("モデル");
+    let near = ValueNet::new(with(-40.0)).expect("モデル");
+    let half = ValueNet::new(with(0.0)).expect("モデル");
+    let na = ValueNet::new(aux).expect("モデル");
+    assert!(!nz.has_win_head() && half.has_win_head() && na.has_read_head());
+    let sig = |x: f64| 1.0 / (1.0 + (-x).exp());
+    let nc = ValueNet::new(c.clone()).expect("モデル");
+    for p in 0..2 {
+        for phase in [ValuePhase::End, ValuePhase::Imagined] {
+            let v = nz.eval(&s, p, phase);
+            assert!((near.eval(&s, p, phase) - v).abs() < 1e-6 * v.abs().max(1.0));
+            // 生き延びたときの勝率 σ(c + z) は、出力の無いモデルの勝つ確率
+            let sv = sig(c.a * nc.eval(&s, p, phase));
+            let win = sig(c.a * half.eval(&s, p, phase));
+            assert!((win - 0.5 * (0.5 + 0.5 * sv)).abs() < 1e-12);
+            assert_eq!(
+                na.eval(&s, p, phase).to_bits(),
+                v.to_bits(),
+                "補助の出力は値を変えない"
+            );
+            assert_eq!(half.head_probs(&s, p, phase), [Some(0.5), Some(0.5), None]);
+            let [q, w, r] = na.head_probs(&s, p, phase);
+            assert_eq!(q, Some(0.5));
+            assert!(w.is_some_and(|w| w > 0.0 && w < 1.0));
+            assert!(r.is_some_and(|r| r > 0.0 && r < 1.0));
+            assert_eq!(nc.head_probs(&s, p, phase), [None; 3]);
+        }
+    }
+    // 勝ちの出力が無い survivalWin・大きさの合わない出力は読まない
+    let no_win = RawValueNet {
+        win_form: Some("survivalWin".into()),
+        ..z.clone()
+    };
+    assert!(ValueNet::new(no_win).is_err());
+    let bad = RawValueNet {
+        read_head: Some(RawLethalHead {
+            w: vec![0.0; 3],
+            b: 0.0,
+        }),
+        ..z
+    };
+    assert!(ValueNet::new(bad).is_err());
 }

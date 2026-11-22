@@ -160,6 +160,9 @@ export function rawAttributes(vocabId: string): Map<string, number> {
   return out;
 }
 
+/** クレストの行だけが現れるゾーン（クレストのカウント・信仰値・信仰に付いた能力の数。2026-11-22） */
+const CREST_ONLY_ZONES = new Set(["myCrestCountdown", "oppCrestCountdown", "myCrestFaith", "oppCrestFaith", "myCrestStacks", "oppCrestStacks"]);
+
 /**
  * ゾーン zone（scripts/valueNet.ts の VALUE_ZONES と、見込みのモデルの P_ZONES）に、vocab の項目 vocabId の行が入力として現れうるか
  * （rust/engine/src/ai/valuenet.rs・potential.rs の encode）。
@@ -167,7 +170,7 @@ export function rawAttributes(vocabId: string): Map<string, number> {
  */
 export function rowCanOccur(zone: string, vocabId: string): boolean {
   const crest = vocabId.startsWith("crest:");
-  if (zone === "myCrest" || zone === "oppCrest") return crest;
+  if (zone === "myCrest" || zone === "oppCrest" || CREST_ONLY_ZONES.has(zone)) return crest;
   if (crest) return false;
   const c = CARD_BY_ID.get(vocabId);
   if (!c) return true;
@@ -187,6 +190,7 @@ export function rowCanOccur(zone: string, vocabId: string): boolean {
     case "boardEvolved":
       return c.type === "follower";
     case "myBoardCountdown":
+    case "oppBoardCountdown":
       return c.type === "amulet";
     case "myBoardEvolved":
     case "oppBoardEvolved":

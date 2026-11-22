@@ -21,7 +21,8 @@ import { CARD_ABILITIES, CREST_ABILITIES } from "../src/cards/abilities";
  * 10〜13 は場のフォロワーの攻撃力・体力（カードごとの合計を 5 で割る）。
  * 最後の 2 つ（2026-11-13）は山札の中身: 自分の山札に残っているカードの枚数と、相手のまだ見えていないカード（伏せた手札・山札・
  * どれか分からない捨てたカード）の枚数。どちらも決定化で並べ直しても変わらない（rust/engine/src/ai/valuenet.rs の ZONES）。
- * その後の 2 つ（2026-11-20）は、自分の手札のカードに付いた攻撃力・体力の変化（カードごとの合計 / 5）
+ * その後の 2 つ（2026-11-20）は、自分の手札のカードに付いた攻撃力・体力の変化（カードごとの合計 / 5）。
+ * 最後の 7 つ（2026-11-22）は、相手の場のアミュレットのカウント（/ 3）、両方のクレストのカウント（/ 3）・信仰値（/ 10）・信仰に付いた能力の数
  */
 export const VALUE_ZONES = [
   "myHand",
@@ -42,6 +43,13 @@ export const VALUE_ZONES = [
   "oppUnseen",
   "myHandAtkMod",
   "myHandDefMod",
+  "oppBoardCountdown",
+  "myCrestCountdown",
+  "oppCrestCountdown",
+  "myCrestFaith",
+  "oppCrestFaith",
+  "myCrestStacks",
+  "oppCrestStacks",
 ] as const;
 
 /**
@@ -210,8 +218,14 @@ export interface ValueNetModel {
    * このファイルの計算（td train・check・eval 等）は扱わない。td extend・td attr は w1 だけを変えて、そのまま書き出す
    */
   lethalHead?: { w: number[]; b: number };
-  /** 勝つ確率の形（無ければ "logit"。"survival" は (1 − リーサルの出力) × 生き延びたときの勝率） */
-  winForm?: "logit" | "survival";
+  /**
+   * 勝ちの出力（自分の次のターンに勝つ確率。次の相手のターンを生き延びたとき）と、読みの出力（読みの中の相手に負けた割合。手を選ぶのには使わない）。
+   * どちらも最後の隠れ層から（Rust の svwb td train --winHead・--readHead が書く。docs/value-net.md「勝ちの出力・読みの出力」）。扱いは lethalHead と同じ
+   */
+  winHead?: { w: number[]; b: number };
+  readHead?: { w: number[]; b: number };
+  /** 勝つ確率の形（無ければ "logit"。"survival" は (1 − リーサルの出力) × 生き延びたときの勝率、"survivalWin" は (1 − リーサルの出力) × (w + (1 − w) × s)） */
+  winForm?: "logit" | "survival" | "survivalWin";
 }
 
 /** 最初の層のカードの行の、属性で表す分 */
@@ -275,14 +289,20 @@ export function parseValueNetModel(raw: unknown): ValueNetModel {
     const r = o.attr as Record<string, unknown>;
     attr = { names: strsOf(r.names, "attr.names"), a: numsOf(r.a, "attr.a") };
   }
-  let lethalHead: ValueNetModel["lethalHead"];
-  if (o.lethalHead !== undefined) {
-    if (typeof o.lethalHead !== "object" || o.lethalHead === null) throw new Error("ValueNetModel の lethalHead がオブジェクトではありません");
-    const r = o.lethalHead as Record<string, unknown>;
-    if (typeof r.b !== "number" || !Number.isFinite(r.b)) throw new Error("ValueNetModel の lethalHead.b が数ではありません");
-    lethalHead = { w: numsOf(r.w, "lethalHead.w"), b: r.b };
+  const headOf = (k: "lethalHead" | "winHead" | "readHead"): { w: number[]; b: number } | undefined => {
+    const v = o[k];
+    if (v === undefined) return undefined;
+    if (typeof v !== "object" || v === null) throw new Error(`ValueNetModel の ${k} がオブジェクトではありません`);
+    const r = v as Record<string, unknown>;
+    if (typeof r.b !== "number" || !Number.isFinite(r.b)) throw new Error(`ValueNetModel の ${k}.b が数ではありません`);
+    return { w: numsOf(r.w, `${k}.w`), b: r.b };
+  };
+  const lethalHead = headOf("lethalHead");
+  const winHead = headOf("winHead");
+  const readHead = headOf("readHead");
+  if (o.winForm !== undefined && o.winForm !== "logit" && o.winForm !== "survival" && o.winForm !== "survivalWin") {
+    throw new Error('ValueNetModel の winForm は "logit"・"survival"・"survivalWin" のどれか');
   }
-  if (o.winForm !== undefined && o.winForm !== "logit" && o.winForm !== "survival") throw new Error('ValueNetModel の winForm は "logit" か "survival"');
   const winForm = o.winForm as ValueNetModel["winForm"];
   return {
     kind: "td-value-net",
@@ -302,6 +322,8 @@ export function parseValueNetModel(raw: unknown): ValueNetModel {
     ...(board ? { board } : {}),
     ...(attr ? { attr } : {}),
     ...(lethalHead ? { lethalHead } : {}),
+    ...(winHead ? { winHead } : {}),
+    ...(readHead ? { readHead } : {}),
     ...(winForm ? { winForm } : {}),
   };
 }
@@ -381,10 +403,14 @@ export function compileValueNet(model: ValueNetModel, opts: { keepHead?: boolean
   if (model.w1.length !== n * model.hidden || model.b1.length !== model.hidden || !layersOk || model.w2.length !== sizes[sizes.length - 1]) {
     throw new Error("ValueNetModel の重みの大きさが合いません");
   }
-  if (model.lethalHead && model.lethalHead.w.length !== sizes[sizes.length - 1]) throw new Error("ValueNetModel の lethalHead の重みの大きさが合いません");
-  if (model.winForm === "survival" && !model.lethalHead) throw new Error('ValueNetModel の winForm "survival" には lethalHead が要ります');
-  if ((model.lethalHead || model.winForm) && !opts.keepHead) {
-    throw new Error("リーサルの出力（lethalHead・winForm）を持つモデルは、TypeScript の計算では扱いません（Rust の svwb で。docs/value-net.md「リーサルの出力（実験）」）");
+  for (const k of ["lethalHead", "winHead", "readHead"] as const) {
+    const h = model[k];
+    if (h && h.w.length !== sizes[sizes.length - 1]) throw new Error(`ValueNetModel の ${k} の重みの大きさが合いません`);
+  }
+  if ((model.winForm === "survival" || model.winForm === "survivalWin") && !model.lethalHead) throw new Error(`ValueNetModel の winForm "${model.winForm}" には lethalHead が要ります`);
+  if (model.winForm === "survivalWin" && !model.winHead) throw new Error('ValueNetModel の winForm "survivalWin" には winHead が要ります');
+  if ((model.lethalHead || model.winHead || model.readHead || model.winForm) && !opts.keepHead) {
+    throw new Error("リーサルの出力・勝ちの出力・読みの出力（lethalHead・winHead・readHead・winForm）を持つモデルは、TypeScript の計算では扱いません（Rust の svwb で。docs/value-net.md「リーサルの出力（実験）」）");
   }
   const index = new Map(model.vocab.map((id, i): [string, number] => [id, i]));
   return {

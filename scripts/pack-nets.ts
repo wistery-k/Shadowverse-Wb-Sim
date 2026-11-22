@@ -101,8 +101,10 @@ function checkNoNegZero(v: Json, at: string): void {
 /** 補正と見込み（JSON を解析したもの）を補正のファイルの形（gzip の前）にする */
 export function packNets(value: Json, potential: Json): Uint8Array {
   if (!isObj(value) || !isObj(potential)) throw new Error("補正と見込みはオブジェクトの JSON");
-  const root: { [k: string]: Json } = structuredClone({ value, potential });
-  const paths = arrayPaths(value);
+  // 読みの出力（readHead）は手を選ぶのに使わない（棋譜の数え用）ので、ページには詰めない（補正の指紋にも入らない。netpack.rs の checksum）
+  const { readHead: _read, ...played } = value;
+  const root: { [k: string]: Json } = structuredClone({ value: played, potential });
+  const paths = arrayPaths(played);
   const arrays = paths.map((p) => takeArray(root, p));
   checkNoNegZero(root, "ヘッダ");
   const n = arrays.reduce((s, a) => s + a.length, 0);

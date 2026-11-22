@@ -1,0 +1,72 @@
+# R6 の候補（勝ちの出力・読みの出力・入力 7 つ）の 1 晩目: 出発の補正、自己対戦 6 万試合、6 つの版の学習まで。見込みは下の plan（券は until=+10h）。
+# 2 晩目（night/r6-heads-2.txt）は、翌朝に取り置きのデータで 6 つから 1 つを選んでから、選んだ版 対 R5 を回す。
+# ユーザー決定 2026-11-22: 自己対戦を 1 回だけ回し、同じデータから B・I・W・V・F・A の 6 つを学び、取り置きのデータで 1 つを選んで R5 と比べる。
+#   見込み（potential）は R4 のまま（R5 と同じ。比べを補正の違いだけにする）。全部入りが選ばれても、どの案が効いたかは取り置きのデータの差までしか分からない（ユーザー了承済み）。
+# 形と学び方は docs/value-net.md「勝ちの出力・読みの出力（R6 の候補）」、計画は docs/ai-notes/15-2026-11-22.md「R6 の候補」。
+#
+#   B 基準: 入力 7 つを外し（--dropInputs）、R5 と同じ形（勝つ確率 = (1 − q) × s）で学び直す。案の効きは B との差で見る
+#   I 入力: 入力 7 つ（相手のアミュレットのカウント・クレストのカウント・信仰値 / 10・信仰に付いた能力の数）を足す
+#   W 勝ちの形: 勝つ確率 = (1 − q) × (w + (1 − w) × s)。w は自分の次のターンに勝つ確率の出力（--winHead form）。w は 0.1% で始める（学ぶ前の勝つ確率は R5 とほぼ同じ）
+#   V 勝ちの補助: w を補助の出力として学ぶ（--winHead aux。手を選ぶのには使わない）
+#   F 読みの割合: 読みの中の相手に負けた割合を当てる補助の出力 r（--readHead aux。手を選ぶのには使わない）
+#   A 全部入り: 入力 7 つ ＋ W の形 ＋ r
+#
+# 印（自己対戦で足す。どれも打つ手・試合・速さは変わらない）: --lostLabel 1（"ln"・"oe"。q の印。R5 と同じ）、--wonLabel 1（"wn"・"we"。w の印）、
+#   --readLabel 1（"rf"・"rn"。r の印。そのターンの最後の探索が選んだ並びの読みのうち、読みの中の相手が勝った割合と読みの回数）
+# 読みの回数 rn が 12 より少ない行の扱い（回す前に決めた。夜の後には変えない）: 小さな通し（クラウド環境の 240 試合）で rn < 12 の行は 0（rf のある行の 0.0%。rn > 12 は最後の探索の読み足し）なので、そのまま使う（--readMin は付けない）
+#
+# 回す前に決めた問いと線（翌朝、クラウド環境で選ぶ）:
+#   取り置きのデータ: Z 対 C の compare（夜のキュー lethal-heads-2。共有フォルダの data/kifu/lethal-heads-2/）の g0〜5999（1.2 万試合）の A の席（Z = R5）のターン末。
+#     svwb kifu values <その棋譜> --opts '<版>' --where side=A,g=0-5999 を 6 つの版と R5（参考）で回し、試合ごとのブートストラップで B との差の ± を出す
+#     （選ぶスクリプトは共有フォルダの logs/r6-heads-smoke/pick.py。クラウドの小さな通しで通した）
+#   主に見る数: 全部の行の勝敗の交差エントロピー（endWin と試合の結果）。足切り: q の AUC（netLethal と lostNext、全部の行）
+#   選ぶ手順: 1. 各版 V について Δ = 交差エントロピー(V) − 交差エントロピー(B) とその SE を出す
+#             2. Δ + 2 SE < 0 で、q の AUC が B の AUC − 2 SE 以上の版を残す
+#             3. 残った版のうち、交差エントロピーがいちばん小さいものを選ぶ。残らなければ B
+#   選んだ結果を審査とユーザーに知らせ、night/r6-heads-2.txt を選んだ版に書き換えてから 2 晩目の券を出す。B のモデルは残す（後から「選んだ版 対 B」を回せるように）
+#   線ではないが並べる数: 体力 10 以下の交差エントロピー、値 50% 以上のまま次の相手のターンに負けた行、値の帯ごとの実際の勝率、w の AUC（netWin と wonNext）、
+#     r と読みの負けの割合（--reads 12 の readLoss を R5 で 1 回だけ付ける）の当たり方、学習の報告の確かめ用のターン末の数
+#
+# 見込み（PC、svwb-docker・28 スレッド）: 自己対戦は lethal-heads-1 の実測 0.43 秒/試合（R5 は R4 と同じ速さ）で 7 時間 20 分ほど。学習は 1 つ 11 分（C・X・Z の実測）に
+#   出力の分を足して 12〜13 分、6 つで 1 時間 15 分ほど。間引き 20 秒・属性で埋める 1 秒（実測）、profile 2 分
+# 朝: 止まったときのまとめを push してもらい、ingest する。モデル（b・i・w・v・f・a.json）を pack-run で共有フォルダへ（翌朝の選ぶ手順が読む。自己対戦は後で）
+# 回の名前は r6-heads-1（2 晩目のキューが @run:r6-heads-1/<版>.json でこの回のフォルダのモデルを読む）
+
+# 0. 出発の補正: R5 に入力 7 つの行を 0 で足したもの（R5 と同じ値・同じ手。td extend は出力と winForm をそのまま書き出す）
+td extend --model rust/engine/yardstick/pool-r5-net.json --out @/v0.json --est 120
+
+# 1. 自己対戦 6 万試合（g7500000〜7559999。lethal-heads-1 は 7400000〜）。打ち方は R5、印を 3 つ
+td selfplay --model @/v0.json --decks @data/pools/azvaldt/sets/all84.txt --games 60000 --start 7500000 --chunk 3000 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --lostLabel 1 --wonLabel 1 --readLabel 1 --potential rust/engine/yardstick/pool-r4-potential.json --out @/s-{k}.jsonl.gz --est 0.44
+
+# 2. B 基準（入力 7 つを外す）
+td train --impl rust --model @/v0.json --data @/s-{1..20}.jsonl.gz --out @/bt.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks --est 720
+td prune --impl rust --model @/bt.json --data @/s-{1..20}.jsonl.gz --out @/bp.json --est 30
+td attr --model @/bp.json --out @/b.json --keepA 0 --est 10
+
+# 3. I 入力（入力 7 つを足す）
+td train --impl rust --model @/v0.json --data @/s-{1..20}.jsonl.gz --out @/it.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --est 720
+td prune --impl rust --model @/it.json --data @/s-{1..20}.jsonl.gz --out @/ip.json --est 30
+td attr --model @/ip.json --out @/i.json --keepA 0 --est 10
+
+# 4. W 勝ちの形
+td train --impl rust --model @/v0.json --data @/s-{1..20}.jsonl.gz --out @/wt.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --winHead form --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks --est 780
+td prune --impl rust --model @/wt.json --data @/s-{1..20}.jsonl.gz --out @/wp.json --est 30
+td attr --model @/wp.json --out @/w.json --keepA 0 --est 10
+
+# 5. V 勝ちの補助
+td train --impl rust --model @/v0.json --data @/s-{1..20}.jsonl.gz --out @/vt.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --winHead aux --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks --est 780
+td prune --impl rust --model @/vt.json --data @/s-{1..20}.jsonl.gz --out @/vp.json --est 30
+td attr --model @/vp.json --out @/v.json --keepA 0 --est 10
+
+# 6. F 読みの割合
+td train --impl rust --model @/v0.json --data @/s-{1..20}.jsonl.gz --out @/ft.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --readHead aux --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks --est 780
+td prune --impl rust --model @/ft.json --data @/s-{1..20}.jsonl.gz --out @/fp.json --est 30
+td attr --model @/fp.json --out @/f.json --keepA 0 --est 10
+
+# 7. A 全部入り（入力 7 つ ＋ W の形 ＋ r）
+td train --impl rust --model @/v0.json --data @/s-{1..20}.jsonl.gz --out @/at.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --winHead form --readHead aux --est 840
+td prune --impl rust --model @/at.json --data @/s-{1..20}.jsonl.gz --out @/ap.json --est 30
+td attr --model @/ap.json --out @/a.json --keepA 0 --est 10
+
+# 8. 線ではないが毎回見る数字（B。R1〜R5 と同じ）
+profile --opts '{"valueNet":"@/b.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.16
