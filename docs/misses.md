@@ -446,6 +446,9 @@ npm run misses -- cover --dir misses/azvaldt --opts '<同じ設定>' --m 64
 - R4（2026-11-21 からの新しいプールの補正。山札・手札の強化を入力に足して学び直した）は 29.5%（85/288）± 1.8（指紋 455addc9、台帳 `新しいプール-問題集-R4`。R3 は同じ指紋で 24.7%）。
   増えたのは `elf-dustdays-g1067`（ダストデイズを出さずに終える）0 → 15/24・`royal-firstmate-g1104` 14 → 24・`elf-assassin-g1567` 6/24（R3 0）・`dragon-abyss-g1281` 2/24（R3 0）、
   減ったのは `bishop-gem-g1029` 12 → 3・`witch-tico-g1006` 7 → 3・`bishop-miko-g1006` 19 → 16・`nightmare-macmillan-g1004` 18 → 16・`witch-researcher-g1461` 1 → 0。0/24 は 4 問
+- R5（2026-11-22 からの新しいプールの補正。R4 から同じ流れで学び直すときにリーサルの出力を足し、勝つ確率を (1 − q) × 生き延びたときの勝率にした Z）は 50.7%（146/288）± 1.8（指紋 455addc9、台帳 `新しいプール-問題集-R5`）。
+  出力なしで同じ流れの C は 25.7%（74/288）± 2.0（台帳 `リーサルの出力-問題集-C`）。C → R5 で増えたのは `royal-firstmate-g1104` 2 → 24（リーサル避け）・`dragon-abyss-g1281` 2 → 20・`elf-dustdays-g1067` 15 → 24・
+  `witch-researcher-g1461` 9 → 18・`witch-tico-g1006` 5 → 12・`nightmare-macmillan-g1004` 19 → 23（リーサル避け）・`bishop-gem-g1029` 3 → 6・`elf-assassin-g1567` 2 → 4、減ったのは `bishop-miko-g1006` 17 → 15。0/24 は 3 問（[ai-notes/14-2026-11-16.md](ai-notes/14-2026-11-16.md)「Z と C の打ち方の比べ」）
 
 ## 問題集のページ（ブラウザの「問題集」タブ）
 
