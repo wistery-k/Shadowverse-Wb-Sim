@@ -1,0 +1,39 @@
+# 相手のターンの読みが、新しいプールの既定（補正 R5 = リーサルの出力を足して学んだ Z、見込み R4）でも勝率に効いているかと、
+# 読みとターン末の点数の混ぜ方（rescoreMix。選ぶ値 = (1 − m)・読み直した点数 + m・ターン末の点数、既定 0.5）が今も良いかを確かめる
+# （ユーザーの問い 2026-11-22: 前に「相手ターンの読みの価値のほとんどはリーサル」と言われたので、リーサルを見る Z になった今も効くか。
+#  docs/ai-notes/15-2026-11-22.md「相手のターンの読みは Z の上でも効くか」）。
+#
+# 回す前に決めた問いと線（84 個のデッキの鏡の compare。B はどれも今の新しいプールの既定）:
+#   問い 1（読みは効くか）: m = 1（読みを選ぶ値に使わない）対 0.5、1.2 万試合（± 0.4 ほど）。
+#     見込みは −3〜0 ポイント（スターターでは、相手のビームを足して +3.2・幅を広げて +1.9。机上では m = 1 は 1 試合 −4.8 ± 1.4 の得で、
+#     打ち比べの得と対戦の差の比（7.60 に対し +4.83、0.64）で −3 ほどの粗い見積もり。Z が相手のリーサルを見るので、その分は小さくなりうる）。
+#     差 + 2 SE < 0 なら「読みは今も効く」で、既定のまま（差の大きさを記録する）。差 − 2 SE > 0 なら「読みは損」として、読みを外す案をユーザーに出す。
+#     どちらでもなく差が −1 ポイントより上なら、別の夜に 1.2 万試合足す（± 0.28）。足した後、差の 95% の下限が −0.3 より上なら
+#     「読みは要らない」として、読みを飛ばす実装（読みの中の相手のターンは思考の 4 割。下）と、空いた時間で幅を広げる案をユーザーに出す。届かなければ既定のまま
+#   問い 2（混ぜ方）: m = 0.75 対 0.5 と m = 0.25 対 0.5、それぞれ 1.2 万試合（± 0.3〜0.4）。
+#     スターターでは 0.75 が −1.2 ± 0.57・0.25 が 0.5 と同じ（2026-10-22〜23、3200 試合）。机上では 0.75 が −0.45 ± 0.85・0.25 が −0.82 ± 0.76。
+#     差 − 2 SE > 0 なら、その m を既定にする案をユーザーに出す。そうでなければ 0.5 のまま（誤差の中で既定は替えない）
+#   線ではないが見る数字: 型ごとの勝率（svwb kifu winrate --where side=A --by arch・oppArch）と、A・B の席の次の相手のターンに負けたターン末の割合
+#     （svwb kifu values の lostNext。読みを外すと相手のリーサルに入る割合が増えるか）、思考の時間（下の profile。同じ試合番号）
+#
+# 読み（m < 1）と m = 1 の違いは選ぶ値だけ。m = 1 でも読み直しは回る（今のコードは選ぶ値に使わない読みも打つ）ので、m = 1 は速くならない
+#   （クラウド環境の 50 試合で 1 ターン 165 ミリ秒、既定は 151。打ち切り rescoreRace の落とし方が変わる分）。
+#   読みを飛ばしたときの速さは、内訳を測るビルドの割合から見積もる（新しいプールの代表 10 型・50 試合で、読み直し 60.7%・うち読みの中の相手のターン 40.1%・
+#   drawSplit の組み直し 19.4%。読みを飛ばせば思考は 0.6〜0.7 倍ほど。測るビルドは細かい処理を多めに出すので幅を持たせた）。
+#   補正は読みを使う AI の自己対戦（m = 0.5）と読みの想像の局面（--imagined 2）で学んでいるので、ここで測るのは「読まずに打つ」ことだけ（「読まずに学ぶ」ではない）
+#
+# 見込み（PC、svwb-docker・28 スレッド）: compare は 0.18 秒/試合（R4 どうしの実測 0.17 に、m = 1 の 1.1 倍の半分を足した）で、1 つ 36 分、3 つで 1 時間 48 分。profile 2 つで 5 分ほど
+# 朝: 止まったときのまとめ（台帳の行・棋譜）を push してもらい、ingest する
+
+# 1. 問い 1: m = 1 対 0.5（1.2 万試合）
+compare 6000 '{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","rescoreMix":1}' '{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 読みの混ぜ方-1対0.5 --est 0.18
+
+# 2. 問い 2: m = 0.75 対 0.5（1.2 万試合）
+compare 6000 '{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","rescoreMix":0.75}' '{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 読みの混ぜ方-0.75対0.5 --est 0.18
+
+# 3. 問い 2: m = 0.25 対 0.5（1.2 万試合）
+compare 6000 '{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","rescoreMix":0.25}' '{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 読みの混ぜ方-0.25対0.5 --est 0.18
+
+# 4. 思考の時間（同じ試合番号の 840 試合。既定と m = 1）
+profile --opts '{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.16
+profile --opts '{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","rescoreMix":1}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.17
