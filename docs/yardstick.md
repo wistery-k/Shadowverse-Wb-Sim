@@ -44,7 +44,7 @@ AI の版ごとに、**固定した相手**との勝率を記録する表。`npm
 
 - 思考用の乱数はその日の既定（判断ごとに作る。スターターの物差しの相手は古い取り方）なので、同じ設定を測るとちょうど 50.0% になる
   （`--opts '{"valueNet":"rust/engine/yardstick/pool-r3-net.json","potentialNet":"rust/engine/yardstick/pool-r3-potential.json"}'` で `--ref pool-r3`。2026-11-16 に 40 試合で、組がすべて 1 勝 1 敗になるのを確かめた。v0 も同じ）
-- 新しいプールの AI は、今は R4 の補正と見込み（2026-11-21 から。`--opts '{"valueNet":"rust/engine/yardstick/pool-r4-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}'`。夜のキュー night-20261121b の `r.json`・`rpot.json`、台帳の指紋 1e0cadc6・869d3cc8。アズヴォルト環境のページの `data/pools/azvaldt/` と同じ中身）。`pool-r4-*.json` は物差しの相手ではない（相手は `pool-v0`・`pool-r3` のまま）。それまでは R3（上の `pool-r3` の 2 つのファイル）。スターターの既定（`{}`）は新しいカードの行が無い補正なので、この表では測らない
+- 新しいプールの AI は、今は補正 R5 と見込み R4（2026-11-22 から。`--opts '{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}'`。R5 は夜のキュー lethal-heads-1 の `z.json`（リーサルの出力を足して学び直した Z。台帳の指紋 8e0041a7）で、見込みは R4 のまま。アズヴォルト環境のページの `data/pools/azvaldt/` と同じ中身）。`pool-r4-*.json`・`pool-r5-net.json` は物差しの相手ではない（相手は `pool-v0`・`pool-r3` のまま）。2026-11-21〜22 は R4（`pool-r4-*.json`。夜のキュー night-20261121b の `r.json`・`rpot.json`、指紋 1e0cadc6・869d3cc8）、それまでは R3（上の `pool-r3` の 2 つのファイル）。スターターの既定（`{}`）は新しいカードの行が無い補正なので、この表では測らない
 - 1 試合はクラウド環境（4 スレッド）で 0.72 秒ほど（スレッド秒 2.9。スターターの強い相手の物差しの 1.6 倍）。PC（28 スレッド）は段階 4 の compare から 0.18 秒ほどの見込み
 - デッキ別の列は、測った AI がその型を持ったときの勝率（相手は 10 型すべて）。型ごとに 40〜60% ほど散るので、デッキ別は 50% とではなく表の 1 行目と比べる
 - 2026-11-16 の R3（新しいプールの今の AI）は、相手 v0 に 78.21% ± 0.44（8000 試合、PC）。段階 4 の R1 対 v0 の 76.28% ± 0.61 は 84 個のデッキの組なので、この表の行とは比べない。

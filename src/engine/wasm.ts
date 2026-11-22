@@ -9,7 +9,7 @@
 //
 // 探索 AI の補正と見込み（学習したネットワーク）は WASM に埋め込まず、ページごとのファイル（src/engine/nets/<名前>.bin。
 // scripts/pack-nets.ts が JSON から作る。値は JSON とビットまで同じ）を読み込み、WASM を作るたびに入れる（load_nets）。
-// スターターのページは starter（data/value-net.json と同じ）、アズヴォルト環境のページは azvaldt（今は R4）。selectNets で選ぶ。
+// スターターのページは starter（data/value-net.json と同じ）、アズヴォルト環境のページは azvaldt（今は補正 R5・見込み R4）。selectNets で選ぶ。
 // AI を動かす Worker が自分で読み込む（Worker は作った画面が付けた名前 workerName() で、同じ補正を選ぶ）。
 // 画面は AI を動かさないので補正を読み込まない（initEngine の nets: false。src/ui/boot.tsx）。
 //
