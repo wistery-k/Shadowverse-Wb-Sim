@@ -35,11 +35,24 @@ services:
         bind:
           create_host_path: false
     # claude remote-control が終わっても（ネットワークが 10 分ほど切れた等）、コンテナは止めずに中で立ち上げ直す。
-    # コンテナが止まると、中で動いている夜のキュー（npm run night。docs/night.md）も止まるため
+    # コンテナが止まると、中で動いている夜のキュー（npm run night。docs/night.md）も止まるため。
+    # 積むキューの回す係（pueued）も先に立てておく（落ちたら 10 秒後に立ち上げ直す。立てるだけで、キューは night.sh start まで回らない）
     command:
       - bash
       - -c
       - |
+        if command -v pueued > /dev/null; then
+          (while :; do
+            pueued
+            s=$$?
+            # 落ちた pueued の pid とつなぐ口を消してから立て直す（立てるのはこの繰り返しだけ）
+            rm -f "/tmp/pueue-$$(id -u)/pueue.pid" /tmp/pueue-$$(id -u)/pueue_*.socket
+            echo "pueued が終わりました（終わりの状態 $$s）。10 秒後に立ち上げ直します" >&2
+            sleep 10
+          done) &
+        else
+          echo "pueued がありません（イメージを作り直す: docker compose up -d --build）。積むキューは使えません" >&2
+        fi
         while :; do
           claude remote-control --permission-mode "$$CLAUDE_PERMISSION_MODE" --spawn "$$CLAUDE_SPAWN"
           echo "claude remote-control が終わりました（終わりの状態 $$?）。30 秒後に立ち上げ直します" >&2
@@ -48,6 +61,8 @@ services:
     environment:
       CLAUDE_PERMISSION_MODE: ${CLAUDE_PERMISSION_MODE:-acceptEdits}
       CLAUDE_SPAWN: ${CLAUDE_SPAWN:-same-dir}
+      # pueue の設定（無ければ entrypoint.sh が作る。状態とログは ~/svwb-data/pueue に置き、コンテナを作り直しても残す）
+      PUEUE_CONFIG_PATH: /home/wk/svwb-data/pueue/pueue.yml
 
 volumes:
   claude-config:

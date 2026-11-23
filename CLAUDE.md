@@ -56,12 +56,14 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
    - **実験を回す場所**（ユーザー確認済み 2026-10-26。費用を抑えるため）:
      1. 既定は、ユーザーの PC の Docker コンテナ（`docker/remote-control`。Remote Control のセッション `svwb-docker-…`、データは `~/svwb-data` の下）。
         PC で回すのは夜だけで、ユーザーが「今夜は回す」と言った夜だけ（昼はゲームがカクつくので、短いものも回さない。2026-11-10）。
-        compare・yardstick・速さは夜のキュー（`npm run night`、`docs/night.md`）に並べて回す。承認は 1 晩分まとめて取る:
-        `npm run night -- plan <ファイル> --machine svwb-docker` のジョブの一覧と見込みと券の 1 行を見せて「今夜これを回してよいか」を 1 回聞き、承認されたキューの中のジョブは 1 つずつ聞かない。
-        始めるのはユーザーで、ホストで券の 1 行（`docker/remote-control/night.sh go <券>`）を流す（ユーザー決定 2026-11-19。`docs/night.md`「券と go」）
+        compare・yardstick・速さは夜のキュー（`npm run night`、`docs/night.md`）に並べて回す。承認は券ごとに取る:
+        `npm run night -- plan <ファイル> --machine svwb-docker` のジョブの一覧と見込みと券の 1 行を見せて「これをキューに積んでよいか」を 1 回聞き、承認された券の中のジョブは 1 つずつ聞かない。
+        積むのはユーザーで、ホストで券の 1 行（`docker/remote-control/night.sh add <券>`）を流す（昼に積んでも回らない）。回すのもユーザーで、回すと決めた夜に `night.sh start`
+        を流す（止めるのは `night.sh pause`）。スレッドは `add`・`start` を流さない（ユーザー決定 2026-11-23、積むキュー。`docs/night.md`「積むキュー」。
+        PC の 1 晩で確かめるまで、前のやり方の券と `night.sh go <券>` も残す。`docs/night.md`「券と go」）
      2. Google Cloud（`cloud/gcp.sh` の Spot VM など）は、所要時間や費用にかかわらず、使うたびにユーザーの承認を得てから使う。PC より速いことは承認なしで使う理由にならない。2026-11-08 から当分使わないことにして課金を外した（`cloud/README.md`「今は使っていない」）
      3. 十分速く終わるもの（小さく試す・短い確かめなど）は、Claude のクラウド環境（スレッド自身の環境。4 スレッドほどで、PC の 28 スレッドより何倍も遅い）で回してよい
-     - どこで回すときも、回す前に変更を作業ブランチに push し、所要時間を見積もる。見積もりが 1 時間以上なら、回す前にユーザーに確かめる（PC の夜のキューは、1 晩分をまとめて 1 回）
+     - どこで回すときも、回す前に変更を作業ブランチに push し、所要時間を見積もる。見積もりが 1 時間以上なら、回す前にユーザーに確かめる（PC の夜のキューは、券ごとに 1 回）
    - 対戦を打つランナー（compare・yardstick・profile・td selfplay・survey run・rhino-compare・deck-compare・review zero・deep-gap play・beam-gap）は、既定で試合ごとの棋譜を書く（`docs/kifu.md`。夜のキューは回のフォルダの `kifu/`。meta round は `--kifu` を付けたときだけ）。調べ物は、ランナーに専用の処理を足さず、棋譜を打ち直して数える形にそろえていく（`svwb kifu count`・`winrate`・`events`・`seats`。`docs/kifu.md`「数える」。ユーザーの依頼 2026-11-16）
    - ユーザーの PC で回した自己対戦・モデル・棋譜・ログは、`npm run pack-run` でまとめたものを共有フォルダ（`/mnt/project-files/`）の `data/selfplay/<名前>/`・`data/models/<名前>/`・`data/kifu/<名前>/`・`logs/<名前>/` に展開して置く。各回の中身は `logs/<名前>/MANIFEST.md`（`docs/commands.md`「pack-run」）
    - ユーザーの PC の Docker コンテナ（`docker/remote-control`）で回すときは、自己対戦・モデル・ログ・`pack-run` の出力を `~/svwb-data/<名前>/` の下に置く（ホストの同じ場所に見える。`/workspace` と `~/svwb-data` 以外はコンテナを作り直すと消える）

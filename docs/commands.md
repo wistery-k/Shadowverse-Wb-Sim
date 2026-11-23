@@ -324,15 +324,18 @@ npm run ledger -- check
 ## night
 
 ```sh
-npm run night -- plan <ジョブのファイル> [--until 07:00] [--threads N] [--machine svwb-docker]   # ジョブの一覧と見込みと券（始めない）
-docker/remote-control/night.sh go <券>                                                       # ユーザーが今夜回すと決めたら、ホストで（中は npm run night -- go）
-npm run night -- start <ジョブのファイル> --yes [--until 07:00] [--threads N]               # 前の始め方（PC で確かめるまで残す）
+npm run night -- plan <ジョブのファイル> [--threads N] [--machine svwb-docker] [--legacy]     # ジョブの一覧と見込みと積む券（積まない。--legacy は前の go の券）
+docker/remote-control/night.sh add <券>                                                      # 積む（ユーザーがホストで、いつでも。中は npm run night -- add）
+docker/remote-control/night.sh start [--until 07:00|none] | pause [--wait] | status | remove <回>   # 回す・止める（回すのはユーザーが決めた夜）
+docker/remote-control/night.sh go <券>                                                       # 前のやり方（PC で積むキューを確かめるまで残す）
+npm run night -- start <ジョブのファイル> --yes [--until 07:00] [--threads N]               # もっと前の始め方
 npm run night -- status | stop [--now] | resume --yes | wrap | list
 npm run night -- ingest <回の名前|ファイル…>                                                     # スレッドで: 台帳に足す・出口のファイルを展開する
 ```
 
 PC で対戦を回す夜のキュー。ジョブのファイルは 1 行 1 ジョブで、svwb の `compare`・`yardstick`・`profile`・`misses`・`survey` と同じ形（`--label` が要る）。
-夜はユーザーがホストで `plan` の出した券の 1 行（`docker/remote-control/night.sh go <券>`）を流す。
+ユーザーがホストで `plan` の出した券の 1 行（`docker/remote-control/night.sh add <券>`）を流して積み（いつでも。積むだけでは回らない）、
+回すと決めた夜に `night.sh start` で回す（回す係は pueue。止めるのは `night.sh pause`。[night.md](night.md)「積むキュー」）。
 5〜10 分の区切りごとに結果を回のフォルダ（`~/svwb-data/night/<名前>/`）に残し、電源が切れても続きから回る。止まるときに、ジョブごとに 1 行にまとめた行を
 ブランチ `night/<名前>` にコミットし、棋譜などを出口のフォルダ（`~/svwb-data/outbox/<名前>/`）にまとめる。朝はホストで `docker/remote-control/night-push.sh` を流すだけで、
 スレッドが `ingest` で台帳に足す。
