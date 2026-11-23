@@ -1,9 +1,9 @@
-//! ブラウザのアズヴォルト環境のページの AI が、コマンドの同じ補正（今は R5）と同じ手を選ぶか（ユーザーの依頼 2026-11-19。R3 から R4 にしたのは 2026-11-21、R5 にしたのは 2026-11-22）。
+//! ブラウザのアズヴォルト環境のページの AI が、コマンドの同じ補正（今は R6）と同じ手を選ぶか（ユーザーの依頼 2026-11-19。R3 から R4 にしたのは 2026-11-21、R5 にしたのは 2026-11-22、R6 にしたのは 2026-11-23）。
 //!
 //! ページの AI は、WASM の探索 AI（`search`）に、ページが読み込んだ補正と見込み（data/pools/azvaldt/ の JSON を詰めたもの。
 //! scripts/pack-nets.ts、src/engine/wasm.ts）を既定として入れたもの。コマンドの側は、compare・misses の
-//! `--opts '{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}'`（下の PAGE_NET・PAGE_POTENTIAL。
-//! R5 は補正だけを学び直したもので、見込みは R4 のまま）。
+//! `--opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}'`（下の PAGE_NET・PAGE_POTENTIAL。
+//! R5・R6 は補正だけを学び直したもので、見込みは R4 のまま）。
 //!
 //! ここではコマンドの側が決まった局面（新しいプールの問題集 misses/azvaldt/ の 12 問と、代表 10 型のデッキのマリガン）から打つ手を求め、
 //! tests/fixtures/browser-azvaldt.json と比べる。問の局面からは、1 つの AI でそのターンの終わりまで打つ（並びを覚えて使い回す経路も通る。
@@ -28,7 +28,7 @@ use svwb_engine::{acting_player, apply_action, create_game, Action, Phase};
 const MAX_STEPS: u32 = 60;
 
 /// ページの補正の凍結した写し（rust/engine/yardstick/<PAGE_NET>-net.json。data/pools/azvaldt/value-net.json と同じ中身）
-const PAGE_NET: &str = "pool-r5";
+const PAGE_NET: &str = "pool-r6";
 /// ページの見込みの凍結した写し（rust/engine/yardstick/<PAGE_POTENTIAL>-potential.json。data/pools/azvaldt/potential-net.json と同じ中身）
 const PAGE_POTENTIAL: &str = "pool-r4";
 

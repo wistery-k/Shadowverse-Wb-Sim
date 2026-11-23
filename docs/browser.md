@@ -5,7 +5,7 @@
 | ページ | URL | 入口 | タブ | 探索 AI の補正 |
 | --- | --- | --- | --- | --- |
 | スターター | `/Shadowverse-Wb-Sim/` | `index.html`・`src/main.tsx`・`src/ui/App.tsx` | 対戦・デッキ・AI対戦・人間との比較・問題集（開発サーバーではサンドボックス等も） | `starter`（`data/value-net.json`・`data/potential-net.json`） |
-| アズヴォルト環境 | `/Shadowverse-Wb-Sim/azvaldt/` | `azvaldt/index.html`・`src/azvaldt/main.tsx`・`src/azvaldt/App.tsx` | AI対戦（総当たり）・問題集 | `azvaldt`（`data/pools/azvaldt/` の補正 R5・見込み R4。2026-11-21 までは R3、2026-11-22 までは R4） |
+| アズヴォルト環境 | `/Shadowverse-Wb-Sim/azvaldt/` | `azvaldt/index.html`・`src/azvaldt/main.tsx`・`src/azvaldt/App.tsx` | AI対戦（総当たり）・問題集 | `azvaldt`（`data/pools/azvaldt/` の補正 R6・見込み R4。2026-11-21 までは R3、2026-11-22 までは R4、2026-11-23 までは R5） |
 
 `vite build` は 2 つの入口を束ね（`vite.config.ts` の `rollupOptions.input`）、画面の共通の部分は 1 つのチャンクにまとまる。
 ページの上の端に、もう片方のページへのリンクがある。
@@ -36,7 +36,7 @@
 - 補正のファイルは、補正と見込みの JSON の gzip（スターター 3.41MB、R3 6.18MB）より 27% 小さい
 - 上の表のアズヴォルト環境は R3 のとき。R4 にした後（2026-11-21）は、補正のファイルが 4.96MB（JSON の gzip 6.68MB より 26% 小さい）。
   R4 は手札のカードごとの攻撃力・体力の変化の入力（カードごとの行）を足したので、R3 の 4.53MB より 1 割ほど大きい。
-  R5（2026-11-22）は 4.97MB（リーサルの出力の 33 個の数と winForm が増えただけで、R4 とほぼ同じ）
+  R5（2026-11-22）は 4.97MB（リーサルの出力の 33 個の数と winForm が増えただけで、R4 とほぼ同じ）。R6（2026-11-23）は 4.98MB（R5 と同じ形。入力 7 つの行が 0 で増えた）
 - アズヴォルト環境のページは、スターターの補正（`starter-*.bin`）を一度も取りに行かない（スターターのページも `azvaldt-*.bin` を取りに行かない）
 - 公開サイト（GitHub Pages）が WASM・JS を gzip で送るかは、作業環境から公開サイトに届かないので確かめていない。
   送らなければ、開いたときはスターター 12.3MB → 3.2MB、アズヴォルト環境 3.5MB。補正のファイルは gzip 済みなので、どちらでも同じ大きさ。
@@ -85,7 +85,7 @@
 - **AI対戦（総当たり）**: スターターのページと同じ画面（`src/ui/Simulate.tsx`）に、選べるデッキ・AI・既定を渡したもの
   - デッキ: 取り込んだプロのデッキ 84 個（`data/pools/azvaldt/decks/`。`src/azvaldt/decks.ts`）だけ。大会ごとにまとめて出し、「代表 10 型」「全部」でまとめて選べる。
     既定は代表 10 型（`data/pools/azvaldt/sets/rep10.txt`。物差しと同じ組）。貼り付け・自作・編集は付けない
-  - AI: 探索（このページの補正 R5）・貪欲法・ランダム。既定は探索だけ
+  - AI: 探索（このページの補正 R6）・貪欲法・ランダム。既定は探索だけ
   - 1 組の試合数の既定は 2（席を入れ替えて 1 回ずつ）。代表 10 型の 45 組で 90 試合
   - 試合のリプレイ・「AI の考え」・「打ち比べ」はスターターのページと同じ（「サンドボックスで開く」は出さない）。
     リプレイの「再現」のコマンドには `--pool azvaldt` が付く（`npm run game -- … --pool azvaldt`。前期のローテーションのカードを足し、補正をこのページと同じにする）
@@ -97,7 +97,7 @@
 
 ### ページの試合の時間
 
-R3 のときに測った。R4・R5 は測り直していない（PC の profile で 1 手の思考は R4 43.4 ミリ秒・R3 50.8 ミリ秒で、同じほど。版が違う。R5 は R4 と同じ形のネットワークにリーサルの出力の 1 つの数を足しただけで、PC の compare は R4 対 R3 と同じ 0.17 秒/試合）。
+R3 のときに測った。R4・R5・R6 は測り直していない（PC の profile で 1 手の思考は R4 43.4 ミリ秒・R3 50.8 ミリ秒で、同じほど。版が違う。R5 は R4 と同じ形のネットワークにリーサルの出力の 1 つの数を足しただけで、PC の compare は R4 対 R3 と同じ 0.17 秒/試合。R6 は R5 と同じ形で、クラウド環境の profile で同じ 80 試合の思考は R5 と差が見えない）。
 
 
 - Node の WASM で、代表 10 型の R3 どうしの 1 試合は 2.9〜11.5 秒（平均 5.7 秒）
@@ -106,11 +106,11 @@ R3 のときに測った。R4・R5 は測り直していない（PC の profile 
 
 ### ブラウザの探索 AI とコマンドの探索 AI
 
-ページの探索 AI（今は補正 R5・見込み R4）は、WASM の探索 AI の既定の設定に、ページが読み込んだ補正と見込みを入れたもの。コマンドの R5 は
-`--opts '{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}'`（R5 は補正だけを学び直したので、見込みは R4 のファイル）。
+ページの探索 AI（今は補正 R6・見込み R4）は、WASM の探索 AI の既定の設定に、ページが読み込んだ補正と見込みを入れたもの。コマンドの R6 は
+`--opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}'`（R5・R6 は補正だけを学び直したので、見込みは R4 のファイル）。
 同じ局面（`misses/azvaldt/` の 12 問と、代表 10 型のデッキのマリガン 2 つ）から同じ乱数で打った手を `tests/fixtures/browser-azvaldt.json` に書き、
 CLI（`rust/engine/tests/browser_azvaldt.rs`）と WASM（`tests/nets-azvaldt.test.ts`）の両方で比べる。
 読み込んだ補正の指紋も、JSON を serde_json で読んだものと比べる（`data/pools/azvaldt/` と `rust/engine/yardstick/` の写しの両方。指紋にはリーサルの出力と winForm も入る。2026-11-22 から）。
 ページの補正を入れ替えるときは、`data/pools/azvaldt/` と `rust/engine/yardstick/pool-<版>-*.json` を同じファイルにし、両方のテストの `PAGE_NET`（見込みを替えないなら `PAGE_POTENTIAL` はそのまま）を直して、
-表を `SVWB_WRITE_FIXTURE=1 cargo test --release --test browser_azvaldt` で書き直す。R3 → R4 では 14 行のうち 11 行の手が変わった（2026-11-21）。R4 → R5 では 10 行（2026-11-22）。
+表を `SVWB_WRITE_FIXTURE=1 cargo test --release --test browser_azvaldt` で書き直す。R3 → R4 では 14 行のうち 11 行の手が変わった（2026-11-21）。R4 → R5 では 10 行（2026-11-22）。R5 → R6 では 9 行（2026-11-23）。
 2026-11-19 には、ブラウザで打った 1 試合（R3 どうし）を、リプレイの「再現」のコマンドで打ち直して同じ手数・ターン数になることも確かめた。
