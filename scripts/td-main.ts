@@ -666,7 +666,8 @@ export interface Dataset {
   q: Float64Array;
 }
 
-type IvZone = "hand" | "drawn" | "board" | "oppBoard" | "res" | "oppRes";
+/** plan: 選ばなかった候補の枝（svwb td branch）。もとの試合と同じ局面から分かれるので、もとの局面との組は作らない */
+type IvZone = "hand" | "drawn" | "board" | "oppBoard" | "res" | "oppRes" | "plan";
 
 const isResZone = (z: IvZone): boolean => z === "res" || z === "oppRes";
 
@@ -876,7 +877,7 @@ export function loadData(files: string[], holdout: number, ivWeight = 1, keep?: 
         const variant = pos[r.iv.p][0];
         const zone = r.iv.zone ?? "hand";
         const owner = zone === "oppBoard" || zone === "oppRes" ? 1 - r.iv.p : r.iv.p;
-        if (base !== undefined && base >= 0 && variant !== undefined && variant >= 0) {
+        if (zone !== "plan" && base !== undefined && base >= 0 && variant !== undefined && variant >= 0) {
           pairs.push({ base, variant, card: r.iv.card ?? r.iv.res ?? "", deck: r.decks[owner]!, opp: r.decks[1 - owner]!, zone, d: r.iv.d ?? 0 });
         }
       } else {
@@ -1162,7 +1163,7 @@ function report(label: string, d: Dataset, v: Float64Array, targets: Float64Arra
 }
 
 /** 介入の対の、測った価値（勝敗の差の平均）とモデルが見ている価値（予測の差の平均） */
-const IV_ZONE_NAME: Record<IvZone, string> = { hand: "", drawn: "引いたとき", board: "自分の場", oppBoard: "相手の場", res: "自分の", oppRes: "相手の" };
+const IV_ZONE_NAME: Record<IvZone, string> = { hand: "", drawn: "引いたとき", board: "自分の場", oppBoard: "相手の場", res: "自分の", oppRes: "相手の", plan: "枝" };
 /** 資源の介入の資源の名前（td selfplay --ivRes の res） */
 const RES_NAME: Record<string, string> = { ep: "EP", sep: "SEP", hp: "体力", maxPp: "PP 最大値" };
 
@@ -1171,7 +1172,7 @@ const ivGroup = (q: IvPair): string => (isResZone(q.zone) ? `${IV_ZONE_NAME[q.zo
 
 function ivSummary(d: Dataset, v: Float64Array, holdoutOnly: boolean): string | null {
   // 手札・自分の場・相手の場・資源（自分・相手、EP・SEP・体力・PP 最大値）の順
-  const order = (q: IvPair): number => ["hand", "drawn", "board", "oppBoard", "res", "oppRes"].indexOf(q.zone) * 10 + (isResZone(q.zone) ? Object.keys(RES_NAME).indexOf(q.card) + 1 : 0);
+  const order = (q: IvPair): number => ["hand", "drawn", "board", "oppBoard", "res", "oppRes", "plan"].indexOf(q.zone) * 10 + (isResZone(q.zone) ? Object.keys(RES_NAME).indexOf(q.card) + 1 : 0);
   const groups = new Map<string, { o: number; n: number; measured: number; predicted: number }>();
   for (const q of d.pairs) {
     if (holdoutOnly && !d.holdout[q.base]) continue;
