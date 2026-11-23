@@ -9,13 +9,9 @@
 #   2. まだ上げていない night/ のブランチを push する
 #   3. 台帳の行が全部 GitHub の main の台帳に入った回のブランチは、上げ直さず、GitHub から消す（手元のブランチは続きを回すときに使うので残す）
 # 上げたら、スレッドに「<回の名前> を push した」と伝える。スレッドが npm run night -- ingest <回の名前> で台帳に足す。
+# GitHub とやり取りする git（fetch と push）だけは (set -x; git …) で流し、流す前にそのコマンドを出す（パスフレーズを聞かれたとき、どのコマンドか分かるように）。
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
-
-# GitHub とやり取りする git の前に、何をするかを出す（SSH 鍵のパスフレーズを聞かれたとき、何のプロンプトか分かるように）
-say_git() {
-  echo "$1（パスフレーズを聞かれたら、GitHub に使っている SSH 鍵のものです）"
-}
 cd "$here/../.."
 
 # 1. まとめが済んでいない回をまとめる（コンテナが動いていなければ飛ばす）
@@ -28,8 +24,7 @@ else
 fi
 
 # 2・3 のために GitHub の main と night/ のブランチを取ってくる（GitHub で消したブランチは手元の origin/night/… からも消える）
-say_git "これから git fetch で、GitHub から main と night/ のブランチを取ってきます"
-git fetch --quiet --prune origin '+refs/heads/main:refs/remotes/origin/main' '+refs/heads/night/*:refs/remotes/origin/night/*'
+(set -x; git fetch --quiet --prune origin '+refs/heads/main:refs/remotes/origin/main' '+refs/heads/night/*:refs/remotes/origin/night/*')
 main_ledger=$(mktemp)
 rows=$(mktemp)
 trap 'rm -f "$main_ledger" "$rows"' EXIT
@@ -48,8 +43,7 @@ for b in $(git for-each-ref --format='%(refname:short)' 'refs/heads/night/'); do
   if in_main "$b"; then
     # main に入った回。GitHub に残っていれば消す
     if [ -n "$remote" ]; then
-      say_git "これから git push --delete で、GitHub のブランチ $b を消します"
-      git push --quiet origin --delete "$b"
+      (set -x; git push --quiet origin --delete "$b")
       gone="$gone $b"
     fi
   elif [ "$remote" != "$(git rev-parse "refs/heads/$b")" ]; then
@@ -65,8 +59,7 @@ if [ -z "$todo" ]; then
   exit 0
 fi
 for b in $todo; do
-  say_git "これから git push で、$b を GitHub に上げます"
-  git push origin "refs/heads/$b:refs/heads/$b"
+  (set -x; git push origin "refs/heads/$b:refs/heads/$b")
 done
 echo
 echo "上げたブランチ:"
