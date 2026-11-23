@@ -102,7 +102,7 @@ npm run svwb -- survey run --out 結果.jsonl --games a-b [--rate 0.1] [--m 32] 
 npm run svwb -- survey report 結果.jsonl… [--label 名前] [--no-ledger] [--top 20] [--states <フォルダ>]
 npm run svwb -- survey recheck 結果.jsonl… --out 打ち直し.jsonl [--m 32] [--peek 1] [--batch 16]
 npm run svwb -- survey turns 結果.jsonl… --pos <試合>:<手の番号> [--stage 2] [--out 回ごと.jsonl] [--cards <カード名>,…] [--why <回>,… [--explain <回数>]]
-npm run svwb -- survey values 結果.jsonl… --kifu <棋譜>[,<棋譜>…] --score '<設定>' [--reads 12] --out 候補.jsonl
+npm run svwb -- survey values 結果.jsonl… --kifu <棋譜>[,<棋譜>…] --score '<設定>' [--reads 12] [--draws 1] [--seed 0] --out 候補.jsonl
 ```
 
 | 引数 | 既定 | 意味 |
@@ -131,6 +131,8 @@ npm run svwb -- survey values 結果.jsonl… --kifu <棋譜>[,<棋譜>…] --sc
 | `values --kifu` | （要る） | 調査の試合の棋譜（`run` が書いたもの。ファイルかフォルダをコンマで並べる）。局面を棋譜から作り直し、調査を打った AI（試合の行の `opts`）に試合と同じ乱数で考えさせて、候補を作り直す（2026-11-21、測定のみ。[ai-notes/14](ai-notes/14-2026-11-16.md)「死ぬ確率と生き延びたときの勝率で候補を選んだら」） |
 | `values --score` | `{}` | 候補の終局面（考えた決定化の局面で、読んだ並び `full` を打ったビームの終局面）に値を付ける探索 AI の設定（`valueNet` が要る）。1 候補 1 行で、`g`・`i`・`k`（候補の添字）・`match`（局面と候補の手が結果の行と同じか）・`chosen`・`top`・`cut`・`hp`・`oppHp`・`ended` と、`kifu values` と同じ `end`・`endWin`・`readLoss`・`readWin`・`pickWin`・`x`・`v`・`extra`（[kifu.md](kifu.md)「ターン末の値」） |
 | `values --reads` | 12 | 読みの引き直しの数（種は局面ごとに決め、候補で同じ） |
+| `values --draws` | 0 | 1 なら、候補ごとに引き直しごとの読みの点数 `reads`（残った PP の分を引いたもの。相手のリーサルは −100 万）と混ぜる割合 `mix` を足し、並びに引く手・ランダムな手のある候補には、探索の drawSplit と同じ作り方の値 `splitEnd`（引きを作り直して組み直したターン末の点数の、引きの重み付きの平均）と `splitReads`（[重み, 読みの点数]。相手の手札の引き直しを引きごとに分ける）も足す（`SearchAgent::split_values`）。AI が選ぶときの値は、引く手の無い候補が (1 − mix) × `reads` の平均 + mix × `end`、ある候補が (1 − mix) × `splitReads` の重み付きの平均 + mix × `splitEnd`。**引く手のある候補の `end`・`endWin`・`readLoss`・`readWin`・`pickWin` は、考えた決定化の引きを知って打ったビームの終局面のもので、探索の選ぶときの値とは違う**（新しいプールの調査の R3 で、試合の値より中央で 3.7 点高い。`splitEnd`・`splitReads` で作り直すと中央 0.2 点。2026-11-23、[ai-notes/15](ai-notes/15-2026-11-22.md)「選び直しの得が逃げる場所」） |
+| `values --seed` | 0 | 読みの引き直しと drawSplit の引きの種の元。0 は前と同じ種。ほかの数なら、同じ局面で別の組の引き直し（読み 12 の AI のぶれを、組を替えて見る） |
 | `recheck --batch` | 16 | まとめて打って書く局面の数。出力に既にある局面は飛ばす（同じ引数で再開できる）。台帳には書かない |
 
 - `run` は出力に既にある試合を飛ばす（同じ引数で再開できる）。試合の行の無い局面の行（途中で止めたもの）は、再開のときに消す

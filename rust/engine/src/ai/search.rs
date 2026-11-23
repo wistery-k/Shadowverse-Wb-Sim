@@ -2467,6 +2467,128 @@ impl SearchAgent {
             .collect()
     }
 
+    /// root から並び full を打つ候補の、選ぶときの値の材料を、探索の drawSplit（plan_turn の rescore_node）と同じ作り方で出す（測る道具。svwb survey values --draws 1。打つ手は変えない）。
+    /// 並びに引く手・ランダムな手が無いか、drawSplit を使わない設定なら None（呼び出し側は今までどおり full の終局面を read_values で読む）。
+    /// ある候補は、その手の直前の局面で自分の山札と乱数を作り直し（enumerate なら一番上のカードの種類ごと。種は enum_seed と split_seeds で、
+    /// 探索と同じくどの候補でも同じ）、その手の後を drawSplit の組み直しのビームでターン末まで打ち、引きごとのターン末の点数と、
+    /// 相手の手札の引き直し seeds を引きごとに分けて読んだ点数を返す: (ターン末の点数の重み付きの平均, 引き直しごとの (重み, 読みの点数))。
+    /// 選ぶときの値は (1 − rescoreMix) × 読みの重み付きの平均 + rescoreMix × ターン末の点数
+    pub fn split_values(
+        &self,
+        root: &GameState,
+        p: PlayerIndex,
+        full: &[Action],
+        seeds: &[u32],
+        enum_seed: u32,
+        split_seeds: &[u32],
+    ) -> Option<(f64, Vec<(f64, f64)>)> {
+        let ds = self.opts.draw_split?;
+        let env = self.env();
+        let pl = Planner {
+            env: &env,
+            p,
+            root: Rc::new(root.clone()),
+            steps: Vec::new(),
+        };
+        let mut steps: Steps = Vec::new();
+        let mut cur = root.clone();
+        for a in full {
+            let next = try_apply_action(&cur, a)?;
+            steps.push((a.clone(), Rc::new(next.clone())));
+            cur = next;
+        }
+        let c = first_chance_step(root, &steps, p)?;
+        let split_opts = SearchOptions {
+            beam_width: ds.beam_width,
+            max_depth: ds.max_depth,
+            draw_split: None,
+            potential: None,
+            ..self.opts.clone()
+        };
+        let senv = Env {
+            opts: &split_opts,
+            w: env.w,
+            opp_w: env.opp_w,
+            policy_w: env.policy_w,
+        };
+        let before: &GameState = if c == 0 { root } else { &steps[c - 1].1 };
+        let a = &steps[c].0;
+        let deck = &before.players[p].deck;
+        let draws = steps[c].1.players[p].deck.len() != deck.len();
+        let samples: Vec<(u32, Option<CardIdx>, f64)> = if ds.enumerate && draws && !deck.is_empty()
+        {
+            let mut kinds: Vec<(CardIdx, usize)> = Vec::new();
+            for r in deck.iter() {
+                match kinds.iter_mut().find(|(x, _)| *x == r.card) {
+                    Some(e) => e.1 += 1,
+                    None => kinds.push((r.card, 1)),
+                }
+            }
+            kinds.sort_by_key(|(x, _)| *x);
+            let n = deck.len() as f64;
+            kinds
+                .into_iter()
+                .map(|(x, m)| {
+                    (
+                        enum_seed ^ (x as u32).wrapping_mul(0x9E37_79B1),
+                        Some(x),
+                        m as f64 / n,
+                    )
+                })
+                .collect()
+        } else {
+            split_seeds
+                .iter()
+                .map(|&seed| (seed, None, 1.0 / split_seeds.len() as f64))
+                .collect()
+        };
+        let k = samples.len();
+        let mut read_xs: Vec<(f64, f64)> = Vec::new();
+        let mut te_sum = 0.0;
+        let mut te_w = 0.0;
+        for (j, &(seed, top, w)) in samples.iter().enumerate() {
+            let mut r = Rng::new(seed);
+            let mut s = before.clone();
+            reshuffle_own(&mut s, p, &mut r);
+            if let Some(x) = top {
+                put_on_top(&mut s, p, x);
+            }
+            let Some(s1) = try_apply_action(&s, a) else {
+                continue;
+            };
+            let (end, te) = split_turn_end(&pl, Rc::new(s1), &senv);
+            te_sum += w * te;
+            te_w += w;
+            if end.phase == Phase::Ended {
+                read_xs.push((w, pl.eval_state(&end)));
+                continue;
+            }
+            let settled = pl.settle(&end);
+            let base = settled.as_ref().unwrap_or(&end);
+            let left = pl.leftover(&end);
+            let gate = pl.read_gate(&end);
+            let mine: Vec<u32> = if seeds.len() >= k {
+                seeds.iter().skip(j).step_by(k).copied().collect()
+            } else if !seeds.is_empty() {
+                vec![seeds[j % seeds.len()]]
+            } else {
+                vec![r.int(u32::MAX as usize) as u32]
+            };
+            let wr = w / mine.len().max(1) as f64;
+            for &seed2 in &mine {
+                let mut r2 = Rng::new(seed2);
+                let d = read_determinize(base, p, &mut r2, &self.opts);
+                let (v, _) = read_once(&pl, &d, &mut r2, gate);
+                read_xs.push((wr, v - left));
+            }
+        }
+        if te_w > 0.0 && !read_xs.is_empty() {
+            Some((te_sum / te_w, read_xs))
+        } else {
+            None
+        }
+    }
+
     /// read_values の引き直し 1 つ（種 seed）の、相手のターンを読む前の決定化した局面（調べもの用。svwb review explain。
     /// oppHandCommon と readOwnDeckApart なら、同じ種の引き直しはどの終局面でも相手の手札が同じ）
     pub fn read_view(&self, end: &GameState, p: PlayerIndex, seed: u32) -> GameState {
