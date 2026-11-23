@@ -147,6 +147,7 @@ pub fn reference_options() -> SearchOptions {
         // 思考用の乱数は 2026-11-10 より前の取り方のまま（相手の手を変えない）
         sequential_rng: true,
         pick: None,
+        read_lethal: None,
     }
 }
 
@@ -233,6 +234,7 @@ pub fn strong_reference_options() -> SearchOptions {
         // 思考用の乱数は 2026-11-10 より前の取り方のまま（相手の手を変えない）
         sequential_rng: true,
         pick: None,
+        read_lethal: None,
     }
 }
 
@@ -364,6 +366,7 @@ pub fn pool_reference_options(name: &str) -> SearchOptions {
         record_reads: false,
         sequential_rng: false,
         pick: None,
+        read_lethal: None,
     }
 }
 

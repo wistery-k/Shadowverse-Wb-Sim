@@ -346,6 +346,17 @@ pub fn exact_lethal_counts() -> (u32, u32) {
     COUNTS.with(|c| *c.borrow())
 }
 
+/// f を、空のメモ（と 0 の回数）で呼び、終わったら元のメモと回数に戻す。読みの中の相手のリーサル探索（search.rs の readLethal）が、
+/// 打ち手の思考のメモ（ターンごとの局面数の上限を含む）と混ざらないようにする（呼ぶたびに空のメモから探す）
+pub fn with_fresh_exact_cache<R>(f: impl FnOnce() -> R) -> R {
+    let saved = CACHES.with(|c| std::mem::take(&mut *c.borrow_mut()));
+    let counts = COUNTS.with(|c| std::mem::take(&mut *c.borrow_mut()));
+    let r = f();
+    CACHES.with(|c| *c.borrow_mut() = saved);
+    COUNTS.with(|c| *c.borrow_mut() = counts);
+    r
+}
+
 /// メモを捨てる（新しい試合を始めるとき）
 pub fn reset_exact_lethal_cache() {
     CACHES.with(|c| *c.borrow_mut() = [None, None]);

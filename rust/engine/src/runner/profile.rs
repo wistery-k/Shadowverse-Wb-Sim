@@ -36,7 +36,9 @@ use super::parallel::{parallel_map, thread_count};
 use super::yardstick::{command_line, commit_label_excluding, short_name};
 use super::{compare_decks, fixed};
 use crate::ai::rhino::RhinoAgent;
-use crate::ai::search::{SearchAgent, SearchOptions};
+use crate::ai::search::{
+    take_read_lethal_stats, ReadLethalStats, SearchAgent, SearchOptions, READ_LETHAL_EDGES,
+};
 use crate::ai::Agent;
 use crate::data::{data, CardIdx, CrestIdx, Deck};
 use crate::game::{acting_player, apply_action, create_game, legal_actions};
@@ -88,6 +90,8 @@ struct GameRecord {
     crest_fired: [CrestFired; 2],
     /// 席ごとの、一度でも持ったクレストと、最初に持った自分のターン（マリガンの前後に置いた信仰は 0）
     crest_held: [BTreeMap<CrestIdx, u32>; 2],
+    /// 席ごとの readLethal の数（設定に readLethal があるときだけ数える）
+    read_lethal: [ReadLethalStats; 2],
     /// 棋譜の 1 行（棋譜を書くときだけ）
     kifu: Option<String>,
 }
@@ -242,6 +246,7 @@ impl GameRecord {
             "seconds": self.secs,
             "think": self.think,
             "decisions": self.decisions,
+            "readLethal": self.read_lethal.iter().map(read_lethal_json).collect::<Vec<_>>(),
         })
     }
 }
@@ -282,6 +287,8 @@ fn play_timed(
         make_agent(opts, seats[1], rhino),
     ];
     let _ = prof::take();
+    let _ = take_read_lethal_stats();
+    let mut read_lethal: [ReadLethalStats; 2] = Default::default();
     let t0 = Instant::now();
     let mut s = create_game([&seats[0].cards, &seats[1].cards], seed);
     let mut rng = MatchRng::new(seed);
@@ -312,6 +319,7 @@ fn play_timed(
         let secs = t.elapsed().as_secs_f64();
         think[actor] += secs;
         decisions[actor] += 1;
+        read_lethal[actor].add(&take_read_lethal_stats());
         if s.phase != Phase::Mulligan && last_turn[actor] != s.turn {
             last_turn[actor] = s.turn;
             own_turns[actor] += 1;
@@ -421,7 +429,20 @@ fn play_timed(
         first_seat: s.first,
         crest_fired: [st0.crest_fired, st1.crest_fired],
         crest_held: [st0.crest_held, st1.crest_held],
+        read_lethal,
     }
+}
+
+/// readLethal の数の JSON（区間の下端の順）
+fn read_lethal_json(x: &ReadLethalStats) -> Value {
+    json!({
+        "edges": READ_LETHAL_EDGES,
+        "starts": x.starts,
+        "reads": x.reads,
+        "searched": x.searched,
+        "found": x.found,
+        "replayFailed": x.replay_failed,
+    })
 }
 
 /// CPU の名前（Linux の /proc/cpuinfo。読めなければ "?"）
@@ -632,6 +653,64 @@ struct Summary {
     slow: Vec<SlowDecision>,
     /// --check で不変条件を確かめたか、破った局面
     check: Option<Vec<String>>,
+    /// readLethal の数（全部の席の合計）
+    read_lethal: ReadLethalStats,
+}
+
+/// 報告の readLethal の節（q の区間ごとの、読みの起点・引き直し・リーサル探索をした数と見つけた数、線ごとの掛かる割合）
+fn read_lethal_section(out: &mut String, x: &ReadLethalStats, seats: u32) {
+    let n = READ_LETHAL_EDGES.len();
+    let sum = |v: &[u64]| v.iter().sum::<u64>();
+    let pct = |a: u64, b: u64| {
+        if b == 0 {
+            "―".to_string()
+        } else {
+            format!("{}%", fixed(100.0 * a as f64 / b as f64, 2))
+        }
+    };
+    let per = |a: u64| fixed(a as f64 / seats.max(1) as f64, 1);
+    out.push_str("\n## 読みの中の相手のリーサル探索（readLethal）\n\n");
+    out.push_str(&format!(
+        "読みの起点（読み直した終局面と、drawSplit で作り直した引きごとの終局面）を、補正のリーサルの出力 q の区間ごとに数える。\
+         1 席 1 試合あたりは {seats} 席で割った数。見つけた並びを打っても相手が勝たなかったのは {} 回\n\n",
+        x.replay_failed
+    ));
+    out.push_str("| q | 起点 | 起点（1 席 1 試合） | 引き直し | リーサル探索 | 見つけた |\n| --- | ---: | ---: | ---: | ---: | ---: |\n");
+    for b in 0..n {
+        let hi = if b + 1 < n {
+            format!("{}%", fixed(100.0 * READ_LETHAL_EDGES[b + 1], 0))
+        } else {
+            "100%".into()
+        };
+        out.push_str(&format!(
+            "| {}%〜{hi} | {} | {} | {} | {} | {} |\n",
+            fixed(100.0 * READ_LETHAL_EDGES[b], 0),
+            x.starts[b],
+            per(x.starts[b]),
+            x.reads[b],
+            x.searched[b],
+            x.found[b]
+        ));
+    }
+    out.push_str(&format!(
+        "| 全部 | {} | {} | {} | {} | {} |\n\n",
+        sum(&x.starts),
+        per(sum(&x.starts)),
+        sum(&x.reads),
+        sum(&x.searched),
+        sum(&x.found)
+    ));
+    out.push_str("線ごとの、q が線以上の起点・引き直しの割合と、見つけた数のうち q が線以上の割合（リーサル探索をした区間だけの数）:\n\n");
+    out.push_str("| 線 | 起点 | 引き直し | 見つけた |\n| --- | ---: | ---: | ---: |\n");
+    for (b, &e) in READ_LETHAL_EDGES.iter().enumerate() {
+        out.push_str(&format!(
+            "| {}% | {} | {} | {} |\n",
+            fixed(100.0 * e, 0),
+            pct(sum(&x.starts[b..]), sum(&x.starts)),
+            pct(sum(&x.reads[b..]), sum(&x.reads)),
+            pct(sum(&x.found[b..]), sum(&x.found)),
+        ));
+    }
 }
 
 fn report(sm: &Summary, date: &str, commit: &str, label: &str) -> String {
@@ -707,6 +786,9 @@ fn report(sm: &Summary, date: &str, commit: &str, label: &str) -> String {
             &mut out,
             "- 測らないビルドなので内訳は無し（`npm run profile` なら内訳も出る）",
         ),
+    }
+    if !sm.read_lethal.is_empty() {
+        read_lethal_section(&mut out, &sm.read_lethal, sm.all.seats);
     }
     push(&mut out, "");
     push(&mut out, "## デッキごとの 1 試合の時間");
@@ -1441,6 +1523,14 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             v
         },
         check: check.then(|| records.iter().flat_map(|r| r.violations.clone()).collect()),
+        read_lethal: {
+            let mut t = ReadLethalStats::default();
+            for r in &records {
+                t.add(&r.read_lethal[0]);
+                t.add(&r.read_lethal[1]);
+            }
+            t
+        },
     };
     let date = command_line("date", &["+%Y-%m-%d"]).unwrap_or("?".into());
     let commit = commit_label_excluding("docs/profile.md");
