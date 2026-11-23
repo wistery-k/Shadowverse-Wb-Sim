@@ -200,6 +200,27 @@ describe("ジョブの行", () => {
       mkdirSync(join(runRoot, "r6-heads-1"));
       writeFileSync(join(runRoot, "r6-heads-1", "w.json"), "{}");
       expect(() => checkRunRefs([ext], runRoot)).not.toThrow();
+      // 学習のデータ（{a..b} を開き、ほかの回のデータとカンマで並べる）も、開いた 1 つずつを確かめる
+      const tr = parseJobs(
+        "td train --impl rust --model @run:r6-heads-1/w.json --data @run:r6-heads-1/s-{1..2}.jsonl.gz,@run:lethal-heads-1/s-{1..2}.jsonl.gz --out @/d.json --est 10",
+      )[0]!;
+      expect(jobRunRefs(tr)).toEqual([
+        "@run:r6-heads-1/w.json",
+        "@run:r6-heads-1/s-1.jsonl.gz",
+        "@run:r6-heads-1/s-2.jsonl.gz",
+        "@run:lethal-heads-1/s-1.jsonl.gz",
+        "@run:lethal-heads-1/s-2.jsonl.gz",
+      ]);
+      expect(jobArgv(tr, 0, 1, "/root/night/r6-heads-2")).toContain(
+        "/root/night/r6-heads-1/s-1.jsonl.gz,/root/night/r6-heads-1/s-2.jsonl.gz,/root/night/lethal-heads-1/s-1.jsonl.gz,/root/night/lethal-heads-1/s-2.jsonl.gz",
+      );
+      writeFileSync(join(runRoot, "r6-heads-1", "s-1.jsonl.gz"), "");
+      writeFileSync(join(runRoot, "r6-heads-1", "s-2.jsonl.gz"), "");
+      expect(() => checkRunRefs([tr], runRoot)).toThrow(/lethal-heads-1\/s-1.jsonl.gz がありません/);
+      mkdirSync(join(runRoot, "lethal-heads-1"));
+      writeFileSync(join(runRoot, "lethal-heads-1", "s-1.jsonl.gz"), "");
+      writeFileSync(join(runRoot, "lethal-heads-1", "s-2.jsonl.gz"), "");
+      expect(() => checkRunRefs([tr], runRoot)).not.toThrow();
     } finally {
       rmSync(runRoot, { recursive: true, force: true });
     }

@@ -435,9 +435,9 @@ export function jobInputs(job: Job): string[] {
 /** @/ を回のフォルダに、@run:<回の名前>/ を同じ根の下のその回のフォルダにする */
 export const atDir = (word: string, dir: string): string => word.split("@/").join(`${dir}/`).split("@run:").join(`${dirname(dir)}/`);
 
-/** ジョブが読む前の回のファイル（@run:<回の名前>/<ファイル> の形のまま） */
+/** ジョブが読む前の回のファイル（@run:<回の名前>/<ファイル> の形のまま。{a..b} は開く） */
 export function jobRunRefs(job: Job): string[] {
-  return [...new Set(job.line.match(/@run:[^\s"',]+/g) ?? [])];
+  return [...new Set((job.line.match(/@run:[^\s"',]+/g) ?? []).flatMap((ref) => expandBraces(ref).split(",")))];
 }
 
 /** @run: の書き方を確かめる（回の名前は英数字と . _ -、ファイルは回のフォルダの中） */
