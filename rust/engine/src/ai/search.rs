@@ -160,6 +160,9 @@ pub struct ReadLethal {
     pub threshold: f64,
     /// q を出す補正（リーサルの出力のあるもの）。None なら探索 AI の既定の補正
     pub net: Option<Arc<ValueNet>>,
+    /// 読みの中のリーサル探索が、ビームで見つからないときに全探索で調べる局面数の上限（0 なら全探索をしない）。
+    /// None なら、このAI のリーサル探索と同じ（lethal_exact_states）
+    pub exact_states: Option<i64>,
 }
 
 /// ReadLethalStats の q の区間の下端（q がこれ以上で次の下端より小さい）
@@ -1943,7 +1946,13 @@ fn opp_lethal_first(pl: &Planner, start: &GameState, bin: usize) -> Option<GameS
     note_read_lethal(|st| st.searched[bin] += 1);
     let seq = {
         let _p = prof::scope(Sec::Lethal);
-        with_fresh_exact_cache(|| lethal_line(pl.opts(), &after, q))?
+        let opts = pl.opts();
+        let exact = opts
+            .read_lethal
+            .as_ref()
+            .and_then(|r| r.exact_states)
+            .unwrap_or(opts.lethal_exact_states);
+        with_fresh_exact_cache(|| lethal_line(opts, exact, &after, q))?
     };
     let mut cur = after;
     for a in &seq {
@@ -1964,8 +1973,14 @@ fn opp_lethal_first(pl: &Planner, start: &GameState, bin: usize) -> Option<GameS
     }
 }
 
-/// 局面 s で p がこのターンに勝てる並び（opts のリーサル探索。ビームで見つからなければ、乱数に依らない手だけの全探索）
-fn lethal_line(opts: &SearchOptions, s: &GameState, p: PlayerIndex) -> Option<Vec<Action>> {
+/// 局面 s で p がこのターンに勝てる並び（opts のリーサル探索。ビームで見つからなければ、乱数に依らない手だけの全探索を
+/// 局面数 exact_states まで。0 なら全探索をしない）
+fn lethal_line(
+    opts: &SearchOptions,
+    exact_states: i64,
+    s: &GameState,
+    p: PlayerIndex,
+) -> Option<Vec<Action>> {
     let lo = LethalOptions {
         ward_blocked: opts.lethal_ward_blocked,
         expand_choices: opts.lethal_expand_choices,
@@ -1973,8 +1988,8 @@ fn lethal_line(opts: &SearchOptions, s: &GameState, p: PlayerIndex) -> Option<Ve
     };
     search_lethal(s, p, &lo)
         .or_else(|| {
-            (opts.lethal_exact_states > 0)
-                .then(|| search_exact_lethal(s, p, &sure_lethal_options(opts.lethal_exact_states)))
+            (exact_states > 0)
+                .then(|| search_exact_lethal(s, p, &sure_lethal_options(exact_states)))
                 .flatten()
         })
         .filter(|seq| !seq.is_empty())
@@ -2159,7 +2174,7 @@ impl SearchAgent {
 impl SearchAgent {
     /// 調べもの用（svwb beam-gap）: 局面 s（決定化した局面。決定化し直さない）で、このAI のリーサル探索が p の勝てる並びを見つけるか
     pub fn finds_lethal(&self, s: &GameState, p: PlayerIndex) -> bool {
-        lethal_line(&self.opts, s, p).is_some()
+        lethal_line(&self.opts, self.opts.lethal_exact_states, s, p).is_some()
     }
 
     /// このターンに勝てる並びの最初の手（lethal のとき。見つからない・実際の局面で打てなければ None）

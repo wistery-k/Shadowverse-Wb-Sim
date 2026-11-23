@@ -130,6 +130,35 @@ fn read_lethal_matches_kifu_opp_lethal() {
 }
 
 #[test]
+fn read_lethal_without_exact_finds_subset() {
+    // 全探索を外す（readLethalExact 0）と、見つけるのはビームが見つけた分だけ。負けになる引き直しは全探索ありの部分で、
+    // 見つけなかった引き直しは readLethal なしと同じ点数
+    let plain = SearchAgent::new(r6(""));
+    let full = SearchAgent::new(r6(r#","readLethal":0"#));
+    let beam = SearchAgent::new(r6(r#","readLethal":0,"readLethalExact":0"#));
+    let (ends, _) = positions(6);
+    let seeds: Vec<u32> = (0..4).map(|k| 2000 + k).collect();
+    let mut found = 0;
+    for end in &ends {
+        let p = end.active;
+        let run = |a: &SearchAgent| {
+            fresh();
+            a.read_values(end, p, &seeds)
+        };
+        let (a, b, c) = (run(&plain), run(&full), run(&beam));
+        for j in 0..seeds.len() {
+            if c[j] <= DANGER {
+                found += 1;
+                assert!(b[j] <= DANGER);
+            } else {
+                assert_eq!(a[j], c[j]);
+            }
+        }
+    }
+    assert!(found > 0);
+}
+
+#[test]
 fn read_lethal_option_needs_lethal_head() {
     // スターターの既定の補正にはリーサルの出力が無い
     assert!(compare_options(r#"{"readLethal":0.1}"#).is_err());
@@ -139,5 +168,10 @@ fn read_lethal_option_needs_lethal_head() {
         .read_lethal
         .is_none());
     let o = r6(r#","readLethal":0.2"#);
-    assert_eq!(o.read_lethal.expect("readLethal").threshold, 0.2);
+    let rl = o.read_lethal.expect("readLethal");
+    assert_eq!((rl.threshold, rl.exact_states), (0.2, None));
+    let o = r6(r#","readLethal":0.05,"readLethalExact":0"#);
+    assert_eq!(o.read_lethal.expect("readLethal").exact_states, Some(0));
+    // readLethalExact だけでは書けない
+    assert!(compare_options(r#"{"readLethalExact":0}"#).is_err());
 }

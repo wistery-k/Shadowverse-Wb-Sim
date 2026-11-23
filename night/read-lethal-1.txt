@@ -1,0 +1,33 @@
+# 読みの中の相手に、危ない終局面だけリーサル探索を先にさせる（readLethal）が勝率に効くかを、新しいプールの既定（R6）と比べる
+# （ユーザーの依頼 2026-11-23。審査のスレッドの依頼。docs/ai-notes/15-2026-11-22.md「読みの中の相手に、危ない終局面だけリーサル探索をさせる」）。
+#
+# 案: 読み直す終局面のうち、R6 のリーサルの出力 q（ターン末）が 5% 以上のものだけ、引き直しごとに、相手の番の初めにリーサル探索（ビームだけ。
+#   全探索はしない、readLethalExact 0）を先にさせる。見つければ負けの局面、見つけなければ今までどおり。学び直しはしない（効けば次に考える）
+# N と全探索の外し方はクラウド環境の測り（2026-11-23、168 試合ずつ。同じ文書の表）から決めた:
+#   全探索ありは N = 20% でも思考 1.91 倍（読みの中のリーサル探索の 87% が全探索）。全探索を外すと、見つける数は全探索ありの 97〜98%（N = 0、84 試合）で、
+#   思考は N = 10% で 1.09 倍・5% で 1.13 倍・2% で 1.24 倍。5% は、全探索ありで全部に探させたとき（N = 0）に見つける数の 96.7% を拾い、
+#   選んだターン末で次の相手のターンに負けたものの 98.8% が q ≥ 5%
+#
+# 回す前に決めた問いと線（84 個のデッキの鏡の compare 4 万試合、± 0.15 ほど。見込みはどちらも R4）:
+#   見込み: +0.3〜+1.0 ポイント（推測）。読みを使わないと −2.94 で、読みの得のほぼ全部は相手のリーサルを見つけること。
+#     既定の読みが見つける次の相手のターンの負けは 69%、リーサル探索を先にさせると 92%（R4、2026-11-21）。その分が比例して効けば +1 ほど、
+#     空振り（1.7% → 3.5%）で守りすぎる分を引いて小さめに見る
+#   試合数: +0.5 のとき、4 万試合（± 0.15）なら 2 SE の線を越える割合は 9 割ほど、2 万試合（± 0.22）なら 6 割ほど
+#   差 − 2 SE > 0 なら、readLethal（5%・全探索なし）を新しいプールの既定にする案をユーザーに出す（学び直すかはその後に決める）。
+#   差 + 2 SE < 0 なら「損」として区切る。どちらでもなければ「分からない」として区切り、試合を足すかはユーザーが決める。どの場合も台帳に decide を足す
+#   線ではないが見る数（朝、棋譜を数える）:
+#     - 選ぶときの値 50% 以上のまま次の相手のターンに負けた数（1 席 1 試合）。A・B の席それぞれの自分の値と、共通の判定役 R4 の値で
+#       （svwb kifu values --reads 12。2026-11-23 の R6 の確かめと同じ形）。補助に見るだけで、目標にも線にもしない（ユーザーの判断、11-23）
+#     - 型ごとの勝率（svwb kifu winrate --where side=A --by arch・oppArch）
+#     - 思考の時間（下の profile。同じ試合番号の既定と並べる）
+#
+# 見込み（PC、svwb-docker・28 スレッド）: compare は R6 どうしの 0.17 秒/試合に、A の席の思考 1.13 倍の半分を足して 0.18 秒/試合、4 万試合で 2 時間。
+#   profile 2 つで 5 分ほど
+# 朝: 止まったときのまとめ（台帳の行・棋譜）を push してもらい、ingest する
+
+# 1. readLethal（5%・全探索なし）対 R6（4 万試合）
+compare 20000 '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","readLethal":0.05,"readLethalExact":0}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 読みのリーサル探索-5%全探索なし対R6 --est 0.18
+
+# 2. 思考の時間（同じ試合番号の 840 試合。既定と readLethal）
+profile --opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.16
+profile --opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","readLethal":0.05,"readLethalExact":0}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.18

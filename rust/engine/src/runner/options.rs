@@ -525,10 +525,16 @@ pub fn search_options(
 /// "weights": "default" で基準の重み、オブジェクトなら SEARCH_WEIGHTS のその項目だけを変える（"holdScale" は hold を何倍にするか）
 pub fn compare_options(text: &str) -> Result<SearchOptions, String> {
     let (mut raw, model, net) = apply_value_net_model(Json::parse(text)?)?;
-    let read_lethal = match raw.take("readLethal") {
+    let mut read_lethal = match raw.take("readLethal") {
         None => None,
         Some(v) => read_lethal_option(&v, net)?,
     };
+    if let Some(v) = raw.take("readLethalExact") {
+        let Some(rl) = read_lethal.as_mut() else {
+            return Err("\"readLethalExact\" は \"readLethal\" と一緒に書きます".into());
+        };
+        rl.exact_states = Some(count("readLethalExact", &v)? as i64);
+    }
     for key in ["weights", "policyWeights"] {
         if let Some(w) = resolve_weights(key, raw.get(key))? {
             raw.set(key, w);
@@ -541,7 +547,8 @@ pub fn compare_options(text: &str) -> Result<SearchOptions, String> {
 
 /// "readLethal"（compare の設定だけ。0 以上の数か null）: 補正のリーサルの出力 q がこの値以上の終局面は、読みの中の相手にリーサル探索を
 /// 先にさせる（search.rs の ReadLethal。1 より大きければどの終局面にもさせず、q の分かれ方だけを数える）。
-/// q を出すのは "valueNet" の補正（書かなければ探索 AI の既定の補正）で、リーサルの出力が要る
+/// q を出すのは "valueNet" の補正（書かなければ探索 AI の既定の補正）で、リーサルの出力が要る。
+/// "readLethalExact": <局面数> で、読みの中のリーサル探索の全探索の上限を替える（0 で全探索をしない。書かなければ "lethalExactStates" と同じ）
 fn read_lethal_option(v: &Json, net: Option<Arc<ValueNet>>) -> Result<Option<ReadLethal>, String> {
     let threshold = match v {
         Json::Null => return Ok(None),
@@ -562,7 +569,11 @@ fn read_lethal_option(v: &Json, net: Option<Arc<ValueNet>>) -> Result<Option<Rea
             "\"readLethal\" には、リーサルの出力のある補正（\"valueNet\"）が要ります".into(),
         );
     }
-    Ok(Some(ReadLethal { threshold, net }))
+    Ok(Some(ReadLethal {
+        threshold,
+        net,
+        exact_states: None,
+    }))
 }
 
 /// compare の "weights"・"policyWeights" の値を、全部の項目のある重みの JSON にする（直さなくてよければ None）。
