@@ -143,12 +143,12 @@ profile --games 49
 - **pick**: `pick --compare <前の compare の台帳の名前> --pass <ファイル> --fail <ファイル> --out <ファイル>`。その compare の済んだ区切りをまとめ、
   A の勝率 − 50% − 2 SE が 0 より大きければ `--pass`、そうでなければ `--fail` のファイルを `--out` に写す（回す前に決めた線で、後のジョブの設定を選ぶ）。
   結果は回のフォルダの `pick-<番号>.json` と、`status`・`finish` の表
-- 作るファイル（td selfplay・beam-gap は区切りのファイル、td・potential・pick は `--out`）は、途中は `.tmp` に書き、済んでから名前を替える。
+- 作るファイル（td selfplay・td branch・beam-gap は区切りのファイル、td・potential・pick は `--out`）は、途中は `.tmp` に書き、済んでから名前を替える。
   ファイルがあれば、印が無くても済んだものとする（手でファイルを置けば、そのジョブを飛ばせる）
 - `@/` のファイルは前のジョブが作るものだけを読める（ジョブのファイルを読むときに確かめる）。回すときに前のジョブが作るはずのファイルが無ければ
   （失敗した・まだ済んでいない）、そのジョブを回さずに失敗にする。`resume` で、失敗したジョブから続きを回す
 - `start` の確かめでは、`@/` のモデルを今の既定（`valueNet` は `data/value-net.json`、`potentialNet` は `data/potential-net.json`）にして設定を読み、
-  td selfplay・beam-gap は 0 試合で回す。td・potential・pick の引数は確かめない（小さく試してから PC に回す）
+  td selfplay・td branch・beam-gap は 0 試合で回す（td branch は 0 試合なら棋譜を読まない）。td・potential・pick の引数は確かめない（小さく試してから PC に回す）
 - **前の回のファイル**（2026-11-22）: `@run:<回の名前>/<ファイル>` は、同じ根（`~/svwb-data/night/`）の下の、前の回のフォルダのファイル
   （`td extend --model @run:r6-heads-1/w.json --out @/h.json`。前の夜に作ったモデルを次の夜に読む）。PC の中の道を公開のジョブのファイルに書かないための書き方で、
   `@<ファイル>`（デッキの組のファイル）とは別。回の名前は英数字と `.` `_` `-`、ファイルは回のフォルダの中だけ（`..` は書けない）。

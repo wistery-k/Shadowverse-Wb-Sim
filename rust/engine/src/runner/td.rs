@@ -93,8 +93,21 @@
 //!
 //! --check 1 なら、各局面にモデルの補正の値（評価の点数の単位）も書く（"z"）。`npm run td -- check` で、学習側（scripts/valueNet.ts）が
 //! "x" と "b" から出す補正が探索の補正と同じかを確かめる（場のカードのネットワークを変えたとき用）。
+//!
+//!   svwb td branch --model m0.json --from <自己対戦の棋譜のファイルかフォルダ>,… [--start 0] [--games N] [--turns 4-9] [--extra 4]
+//!     [--eps 0.1] [打ち方と印の引数は selfplay と同じ] [--kifu k.jsonl | --no-kifu] --out b0.jsonl
+//!
+//! 選ばなかった候補の枝（2026-11-23。docs/ai-notes/15-2026-11-22.md「選ばなかった候補を学びに足す」）。自己対戦の棋譜の試合 g
+//! （[start, start + games) のもの。"source": "td selfplay" の行だけ）ごとに、席 g mod 2 の自分のターン（--turns の範囲）の最初を 1 つ選び、
+//! その局面の候補（survey run と同じ作り方: 探索が読み直した候補と、足した候補 --extra 個）から、探索が選んだもの以外を 1 つ一様に選んで
+//! その手を打ち、そのターンの残りと試合の終わりまでを同じ打ち方（--model・--eps・--opp 等）で 1 回打つ。書き出す行は selfplay と同じ形で、
+//! 局面は枝のターン末から（"iv": {"p", "k": 0, "zone": "plan", "card": 候補の種類 top・cut・extra, "plan", "plans", "turn", "i"}）。
+//! 学習は普通の自己対戦の行として読む（"plan" の行は介入の対にしない）。試合ごとの乱数は試合番号から決まり、同じ引数なら同じ行になる。
+//! 枝を作らない試合（範囲にターンが無い・リーサルがある・候補が 1 つ等）は書かず、理由ごとの数を出す。棋譜は枝の試合（もとの試合の
+//! 枝までの手と枝の手）を書く（"kind": "branch" の名前）。--model の補正は棋譜の試合を打った補正と同じものを渡す（候補を作り直すため）。
 
 use super::deck_compare::{read_deck, read_deck_list};
+use super::human_plan::mix;
 use super::kifu::{self, RunInfo, Seat};
 use super::options::{compare_options, model_eval};
 use super::parallel::parallel_map;
@@ -102,13 +115,17 @@ use super::{compare_decks, fixed, seconds_since, Tally};
 use crate::ai::aidata::{ai_data, weights_with};
 use crate::ai::determinize::determinize;
 use crate::ai::eval::{evaluate_with, EvalWeights};
+use crate::ai::exact_lethal::reset_exact_lethal_cache;
+use crate::ai::lethal::reset_lethal;
 use crate::ai::mulligan::default_deck_name_of;
 use crate::ai::potential::PotentialNet;
 use crate::ai::search::{MulliganMode, SearchAgent, SearchOptions};
 use crate::ai::valuenet::{ValueNet, ValuePhase};
 use crate::ai::Rng;
 use crate::data::{data, CardIdx, Deck};
-use crate::game::{acting_player, apply_action, create_game, legal_actions, resolve_turn_end};
+use crate::game::{
+    acting_player, apply_action, create_game, is_legal, legal_actions, resolve_turn_end,
+};
 use crate::jsnum::{js_num, round_precision};
 use crate::json::Json;
 use crate::sim::MatchRng;
@@ -117,6 +134,7 @@ use crate::state::{
     SEP,
 };
 use crate::state_json::ability_json_text;
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::sync::Arc;
 use std::time::Instant;
@@ -624,13 +642,32 @@ struct Played {
 /// learner があれば（--frozen）、その席だけが m.opts で打ってランダムな手も打ち、もう片方の席は m.frozen で打つ
 fn play_out(
     g: u32,
-    mut state: GameState,
+    state: GameState,
     m: &Model,
     eps: f64,
     seed: u32,
     branch_at: Option<(PlayerIndex, i32)>,
     learner: Option<PlayerIndex>,
 ) -> Played {
+    play_out_seen(g, state, m, eps, seed, branch_at, learner, [-1, -1], None)
+}
+
+/// play_out と同じ。seen0 はプレイヤーごとの、もう最初の局面を書いた（書かない）自分のターンの番号。
+/// forced があれば、そのプレイヤーの手は、合法な間は並べた手を先に打つ（考えない）。
+/// 選ばなかった候補の枝（td branch）は、もとの試合の自分のターンの最初の局面から候補の手を打たせ、そのターンの最初の局面は書かない（もとの試合の行にある）
+#[allow(clippy::too_many_arguments)]
+fn play_out_seen(
+    g: u32,
+    mut state: GameState,
+    m: &Model,
+    eps: f64,
+    seed: u32,
+    branch_at: Option<(PlayerIndex, i32)>,
+    learner: Option<PlayerIndex>,
+    seen0: [i32; 2],
+    forced: Option<(PlayerIndex, &[Action])>,
+) -> Played {
+    let mut forced_at = 0usize;
     let mut agent_rng = MatchRng::new(seed);
     let mut img_rng = Rng::new(seed ^ 0x3c6ef372);
     let mut explore = seed ^ 0x2545f491;
@@ -655,7 +692,7 @@ fn play_out(
         SearchAgent::new(o)
     };
     let mut agents = [agent(0), agent(1)];
-    let mut seen = [-1, -1];
+    let mut seen = seen0;
     let mut samples = [String::new(), String::new()];
     let mut counts = [0usize; 2];
     let mut explored = 0;
@@ -765,6 +802,16 @@ fn play_out(
                 None,
                 None,
             );
+        }
+        if let Some((fp, acts)) = forced {
+            if action.is_none() && actor == fp && forced_at < acts.len() {
+                if legal.contains(&acts[forced_at]) {
+                    action = Some(acts[forced_at].clone());
+                    forced_at += 1;
+                } else {
+                    forced_at = acts.len();
+                }
+            }
         }
         let action = match action {
             Some(a) => a,
@@ -1255,57 +1302,34 @@ fn play_one(
     }
 }
 
-fn selfplay(args: &[(String, String)]) -> Result<(), String> {
-    let model_path = arg(args, "model").ok_or("--model がありません")?;
-    let out = arg(args, "out").ok_or("--out がありません")?;
-    let games = num_arg(args, "games", 100.0)?;
-    let start = num_arg(args, "start", 0.0)?;
-    let eps = num_arg(args, "eps", 0.1)?;
-    let iv = num_arg(args, "iv", 0.0)?;
-    if iv < 0.0 {
-        return Err("--iv は 0 以上".into());
-    }
-    let iv_res = num_arg(args, "ivRes", 0.0)?;
-    if iv_res < 0.0 {
-        return Err("--ivRes は 0 以上".into());
-    }
-    let imagined = num_arg(args, "imagined", 0.0)?;
-    if imagined < 0.0 || imagined.fract() != 0.0 {
-        return Err("--imagined は 0 以上の整数".into());
-    }
-    let zone = match arg(args, "ivZone").unwrap_or("hand") {
-        "hand" => IvZone::Hand,
-        "board" => IvZone::Board,
-        "both" => IvZone::Both,
-        "drawn" => IvZone::Drawn,
-        x => return Err(format!("--ivZone は hand・board・both・drawn: {x}")),
-    };
+/// selfplay と branch に共通の、打ち方と局面に書く印の引数（--opp・--sampling・--potential・--board・--imagined・--searchValue・
+/// --wonLabel・--readLabel・--lethalLabel・--lostLabel・--check・--sDefault）から作る自己対戦の設定。
+/// 返すのは（設定, 補正, --potential（無ければ None、null なら Some(None)）, --sampling classic か, --opp beam か）
+#[allow(clippy::type_complexity)]
+fn common_model(
+    args: &[(String, String)],
+    model_path: &str,
+    imagined: f64,
+) -> Result<
+    (
+        Model,
+        Arc<ValueNet>,
+        Option<Option<Arc<PotentialNet>>>,
+        bool,
+        bool,
+    ),
+    String,
+> {
     let opp_beam = match arg(args, "opp").unwrap_or("greedy") {
         "greedy" => false,
         "beam" => true,
         x => return Err(format!("--opp は greedy か beam: {x}")),
     };
-    if games < 0.0 || games.fract() != 0.0 || start < 0.0 || start.fract() != 0.0 {
-        return Err("--games・--start は 0 以上の整数".into());
-    }
     let classic = match arg(args, "sampling").unwrap_or("classic") {
         "classic" => true,
         "default" => false,
         x => return Err(format!("--sampling は classic か default: {x}")),
     };
-    let cmp_k = num_arg(args, "cmp", 0.0)?;
-    let rollouts = num_arg(args, "rollouts", 8.0)?;
-    if cmp_k < 0.0
-        || cmp_k.fract() != 0.0
-        || cmp_k == 1.0
-        || rollouts < 1.0
-        || rollouts.fract() != 0.0
-    {
-        return Err("--cmp は 0 か 2 以上の整数、--rollouts は 1 以上の整数".into());
-    }
-    if cmp_k > 0.0 && (iv > 0.0 || iv_res > 0.0) {
-        return Err("--cmp と --iv・--ivRes は一緒に使えません".into());
-    }
     let board = match arg(args, "board").unwrap_or("1") {
         "1" => true,
         "0" => false,
@@ -1368,6 +1392,51 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
         "1" => Some(EvalWeights::new(ai_data().default_weights.clone())),
         x => return Err(format!("--sDefault は 0 か 1: {x}")),
     };
+    Ok((m, net, potential, classic, opp_beam))
+}
+
+fn selfplay(args: &[(String, String)]) -> Result<(), String> {
+    let model_path = arg(args, "model").ok_or("--model がありません")?;
+    let out = arg(args, "out").ok_or("--out がありません")?;
+    let games = num_arg(args, "games", 100.0)?;
+    let start = num_arg(args, "start", 0.0)?;
+    let eps = num_arg(args, "eps", 0.1)?;
+    let iv = num_arg(args, "iv", 0.0)?;
+    if iv < 0.0 {
+        return Err("--iv は 0 以上".into());
+    }
+    let iv_res = num_arg(args, "ivRes", 0.0)?;
+    if iv_res < 0.0 {
+        return Err("--ivRes は 0 以上".into());
+    }
+    let imagined = num_arg(args, "imagined", 0.0)?;
+    if imagined < 0.0 || imagined.fract() != 0.0 {
+        return Err("--imagined は 0 以上の整数".into());
+    }
+    let zone = match arg(args, "ivZone").unwrap_or("hand") {
+        "hand" => IvZone::Hand,
+        "board" => IvZone::Board,
+        "both" => IvZone::Both,
+        "drawn" => IvZone::Drawn,
+        x => return Err(format!("--ivZone は hand・board・both・drawn: {x}")),
+    };
+    if games < 0.0 || games.fract() != 0.0 || start < 0.0 || start.fract() != 0.0 {
+        return Err("--games・--start は 0 以上の整数".into());
+    }
+    let cmp_k = num_arg(args, "cmp", 0.0)?;
+    let rollouts = num_arg(args, "rollouts", 8.0)?;
+    if cmp_k < 0.0
+        || cmp_k.fract() != 0.0
+        || cmp_k == 1.0
+        || rollouts < 1.0
+        || rollouts.fract() != 0.0
+    {
+        return Err("--cmp は 0 か 2 以上の整数、--rollouts は 1 以上の整数".into());
+    }
+    if cmp_k > 0.0 && (iv > 0.0 || iv_res > 0.0) {
+        return Err("--cmp と --iv・--ivRes は一緒に使えません".into());
+    }
+    let (mut m, net, potential, classic, opp_beam) = common_model(args, model_path, imagined)?;
     // 固定した相手（--frozen）。想像の局面を書くなら、固定した側も読んだ局面を残す（打つ手は変わらない）
     if let Some(text) = arg(args, "frozen") {
         if cmp_k > 0.0 || arg(args, "vs").is_some() {
@@ -1574,6 +1643,369 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
     Ok(())
 }
 
+/// td branch の種の印（"BRNC"）
+const BRANCH_TAG: u32 = 0x4252_4e43;
+
+/// td branch の 1 試合の結果
+struct BranchOut {
+    /// 枝の行（自己対戦の行と同じ形で、"iv": {"p", "k": 0, "zone": "plan", "card": 候補の種類, …}）
+    line: Option<String>,
+    /// 枝の棋譜の 1 行（もとの試合の分かれるまでの行動と、枝の行動。最初の局面から打ち直せる）
+    replay: Option<String>,
+    /// 枝を作らなかった理由
+    skip: Option<&'static str>,
+    /// 選んだ候補の種類（top: AI が読み直した候補、cut: 読み直しを打ち切った候補、extra: 調査が足す候補）
+    kind: &'static str,
+    /// 候補の手を全部打てたか（途中で合法でなくなったら、そこから AI が考える）
+    forced_all: bool,
+    samples: usize,
+}
+
+/// 棋譜の試合 1 つから、選ばなかった候補の枝を 1 つ作る（td branch）。
+/// 席は g mod 2（両方の席から同じ割合）、ターンは turns の範囲でその席の自分のターンの最初の局面から乱数で選ぶ。
+/// その局面で m.opts の AI に考えさせて survey と同じ候補（AI が読み直す候補と、足す候補 extra 個）を作り、AI の選ぶ候補を除いた中から
+/// 1 つを同じ確率で選ぶ。その候補の手（steps。最初の引く手・ランダムな手まで）を打ち、その先はふつうの自己対戦と同じく両方の席が m で
+/// 最後まで打つ。分かれた局面（そのターンの最初の局面）はもとの試合の行にあるので書かず、枝のターン末から書く
+#[allow(clippy::too_many_arguments)]
+fn branch_one(
+    g: u32,
+    names: &[String; 2],
+    rep: &kifu::Replay,
+    m: &Model,
+    eps: f64,
+    turns: (i32, i32),
+    extra: usize,
+) -> BranchOut {
+    let mut out = BranchOut {
+        line: None,
+        replay: None,
+        skip: None,
+        kind: "",
+        forced_all: false,
+        samples: 0,
+    };
+    let seed = rep.seed;
+    let mut rng = Rng::new(seed ^ BRANCH_TAG);
+    let p = (g % 2) as PlayerIndex;
+    // p の自分のターンの最初の局面（そのターンの最初の判断。play_out が "ph": 1 を書く局面）の行動の添字とターン
+    let at_start = |s: &GameState, seen: i32| {
+        s.phase == Phase::Main
+            && s.pending.is_none()
+            && s.active == p
+            && acting_player(s) == p
+            && s.players[p].turn_count != seen
+    };
+    let mut starts: Vec<(usize, i32)> = Vec::new();
+    let mut s = create_game([&rep.decks[0], &rep.decks[1]], seed);
+    let mut seen = -1;
+    for (i, a) in rep.actions.iter().enumerate() {
+        if at_start(&s, seen) {
+            seen = s.players[p].turn_count;
+            if (turns.0..=turns.1).contains(&seen) {
+                starts.push((i, seen));
+            }
+        }
+        if !is_legal(&s, a) {
+            out.skip = Some("illegal-kifu");
+            return out;
+        }
+        s = apply_action(&s, a);
+    }
+    if starts.is_empty() {
+        out.skip = Some("no-turn");
+        return out;
+    }
+    let (i, t) = starts[rng.int(starts.len())];
+    let mut s = create_game([&rep.decks[0], &rep.decks[1]], seed);
+    for a in &rep.actions[..i] {
+        s = apply_action(&s, a);
+    }
+    if !s.stack.is_empty() || !s.queue.is_empty() {
+        out.skip = Some("stack");
+        return out;
+    }
+    let legal = legal_actions(&s);
+    if legal.len() <= 1 {
+        out.skip = Some("one-action");
+        return out;
+    }
+    reset_lethal();
+    reset_exact_lethal_cache();
+    let agent = SearchAgent::new(m.opts.clone());
+    let mut think = Rng::new(mix(seed ^ BRANCH_TAG, i as u32));
+    let Some(sv) = agent.survey_plans(&s, &legal, &mut think, extra) else {
+        out.skip = Some("one-action");
+        return out;
+    };
+    if sv.lethal {
+        out.skip = Some("lethal");
+        return out;
+    }
+    let others: Vec<usize> = (0..sv.plans.len())
+        .filter(|&k| !sv.plans[k].chosen)
+        .collect();
+    if others.is_empty() {
+        out.skip = Some("one-plan");
+        return out;
+    }
+    let k = others[rng.int(others.len())];
+    let pl = &sv.plans[k];
+    out.kind = if !pl.top {
+        "extra"
+    } else if pl.cut {
+        "cut"
+    } else {
+        "top"
+    };
+    // 候補の手が全部打てるか（打ち切りの判定用。打てない手からは AI が考える）
+    let mut x = s.clone();
+    out.forced_all = pl.steps.iter().all(|a| {
+        let ok = x.phase != Phase::Ended && is_legal(&x, a);
+        if ok {
+            x = apply_action(&x, a);
+        }
+        ok
+    });
+    let mut seen0 = [-1, -1];
+    seen0[p] = t;
+    reset_lethal();
+    reset_exact_lethal_cache();
+    let r = play_out_seen(
+        g,
+        s,
+        m,
+        eps,
+        seed ^ BRANCH_TAG ^ 0x5bd1_e995,
+        None,
+        None,
+        seen0,
+        Some((p, &pl.steps)),
+    );
+    let info = format!(
+        "{{\"p\":{p},\"k\":0,\"zone\":\"plan\",\"card\":\"{}\",\"plan\":{k},\"plans\":{},\"turn\":{t},\"i\":{i}}}",
+        out.kind,
+        sv.plans.len()
+    );
+    out.samples = r.counts[0] + r.counts[1];
+    out.line = Some(record_line(g, names, &r, Some(info), None));
+    out.replay = match &m.kifu {
+        Some(k) => {
+            let (run, seats) = &**k;
+            let mut acts = rep.actions[..i].to_vec();
+            acts.extend(r.actions.iter().cloned());
+            Some(kifu::line(
+                run,
+                &kifu::Game {
+                    g,
+                    swap: None,
+                    names: [&names[0], &names[1]],
+                    seats: [&seats[0], &seats[1]],
+                    decks: [&rep.decks[0], &rep.decks[1]],
+                    seed,
+                    end: kifu::End::of(&r.state),
+                    actions: &acts,
+                },
+            ))
+        }
+        None => None,
+    };
+    out
+}
+
+/// 棋譜の行の試合番号（最初の `,"g":<数>`）。見つからなければ None（読み解いて確かめる）
+fn head_g(line: &str) -> Option<u32> {
+    // 文字列の中の引用符は \" になるので、`,"g":` は鍵としてしか出ない（最初のものが試合の行の鍵）
+    let at = line.find(",\"g\":")? + 5;
+    let digits: &str = &line[at..];
+    let end = digits.find(|c: char| !c.is_ascii_digit())?;
+    digits[..end].parse().ok()
+}
+
+/// svwb td branch: 自己対戦の棋譜（--from）の試合ごとに、選ばなかった候補の枝を 1 つ作り、自己対戦と同じ形の行で書き出す
+/// （docs/ai-notes/15-2026-11-22.md「選び直しの得が逃げる場所」の次の段取り。打ち方と局面に書く印の引数は selfplay と同じ）
+fn branch(args: &[(String, String)]) -> Result<(), String> {
+    let model_path = arg(args, "model").ok_or("--model がありません")?;
+    let out = arg(args, "out").ok_or("--out がありません")?;
+    let from = arg(args, "from")
+        .ok_or("--from（自己対戦の棋譜のファイルかフォルダ。コンマで並べる）がありません")?;
+    for k in ["iv", "ivRes", "cmp", "frozen", "vs", "decks"] {
+        if arg(args, k).is_some() {
+            return Err(format!(
+                "td branch に --{k} は使えません（試合とデッキは棋譜から読む）"
+            ));
+        }
+    }
+    let eps = num_arg(args, "eps", 0.1)?;
+    let imagined = num_arg(args, "imagined", 0.0)?;
+    if imagined < 0.0 || imagined.fract() != 0.0 {
+        return Err("--imagined は 0 以上の整数".into());
+    }
+    let extra = num_arg(args, "extra", 4.0)?;
+    if extra < 0.0 || extra.fract() != 0.0 {
+        return Err("--extra は 0 以上の整数".into());
+    }
+    let turns = super::human_plan::parse_range(arg(args, "turns").unwrap_or("4-9"))?;
+    // --start・--games: 枝を作る試合番号の範囲 [start, start + games)（夜のキューの区切り）。--games が無ければ start から棋譜の全部
+    let start = num_arg(args, "start", 0.0)?;
+    let games = match arg(args, "games") {
+        None => None,
+        Some(_) => Some(num_arg(args, "games", 0.0)?),
+    };
+    if start < 0.0 || start.fract() != 0.0 || games.is_some_and(|x| x < 0.0 || x.fract() != 0.0) {
+        return Err("--start・--games は 0 以上の整数".into());
+    }
+    let (mut m, net, _potential, classic, opp_beam) = common_model(args, model_path, imagined)?;
+    let mut file = std::fs::File::create(out).map_err(|e| format!("{out} に書けません: {e}"))?;
+    writeln!(file, "{{\"tdLayout\":{}}}", net.layout_json())
+        .map_err(|e| format!("{out} に書けません: {e}"))?;
+    // 夜のキューの確かめ（--games 0）は棋譜を読まない
+    if games == Some(0.0) {
+        println!("{out}: 0 試合");
+        return Ok(());
+    }
+    let in_range = |g: u32| (g as f64) >= start && games.is_none_or(|n| (g as f64) < start + n);
+    // 棋譜の自己対戦の試合（"source": "td selfplay" の "kind": "replay"）。同じ試合番号は最初の行だけ
+    let mut by_g: BTreeMap<u32, ([String; 2], kifu::Replay)> = BTreeMap::new();
+    let files: Vec<String> = from.split(',').map(|x| x.to_string()).collect();
+    for f in super::kifu_cmd::kifu_files(&files)? {
+        for l in super::kifu_cmd::read_text(&f)?.lines() {
+            if !l.starts_with("{\"kind\":\"replay\"") {
+                continue;
+            }
+            // 範囲の外の試合は読まない（夜のキューの区切りはどれも同じ棋譜を読むので、全部を読み解くと遅い）
+            if let Some(g) = head_g(l) {
+                if !in_range(g) {
+                    continue;
+                }
+            }
+            let j = Json::parse(l)?;
+            let Some(Json::Num(g)) = j.get("g") else {
+                continue;
+            };
+            let g = *g as u32;
+            if !in_range(g)
+                || by_g.contains_key(&g)
+                || j.get("source") != Some(&Json::Str("td selfplay".into()))
+            {
+                continue;
+            }
+            let name = |k: usize| match j.get("names") {
+                Some(Json::Arr(xs)) => match xs.get(k) {
+                    Some(Json::Str(x)) => x.clone(),
+                    _ => String::new(),
+                },
+                _ => String::new(),
+            };
+            by_g.insert(g, ([name(0), name(1)], kifu::parse_replay(&j)?));
+        }
+    }
+    let items: Vec<(u32, [String; 2], kifu::Replay)> =
+        by_g.into_iter().map(|(g, (n, r))| (g, n, r)).collect();
+    if items.is_empty() {
+        return Err("棋譜にその範囲の自己対戦の試合がありません".into());
+    }
+    let first = items.first().map_or(0, |x| x.0);
+    let last = items.last().map_or(0, |x| x.0);
+    println!(
+        "試合 {}（g{first}〜{last}）、自分のターン {}〜{}、足す候補 {extra}、{} スレッド",
+        items.len(),
+        turns.0,
+        turns.1,
+        super::parallel::thread_count()
+    );
+    let run = RunInfo::now("td branch", "");
+    let key = kifu::args_key(
+        &args
+            .iter()
+            .flat_map(|(k, v)| [k.as_str(), v.as_str()])
+            .collect::<Vec<_>>(),
+    );
+    let kifu_path = kifu::target_of_pairs(args)?.path(&kifu::Name {
+        kind: "branch",
+        label: "",
+        first,
+        last,
+        key: &key,
+        commit: &run.engine,
+    });
+    let mut kifu_file = kifu_path.as_deref().map(kifu::Writer::create).transpose()?;
+    if kifu_file.is_some() {
+        let potential_file = match arg(args, "potential") {
+            _ if classic => None,
+            None => Some(""),
+            Some("null") => None,
+            Some(p) => Some(p),
+        };
+        let mut ai = vec![
+            ("model".to_string(), Json::Str(model_path.to_string())),
+            ("eps".to_string(), Json::Num(eps)),
+            (
+                "sampling".to_string(),
+                Json::Str(if classic { "classic" } else { "default" }.into()),
+            ),
+            (
+                "opp".to_string(),
+                Json::Str(if opp_beam { "beam" } else { "greedy" }.into()),
+            ),
+        ];
+        if let Some(p) = arg(args, "potential") {
+            ai.push(("potential".into(), Json::Str(p.into())));
+        }
+        let seat = Seat {
+            side: None,
+            agent: "td-branch".into(),
+            ai: Json::Obj(ai),
+            nets: kifu::nets_from(Some(model_path), potential_file),
+            variant: None,
+        };
+        m.kifu = Some(Arc::new((run, [seat.clone(), seat])));
+    }
+    let t0 = Instant::now();
+    let results = parallel_map(
+        &items,
+        |(g, names, rep), _| branch_one(*g, names, rep, &m, eps, turns, extra as usize),
+        |done, total, r, _| {
+            if let Some(line) = &r.line {
+                writeln!(file, "{line}").unwrap_or_else(|e| panic!("{out} に書けません: {e}"));
+            }
+            if let (Some(w), Some(line)) = (kifu_file.as_mut(), r.replay.as_ref()) {
+                w.write(line);
+            }
+            if done % 100 == 0 || done == total {
+                println!(
+                    "{done}/{total} 試合 {}s/試合",
+                    fixed(seconds_since(t0) / done as f64, 2)
+                );
+            }
+        },
+    );
+    if let Some(w) = kifu_file {
+        let (p, n) = w.finish()?;
+        println!("棋譜: {p}（{n} 試合）");
+    }
+    let made: Vec<&BranchOut> = results.iter().filter(|r| r.line.is_some()).collect();
+    let mut skips: BTreeMap<&str, usize> = BTreeMap::new();
+    for r in &results {
+        if let Some(x) = r.skip {
+            *skips.entry(x).or_default() += 1;
+        }
+    }
+    let kinds = |k: &str| made.iter().filter(|r| r.kind == k).count();
+    println!(
+        "{out}: 枝 {}/{}（候補の種類 top {}・cut {}・extra {}。候補の手を全部打てた {}）、局面 {}、作らなかった {:?}、{} 秒",
+        made.len(),
+        results.len(),
+        kinds("top"),
+        kinds("cut"),
+        kinds("extra"),
+        made.iter().filter(|r| r.forced_all).count(),
+        made.iter().map(|r| r.samples).sum::<usize>(),
+        skips,
+        fixed(seconds_since(t0), 1)
+    );
+    Ok(())
+}
+
 pub fn main(argv: &[String]) -> Result<(), String> {
     // --no-kifu だけは値を取らない（棋譜を書かない）
     let mut rest: Vec<String> = argv.get(1..).unwrap_or(&[]).to_vec();
@@ -1585,10 +2017,11 @@ pub fn main(argv: &[String]) -> Result<(), String> {
     }
     match argv.first().map(|s| s.as_str()) {
         Some("selfplay") => selfplay(&args),
+        Some("branch") => branch(&args),
         Some("train") => super::td_train::train(&args),
         Some("prune") => super::td_train::prune(&args),
         _ => Err(
-            "svwb td selfplay|train|prune ...（init・probe・attr 等と、train・prune の実験用の引数は npm run td -- で行う）".into(),
+            "svwb td selfplay|branch|train|prune ...（init・probe・attr 等と、train・prune の実験用の引数は npm run td -- で行う）".into(),
         ),
     }
 }
@@ -1789,6 +2222,52 @@ mod tests {
         }
         // 試合の終わりには、負けた側の最後のターン末で相手にリーサルがある
         assert!(ends > 0 && found > 0, "{found}/{ends}");
+    }
+
+    #[test]
+    fn branch_plays_an_unchosen_candidate_from_the_kifu() {
+        // td branch: 自己対戦の試合の棋譜から、選ばなかった候補を打った枝を作る。枝はその席（g mod 2）のターン末（"ph": 0）から書き、
+        // 枝の棋譜は最初の局面から打ち直すと同じ終わり方になる。同じ試合からは同じ枝
+        let decks = compare_decks();
+        let mut m = imagined_model(0);
+        let seat = kifu::same_seat("test", "{}");
+        m.kifu = Some(Arc::new((RunInfo::now("test", ""), [seat.clone(), seat])));
+        let mut made = 0;
+        for g in [3u32, 10, 21, 30] {
+            let base = play_one(g, &decks, None, &m, 0.1, 0.0, IvZone::Hand, 0.0, None);
+            let j = Json::parse(base.replay.as_deref().expect("棋譜")).expect("JSON");
+            let rep = kifu::parse_replay(&j).expect("棋譜");
+            let names = base.decks.clone();
+            let a = branch_one(g, &names, &rep, &m, 0.1, (4, 9), 2);
+            let b = branch_one(g, &names, &rep, &m, 0.1, (4, 9), 2);
+            assert_eq!(a.line, b.line);
+            assert_eq!(a.replay, b.replay);
+            let Some(line) = &a.line else {
+                assert!(a.skip.is_some());
+                continue;
+            };
+            made += 1;
+            let v: serde_json::Value = serde_json::from_str(line).expect("JSON");
+            assert_eq!(v["iv"]["zone"], "plan");
+            let p = v["iv"]["p"].as_u64().expect("席") as usize;
+            assert_eq!(p, (g % 2) as usize);
+            let t = v["iv"]["turn"].as_i64().expect("ターン");
+            assert!((4..=9).contains(&t), "{t}");
+            assert!(["top", "cut", "extra"].contains(&v["iv"]["card"].as_str().expect("種類")));
+            assert_eq!(v["samples"][p][0]["ph"], 0, "枝の最初はターン末");
+            let k = Json::parse(a.replay.as_deref().expect("枝の棋譜")).expect("JSON");
+            let r = kifu::parse_replay(&k).expect("枝の棋譜");
+            assert!(!r.actions.is_empty() && r.actions[..10] == rep.actions[..10]);
+            let mut s = create_game([&r.decks[0], &r.decks[1]], r.seed);
+            for x in &r.actions {
+                assert!(is_legal(&s, x));
+                s = apply_action(&s, x);
+            }
+            assert_eq!(s.phase, Phase::Ended);
+            assert_eq!(s.winner.map(|w| w as u64), v["winner"].as_u64());
+            assert_eq!(s.turn as i64, v["turns"].as_i64().expect("ターン"));
+        }
+        assert!(made >= 2, "{made}");
     }
 
     #[test]

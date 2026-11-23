@@ -135,7 +135,7 @@ describe("ジョブの行", () => {
     expect(() => parseJobs("profile\nyardstick --ref weak --label x")).toThrow(/2 行目/);
   });
 
-  it("学び直しの流れのジョブ（td selfplay・beam-gap・td・potential・pick）を読み、回のフォルダのファイルのつながりを確かめる", () => {
+  it("学び直しの流れのジョブ（td selfplay・td branch・beam-gap・td・potential・pick）を読み、回のフォルダのファイルのつながりを確かめる", () => {
     expect(expandBraces("@/s-{1..3}.jsonl.gz,x.json")).toBe("@/s-1.jsonl.gz,@/s-2.jsonl.gz,@/s-3.jsonl.gz,x.json");
     expect(expandBraces('{"beamWidth":8}')).toBe('{"beamWidth":8}');
     const sp = parseJob("td selfplay --model @/net0.json --games 10 --start 100 --chunk 4 --eps 0.1 --out @/s-{k}.jsonl.gz --est 0.5", 2);
@@ -146,6 +146,10 @@ describe("ジョブの行", () => {
     expect(jobProducts(sp)).toEqual(["@/s-1.jsonl.gz", "@/s-2.jsonl.gz", "@/s-3.jsonl.gz"]);
     expect(jobInputs(sp)).toEqual(["@/net0.json"]);
     expect(jobArgv(sp, 104, 4, "/r")).toEqual(["td", "selfplay", "--games", "4", "--start", "104", "--model", "/r/net0.json", "--eps", "0.1", "--out", "/r/s-2.jsonl.tmp"]);
+    // td branch（選ばなかった候補の枝）も同じく区切る。前の回の棋譜のフォルダは @run: で読む
+    const br = parseJob("td branch --model @run:r6-heads-1/v0.json --from @run:r6-heads-1/kifu --games 10 --start 100 --chunk 4 --out @/b-{k}.jsonl.gz --est 0.1", 2);
+    expect(br.spec).toMatchObject({ kind: "data", cmd: ["td", "branch"], out: "@/b-{k}.jsonl.gz", chunk: 4 });
+    expect(jobArgv(br, 104, 4, "/root/run")).toEqual(["td", "branch", "--games", "4", "--start", "104", "--model", "/root/r6-heads-1/v0.json", "--from", "/root/r6-heads-1/kifu", "--out", "/root/run/b-2.jsonl.tmp"]);
     const bg = parseJob(`beam-gap --games 4 --from 1000 --chunk 2 --ref '{"valueNet":"@/q.json"}' --inputs @/pot-{k}.jsonl --out @/pot-{k}-rows.jsonl --est 1`, 3);
     expect(jobInputs(bg)).toEqual(["@/q.json"]);
     expect(jobArgv(bg, 1002, 2, "/r")).toEqual(["beam-gap", "--games", "2", "--from", "1002", "--ref", '{"valueNet":"/r/q.json"}', "--out", "/r/pot-2-rows.jsonl", "--inputs", "/r/pot-2.jsonl.tmp"]);

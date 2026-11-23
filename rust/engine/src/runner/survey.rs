@@ -2655,6 +2655,7 @@ fn turns(argv: &[String]) -> Result<(), String> {
 }
 
 const VALUES_TAG: u32 = 0x5641_4c55;
+const SPLIT_TAG: u32 = 0x5350_4c54;
 
 /// survey values の 1 局面: 棋譜 rep から局面 row を作り直して候補を作り、候補ごとの終局面の値の行（JSON Lines）を返す
 #[allow(clippy::too_many_arguments)]
@@ -2667,6 +2668,8 @@ fn candidate_values(
     net: &crate::ai::valuenet::ValueNet,
     scale: f64,
     reads: u32,
+    draws: bool,
+    rep_seed: u32,
 ) -> Result<String, String> {
     use super::kifu_cmd::{feature_cells, LOSS_SCORE};
     let sig = |x: f64| 100.0 / (1.0 + (-scale * x).exp());
@@ -2696,8 +2699,19 @@ fn candidate_values(
             .all(|(a, b)| actions_json(&a.steps) == b["steps"]);
     let root = sv.root.as_ref().unwrap_or(&s);
     let scorer = SearchAgent::new(score_opts.clone());
-    let base = seed_of(&[VALUES_TAG, g as u32, i as u32]);
+    // 引き直しの種の元（--seed 0 は前と同じ。ほかの数なら、同じ局面で別の引き直しの組）
+    let base = if rep_seed == 0 {
+        seed_of(&[VALUES_TAG, g as u32, i as u32])
+    } else {
+        seed_of(&[VALUES_TAG, g as u32, i as u32, rep_seed])
+    };
     let seeds: Vec<u32> = (0..reads).map(|k| mix(base, k)).collect();
+    // drawSplit の引きを作り直す種（探索と同じく、どの候補でも同じ）
+    let split_n = score_opts.draw_split.map_or(0, |ds| ds.samples.max(1));
+    let split_seeds: Vec<u32> = (0..split_n)
+        .map(|j| seed_of(&[base, SPLIT_TAG, j as u32]))
+        .collect();
+    let enum_seed = seed_of(&[base, SPLIT_TAG, u32::MAX]);
     let mut text = String::new();
     for (k, pl) in sv.plans.iter().enumerate() {
         let mut t = root.clone();
@@ -2758,6 +2772,35 @@ fn candidate_values(
                     ),
                 ),
             ]);
+            if draws {
+                // 引き直しごとの読みの点数（残った PP の分を引いたもの。相手のリーサルは LOSS_SCORE 以下）と、混ぜる割合。
+                // AI が選ぶときの値は (1 − mix) × 平均 + mix × end（search.rs の rescore_node）
+                cells.extend([
+                    (
+                        "reads".into(),
+                        Json::Arr(rv.iter().map(|&x| Json::Num(x)).collect()),
+                    ),
+                    ("mix".into(), Json::Num(mix_r)),
+                ]);
+                // 並びに引く手・ランダムな手がある候補は、探索の drawSplit と同じ作り方の値（上の reads と end は、決定化した引きを知って打った
+                // 終局面のもので、探索の選ぶときの値とは違う）: splitEnd（引きごとのターン末の点数の平均）と splitReads（[重み, 読みの点数]）。
+                // 選ぶときの値は (1 − mix) × Σ 重み × 点数 / Σ 重み + mix × splitEnd
+                if let Some((te, xs)) =
+                    scorer.split_values(root, p, &pl.full, &seeds, enum_seed, &split_seeds)
+                {
+                    cells.extend([
+                        ("splitEnd".into(), Json::Num(te)),
+                        (
+                            "splitReads".into(),
+                            Json::Arr(
+                                xs.iter()
+                                    .map(|&(w, x)| Json::Arr(vec![Json::Num(w), Json::Num(x)]))
+                                    .collect(),
+                            ),
+                        ),
+                    ]);
+                }
+            }
         }
         if t.phase != Phase::Ended {
             cells.extend(feature_cells(&scorer, &t, p, net));
@@ -2776,8 +2819,8 @@ fn candidate_values(
 fn values(argv: &[String]) -> Result<(), String> {
     use super::kifu_cmd::{kifu_files, read_text};
     let (flags, files) = parse_flags(argv)?;
-    check_flags(&flags, &["kifu", "score", "reads", "out"])?;
-    let usage = "svwb survey values <結果.jsonl>… --kifu <棋譜>[,<棋譜>…] --score '<設定>' [--reads 12] --out <候補.jsonl>";
+    check_flags(&flags, &["kifu", "score", "reads", "draws", "seed", "out"])?;
+    let usage = "svwb survey values <結果.jsonl>… --kifu <棋譜>[,<棋譜>…] --score '<設定>' [--reads 12] [--draws 1] [--seed 0] --out <候補.jsonl>";
     let out = flag(&flags, "out")
         .ok_or_else(|| format!("--out を渡してください（{usage}）"))?
         .to_string();
@@ -2795,6 +2838,8 @@ fn values(argv: &[String]) -> Result<(), String> {
     };
     let scale = net.a();
     let reads = num_flag(&flags, "reads", 12)?;
+    let draws = num_flag(&flags, "draws", 0)? != 0;
+    let rep_seed = num_flag(&flags, "seed", 0)?;
     if files.is_empty() {
         return Err(format!("調査の結果（jsonl）を渡してください（{usage}）"));
     }
@@ -2844,7 +2889,20 @@ fn values(argv: &[String]) -> Result<(), String> {
     );
     let results = parallel_map(
         &items,
-        |&(row, rep), _| candidate_values(row, rep, &opts, extra, &score_opts, &net, scale, reads),
+        |&(row, rep), _| {
+            candidate_values(
+                row,
+                rep,
+                &opts,
+                extra,
+                &score_opts,
+                &net,
+                scale,
+                reads,
+                draws,
+                rep_seed,
+            )
+        },
         |done, total, _, _| {
             if done % 50 == 0 || done == total {
                 eprintln!("{done}/{total}");
@@ -2873,7 +2931,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         Some("recheck") => recheck(&argv[1..]),
         Some("turns") => turns(&argv[1..]),
         Some("values") => values(&argv[1..]),
-        _ => Err("使い方: svwb survey run --out <結果.jsonl> --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8] | survey report <結果.jsonl>… [--label 名前] [--no-ledger] [--top 20] [--states <フォルダ>] | survey recheck <結果.jsonl>… --out <打ち直し.jsonl> [--m 32] [--peek 1] [--batch 16] | survey turns <結果.jsonl>… --pos <試合>:<手の番号> [--stage 2] [--out <回ごと.jsonl>] [--cards <カード名>,…] | survey values <結果.jsonl>… --kifu <棋譜>[,…] --score '<設定>' [--reads 12] --out <候補.jsonl>".into()),
+        _ => Err("使い方: svwb survey run --out <結果.jsonl> --games a-b [--rate 0.1] [--m 32] [--extra 4] [--confirm 96] [--flag 10] [--batch 8] | survey report <結果.jsonl>… [--label 名前] [--no-ledger] [--top 20] [--states <フォルダ>] | survey recheck <結果.jsonl>… --out <打ち直し.jsonl> [--m 32] [--peek 1] [--batch 16] | survey turns <結果.jsonl>… --pos <試合>:<手の番号> [--stage 2] [--out <回ごと.jsonl>] [--cards <カード名>,…] | survey values <結果.jsonl>… --kifu <棋譜>[,…] --score '<設定>' [--reads 12] [--draws 1] [--seed 0] --out <候補.jsonl>".into()),
     }
 }
 
@@ -3180,7 +3238,8 @@ mod tests {
         };
         let net = crate::ai::valuenet::default_value_net();
         let opts = SearchOptions::default();
-        let text = candidate_values(&prep.row, &rep, &opts, 4, &opts, net, net.a(), 2).unwrap();
+        let text =
+            candidate_values(&prep.row, &rep, &opts, 4, &opts, net, net.a(), 2, false, 0).unwrap();
         let rows: Vec<Json> = text.lines().map(|l| Json::parse(l).unwrap()).collect();
         assert_eq!(rows.len(), prep.plans.len());
         for (k, r) in rows.iter().enumerate() {
@@ -3198,9 +3257,59 @@ mod tests {
         }
         // 同じ局面からは同じ行（読みの種は局面ごとに決まる）
         assert_eq!(
-            candidate_values(&prep.row, &rep, &opts, 4, &opts, net, net.a(), 2).unwrap(),
+            candidate_values(&prep.row, &rep, &opts, 4, &opts, net, net.a(), 2, false, 0).unwrap(),
             text
         );
+        // --draws 1: 前の欄はそのままで、引き直しごとの読みの点数と混ぜる割合が足される。--seed 0 は前と同じ種
+        let drawn =
+            candidate_values(&prep.row, &rep, &opts, 4, &opts, net, net.a(), 2, true, 0).unwrap();
+        for (a, b) in text.lines().zip(drawn.lines()) {
+            let (a, b) = (Json::parse(a).unwrap(), Json::parse(b).unwrap());
+            assert_eq!(a.get("end"), b.get("end"));
+            assert_eq!(a.get("pickWin"), b.get("pickWin"));
+            if b.get("ended") == Some(&Json::Bool(false)) {
+                assert!(matches!(b.get("reads"), Some(Json::Arr(r)) if r.len() == 2));
+                assert!(matches!(b.get("mix"), Some(Json::Num(_))));
+            }
+        }
+    }
+
+    /// survey values --draws 1 の drawSplit の値（SearchAgent::split_values）: 引く手・ランダムな手のある候補だけ値を出し、
+    /// 引きの重みの和は 1、同じ種なら同じ値
+    #[test]
+    fn split_values_cover_chance_candidates() {
+        let rec = play_game(3, None, &SearchOptions::default());
+        let agent = SearchAgent::new(SearchOptions::default());
+        let seeds: Vec<u32> = (0..12).map(|k| mix(7, k)).collect();
+        let split_seeds: Vec<u32> = (0..4).map(|j| mix(11, j)).collect();
+        let (mut some, mut none) = (0, 0);
+        for &(i, p) in &rec.starts {
+            let (s, mut rng) = rebuild(&rec, i);
+            let legal = legal_actions(&s);
+            let Some(sv) = agent.survey_plans(&s, &legal, &mut rng, 2) else {
+                continue;
+            };
+            let root = sv.root.as_ref().unwrap_or(&s);
+            for pl in &sv.plans {
+                let got = agent.split_values(root, p, &pl.full, &seeds, 5, &split_seeds);
+                match &got {
+                    Some((te, xs)) => {
+                        some += 1;
+                        assert!(te.is_finite());
+                        assert!(!xs.is_empty());
+                        let w: f64 = xs.iter().map(|x| x.0).sum();
+                        assert!((w - 1.0).abs() < 1e-9, "{w}");
+                        let again = agent.split_values(root, p, &pl.full, &seeds, 5, &split_seeds);
+                        assert_eq!(format!("{got:?}"), format!("{again:?}"));
+                    }
+                    None => none += 1,
+                }
+            }
+            if some >= 3 && none >= 3 {
+                break;
+            }
+        }
+        assert!(some >= 1 && none >= 1, "split {some}, whole {none}");
     }
 
     #[test]

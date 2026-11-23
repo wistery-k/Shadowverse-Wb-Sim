@@ -391,6 +391,7 @@ npm run svwb -- mulligan-data --games 6000 [--start 0] [--seed 1] [--flip 0.5] -
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
                 [--sampling classic|default] [--potential p.json|null] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
                 [--sDefault 0] [--searchValue 0] [--lethalLabel 0] [--lostLabel 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--kifu k.jsonl | --no-kifu]
+npm run svwb -- td branch --model m.json --from <自己対戦の棋譜>,… --out b.jsonl [--start 0] [--games N] [--turns 4-9] [--extra 4] [打ち方と印は td selfplay と同じ]   # 選ばなかった候補の枝
 npm run svwb -- td train --model m0.json --data d0.jsonl[,d1.jsonl.gz] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001]
                 [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--imaginedWeight 1] [--ivRes 1] [--best 0] [--bestOn end,after]
                 [--base default|zero|search] [--excludeDecks <デッキ>,…|--onlyDecks <デッキ>,…] [--dropInputs <入力>,…] [--lethalHead aux|survival] [--lethalWeight 1] [--lethalTarget lost|search]
@@ -423,6 +424,9 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
 - `mulligan-data`: 両プレイヤーとも初手の各カードの残す・返すをコインで決め（`--flip` が 0.5 未満なら今のマリガンの判断を各カードその確率で反転し）、
   その後は今の探索 AI で打った試合を 1 試合 1 行で追記する（初手・残したか・先後・勝敗。TypeScript 版の `mulligan-data` と同じ形）。
   残し方の因果的な効き目の推定と、どんなマリガンの勝率も試合を打たずに推定する（逆確率重み付け）のに使う
+- `td branch`: 自己対戦の棋譜の試合ごとに、自分のターンの最初で探索が選ばなかった候補を 1 つ打ち、最後まで同じ打ち方で打った枝を、自己対戦と同じ形の行で書く
+  （学びのデータに足す。`"iv"` の `"zone"` が `"plan"`）。`--model` は棋譜の試合を打った補正。引数は `rust/engine/src/runner/td.rs` の先頭、
+  考えは docs/ai-notes.md の索引「選ばなかった候補を学びに足す」。夜のキューでは `td selfplay` と同じく `--chunk` で区切れる
 - `td selfplay`: TD 学習の自己対戦。各引数の意味は `rust/engine/src/runner/td.rs` の先頭。
   `--decks` で、比較用の 7 デッキの代わりに並べたデッキ（デフォルトデッキの名前かデッキのテキストファイル。`@<デッキの組>` も。上の「compare」）の全組を回す（例: `rust/engine/td-pool/royal-counter/*.txt`）。
   `--ivZone drawn` は、カードを引いた瞬間に手札から抜いて最後まで打つ介入（`td ivcheck` で「（引いたとき）」の行。デッキに 1 枚入れる価値に近い）。

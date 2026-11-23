@@ -1306,6 +1306,7 @@ fn iv_zone_name(z: IvZone) -> &'static str {
         IvZone::OppBoard => "相手の場",
         IvZone::Res => "自分の",
         IvZone::OppRes => "相手の",
+        IvZone::Plan => "枝",
     }
 }
 
