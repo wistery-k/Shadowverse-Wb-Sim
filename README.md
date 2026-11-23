@@ -111,7 +111,7 @@ PR では CI（`.github/workflows/ci.yml`）が、変わったファイルに合
 ページはスターター（`https://wistery-k.github.io/Shadowverse-Wb-Sim/`）と、前期のローテーションのアズヴォルト環境（`https://wistery-k.github.io/Shadowverse-Wb-Sim/azvaldt/`）の 2 つです（`docs/browser.md`）。
 Vite の `base` はリポジトリ名（`/Shadowverse-Wb-Sim/`）に合わせます。
 
-また `main` への push ごとに「自動対戦」ワークフロー（`.github/workflows/auto-match.yml`）が、探索 AI どうし（リノセウスエルフだけリノセウス用 AI）でデフォルトデッキの総当たり（1組 20 試合、8 並列）を回し、通算勝率と対戦表を Actions の実行結果のサマリーに出します。Actions タブの Run workflow から試合数と AI を変えて手動でも実行できます。
+「自動対戦」ワークフロー（`.github/workflows/auto-match.yml`）は、探索 AI どうし（リノセウスエルフだけリノセウス用 AI）でデフォルトデッキの総当たり（1組 20 試合、8 並列）を回し、通算勝率と対戦表を Actions の実行結果のサマリーに出します。手動実行（Actions タブの Run workflow）だけで、試合数と AI を変えられます（`main` への push ごとに回すのは 2026-11-23 にやめました）。デプロイはテストを回さず、ビルドだけします（テストは PR の CI で済んでいるため）。
 
 ## ライセンス
 

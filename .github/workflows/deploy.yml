@@ -23,10 +23,11 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      # エンジンと AI の WASM を作る（npm test・npm run build の前に npm run wasm が走る）
+      # エンジンと AI の WASM を作る（npm run build の前に npm run wasm が走る）
       - run: rustup target add wasm32-unknown-unknown
       - run: npm ci
-      - run: npm test
+      # npm test はここでは回さない。テストはマージ前に PR の CI（ci.yml の check）で済んでいる
+      # （ユーザーの依頼 2026-11-23。リポジトリを非公開にすると Actions の分数が課金されるため）
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
