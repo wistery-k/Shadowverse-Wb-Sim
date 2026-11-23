@@ -12,7 +12,7 @@ use super::converging::{
 };
 use super::determinize::{determinize, determinize_apart_with, determinize_with};
 use super::eval::{evaluate_with, EvalWeights};
-use super::exact_lethal::{search_exact_lethal, sure_lethal_options};
+use super::exact_lethal::{search_exact_lethal, sure_lethal_options, with_fresh_exact_cache};
 use super::fusion::{excessive_fusion, last_words_to_hand, needless_material};
 use super::greedy::choose_greedy;
 use super::keys::{hand_eq_noid, state_eq, visible_eq, TurnOrderSet};
@@ -26,7 +26,9 @@ use super::mulligan::{
 };
 use super::potential::{default_potential_net, PotentialNet};
 use super::think::{Thought, ThoughtCandidate};
-use super::valuenet::{default_net_weights, value_net_eval, ValuePhase};
+use super::valuenet::{
+    default_net_weights, default_value_net, value_net_eval, ValueNet, ValuePhase,
+};
 use super::{purpose, purpose_rng, seed_of, with_purpose_rng, Agent, Rng};
 use crate::data::CardIdx;
 use crate::game::{
@@ -144,6 +146,95 @@ pub const DEFAULT_DRAW_SPLIT: DrawSplit = DrawSplit {
 thread_local! {
     /// ビームが局面を採点した回数（Planner::score。調べもの用。スレッドごと。svwb beam-gap）
     static SCORED: Cell<u64> = const { Cell::new(0) };
+    /// readLethal の数（調べもの用。スレッドごと。svwb profile が手番ごとに取り出す）
+    static READ_LETHAL: RefCell<ReadLethalStats> = const { RefCell::new(ReadLethalStats::new()) };
+}
+
+/// 読み直す終局面のうち、補正のリーサルの出力（相手が次のターンにリーサルを持つ確率 q。ターン末の局面で、合流する相打ちと
+/// ターン終了時の処理の後に出す。svwb kifu values の netLethal と同じ）が threshold 以上のものは、読みの中の相手が、相手のターンの初めに、
+/// このAI と同じリーサル探索（SearchAgent::finds_lethal と同じ。ビームと、見つからなければ全探索）を先にする（readLethal。2026-11-23）。
+/// 見つければその並びを打って負けの局面にする（svwb kifu values --opp-lethal 1 の相手と同じ）。見つけなければ今までどおりビームで打つ。
+/// 全探索のメモは打ち手の思考と分け、探すたびに空から（exact_lethal::with_fresh_exact_cache）
+#[derive(Clone)]
+pub struct ReadLethal {
+    pub threshold: f64,
+    /// q を出す補正（リーサルの出力のあるもの）。None なら探索 AI の既定の補正
+    pub net: Option<Arc<ValueNet>>,
+}
+
+/// ReadLethalStats の q の区間の下端（q がこれ以上で次の下端より小さい）
+pub const READ_LETHAL_EDGES: [f64; 9] = [0.0, 0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.5, 0.8];
+
+/// readLethal の数（q の区間ごと。調べもの用）。readLethal を設定したときだけ数える（threshold が 1 より大きければ、
+/// 打つ手は既定と同じまま q の分かれ方だけを数えられる）
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReadLethalStats {
+    /// 読みの起点の終局面（読み直した候補の終局面と、drawSplit で作り直した引きごとの終局面）の数
+    pub starts: [u64; READ_LETHAL_EDGES.len()],
+    /// 起点から読んだ引き直しの数
+    pub reads: [u64; READ_LETHAL_EDGES.len()],
+    /// リーサル探索をした引き直しの数と、見つけた数
+    pub searched: [u64; READ_LETHAL_EDGES.len()],
+    pub found: [u64; READ_LETHAL_EDGES.len()],
+    /// 見つけた並びを打っても相手が勝たなかった数（見つけなかったものとして扱う）
+    pub replay_failed: u64,
+}
+
+impl ReadLethalStats {
+    pub const fn new() -> ReadLethalStats {
+        ReadLethalStats {
+            starts: [0; READ_LETHAL_EDGES.len()],
+            reads: [0; READ_LETHAL_EDGES.len()],
+            searched: [0; READ_LETHAL_EDGES.len()],
+            found: [0; READ_LETHAL_EDGES.len()],
+            replay_failed: 0,
+        }
+    }
+
+    pub fn add(&mut self, o: &ReadLethalStats) {
+        for b in 0..READ_LETHAL_EDGES.len() {
+            self.starts[b] += o.starts[b];
+            self.reads[b] += o.reads[b];
+            self.searched[b] += o.searched[b];
+            self.found[b] += o.found[b];
+        }
+        self.replay_failed += o.replay_failed;
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.starts.iter().all(|&x| x == 0)
+    }
+}
+
+impl Default for ReadLethalStats {
+    fn default() -> Self {
+        ReadLethalStats::new()
+    }
+}
+
+/// このスレッドの readLethal の数を取り出して 0 に戻す
+pub fn take_read_lethal_stats() -> ReadLethalStats {
+    READ_LETHAL.with(|c| std::mem::take(&mut *c.borrow_mut()))
+}
+
+fn note_read_lethal(f: impl FnOnce(&mut ReadLethalStats)) {
+    READ_LETHAL.with(|c| f(&mut c.borrow_mut()));
+}
+
+/// 読みの起点 1 つの readLethal の判定（stats が None なら readLethal を使わない）
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ReadGate {
+    /// 読みの中の相手にリーサル探索を先にさせる
+    lethal: bool,
+    /// q の区間（READ_LETHAL_EDGES の添字。readLethal を使わないなら None）
+    bin: Option<usize>,
+}
+
+impl ReadGate {
+    const OFF: ReadGate = ReadGate {
+        lethal: false,
+        bin: None,
+    };
 }
 
 /// 自分のターンの最初に、候補の打ち比べ調査と同じ候補を最後まで打ち比べて選び直す（2026-11-12。打ち比べ調査の得を対戦で確かめる。
@@ -270,6 +361,8 @@ pub struct SearchOptions {
     pub sequential_rng: bool,
     /// 自分のターンの最初に、候補を最後まで打ち比べて選び直す（PickByPlayout。None なら使わない。既定 None）
     pub pick: Option<PickByPlayout>,
+    /// 補正のリーサルの出力が線以上の終局面だけ、読みの中の相手にリーサル探索を先にさせる（ReadLethal。None なら使わない。既定 None）
+    pub read_lethal: Option<ReadLethal>,
 }
 
 impl Default for SearchOptions {
@@ -356,6 +449,7 @@ impl Default for SearchOptions {
             // 2026-11-10 から、思考用の乱数を用途から作る（docs/ai-notes.md「AI の思考用の乱数を用途から作る」）
             sequential_rng: false,
             pick: None,
+            read_lethal: None,
         }
     }
 }
@@ -754,6 +848,29 @@ impl<'a> Planner<'a> {
         let base = settled.as_ref().unwrap_or(s);
         let resolved = resolve_turn_end(base);
         self.eval_state(resolved.as_ref().unwrap_or(base)) - self.leftover(s) - self.expiring(s)
+    }
+
+    /// readLethal: ターン末の局面 end（ターン終了を打つ前）から読むとき、読みの中の相手にリーサル探索を先にさせるか。
+    /// q は合流する相打ちとターン終了時の処理の後の局面で出す（end_score の補正と同じ局面。kifu values の netLethal と同じ）
+    fn read_gate(&self, end: &GameState) -> ReadGate {
+        let Some(rl) = &self.opts().read_lethal else {
+            return ReadGate::OFF;
+        };
+        if end.phase == Phase::Ended {
+            return ReadGate::OFF;
+        }
+        let settled = self.settle(end);
+        let base = settled.as_ref().unwrap_or(end);
+        let resolved = resolve_turn_end(base);
+        let at = resolved.as_ref().unwrap_or(base);
+        let net: &ValueNet = rl.net.as_deref().unwrap_or_else(|| default_value_net());
+        let q = net.lethal_prob(at, self.p, ValuePhase::End).unwrap_or(0.0);
+        let bin = READ_LETHAL_EDGES.iter().rposition(|&e| q >= e).unwrap_or(0);
+        note_read_lethal(|st| st.starts[bin] += 1);
+        ReadGate {
+            lethal: q >= rl.threshold,
+            bin: Some(bin),
+        }
     }
 
     fn score(&self, s: &GameState) -> f64 {
@@ -1207,6 +1324,16 @@ pub fn plan_turn_traced(
     // 引き直しごとの点数（trace のときだけ。PlanTrace.detail）
     let details: RefCell<Vec<ReadDetail>> = RefCell::new(Vec::new());
     let mut reads: Vec<(Action, ScoreParts)> = Vec::new();
+    // readLethal: 終局面ごとの判定（rescoreRace と読み直しで 1 回だけ出す）
+    let gates: RefCell<Vec<Option<ReadGate>>> = RefCell::new(vec![None; terminals.len()]);
+    let gate_of = |i: usize| -> ReadGate {
+        if let Some(g) = gates.borrow()[i] {
+            return g;
+        }
+        let g = pl.read_gate(&terminals[i].state);
+        gates.borrow_mut()[i] = Some(g);
+        g
+    };
     let rescore_node = |i: usize,
                         rng: &mut Rng,
                         result: &mut Vec<(Action, Plan)>,
@@ -1304,6 +1431,7 @@ pub fn plan_turn_traced(
                     let settled = pl.settle(&end);
                     let base = settled.as_ref().unwrap_or(&end);
                     let left = pl.leftover(&end);
+                    let gate = pl.read_gate(&end);
                     // 相手の手札の引き直しは、どの並びでも同じもの（oppHandCommon）を引きの数で分けて使う
                     let split_seeds_of = |seeds: &[u32], r: &mut Rng| -> Vec<u32> {
                         if seeds.len() >= k {
@@ -1319,7 +1447,7 @@ pub fn plan_turn_traced(
                     for &seed2 in &mine {
                         let mut r2 = Rng::new(seed2);
                         let d = read_determinize(base, p, &mut r2, opts);
-                        let (v, after) = read_once(&pl, &d, &mut r2);
+                        let (v, after) = read_once(&pl, &d, &mut r2, gate);
                         read_xs.push((wr, v - left));
                         read_w += wr;
                         reads += 1;
@@ -1348,15 +1476,17 @@ pub fn plan_turn_traced(
         } else if opts.opp_hand_samples <= 1 {
             let settled = pl.settle(&node.state);
             let start = settled.as_ref().unwrap_or(&node.state);
+            let gate = gate_of(i);
             let (v, after) = match read_rng(i, 0) {
-                Some(mut r) => read_once(&pl, start, &mut r),
-                None => read_once(&pl, start, rng),
+                Some(mut r) => read_once(&pl, start, &mut r, gate),
+                None => read_once(&pl, start, rng, gate),
             };
             add(after);
             (v - pl.leftover(&node.state), 1)
         } else {
             let settled = pl.settle(&node.state);
             let base = settled.as_ref().unwrap_or(&node.state);
+            let gate = gate_of(i);
             // 引き直しごとの (重み, 点数)（残った PP の分は引かずに入れ、まとめるときに引く）
             let mut xs: Vec<(f64, f64)> = Vec::new();
             if opts.opp_hand_common {
@@ -1374,7 +1504,7 @@ pub fn plan_turn_traced(
                         Some(x) => (x.value, x.after),
                         None => {
                             let mut r = Rng::new(seed);
-                            read_common(&pl, base, &mut r)
+                            read_common(&pl, base, &mut r, gate)
                         }
                     };
                     xs.push((1.0, v));
@@ -1385,11 +1515,11 @@ pub fn plan_turn_traced(
                     let (v, after) = match read_rng(i, k) {
                         Some(mut r) => {
                             let d = read_determinize(base, p, &mut r, opts);
-                            read_once(&pl, &d, &mut r)
+                            read_once(&pl, &d, &mut r, gate)
                         }
                         None => {
                             let d = read_determinize(base, p, rng, opts);
-                            read_once(&pl, &d, rng)
+                            read_once(&pl, &d, rng, gate)
                         }
                     };
                     xs.push((1.0, v));
@@ -1484,7 +1614,7 @@ pub fn plan_turn_traced(
                             || first_chance_step(root, &pl.steps_of(t.path), p).is_none())
                 })
                 .collect();
-            let (kept, out) = race_rescore(&pl, &terminals, &racers, &common_seeds, rr);
+            let (kept, out) = race_rescore(&pl, &terminals, &racers, &common_seeds, rr, &gate_of);
             *race_reads.borrow_mut() = kept;
             dropped = out;
         }
@@ -1545,9 +1675,9 @@ fn read_determinize(
 
 /// 相手の手札の引き直し（oppHandCommon。r はその引き直しの種で作った乱数で、読んだ後の状態になる）で、
 /// base から相手のターンを読んだ点数と、読んだ後の局面
-fn read_common(pl: &Planner, base: &GameState, r: &mut Rng) -> (f64, GameState) {
+fn read_common(pl: &Planner, base: &GameState, r: &mut Rng, gate: ReadGate) -> (f64, GameState) {
     let d = read_determinize(base, pl.p, r, pl.opts());
-    read_once(pl, &d, r)
+    read_once(pl, &d, r, gate)
 }
 
 /// rescoreRace: 終局面 racers（terminals の添字）を、引き直しを rr.first 通り、その後 rr.step 通りずつ読んで比べ、
@@ -1559,9 +1689,11 @@ fn race_rescore(
     racers: &[usize],
     seeds: &[u32],
     rr: RescoreRace,
+    gate_of: &dyn Fn(usize) -> ReadGate,
 ) -> RaceResult {
     struct Racer {
         i: usize,
+        gate: ReadGate,
         settled: Option<GameState>,
         left: f64,
         /// 引き直しごとの読みの点数（残った PP の分を引いたもの）
@@ -1573,6 +1705,7 @@ fn race_rescore(
         .iter()
         .map(|&i| Racer {
             i,
+            gate: gate_of(i),
             settled: pl.settle(&terminals[i].state),
             left: pl.leftover(&terminals[i].state),
             xs: Vec::new(),
@@ -1588,7 +1721,7 @@ fn race_rescore(
             let base = rc.settled.as_ref().unwrap_or(&terminals[rc.i].state);
             for &seed in &seeds[n..next] {
                 let mut r = Rng::new(seed);
-                let (v, after) = read_common(pl, base, &mut r);
+                let (v, after) = read_common(pl, base, &mut r, rc.gate);
                 rc.xs.push(v - rc.left);
                 rc.reads.push(RaceRead { value: v, after });
             }
@@ -1776,9 +1909,17 @@ fn split_turn_end(pl: &Planner, start: Rc<GameState>, env: &Env) -> (Rc<GameStat
 }
 
 /// start から相手のターンを読んだ点数と、読んだ後の局面
-fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng) -> (f64, GameState) {
+fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng, gate: ReadGate) -> (f64, GameState) {
     let env = pl.env;
     let p = pl.p;
+    if let Some(bin) = gate.bin {
+        note_read_lethal(|st| st.reads[bin] += 1);
+        if gate.lethal {
+            if let Some(after) = opp_lethal_first(pl, start, bin) {
+                return (pl.eval_after(&after), after);
+            }
+        }
+    }
     let after = {
         let _p = prof::scope(Sec::OppTurn);
         if env.opts.opponent_search.is_some() {
@@ -1788,6 +1929,55 @@ fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng) -> (f64, GameState)
         }
     };
     (pl.eval_after(&after), after)
+}
+
+/// readLethal: start（p のターン末）でターンを終え、相手の番の初めに、このAI と同じリーサル探索（lethal_line）で相手の勝てる並びを探す。
+/// 見つかれば、その並びを打って決着した局面（相手の勝ち）。探す局面はターン終了を打った後の局面そのもの（決定化し直さない）なので、
+/// 見つけた並びはそのまま打てる。探す前後で乱数（rng）は使わないので、見つからなければ読みは readLethal を使わないときと同じ
+fn opp_lethal_first(pl: &Planner, start: &GameState, bin: usize) -> Option<GameState> {
+    let q = opponent(pl.p);
+    let after = try_apply_action(start, &Action::EndTurn)?;
+    if after.phase == Phase::Ended || after.active != q {
+        return None;
+    }
+    note_read_lethal(|st| st.searched[bin] += 1);
+    let seq = {
+        let _p = prof::scope(Sec::Lethal);
+        with_fresh_exact_cache(|| lethal_line(pl.opts(), &after, q))?
+    };
+    let mut cur = after;
+    for a in &seq {
+        if cur.phase == Phase::Ended {
+            break;
+        }
+        match try_apply_action(&cur, a) {
+            Some(x) => cur = x,
+            None => break,
+        }
+    }
+    if cur.phase == Phase::Ended && cur.winner == Some(q) {
+        note_read_lethal(|st| st.found[bin] += 1);
+        Some(cur)
+    } else {
+        note_read_lethal(|st| st.replay_failed += 1);
+        None
+    }
+}
+
+/// 局面 s で p がこのターンに勝てる並び（opts のリーサル探索。ビームで見つからなければ、乱数に依らない手だけの全探索）
+fn lethal_line(opts: &SearchOptions, s: &GameState, p: PlayerIndex) -> Option<Vec<Action>> {
+    let lo = LethalOptions {
+        ward_blocked: opts.lethal_ward_blocked,
+        expand_choices: opts.lethal_expand_choices,
+        ..DEFAULT_LETHAL_OPTIONS
+    };
+    search_lethal(s, p, &lo)
+        .or_else(|| {
+            (opts.lethal_exact_states > 0)
+                .then(|| search_exact_lethal(s, p, &sure_lethal_options(opts.lethal_exact_states)))
+                .flatten()
+        })
+        .filter(|seq| !seq.is_empty())
 }
 
 /// 自分のターンを終え、相手のターン（と、その途中の選択）を貪欲法で進め、自分の手番に戻った局面を返す
@@ -1835,6 +2025,7 @@ fn opponent_search_options(opts: &SearchOptions) -> SearchOptions {
         max_depth: os.map(|o| o.max_depth).unwrap_or(opts.max_depth),
         opponent_search: None,
         potential: None,
+        read_lethal: None,
         ..opts.clone()
     }
 }
@@ -1968,21 +2159,7 @@ impl SearchAgent {
 impl SearchAgent {
     /// 調べもの用（svwb beam-gap）: 局面 s（決定化した局面。決定化し直さない）で、このAI のリーサル探索が p の勝てる並びを見つけるか
     pub fn finds_lethal(&self, s: &GameState, p: PlayerIndex) -> bool {
-        let opts = &self.opts;
-        let lo = LethalOptions {
-            ward_blocked: opts.lethal_ward_blocked,
-            expand_choices: opts.lethal_expand_choices,
-            ..DEFAULT_LETHAL_OPTIONS
-        };
-        search_lethal(s, p, &lo)
-            .or_else(|| {
-                (opts.lethal_exact_states > 0)
-                    .then(|| {
-                        search_exact_lethal(s, p, &sure_lethal_options(opts.lethal_exact_states))
-                    })
-                    .flatten()
-            })
-            .is_some_and(|seq| !seq.is_empty())
+        lethal_line(&self.opts, s, p).is_some()
     }
 
     /// このターンに勝てる並びの最初の手（lethal のとき。見つからない・実際の局面で打てなければ None）
@@ -2264,12 +2441,13 @@ impl SearchAgent {
         let settled = pl.settle(end);
         let base = settled.as_ref().unwrap_or(end);
         let leftover = pl.leftover(end);
+        let gate = pl.read_gate(end);
         seeds
             .iter()
             .map(|&seed| {
                 let mut r = Rng::new(seed);
                 let d = read_determinize(base, p, &mut r, &self.opts);
-                read_once(&pl, &d, &mut r).0 - leftover
+                read_once(&pl, &d, &mut r, gate).0 - leftover
             })
             .collect()
     }
@@ -2302,7 +2480,7 @@ impl SearchAgent {
         let base = settled.as_ref().unwrap_or(end);
         let mut r = Rng::new(seed);
         let d = read_determinize(base, p, &mut r, &self.opts);
-        let (v, after) = read_once(&pl, &d, &mut r);
+        let (v, after) = read_once(&pl, &d, &mut r, pl.read_gate(end));
         (v - pl.leftover(end), after)
     }
 
@@ -2338,7 +2516,7 @@ impl SearchAgent {
         let leftover = pl.leftover(end);
         let mut r = Rng::new(seed);
         let d = read_determinize(base, p, &mut r, &self.opts);
-        let (v, after) = read_once(&pl, &d, &mut r);
+        let (v, after) = read_once(&pl, &d, &mut r, pl.read_gate(end));
         let read = v - leftover;
         if after.phase == Phase::Ended || after.active != p || after.pending.is_some() {
             return same(read);

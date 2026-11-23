@@ -8,7 +8,7 @@ use crate::data::Pool;
 use crate::sim::play_match;
 
 /// デッキのファイル（data/pools/azvaldt/decks/）を前期のローテーションのカードで読む
-fn pool_deck(text: &str) -> Vec<CardIdx> {
+pub(super) fn pool_deck(text: &str) -> Vec<CardIdx> {
     let d = data();
     let mut out = Vec::new();
     for line in text.lines() {

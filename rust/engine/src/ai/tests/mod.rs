@@ -21,6 +21,7 @@ mod match_rng;
 mod mulligan;
 mod pool;
 mod potential;
+mod read_lethal;
 mod rescore_race;
 mod rhino;
 mod rhino_bound;

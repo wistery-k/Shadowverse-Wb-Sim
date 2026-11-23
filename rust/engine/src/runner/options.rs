@@ -9,8 +9,8 @@ use crate::ai::mulligan::OppMulligan;
 use crate::ai::potential::PotentialNet;
 use crate::ai::rhino::{rhino_search_options, RHINO_POTENTIAL};
 use crate::ai::search::{
-    DrawSplit, ExtraEval, MulliganMode, OpponentSearch, PickByPlayout, RescoreRace, RolloutWeights,
-    SearchOptions, DEFAULT_PICK, DEFAULT_RESCORE_RACE,
+    DrawSplit, ExtraEval, MulliganMode, OpponentSearch, PickByPlayout, ReadLethal, RescoreRace,
+    RolloutWeights, SearchOptions, DEFAULT_PICK, DEFAULT_RESCORE_RACE,
 };
 use crate::ai::valuenet::ValueNet;
 use crate::json::Json;
@@ -47,15 +47,24 @@ pub fn load_model(path: &str) -> Result<(Arc<ValueNet>, Json), String> {
 
 /// 設定の JSON に `"valueNet"` があれば、学習した補正を入れた設定に直す（applyValueNetOption）。
 /// 補正は設定の JSON では `"extraEval"` の関数（表示されない値）になり、その中身を 2 つ目に返す
-pub fn apply_value_net(mut raw: Json) -> Result<(Json, Option<ExtraEval>), String> {
+pub fn apply_value_net(raw: Json) -> Result<(Json, Option<ExtraEval>), String> {
+    let (raw, model, _) = apply_value_net_model(raw)?;
+    Ok((raw, model))
+}
+
+/// apply_value_net の結果に、読んだ補正のモデルを足したもの
+type WithModel = (Json, Option<ExtraEval>, Option<Arc<ValueNet>>);
+
+/// apply_value_net と同じ。読んだ補正のモデルも返す（readLethal が q を出すのに使う）
+fn apply_value_net_model(mut raw: Json) -> Result<WithModel, String> {
     if !raw.is_obj() {
         return Err("設定はオブジェクトの JSON で渡します".into());
     }
     match raw.take("valueNet") {
-        None => Ok((raw, None)),
+        None => Ok((raw, None, None)),
         Some(Json::Bool(false)) => {
             raw.set("extraEval", Json::Null);
-            Ok((raw, None))
+            Ok((raw, None, None))
         }
         Some(Json::Str(path)) => {
             let (net, file) = load_model(&path)?;
@@ -81,7 +90,7 @@ pub fn apply_value_net(mut raw: Json) -> Result<(Json, Option<ExtraEval>), Strin
                 search_weights_json().spread(&base).spread(&extra),
             );
             raw.set("extraEval", Json::Func);
-            Ok((raw, Some(model_eval(net))))
+            Ok((raw, Some(model_eval(net.clone())), Some(net)))
         }
         Some(_) => Err("\"valueNet\" にはモデルのファイル名か false を渡します".into()),
     }
@@ -515,13 +524,45 @@ pub fn search_options(
 /// compare の設定（scripts/compare-main.ts の parseOptions）。
 /// "weights": "default" で基準の重み、オブジェクトなら SEARCH_WEIGHTS のその項目だけを変える（"holdScale" は hold を何倍にするか）
 pub fn compare_options(text: &str) -> Result<SearchOptions, String> {
-    let (mut raw, model) = apply_value_net(Json::parse(text)?)?;
+    let (mut raw, model, net) = apply_value_net_model(Json::parse(text)?)?;
+    let read_lethal = match raw.take("readLethal") {
+        None => None,
+        Some(v) => read_lethal_option(&v, net)?,
+    };
     for key in ["weights", "policyWeights"] {
         if let Some(w) = resolve_weights(key, raw.get(key))? {
             raw.set(key, w);
         }
     }
-    search_options(&raw, model.as_ref(), SearchOptions::default(), &[])
+    let mut o = search_options(&raw, model.as_ref(), SearchOptions::default(), &[])?;
+    o.read_lethal = read_lethal;
+    Ok(o)
+}
+
+/// "readLethal"（compare の設定だけ。0 以上の数か null）: 補正のリーサルの出力 q がこの値以上の終局面は、読みの中の相手にリーサル探索を
+/// 先にさせる（search.rs の ReadLethal。1 より大きければどの終局面にもさせず、q の分かれ方だけを数える）。
+/// q を出すのは "valueNet" の補正（書かなければ探索 AI の既定の補正）で、リーサルの出力が要る
+fn read_lethal_option(v: &Json, net: Option<Arc<ValueNet>>) -> Result<Option<ReadLethal>, String> {
+    let threshold = match v {
+        Json::Null => return Ok(None),
+        Json::Num(x) if *x >= 0.0 => *x,
+        _ => {
+            return Err(format!(
+                "\"readLethal\" は 0 以上の数か null: {}",
+                v.stringify()
+            ))
+        }
+    };
+    let has_head = match &net {
+        Some(n) => n.has_lethal_head(),
+        None => crate::ai::valuenet::default_value_net().has_lethal_head(),
+    };
+    if !has_head {
+        return Err(
+            "\"readLethal\" には、リーサルの出力のある補正（\"valueNet\"）が要ります".into(),
+        );
+    }
+    Ok(Some(ReadLethal { threshold, net }))
 }
 
 /// compare の "weights"・"policyWeights" の値を、全部の項目のある重みの JSON にする（直さなくてよければ None）。
