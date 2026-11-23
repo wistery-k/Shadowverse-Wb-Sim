@@ -1,0 +1,57 @@
+# R6 の候補の 2 晩目: 1 晩目（r6-heads-1）の翌朝に選んだ版 対 R5 と、選んだ版の新しいプールの物差し 2 つ。
+# 選んだ版: B（2026-11-23 朝、1 晩目のファイルの先頭の手順で選んだ。取り置きのデータで B との差 + 2 SE < 0 の版が無く、決まりどおり B。
+#   I −0.0000 ± 0.0001・W +0.0010 ± 0.0003・V +0.0009 ± 0.0003・F +0.0001 ± 0.0002・A +0.0007 ± 0.0003。docs/ai-notes/15-2026-11-22.md「R6 の候補」）
+#
+# 回す前に決めた問いと線:
+#   選んだ版 対 R5（下の 1。84 個のデッキの鏡の compare 2 万試合、± 0.29 ほど。見込みはどちらも R4）:
+#     差 − 2 SE > 0 なら、選んだ版を R6 の候補として採否をユーザーに出す。越えなければ R5 のままで区切り、台帳を「やめた」にする。
+#     試合数の決め方: 学び直し 1 回の伸びは R3 対 R2 +1.56、R4 対 R3 +2.13、C 対 R4 +1.16。+1 のときに線を越える割合は 1.2 万試合で 7 割半、2 万試合で 9 割ほど
+#   この比べで勝っても、案が効いたのか学び直し 1 回分なのかは勝率では分かれない。B のモデル（@run:r6-heads-1/b.json）は残してあり、
+#     後から「選んだ版 対 B」を回せる（回すかはユーザーが結果を見て決める。B が選ばれたときは要らない）
+#   線ではないが見る数: 型ごとの勝率（svwb kifu winrate --where side=A --by arch・oppArch）、A・B の席の次の相手のターンに負けたターン末の割合、
+#     profile の PP を残して終えたターン
+#   物差し 2 つ（下の 2）: 採る前に測っておく（採らなければ台帳に候補の名前で残るだけ。docs/yardstick.md の表には足さない）
+#
+# 見込み（PC、svwb-docker・28 スレッド）: compare 0.17 秒/試合で 57 分、物差しは R5 の実測 0.148・0.178 秒/試合で 8000 試合ずつ 48 分、profile 2 分。写すのは数秒
+#   学ぶジョブ（下の 4。データの量だけを変えた B）を足して、学びが 40 分ほど
+# 朝: 止まったときのまとめを push してもらい、ingest する。モデル（d15・d30・d120.json）は出口のファイルで共有フォルダへ
+
+# 0. 1 晩目の回のフォルダのモデルを写す（td extend は語彙を替えない写し。出力と winForm も残す）
+td extend --model @run:r6-heads-1/b.json --out @/h.json --est 10
+
+# 1. 選んだ版 対 R5（2 万試合。見込みはどちらも R4）
+compare 10000 '{"valueNet":"@/h.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' '{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label R6候補対R5 --est 0.17
+
+# 2. 物差し 2 つ（新しいプールの弱い相手・強い相手。R5 と同じ試合数）
+yardstick --ref pool-v0 --opts '{"valueNet":"@/h.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' --games 4000 --start 0 --label 新しいプール-物差し-R6候補 --est 0.15
+yardstick --ref pool-r3 --opts '{"valueNet":"@/h.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' --games 4000 --start 0 --label 新しいプール-強い物差し-R6候補 --est 0.18
+
+# 3. 線ではないが毎回見る数字
+profile --opts '{"valueNet":"@/h.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.16
+
+# 4. データの量だけを変えた B（ユーザーの問い 2026-11-23「リーサルよけは 1 試合に 1 ターン（1 局面）しか学べないから、単純に学び足りていないのでは」。審査のスレッドの依頼）
+#   学び方は 1 晩目の B と同じ（出発は r6-heads-1 の v0、入力 7 つを外す、--lethalHead survival、3 エポックで確かめ用の局面が一番良いものを書き出し、間引き・属性）。データの量だけを変える:
+#     d15: r6-heads-1 の自己対戦 1.5 万試合（s-1〜5）、d30: 3 万試合（s-1〜10）、（6 万試合は 1 晩目の B そのもの）、
+#     d120: r6-heads-1 の 6 万試合 ＋ lethal-heads-1 の 6 万試合（g7400000〜7459999）= 12 万試合
+#   ファイル 1 つが 3000 試合なので 2 万・4 万にはできず、倍々（1.5 万・3 万・6 万・12 万）にした
+#   d120 の但し書き: lethal-heads-1 の 6 万試合は R4（リーサルの出力の無い補正）が打った試合で、R5 が学んだデータそのもの（取り置きのデータとは別の試合）。
+#     打ち方が違う試合が半分混ざるので、6 万から 12 万の差は「量」と「R4 の打ち方の混ざり」の両方を含む。lethal-heads-1 のデータは今の入力の形で読める
+#     （クラウドで 1 ファイルずつ混ぜて読み、学び・間引き・属性まで通した。入力 7 つは外すので、R4 の形のデータでも足りない入力は無い）
+#   採否には使わない。次の学び直しの自己対戦の量を決める材料（勝率ではなく、取り置きのデータの当て方で見る）
+#   回す前に決めた読み方（翌朝、1 晩目と同じ取り置きのデータ Z 対 C の g0〜5999 の A の席で、pick.py を B = 6 万を基準に回す）:
+#     並べる数: 勝敗の交差エントロピー、体力 10 以下の交差エントロピー、q の交差エントロピーと AUC、値 50% 以上のまま次の相手のターンに負けた行（試合ごとのブートストラップの対の差の SE）
+#     主に見るのは、リーサルよけに近い 3 つ（体力 10 以下の交差エントロピー、q の交差エントロピー、値 50% 以上のまま負けた行）と勝敗の交差エントロピー
+#     - 3 万 → 6 万で 2 SE を越えて良くなり、6 万 → 12 万でも 2 SE を越えて良くなる: 「まだ学び足りていない」。次の学び直しは自己対戦を増やす（前の回のデータも混ぜる）
+#     - 3 万 → 6 万では越えて良くなるが、6 万 → 12 万では越えない: 「6 万あたりで頭打ち」。量を増やすより、入力・形・打ち方を変える
+#     - 3 万 → 6 万でも越えない: 「3 万で頭打ち」。データの量はリーサルよけの足りなさの理由ではない
+#     - 6 万 → 12 万で 2 SE を越えて悪くなる: R4 の打ち方の試合が混ざった害が量の得より大きい（量の問いには答えられない）
+#   見込み: 学び 1 つは 6 万試合で 11 分（1 晩目の実測）なので、1.5 万 3 分・3 万 6 分・12 万 23 分ほど。12 万はデータを詰めて 5GB ほどのメモリを使う
+td train --impl rust --model @run:r6-heads-1/v0.json --data @run:r6-heads-1/s-{1..5}.jsonl.gz --out @/d15t.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks --est 180
+td prune --impl rust --model @/d15t.json --data @run:r6-heads-1/s-{1..5}.jsonl.gz --out @/d15p.json --est 10
+td attr --model @/d15p.json --out @/d15.json --keepA 0 --est 10
+td train --impl rust --model @run:r6-heads-1/v0.json --data @run:r6-heads-1/s-{1..10}.jsonl.gz --out @/d30t.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks --est 360
+td prune --impl rust --model @/d30t.json --data @run:r6-heads-1/s-{1..10}.jsonl.gz --out @/d30p.json --est 15
+td attr --model @/d30p.json --out @/d30.json --keepA 0 --est 10
+td train --impl rust --model @run:r6-heads-1/v0.json --data @run:r6-heads-1/s-{1..20}.jsonl.gz,@run:lethal-heads-1/s-{1..20}.jsonl.gz --out @/d120t.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks --est 1380
+td prune --impl rust --model @/d120t.json --data @run:r6-heads-1/s-{1..20}.jsonl.gz,@run:lethal-heads-1/s-{1..20}.jsonl.gz --out @/d120p.json --est 45
+td attr --model @/d120p.json --out @/d120.json --keepA 0 --est 10

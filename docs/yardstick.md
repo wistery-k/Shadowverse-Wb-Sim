@@ -44,11 +44,11 @@ AI の版ごとに、**固定した相手**との勝率を記録する表。`npm
 
 - 思考用の乱数はその日の既定（判断ごとに作る。スターターの物差しの相手は古い取り方）なので、同じ設定を測るとちょうど 50.0% になる
   （`--opts '{"valueNet":"rust/engine/yardstick/pool-r3-net.json","potentialNet":"rust/engine/yardstick/pool-r3-potential.json"}'` で `--ref pool-r3`。2026-11-16 に 40 試合で、組がすべて 1 勝 1 敗になるのを確かめた。v0 も同じ）
-- 新しいプールの AI は、今は補正 R5 と見込み R4（2026-11-22 から。`--opts '{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}'`。R5 は夜のキュー lethal-heads-1 の `z.json`（リーサルの出力を足して学び直した Z。台帳の指紋 8e0041a7）で、見込みは R4 のまま。アズヴォルト環境のページの `data/pools/azvaldt/` と同じ中身）。`pool-r4-*.json`・`pool-r5-net.json` は物差しの相手ではない（相手は `pool-v0`・`pool-r3` のまま）。2026-11-21〜22 は R4（`pool-r4-*.json`。夜のキュー night-20261121b の `r.json`・`rpot.json`、指紋 1e0cadc6・869d3cc8）、それまでは R3（上の `pool-r3` の 2 つのファイル）。スターターの既定（`{}`）は新しいカードの行が無い補正なので、この表では測らない
+- 新しいプールの AI は、今は補正 R6 と見込み R4（2026-11-23 から。`--opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}'`。R6 は夜のキュー r6-heads-1 の `b.json` を r6-heads-2 で `td extend` した `h.json`（R5 から 6 万試合で学び直した B。台帳の指紋 55bd5a54）で、見込みは R4 のまま。アズヴォルト環境のページの `data/pools/azvaldt/` と同じ中身）。`pool-r4-*.json`・`pool-r5-net.json`・`pool-r6-net.json` は物差しの相手ではない（相手は `pool-v0`・`pool-r3` のまま）。2026-11-22〜23 は R5（`pool-r5-net.json`。夜のキュー lethal-heads-1 の `z.json`、リーサルの出力を足して学び直した Z、指紋 8e0041a7）。2026-11-21〜22 は R4（`pool-r4-*.json`。夜のキュー night-20261121b の `r.json`・`rpot.json`、指紋 1e0cadc6・869d3cc8）、それまでは R3（上の `pool-r3` の 2 つのファイル）。スターターの既定（`{}`）は新しいカードの行が無い補正なので、この表では測らない
 - 1 試合はクラウド環境（4 スレッド）で 0.72 秒ほど（スレッド秒 2.9。スターターの強い相手の物差しの 1.6 倍）。PC（28 スレッド）は段階 4 の compare から 0.18 秒ほどの見込み
 - デッキ別の列は、測った AI がその型を持ったときの勝率（相手は 10 型すべて）。型ごとに 40〜60% ほど散るので、デッキ別は 50% とではなく表の 1 行目と比べる
-- 2026-11-16 の R3 は、相手 v0 に 78.21% ± 0.44（8000 試合、PC）。2026-11-22 の R5（新しいプールの今の AI）は、相手 v0 に 80.03% ± 0.43、相手 R3 に 53.10% ± 0.48（どちらも 8000 試合、PC。夜のキュー night-20261122）。段階 4 の R1 対 v0 の 76.28% ± 0.61 は 84 個のデッキの組なので、この表の行とは比べない。
-  デッキ別ではアグロNi が 58.5%（R3）・63.1%（R5）といちばん低いが、デッキ別にはデッキそのものの強さが混ざる。比べる 1 行目（同じ AI どうし）が今は確かめの 40 試合だけなので、デッキ別はまだ読まない
+- 2026-11-16 の R3 は、相手 v0 に 78.21% ± 0.44（8000 試合、PC）。2026-11-22 の R5 は、相手 v0 に 80.03% ± 0.43、相手 R3 に 53.10% ± 0.48（どちらも 8000 試合、PC。夜のキュー night-20261122）。2026-11-23 の R6（新しいプールの今の AI）は、相手 v0 に 80.80% ± 0.42、相手 R3 に 54.23% ± 0.48（同じ試合番号、PC。夜のキュー r6-heads-2）。段階 4 の R1 対 v0 の 76.28% ± 0.61 は 84 個のデッキの組なので、この表の行とは比べない。
+  デッキ別ではアグロNi が 58.5%（R3）・63.1%（R5）・63.4%（R6）といちばん低いが、デッキ別にはデッキそのものの強さが混ざる。比べる 1 行目（同じ AI どうし）が今は確かめの 40 試合だけなので、デッキ別はまだ読まない
 
 ### 指紋
 
@@ -241,6 +241,7 @@ relearn9 と確かめの行は、学び直し（B）の 2 晩目の夜のキュ�
 | 2026-11-16 | 30d6064 | 物差しと同じ設定（確かめ。補正 v0・見込み B） | `{"valueNet":"rust/engine/yardstick/pool-v0-net.json","potentialNet":"rust/engine/yardstick/pool-v0-potential.json"}` | **50.0%** | 0.0 | 40（g0〜19） | 0.0% | 25.0% | 25.0% | 75.0% | 75.0% | 50.0% | 25.0% | 75.0% | 100.0% | 50.0% | 0.65秒 |
 | 2026-11-16 | 2e85dc2 | 新しいプールの今の AI（R3。段階 4 で学び直しを止めた回。夜のキュー night-20261117-0328） | `{"valueNet":"rust/engine/yardstick/pool-r3-net.json","potentialNet":"rust/engine/yardstick/pool-r3-potential.json"}` | **78.2%** | 0.4 | 8000（g0〜3999） | 85.1% | 75.8% | 58.5% | 85.0% | 82.6% | 85.2% | 69.0% | 76.6% | 85.8% | 78.5% | 0.15秒（PC） |
 | 2026-11-22 | 6296f29 | 新しいプールの今の AI（R5。リーサルの出力を足して学び直した Z と見込み R4。夜のキュー night-20261122） | `{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}` | **80.0%** | 0.4 | 8000（g0〜3999） | 86.1% | 79.1% | 63.1% | 85.8% | 82.9% | 85.5% | 70.1% | 83.8% | 84.0% | 79.9% | 0.15秒（PC） |
+| 2026-11-23 | 4da20f3 | 新しいプールの今の AI（R6。R5 から 6 万試合で学び直した B と見込み R4。夜のキュー r6-heads-2） | `{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}` | **80.8%** | 0.4 | 8000（g0〜3999） | 88.4% | 79.1% | 63.4% | 87.1% | 83.6% | 84.1% | 71.9% | 83.1% | 87.1% | 80.1% | 0.16秒（PC） |
 
 ## 新しいプールの強い相手の物差し 1（指紋 7fa599f2）
 
@@ -250,3 +251,4 @@ relearn9 と確かめの行は、学び直し（B）の 2 晩目の夜のキュ�
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 2026-11-16 | 30d6064 | 物差しと同じ設定（確かめ。補正 R3・見込み R3） | `{"valueNet":"rust/engine/yardstick/pool-r3-net.json","potentialNet":"rust/engine/yardstick/pool-r3-potential.json"}` | **50.0%** | 0.0 | 40（g0〜19） | 25.0% | 75.0% | 25.0% | 50.0% | 50.0% | 50.0% | 25.0% | 50.0% | 75.0% | 75.0% | 0.65秒 |
 | 2026-11-22 | 6296f29 | 新しいプールの今の AI（R5。リーサルの出力を足して学び直した Z と見込み R4。夜のキュー night-20261122） | `{"valueNet":"rust/engine/yardstick/pool-r5-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}` | **53.1%** | 0.5 | 8000（g0〜3999） | 58.8% | 48.9% | 43.5% | 56.8% | 54.1% | 56.2% | 47.1% | 58.4% | 57.4% | 49.9% | 0.18秒（PC） |
+| 2026-11-23 | 4da20f3 | 新しいプールの今の AI（R6。R5 から 6 万試合で学び直した B と見込み R4。夜のキュー r6-heads-2） | `{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}` | **54.2%** | 0.5 | 8000（g0〜3999） | 60.5% | 51.9% | 44.0% | 58.1% | 52.5% | 57.4% | 49.4% | 57.1% | 62.3% | 49.1% | 0.19秒（PC） |

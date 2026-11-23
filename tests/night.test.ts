@@ -12,6 +12,7 @@ import { outboxPathAllowed } from "../scripts/night-outbox";
 import { packItems, type PackItem } from "../scripts/pack-run-main";
 import {
   checkArgv,
+  checkRunRefs,
   chunkJob,
   combineRows,
   estimate,
@@ -20,6 +21,7 @@ import {
   httpsRemote,
   isDaytime,
   jobInputs,
+  jobRunRefs,
   kifuDir,
   kifuSnapshot,
   jobProducts,
@@ -180,6 +182,48 @@ describe("ジョブの行", () => {
       '{"valueNet":"data/value-net.json","beamWidth":8,"v":{"w":{"potentialNet":"data/potential-net.json"}}}',
     );
     expect(() => standIn('{"model":"@/a.json"}')).toThrow(/valueNet/);
+    // 前の回のフォルダのファイル（@run:<回の名前>/<ファイル>）: 同じ根の下のその回のフォルダ。前のジョブが作らなくてよく、確かめる間は既定のモデル
+    const ext = parseJobs("td extend --model @run:r6-heads-1/w.json --out @/h.json --est 10")[0]!;
+    expect(jobInputs(ext)).toEqual([]);
+    expect(jobRunRefs(ext)).toEqual(["@run:r6-heads-1/w.json"]);
+    expect(jobArgv(ext, 0, 1, "/root/night/r6-heads-2")).toEqual(["td", "extend", "--model", "/root/night/r6-heads-1/w.json", "--out", "/root/night/r6-heads-2/h.json.tmp"]);
+    expect(standIn('{"valueNet":"@run:r6-heads-1/w.json"}')).toBe('{"valueNet":"data/value-net.json"}');
+    const cmp = parseJobs(`compare 10 '{"valueNet":"@run:r6-heads-1/w.json"}' '{}' --label q1`)[0]!;
+    expect(jobRunRefs(cmp)).toEqual(["@run:r6-heads-1/w.json"]);
+    expect(jobArgv(cmp, 0, 10, "/root/night/r6-heads-2")[2]).toBe('{"valueNet":"/root/night/r6-heads-1/w.json"}');
+    for (const bad of ["@run:../x/w.json", "@run:a/../w.json", "@run:a b/w.json", "@run:r6-heads-1"]) {
+      expect(() => parseJobs(`td extend --model '${bad}' --out @/h.json --est 10`)).toThrow(/@run:<回の名前>/);
+    }
+    const runRoot = mkdtempSync(join(tmpdir(), "night-runref-"));
+    try {
+      expect(() => checkRunRefs([ext], runRoot)).toThrow(/r6-heads-1\/w.json がありません/);
+      mkdirSync(join(runRoot, "r6-heads-1"));
+      writeFileSync(join(runRoot, "r6-heads-1", "w.json"), "{}");
+      expect(() => checkRunRefs([ext], runRoot)).not.toThrow();
+      // 学習のデータ（{a..b} を開き、ほかの回のデータとカンマで並べる）も、開いた 1 つずつを確かめる
+      const tr = parseJobs(
+        "td train --impl rust --model @run:r6-heads-1/w.json --data @run:r6-heads-1/s-{1..2}.jsonl.gz,@run:lethal-heads-1/s-{1..2}.jsonl.gz --out @/d.json --est 10",
+      )[0]!;
+      expect(jobRunRefs(tr)).toEqual([
+        "@run:r6-heads-1/w.json",
+        "@run:r6-heads-1/s-1.jsonl.gz",
+        "@run:r6-heads-1/s-2.jsonl.gz",
+        "@run:lethal-heads-1/s-1.jsonl.gz",
+        "@run:lethal-heads-1/s-2.jsonl.gz",
+      ]);
+      expect(jobArgv(tr, 0, 1, "/root/night/r6-heads-2")).toContain(
+        "/root/night/r6-heads-1/s-1.jsonl.gz,/root/night/r6-heads-1/s-2.jsonl.gz,/root/night/lethal-heads-1/s-1.jsonl.gz,/root/night/lethal-heads-1/s-2.jsonl.gz",
+      );
+      writeFileSync(join(runRoot, "r6-heads-1", "s-1.jsonl.gz"), "");
+      writeFileSync(join(runRoot, "r6-heads-1", "s-2.jsonl.gz"), "");
+      expect(() => checkRunRefs([tr], runRoot)).toThrow(/lethal-heads-1\/s-1.jsonl.gz がありません/);
+      mkdirSync(join(runRoot, "lethal-heads-1"));
+      writeFileSync(join(runRoot, "lethal-heads-1", "s-1.jsonl.gz"), "");
+      writeFileSync(join(runRoot, "lethal-heads-1", "s-2.jsonl.gz"), "");
+      expect(() => checkRunRefs([tr], runRoot)).not.toThrow();
+    } finally {
+      rmSync(runRoot, { recursive: true, force: true });
+    }
     // 回す前の確かめ: 語彙を読むモデル（--vocab）も、--model と同じく今の既定のモデルにする。ほかの @/ は tmp の下の名前
     const bgv = parseJob(
       `beam-gap --games 40 --from 1000 --chunk 20 --decks @x.txt --vocab @/r.json --ref '{"valueNet":"@/r.json","potentialNet":null}' --sample 100 --inputs @/pot-{k}.jsonl --out @/pot-{k}-rows.jsonl --est 2`,

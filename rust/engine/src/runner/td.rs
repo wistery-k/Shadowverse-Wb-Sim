@@ -1,6 +1,6 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--searchValue 0] [--lethalLabel 0] [--lostLabel 0] [--sampling classic|default] [--potential p.json|null] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--kifu k.jsonl | --no-kifu] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--searchValue 0] [--lethalLabel 0] [--lostLabel 0] [--wonLabel 0] [--readLabel 0] [--sampling classic|default] [--potential p.json|null] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--kifu k.jsonl | --no-kifu] --out d0.jsonl
 //!
 //! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・既定の幅（今は 256）、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
 //! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
@@ -43,6 +43,14 @@
 //! その初めと終わりの処理も含む）で終わり、相手が勝ったら 1。svwb kifu values の lostNext と同じ）と、次の相手のターンの最初の手が
 //! --eps のランダムな手だったか（"oe": 1 か 0。その相手は、リーサルがあっても最初の手をランダムに打つ）。試合の結果から書くだけで、
 //! 探索しないので、打つ手も速さも変わらない。td train の lethalHead の既定の印（--lethalTarget lost）。"oe" が 1 の局面は学ばない
+//!
+//! --wonLabel 1 なら、各ターン末の局面に、自分の次のターン（ターン末の 2 つ後のターン。その初めと終わりの処理も含む）に勝ったかの印
+//! （"wn": 1 か 0。svwb kifu values の wonNext と同じ）と、自分の次のターンの最初の手が --eps のランダムな手だったか（"we": 1 か 0）を書く。
+//! 試合の結果から書くだけで、打つ手も速さも変わらない。td train の winHead の印。"we" が 1 の局面は学ばない（2026-11-22、R6 の候補）
+//!
+//! --readLabel 1 なら、探索が読んだターン末の局面に、そのターンに選んだ並びの読み（そのターンの最後の探索が選んだ並びを、相手の手札の
+//! 引き直しごとに相手のターンまで読んだ局面。"qr" と同じもの）のうち、読みの中の相手が勝った割合（"rf": 0〜1）と、数えた読みの回数
+//! （"rn"）を書く。読みの無いターン末には書かない。読みを数えるだけで、打つ手も速さも変わらない。td train の readHead の印（2026-11-22）
 //!
 //! --cmp k なら、各試合で 1 つの自分のターンの最初（--iv と同じ選び方）から、探索が読んだ点数の高い順に最初の手の違う並びを k 個まで選び、
 //! 並びごとにターン末から最後まで --rollouts 回打った勝ち数を書き出す（"cmp" 付きの行。打ち比べ）。r 回目はどの並びも同じ乱数で
@@ -165,6 +173,10 @@ struct Model {
     lethal_label: bool,
     /// ターン末の局面に、次の相手のターンに負けたかの印（"ln"）と、その相手の最初の手がランダムな手だったか（"oe"）も書く（--lostLabel。打つ手は変わらない）
     lost_label: bool,
+    /// ターン末の局面に、自分の次のターンに勝ったかの印（"wn"）と、そのターンの最初の手がランダムな手だったか（"we"）も書く（--wonLabel。打つ手は変わらない）
+    won_label: bool,
+    /// ターン末の局面に、選んだ並びの読みのうち読みの中の相手が勝った割合（"rf"）と読みの回数（"rn"）も書く（--readLabel。打つ手は変わらない）
+    read_label: bool,
     /// 固定した相手の設定（--frozen）。あれば、学ぶ側でない席はこの設定で打つ
     frozen: Option<SearchOptions>,
     /// もとの試合（介入していない試合）の棋譜も書く（runner/kifu.rs。回と、学ぶ側・固定した側の席。打つ手は変わらない）
@@ -211,6 +223,8 @@ fn model_options(net: Arc<ValueNet>, opp_beam: bool, classic: bool) -> Result<Mo
         search_value: false,
         lethal_label: false,
         lost_label: false,
+        won_label: false,
+        read_label: false,
         frozen: None,
         kifu: None,
     })
@@ -240,7 +254,9 @@ struct Summary {
 /// ph は 0: ターン末、1: 自分のターンの最初、2: 探索が相手のターンを読んだ後の想像の局面（--imagined）。
 /// q（--searchValue。ターン末の局面だけ）があれば、探索の値の材料 "qe"・"qr"（search_value の (ターン末, 読みの平均)）も書く。
 /// ol（--lethalLabel。ターン末の局面だけ）があれば、相手の次のターンのリーサルの印 "ol" も書く。
-/// ターン末の局面で m.lost_label（--lostLabel）なら、最後に ",\"ln\":0,\"oe\":0" を書く（試合が進んでから、play_out が数字を 1 に書き換える）
+/// rf（--readLabel。ターン末の局面で読みがあったときだけ）があれば、読みの中の相手が勝った割合と読みの回数 "rf"・"rn" も書く。
+/// ターン末の局面で m.lost_label（--lostLabel）なら ",\"ln\":0,\"oe\":0" を、m.won_label（--wonLabel）なら ",\"wn\":0,\"we\":0" を
+/// この順で最後に書く（試合が進んでから、play_out が数字を 1 に書き換える。場所は label_digits）
 #[allow(clippy::too_many_arguments)]
 fn write_sample(
     out: &mut String,
@@ -252,6 +268,7 @@ fn write_sample(
     board: bool,
     q: Option<(f64, f64)>,
     ol: Option<bool>,
+    rf: Option<(f64, usize)>,
 ) {
     let x = m.net.encode(s, p, phase);
     out.push_str(&format!(
@@ -306,14 +323,54 @@ fn write_sample(
     if let Some(ol) = ol {
         out.push_str(if ol { ",\"ol\":1" } else { ",\"ol\":0" });
     }
-    if m.lost_label && matches!(phase, ValuePhase::End) {
-        out.push_str(LOST_FIELDS);
+    if let Some((f, n)) = rf {
+        out.push_str(&format!(
+            ",\"rf\":{},\"rn\":{n}",
+            js_num(round_precision(f, 6))
+        ));
+    }
+    if matches!(phase, ValuePhase::End) {
+        if m.lost_label {
+            out.push_str(LOST_FIELDS);
+        }
+        if m.won_label {
+            out.push_str(WON_FIELDS);
+        }
     }
     out.push('}');
 }
 
 /// --lostLabel のターン末の局面の最後に書く印（数字は play_out が後から 1 に書き換える）
 const LOST_FIELDS: &str = ",\"ln\":0,\"oe\":0";
+/// --wonLabel のターン末の局面の最後に書く印（LOST_FIELDS の後ろ。数字は play_out が後から 1 に書き換える）
+const WON_FIELDS: &str = ",\"wn\":0,\"we\":0";
+
+/// 書き終えたターン末の局面（文字列の末尾が "}"）の、"ln" と "wn" の数字の場所（"oe"・"we" の数字はそれぞれの 7 バイト後）
+fn label_digits(m: &Model, len: usize) -> (Option<usize>, Option<usize>) {
+    // 末尾は [,"ln":0,"oe":0][,"wn":0,"we":0]}
+    let mut end = len - 1;
+    let wn = m.won_label.then(|| {
+        end -= WON_FIELDS.len();
+        end + ",\"wn\":".len()
+    });
+    let ln = m.lost_label.then(|| {
+        end -= LOST_FIELDS.len();
+        end + ",\"ln\":".len()
+    });
+    (ln, wn)
+}
+
+/// 読みの中の相手が勝った割合と読みの回数（--readLabel の "rf"・"rn"）。読みが無ければ None
+fn read_loss(reads: &[std::rc::Rc<GameState>], p: PlayerIndex) -> Option<(f64, usize)> {
+    if reads.is_empty() {
+        return None;
+    }
+    let lost = reads
+        .iter()
+        .filter(|x| x.phase == Phase::Ended && x.winner == Some(opponent(p)))
+        .count();
+    Some((lost as f64 / reads.len() as f64, reads.len()))
+}
 
 /// 文字列の i バイト目の数字の 0 を 1 にする（--lostLabel の印）
 fn set_flag(out: &mut String, i: usize) {
@@ -609,6 +666,8 @@ fn play_out(
     let mut log: Vec<Action> = Vec::new();
     // --lostLabel: 自分の次のターンの手を打つ前の、最後のターン末の局面の "ln" の数字の場所と、そのターン
     let mut open_end: [Option<(usize, i32)>; 2] = [None, None];
+    // --wonLabel: 最後のターン末の局面の "wn" の数字の場所と、そのターン（自分の次のターンが終わるまで開いておく）
+    let mut open_won: [Option<(usize, i32)>; 2] = [None, None];
     let mut n = 0;
     while state.phase != Phase::Ended {
         n += 1;
@@ -628,12 +687,24 @@ fn play_out(
                     phase: ValuePhase,
                     ex: bool,
                     q: Option<(f64, f64)>,
-                    ol: Option<bool>| {
+                    ol: Option<bool>,
+                    rf: Option<(f64, usize)>| {
             if counts[actor] > 0 {
                 samples[actor].push(',');
             }
             counts[actor] += 1;
-            write_sample(&mut samples[actor], m, s, actor, phase, ex, m.board, q, ol);
+            write_sample(
+                &mut samples[actor],
+                m,
+                s,
+                actor,
+                phase,
+                ex,
+                m.board,
+                q,
+                ol,
+                rf,
+            );
         };
         // 自分のターンの最初の局面（相手のターンを読んだ後に探索が評価する局面と同じ）
         if state.phase == Phase::Main
@@ -676,6 +747,12 @@ fn play_out(
                         set_flag(&mut samples[opponent(actor)], i + 7);
                     }
                 }
+                // 自分の 1 つ前のターン末の局面に、自分の次のターン（このターン）の最初の手がランダムな手だった印
+                if let Some((i, t)) = open_won[actor] {
+                    if t + 2 == state.turn {
+                        set_flag(&mut samples[actor], i + 7);
+                    }
+                }
             }
             open_end[actor] = None;
             push(
@@ -684,6 +761,7 @@ fn play_out(
                 &state,
                 ValuePhase::After,
                 action.is_some(),
+                None,
                 None,
                 None,
             );
@@ -708,6 +786,11 @@ fn play_out(
                 let ol = m
                     .lethal_label
                     .then(|| opp_lethal_label(&m.opts, &state, actor));
+                let rf = if m.read_label {
+                    read_loss(&reads, actor)
+                } else {
+                    None
+                };
                 push(
                     &mut samples,
                     &mut counts,
@@ -716,11 +799,15 @@ fn play_out(
                     false,
                     q,
                     ol,
+                    rf,
                 );
-                if m.lost_label {
-                    // 局面は ,"ln":0,"oe":0} で終わる。"ln" の数字の場所（"oe" の数字はその 7 バイト後）
-                    let i = samples[actor].len() - "0,\"oe\":0}".len();
+                // "ln"・"wn" の数字の場所（"oe"・"we" の数字はそれぞれの 7 バイト後）
+                let (ln, wn) = label_digits(m, samples[actor].len());
+                if let Some(i) = ln {
                     open_end[actor] = Some((i, state.turn));
+                }
+                if let Some(i) = wn {
+                    open_won[actor] = Some((i, state.turn));
                 }
                 // そのターンに選んだ並びの想像の局面から m.imagined 個（試合の乱数とは別の乱数で選ぶ）
                 let mut reads: Vec<_> = reads
@@ -737,6 +824,7 @@ fn play_out(
                         false,
                         None,
                         None,
+                        None,
                     );
                 }
             }
@@ -751,6 +839,12 @@ fn play_out(
         if let Some((i, t)) = open_end[opponent(w)] {
             if state.turn == t + 1 {
                 set_flag(&mut samples[opponent(w)], i);
+            }
+        }
+        // 自分の次のターンに勝った（kifu values の wonNext と同じ: 試合がターン末の 2 つ後のターンで終わり、自分が勝った）
+        if let Some((i, t)) = open_won[w] {
+            if state.turn == t + 2 {
+                set_flag(&mut samples[w], i);
             }
         }
     }
@@ -861,6 +955,7 @@ fn compare_plans(
             false,
             None,
             None,
+            None,
         );
         // ターン末が同じ局面になる並び（入力と点数が同じ）は 1 つだけ（--board でも選ぶ並びは変えない）
         if cands.iter().any(|x| x.2 == json) {
@@ -876,6 +971,7 @@ fn compare_plans(
                 ValuePhase::End,
                 false,
                 true,
+                None,
                 None,
                 None,
             );
@@ -1241,7 +1337,17 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
         "1" => true,
         x => return Err(format!("--searchValue は 0 か 1: {x}")),
     };
-    m.opts.record_reads = m.imagined > 0 || m.search_value;
+    m.won_label = match arg(args, "wonLabel").unwrap_or("0") {
+        "0" => false,
+        "1" => true,
+        x => return Err(format!("--wonLabel は 0 か 1: {x}")),
+    };
+    m.read_label = match arg(args, "readLabel").unwrap_or("0") {
+        "0" => false,
+        "1" => true,
+        x => return Err(format!("--readLabel は 0 か 1: {x}")),
+    };
+    m.opts.record_reads = m.imagined > 0 || m.search_value || m.read_label;
     m.lethal_label = match arg(args, "lethalLabel").unwrap_or("0") {
         "0" => false,
         "1" => true,
@@ -1762,6 +1868,108 @@ mod tests {
             }
         }
         assert!(ends > 0 && lost > 0 && oe > 0, "{lost} {oe}/{ex} {ends}");
+    }
+
+    #[test]
+    fn won_and_read_labels_on_turn_ends_without_changing_games() {
+        // --lostLabel・--wonLabel・--readLabel を一緒に付けても試合は同じ（介入した試合も）。"wn"・"we"（0 か 1）はターン末の局面に必ず付き、
+        // 他の局面には付かない。"wn" が 1 なのは勝った側の最後のターン末（その後は自分のターンの最初と想像の局面だけ）だけ。
+        // "we" が 1 なら、自分の次のターンの最初の局面が "ex"（ランダムな手）。"rf"・"rn" はターン末の局面にだけ付き、rn ≥ 1、rf × rn は整数
+        let decks = compare_decks();
+        let mut lm = imagined_model(1);
+        lm.lost_label = true;
+        lm.won_label = true;
+        lm.read_label = true;
+        let (mut ends, mut won, mut we, mut reads, mut read_lost) = (0, 0, 0, 0, 0);
+        for (g, iv) in [(3u32, 0.0), (10, 1.0), (21, 0.0), (30, 0.0), (44, 1.0)] {
+            let plain = play_one(
+                g,
+                &decks,
+                None,
+                &imagined_model(1),
+                0.3,
+                iv,
+                IvZone::Hand,
+                0.0,
+                None,
+            );
+            let with = play_one(g, &decks, None, &lm, 0.3, iv, IvZone::Hand, 0.0, None);
+            let (pl, wl): (Vec<&str>, Vec<&str>) =
+                (plain.line.lines().collect(), with.line.lines().collect());
+            assert_eq!(pl.len(), wl.len());
+            for (pl, wl) in pl.iter().zip(&wl) {
+                let mut v: serde_json::Value = serde_json::from_str(wl).expect("JSON");
+                let winner = v["winner"].as_u64().expect("勝者") as usize;
+                // 席ごとの (ph, wn, we, ex) の列
+                let mut seqs: Vec<Vec<(i64, i64, i64, bool)>> = Vec::new();
+                for seq in v["samples"].as_array_mut().expect("局面") {
+                    let mut out = Vec::new();
+                    for x in seq.as_array_mut().expect("局面の列") {
+                        let o = x.as_object_mut().expect("局面");
+                        let ph = o["ph"].as_i64().expect("ph");
+                        let labels: Vec<_> = ["ln", "oe", "wn", "we", "rf", "rn"]
+                            .into_iter()
+                            .map(|k| o.remove(k))
+                            .collect();
+                        let flag = |f: &Option<serde_json::Value>| {
+                            let f = f.as_ref().and_then(|x| x.as_i64()).expect("ターン末の印");
+                            assert!(f == 0 || f == 1, "{f}");
+                            f
+                        };
+                        let (wn, e) = if ph == 0 {
+                            ends += 1;
+                            flag(&labels[0]);
+                            flag(&labels[1]);
+                            if let (Some(f), Some(n)) = (&labels[4], &labels[5]) {
+                                let (f, n) = (f.as_f64().expect("rf"), n.as_u64().expect("rn"));
+                                assert!(n >= 1 && (0.0..=1.0).contains(&f), "{f} {n}");
+                                assert!((f * n as f64 - (f * n as f64).round()).abs() < 1e-4);
+                                reads += 1;
+                                read_lost += usize::from(f > 0.0);
+                            } else {
+                                assert!(labels[4].is_none() && labels[5].is_none());
+                            }
+                            (flag(&labels[2]), flag(&labels[3]))
+                        } else {
+                            assert!(labels.iter().all(|x| x.is_none()), "{o:?}");
+                            (0, 0)
+                        };
+                        out.push((ph, wn, e, o.contains_key("ex")));
+                    }
+                    seqs.push(out);
+                }
+                for (p, seq) in seqs.iter().enumerate() {
+                    let at: Vec<usize> = (0..seq.len()).filter(|&i| seq[i].1 == 1).collect();
+                    assert!(at.len() <= 1, "{at:?}");
+                    if let Some(&i) = at.first() {
+                        assert_eq!(p, winner);
+                        assert!(
+                            seq[i + 1..].iter().all(|x| x.0 != 0),
+                            "勝った後にターン末がある"
+                        );
+                        won += 1;
+                    }
+                    // "we" が 1 の局面の次の自分のターンの最初の局面はランダムな手
+                    for i in (0..seq.len()).filter(|&i| seq[i].2 == 1) {
+                        let next = seq[i + 1..].iter().find(|x| x.0 == 1).expect("次のターン");
+                        assert!(next.3);
+                        we += 1;
+                    }
+                    let flagged = seq.iter().filter(|x| x.2 == 1).count();
+                    let own_ex = seq.iter().filter(|x| x.0 == 1 && x.3).count();
+                    assert!(
+                        flagged <= own_ex && own_ex <= flagged + 1,
+                        "{flagged} {own_ex}"
+                    );
+                }
+                let plain: serde_json::Value = serde_json::from_str(pl).expect("JSON");
+                assert_eq!(plain, v);
+            }
+        }
+        assert!(
+            ends > 0 && won > 0 && we > 0 && reads > 0,
+            "{won} {we} {reads}/{ends} {read_lost}"
+        );
     }
 
     #[test]

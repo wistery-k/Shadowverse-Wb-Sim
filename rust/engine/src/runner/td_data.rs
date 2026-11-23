@@ -48,11 +48,16 @@ pub struct NetModel {
     pub attr: Option<Json>,
     /// リーサルの出力（相手が次のターンにリーサルを持つ確率。最後の隠れ層から。実験用。docs/value-net.md「リーサルの出力（実験）」）
     pub lethal_head: Option<LethalHead>,
-    /// 勝つ確率の形（"logit" か "survival"。無ければ "logit"。"survival" はリーサルの出力 p と生き延びたときの勝率 s で (1 − p) × s）
+    /// 自分の次のターンに勝つ確率の出力（次の相手のターンを生き延びたとき。最後の隠れ層から。2026-11-22、R6 の候補。docs/value-net.md「勝ちの出力・読みの出力」）
+    pub win_head: Option<LethalHead>,
+    /// 読みの中の相手に負けた割合を当てる補助の出力（最後の隠れ層から。手を選ぶのには使わない。同上）
+    pub read_head: Option<LethalHead>,
+    /// 勝つ確率の形（"logit"・"survival"・"survivalWin"。無ければ "logit"。"survival" はリーサルの出力 p と生き延びたときの勝率 s で (1 − p) × s、
+    /// "survivalWin" は勝ちの出力 w も入れて (1 − p) × (w + (1 − w) × s)）
     pub win_form: Option<String>,
 }
 
-/// リーサルの出力の重み（最後の隠れ層 → 確率のロジット）
+/// リーサルの出力の重み（最後の隠れ層 → 確率のロジット）。勝ちの出力・読みの出力も同じ形
 #[derive(Clone)]
 pub struct LethalHead {
     pub w: Vec<f64>,
@@ -91,6 +96,9 @@ fn json_num(v: Option<&Json>, k: &str) -> Result<f64, String> {
         _ => Err(format!("ValueNetModel の {k} が数ではありません")),
     }
 }
+
+/// winForm の値（無ければ "logit"）
+const WIN_FORMS: [&str; 3] = ["logit", "survival", "survivalWin"];
 
 /// names が all の部分列か（順番を保つ。valueNet.ts の isSubsequence）
 fn is_subsequence(names: &[String], all: &[&str]) -> bool {
@@ -176,21 +184,28 @@ impl NetModel {
             ])),
             Some(_) => return Err("ValueNetModel の attr がオブジェクトではありません".into()),
         };
-        let lethal_head = match json.get("lethalHead") {
-            None => None,
-            Some(h @ Json::Obj(_)) => Some(LethalHead {
-                w: json_nums(h.get("w"), "lethalHead.w")?,
-                b: json_num(h.get("b"), "lethalHead.b")?,
-            }),
-            Some(_) => {
-                return Err("ValueNetModel の lethalHead がオブジェクトではありません".into())
+        let head = |k: &str| -> Result<Option<LethalHead>, String> {
+            match json.get(k) {
+                None => Ok(None),
+                Some(h @ Json::Obj(_)) => Ok(Some(LethalHead {
+                    w: json_nums(h.get("w"), &format!("{k}.w"))?,
+                    b: json_num(h.get("b"), &format!("{k}.b"))?,
+                })),
+                Some(_) => Err(format!("ValueNetModel の {k} がオブジェクトではありません")),
             }
         };
-        let win_form = match json.get("winForm") {
-            None => None,
-            Some(Json::Str(f)) if f == "logit" || f == "survival" => Some(f.clone()),
-            Some(_) => return Err("ValueNetModel の winForm は \"logit\" か \"survival\"".into()),
-        };
+        let lethal_head = head("lethalHead")?;
+        let win_head = head("winHead")?;
+        let read_head = head("readHead")?;
+        let win_form =
+            match json.get("winForm") {
+                None => None,
+                Some(Json::Str(f)) if WIN_FORMS.contains(&f.as_str()) => Some(f.clone()),
+                Some(_) => return Err(
+                    "ValueNetModel の winForm は \"logit\"・\"survival\"・\"survivalWin\" のどれか"
+                        .into(),
+                ),
+            };
         let m = NetModel {
             vocab: json_strs(json.get("vocab"), "vocab")?,
             zones: json_strs(json.get("zones"), "zones")?,
@@ -208,6 +223,8 @@ impl NetModel {
             has_board: json.get("board").is_some(),
             attr,
             lethal_head,
+            win_head,
+            read_head,
             win_form,
         };
         if !is_subsequence(&m.zones, &ZONES) || !is_subsequence(&m.scalars, &SCALARS) {
@@ -229,20 +246,42 @@ impl NetModel {
         {
             return Err("ValueNetModel の重みの大きさが合いません".into());
         }
-        if let Some(h) = &m.lethal_head {
-            if h.w.len() != *sizes.last().expect("層") {
-                return Err("ValueNetModel の lethalHead の重みの大きさが合いません".into());
+        for (k, h) in [
+            ("lethalHead", &m.lethal_head),
+            ("winHead", &m.win_head),
+            ("readHead", &m.read_head),
+        ] {
+            if h.as_ref()
+                .is_some_and(|h| h.w.len() != *sizes.last().expect("層"))
+            {
+                return Err(format!("ValueNetModel の {k} の重みの大きさが合いません"));
             }
         }
         if m.survival() && m.lethal_head.is_none() {
             return Err("ValueNetModel の winForm \"survival\" には lethalHead が要ります".into());
         }
+        if m.survival_win() && (m.lethal_head.is_none() || m.win_head.is_none()) {
+            return Err(
+                "ValueNetModel の winForm \"survivalWin\" には lethalHead と winHead が要ります"
+                    .into(),
+            );
+        }
+        if (m.win_head.is_some() || m.read_head.is_some()) && m.lethal_head.is_none() {
+            return Err(
+                "ValueNetModel の winHead・readHead はリーサルの出力（lethalHead）と一緒に".into(),
+            );
+        }
         Ok(m)
     }
 
-    /// 勝つ確率が (1 − リーサルの出力) × 生き延びたときの勝率 の形か
+    /// 勝つ確率が (1 − リーサルの出力) × 生き延びたときの勝率 の形か（"survival" と "survivalWin"）
     pub fn survival(&self) -> bool {
-        self.win_form.as_deref() == Some("survival")
+        matches!(self.win_form.as_deref(), Some("survival" | "survivalWin"))
+    }
+
+    /// 生き延びたときの勝率が、勝ちの出力 w を入れた w + (1 − w) × s の形か（"survivalWin"）
+    pub fn survival_win(&self) -> bool {
+        self.win_form.as_deref() == Some("survivalWin")
     }
 
     /// 局面から作る入力の数（ゾーン × vocab ＋ 数値の入力。場のカードのネットワークは扱わないので、最初の層の入力の数と同じ）
@@ -272,7 +311,7 @@ impl NetModel {
         m
     }
 
-    /// JSON（parseValueNetModel の項目の順番: kind・version・vocab・zones・scalars・hidden・w1・b1・layers・w2・b2・a・c・baseWeights・attr・lethalHead・winForm）
+    /// JSON（parseValueNetModel の項目の順番: kind・version・vocab・zones・scalars・hidden・w1・b1・layers・w2・b2・a・c・baseWeights・attr・lethalHead・winHead・readHead・winForm）
     pub fn to_json(&self, num: impl Fn(f64) -> Json) -> Json {
         let strs = |xs: &[String]| Json::Arr(xs.iter().map(|x| Json::Str(x.clone())).collect());
         let arr = |xs: &[f64]| Json::Arr(xs.iter().map(|&x| num(x)).collect());
@@ -302,11 +341,17 @@ impl NetModel {
         if let Some(a) = &self.attr {
             items.push(("attr".into(), a.clone()));
         }
-        if let Some(h) = &self.lethal_head {
-            items.push((
-                "lethalHead".into(),
-                Json::Obj(vec![("w".into(), arr(&h.w)), ("b".into(), num(h.b))]),
-            ));
+        for (k, h) in [
+            ("lethalHead", &self.lethal_head),
+            ("winHead", &self.win_head),
+            ("readHead", &self.read_head),
+        ] {
+            if let Some(h) = h {
+                items.push((
+                    k.into(),
+                    Json::Obj(vec![("w".into(), arr(&h.w)), ("b".into(), num(h.b))]),
+                ));
+            }
         }
         if let Some(f) = &self.win_form {
             items.push(("winForm".into(), Json::Str(f.clone())));
@@ -579,6 +624,18 @@ struct RawSample {
     /// 次の相手のターンの最初の手がランダムな手（--eps）だったか（--lostLabel 1。1 か 0）
     #[serde(default)]
     oe: Option<f64>,
+    /// 自分の次のターンに勝ったか（svwb td selfplay --wonLabel 1。1 か 0）
+    #[serde(default)]
+    wn: Option<f64>,
+    /// 自分の次のターンの最初の手がランダムな手（--eps）だったか（--wonLabel 1。1 か 0）
+    #[serde(default)]
+    we: Option<f64>,
+    /// 選んだ並びの読みのうち、読みの中の相手が勝った割合（svwb td selfplay --readLabel 1。0〜1。読みが無ければ無い）
+    #[serde(default)]
+    rf: Option<f64>,
+    /// rf の読みの回数
+    #[serde(default)]
+    rn: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -662,6 +719,9 @@ struct PSample {
     ol: Option<bool>,
     ln: Option<bool>,
     oe: bool,
+    wn: Option<bool>,
+    we: bool,
+    rf: Option<(f64, f64)>,
     x: Vec<(u16, f32)>,
 }
 
@@ -747,6 +807,17 @@ fn parse_game(line: &[u8], map: Option<&[i32]>, n: usize) -> Result<PGame, Strin
                     ol: x.ol.map(|o| o != 0.0),
                     ln: x.ln.map(|o| o != 0.0),
                     oe: x.oe.is_some_and(|e| e != 0.0),
+                    wn: x.wn.map(|o| o != 0.0),
+                    we: x.we.is_some_and(|e| e != 0.0),
+                    rf: match (x.rf, x.rn) {
+                        (None, None) => None,
+                        (Some(f), Some(n)) if (0.0..=1.0).contains(&f) && n >= 1.0 => Some((f, n)),
+                        _ => {
+                            return Err(
+                                "局面の \"rf\"・\"rn\" は 0〜1 と 1 以上の回数の組".to_string()
+                            )
+                        }
+                    },
                     x: remap(&x.x, &x.v, map, n)?,
                 })
             })
@@ -864,6 +935,11 @@ pub struct Dataset {
     pub q: Vec<f64>,
     /// リーサルの出力の印（0: 無し、1: 持たない、2: 持つ。LoadOptions::lethal_target の印）
     pub lethal: Vec<u8>,
+    /// 勝ちの出力の印（0: 無し、1: 自分の次のターンに勝たなかった、2: 勝った）。次の相手のターンを生き延び（"ln" が 0）、
+    /// 自分の次のターンまで試合が続いた（次の局面が自分のターンの最初の局面か、"wn" が 1）ターン末だけ。"we" が 1 の局面は無し
+    pub win: Vec<u8>,
+    /// 読みの出力の印（読みの中の相手が勝った割合 "rf"。無ければ NaN。"rn" が LoadOptions::read_min より小さい局面も NaN）
+    pub read: Vec<f32>,
     pub pairs: Vec<IvPair>,
 }
 
@@ -914,6 +990,23 @@ impl Dataset {
         }
     }
 
+    /// 局面 i の勝ちの出力の印（1 か 0。無ければ None）
+    #[inline]
+    pub fn win_label(&self, i: usize) -> Option<f64> {
+        match self.win[i] {
+            0 => None,
+            1 => Some(0.0),
+            _ => Some(1.0),
+        }
+    }
+
+    /// 局面 i の読みの出力の印（0〜1。無ければ None）
+    #[inline]
+    pub fn read_label(&self, i: usize) -> Option<f64> {
+        let r = self.read[i];
+        (!r.is_nan()).then_some(r as f64)
+    }
+
     /// 局面 i の入力（行の番号と値）を out に書く
     #[inline]
     pub fn inputs(&self, i: usize, out: &mut Vec<(usize, f64)>) {
@@ -934,6 +1027,8 @@ impl Dataset {
             + self.flags.len()
             + self.q.len() * 8
             + self.lethal.len()
+            + self.win.len()
+            + self.read.len() * 4
     }
 }
 
@@ -960,6 +1055,8 @@ pub struct LoadOptions<'a> {
     pub s_source: SSource,
     /// d.lethal に入れる印
     pub lethal_target: LethalTarget,
+    /// 読みの出力の印は、読みの回数 "rn" がこれ以上の局面だけ（td train --readMin。既定 1）
+    pub read_min: f64,
     /// 真を返した試合（デッキの組）は読まない（--excludeDecks・--onlyDecks）
     pub skip_game: Option<&'a SkipFn<'a>>,
     /// 入力をこの並び（学ぶモデルの並び）に読み替える
@@ -1010,6 +1107,8 @@ pub fn load_data(files: &[String], opts: &LoadOptions) -> Result<Dataset, String
         flags: Vec::new(),
         q: Vec::new(),
         lethal: Vec::new(),
+        win: Vec::new(),
+        read: Vec::new(),
         pairs: Vec::new(),
     };
     let mut code_of: FastMap<u32, usize> = FastMap::default();
@@ -1043,6 +1142,8 @@ pub fn load_data(files: &[String], opts: &LoadOptions) -> Result<Dataset, String
     d.flags.shrink_to_fit();
     d.q.shrink_to_fit();
     d.lethal.shrink_to_fit();
+    d.win.shrink_to_fit();
+    d.read.shrink_to_fit();
     d.pairs.shrink_to_fit();
     Ok(d)
 }
@@ -1138,6 +1239,16 @@ fn add_game(
                 Some(false) => 1,
                 Some(true) => 2,
             });
+            // 勝ちの出力: 次の相手のターンを生き延びたターン末だけ（自分の次のターンまで続いたかは、次の局面を読んでから確かめる）
+            d.win.push(match (x.ph, x.ln, x.wn) {
+                (0, Some(false), Some(true)) if !x.we => 2,
+                (0, Some(false), Some(false)) if !x.we => 1,
+                _ => 0,
+            });
+            d.read.push(match x.rf {
+                Some((f, n)) if x.ph == 0 && n >= opts.read_min => f as f32,
+                _ => f32::NAN,
+            });
             if x.ph == 2 {
                 d.anchor.push(prev as i32);
             } else {
@@ -1148,12 +1259,20 @@ fn add_game(
                     if x.ph == 0 && d.phase(pv) == 1 && !d.has(pv, F_EXPLORED) {
                         d.q[pv] = qv;
                     }
+                    // 自分の次のターンに勝たなかったターン末で、次の局面が自分のターンの最初でない（試合が相手のターンで終わった等）
+                    if d.win[pv] == 1 && x.ph != 1 {
+                        d.win[pv] = 0;
+                    }
                 }
                 prev = i as i64;
             }
             if i >= i32::MAX as usize {
                 return Err("局面の数が 2^31 を越えました（データが大きすぎます）".into());
             }
+        }
+        // 最後のターン末の後に自分のターンの最初の局面が無い（試合が次の相手のターンか、自分の次のターンの最初の処理で終わった）
+        if prev >= 0 && d.win[prev as usize] == 1 {
+            d.win[prev as usize] = 0;
         }
     }
     let gk = r.g.to_bits();

@@ -15,8 +15,12 @@ use std::sync::{Arc, OnceLock};
 /// （伏せた手札・山札・どれか分からない捨てたカード）の枚数（oppUnseen）。どちらも決定化で並べ直しても変わらない（ai/determinize.rs は
 /// 自分の山札は順番だけを、相手は伏せた手札・山札・どれか分からない捨てたカードを合わせた中で配り直す）。docs/value-net.md「入力」。
 /// 最後の 2 つ（2026-11-20）は、自分の手札のカードに付いた攻撃力・体力の変化（カードごとの合計を 5 で割る。ダストデイズの山札の強化を
-/// 受けて引いたカードなど。docs/ai-notes/14-2026-11-16.md「ダストデイズの山札の強化を補正の入力に足す」）
-pub const ZONES: [&str; 18] = [
+/// 受けて引いたカードなど。docs/ai-notes/14-2026-11-16.md「ダストデイズの山札の強化を補正の入力に足す」）。
+/// 最後の 7 つ（2026-11-22、R6 の候補）は、リーサルを見込むのに要りそうな公開の数: 相手の場のアミュレットのカウント（カードごとの合計を 3 で割る。
+/// 自分の側の myBoardCountdown と同じ）、両方のクレストのカウント（クレストごとの合計を 3 で割る）、信仰の信仰値（10 で割る）と
+/// 「自分の信仰は『…』を持つ」で付いた能力の数（そのまま）。どれも公開の情報で、決定化で並べ直しても変わらない
+/// （docs/ai-notes/14-2026-11-16.md「補正の入力に無く、リーサルを見込むのに要りそうなもの」の 3・4）
+pub const ZONES: [&str; 25] = [
     "myHand",
     "myHandBoost",
     "myBoard",
@@ -35,12 +39,25 @@ pub const ZONES: [&str; 18] = [
     "oppUnseen",
     "myHandAtkMod",
     "myHandDefMod",
+    "oppBoardCountdown",
+    "myCrestCountdown",
+    "oppCrestCountdown",
+    "myCrestFaith",
+    "oppCrestFaith",
+    "myCrestStacks",
+    "oppCrestStacks",
 ];
 /// 山札の中身の入力（ZONES の添字）
 const ZONE_MY_DECK: usize = 14;
 const ZONE_OPP_UNSEEN: usize = 15;
 /// 手札のカードに付いた攻撃力の変化（体力はその次）
 const ZONE_MY_HAND_ATK_MOD: usize = 16;
+/// 相手の場のアミュレットのカウント
+const ZONE_OPP_BOARD_COUNTDOWN: usize = 18;
+/// クレストのカウント・信仰値・信仰に付いた能力の数（どれも自分・相手の順）
+const ZONE_CREST_COUNTDOWN: usize = 19;
+const ZONE_CREST_FAITH: usize = 21;
+const ZONE_CREST_STACKS: usize = 23;
 /// 数値の入力（ZONES と同じく、モデルはこの並びの部分列を持つ）。
 /// "after" より後ろは場のフォロワーの合計とキーワードを持つ数（同上）。
 /// "imagined" は、探索が相手のターンを読んだ後の想像の局面か（ValuePhase::Imagined。docs/ai-notes.md「読みの中の相手のずれを学習で直す」）。
@@ -176,8 +193,23 @@ pub struct ValueNet {
     board: Option<BoardNet>,
     /// リーサルの確率の出力（重み・バイアス。実験。docs/value-net.md「リーサルの出力（実験）」）
     lethal: Option<(Vec<f64>, f64)>,
-    /// 勝つ確率を (1 − リーサルの確率) × σ(c + z) で出す（winForm "survival"）
+    /// 勝つ確率を (1 − リーサルの確率) × σ(c + z) で出す（winForm "survival"。"survivalWin" も）
     survival: bool,
+    /// 自分の次のターンに勝つ確率の出力（重み・バイアス。docs/value-net.md「勝ちの出力・読みの出力」）
+    win: Option<(Vec<f64>, f64)>,
+    /// 勝つ確率を (1 − リーサルの確率) × (w + (1 − w) × σ(c + z)) で出す（winForm "survivalWin"）
+    survival_win: bool,
+    /// 読みの中の相手に負けた割合を当てる補助の出力（重み・バイアス。手を選ぶのには使わない。棋譜の数え用）
+    read: Option<(Vec<f64>, f64)>,
+}
+
+/// 出力 1 つ（最後の隠れ層 h から σ(b + Σ w·h)）
+fn head_of((w, b): &(Vec<f64>, f64), h: &[f64]) -> f64 {
+    let mut z = *b;
+    for (&hj, &wj) in h.iter().zip(w) {
+        z += hj * wj;
+    }
+    1.0 / (1.0 + (-z).exp())
 }
 
 /// 場のカードのネットワーク（valueNet.ts の CompiledBoard）。場のカード 1 枚ずつを同じ層に通し、最後の層の値（ReLU の後）を
@@ -395,21 +427,27 @@ impl ValueNet {
             || raw.b1.len() != raw.hidden
             || !layers_ok
             || raw.w2.len() != last
-            || raw.lethal_head.as_ref().is_some_and(|l| l.w.len() != last)
+            || [&raw.lethal_head, &raw.win_head, &raw.read_head]
+                .iter()
+                .any(|h| h.as_ref().is_some_and(|l| l.w.len() != last))
         {
             return Err("ValueNetModel の重みの大きさが合いません".into());
         }
-        let survival = match raw.win_form.as_deref() {
-            None | Some("logit") => false,
-            Some("survival") => true,
+        let (survival, survival_win) = match raw.win_form.as_deref() {
+            None | Some("logit") => (false, false),
+            Some("survival") => (true, false),
+            Some("survivalWin") => (true, true),
             Some(f) => {
                 return Err(format!(
-                    "ValueNetModel の winForm は logit か survival: {f}"
+                    "ValueNetModel の winForm は logit・survival・survivalWin のどれか: {f}"
                 ))
             }
         };
         if survival && raw.lethal_head.is_none() {
             return Err("winForm が survival のモデルには lethalHead が要ります".into());
+        }
+        if survival_win && raw.win_head.is_none() {
+            return Err("winForm が survivalWin のモデルには winHead が要ります".into());
         }
         if survival && !base_is_zero(&raw.base_weights) {
             return Err("winForm が survival のモデルは、出発点の評価が 0（td train --base zero）のものだけ".into());
@@ -453,6 +491,9 @@ impl ValueNet {
             board,
             lethal: raw.lethal_head.map(|l| (l.w, l.b)),
             survival,
+            win: raw.win_head.map(|l| (l.w, l.b)),
+            survival_win,
+            read: raw.read_head.map(|l| (l.w, l.b)),
         })
     }
 
@@ -516,7 +557,8 @@ impl ValueNet {
     }
 
     /// 探索の extraEval（評価の点数の単位の補正。valueNetExtraEval）。
-    /// winForm が survival なら、勝つ確率 (1 − リーサルの確率) × σ(c + z) のロジットを a で割ったもの（出発点の評価は 0）
+    /// winForm が survival なら、勝つ確率 (1 − リーサルの確率) × σ(c + z) のロジットを a で割ったもの（出発点の評価は 0）。
+    /// survivalWin なら、勝つ確率 (1 − リーサルの確率) × (w + (1 − w) × σ(c + z)) のロジットを a で割ったもの
     pub fn eval(&self, s: &GameState, p: PlayerIndex, phase: ValuePhase) -> f64 {
         let _p = crate::prof::scope(crate::prof::Sec::ValueNet);
         if s.phase == Phase::Ended {
@@ -531,7 +573,13 @@ impl ValueNet {
                 return (self.c + z) / self.a;
             }
             let q = self.lethal_of(h);
-            let win = ((1.0 - q) / (1.0 + (-(self.c + z)).exp())).clamp(1e-12, 1.0 - 1e-12);
+            let win = if self.survival_win {
+                let w = head_of(self.win.as_ref().expect("勝ちの出力"), h);
+                (1.0 - q) * (w + (1.0 - w) / (1.0 + (-(self.c + z)).exp()))
+            } else {
+                (1.0 - q) / (1.0 + (-(self.c + z)).exp())
+            }
+            .clamp(1e-12, 1.0 - 1e-12);
             (win / (1.0 - win)).ln() / self.a
         })
     }
@@ -549,13 +597,30 @@ impl ValueNet {
         Some(self.last_hidden(s, p, phase, |h| self.lethal_of(h)))
     }
 
-    fn lethal_of(&self, h: &[f64]) -> f64 {
-        let (w, b) = self.lethal.as_ref().expect("リーサルの出力");
-        let mut z = *b;
-        for (&hj, &wj) in h.iter().zip(w) {
-            z += hj * wj;
+    /// リーサルの出力・勝ちの出力・読みの出力の確率（無い出力は None。終わった局面は全部 None）。前向きの計算は 1 回
+    pub fn head_probs(&self, s: &GameState, p: PlayerIndex, phase: ValuePhase) -> [Option<f64>; 3] {
+        if (self.lethal.is_none() && self.win.is_none() && self.read.is_none())
+            || s.phase == Phase::Ended
+        {
+            return [None; 3];
         }
-        1.0 / (1.0 + (-z).exp())
+        self.last_hidden(s, p, phase, |h| {
+            [&self.lethal, &self.win, &self.read].map(|x| x.as_ref().map(|x| head_of(x, h)))
+        })
+    }
+
+    /// 勝ちの出力を持つか
+    pub fn has_win_head(&self) -> bool {
+        self.win.is_some()
+    }
+
+    /// 読みの出力を持つか
+    pub fn has_read_head(&self) -> bool {
+        self.read.is_some()
+    }
+
+    fn lethal_of(&self, h: &[f64]) -> f64 {
+        head_of(self.lethal.as_ref().expect("リーサルの出力"), h)
     }
 
     /// 最後の隠れ層の値（ReLU の後）を f に渡す
@@ -760,18 +825,19 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
             add(4, card_k(c.card), 1.0);
         }
     }
-    for c in &me.crests {
-        add(5, net.vocab_crest[c.crest as usize], 1.0);
-    }
+    crest_inputs(net, &mut add, 0, &me.crests);
     for c in &opp.board {
         add(6, card_k(c.card), 1.0);
         if c.is_follower && c.evolve != Evolve::None {
             add(7, card_k(c.card), 1.0);
         }
+        if !c.is_follower {
+            if let Some(cd) = c.countdown {
+                add(ZONE_OPP_BOARD_COUNTDOWN, card_k(c.card), cd as f64 / 3.0);
+            }
+        }
     }
-    for c in &opp.crests {
-        add(8, net.vocab_crest[c.crest as usize], 1.0);
-    }
+    crest_inputs(net, &mut add, 1, &opp.crests);
     for h in &opp.hand {
         if h.revealed {
             add(9, card_k(h.card), 1.0);
@@ -861,6 +927,26 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
                 acc.push(base + k, x);
             }
         }
+    }
+}
+
+/// クレスト（side 0 が自分、1 が相手）の入力: 持っている数と、カウント・信仰値・信仰に付いた能力の数
+fn crest_inputs(
+    net: &ValueNet,
+    add: &mut impl FnMut(usize, Option<usize>, f64),
+    side: usize,
+    cs: &[CrestInstance],
+) {
+    for c in cs {
+        let k = net.vocab_crest[c.crest as usize];
+        add(if side == 0 { 5 } else { 8 }, k, 1.0);
+        if let Some(cd) = c.countdown {
+            add(ZONE_CREST_COUNTDOWN + side, k, cd as f64 / 3.0);
+        }
+        if let Some(f) = c.faith {
+            add(ZONE_CREST_FAITH + side, k, f as f64 / 10.0);
+        }
+        add(ZONE_CREST_STACKS + side, k, c.stacks as f64);
     }
 }
 

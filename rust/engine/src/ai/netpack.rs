@@ -171,8 +171,9 @@ pub fn checksum(value: &RawValueNet, potential: &RawPotentialNet) -> String {
             nums(&l.b);
         }
     }
-    // リーサルの出力（ヘッダの JSON に残る。winForm が survival なら勝つ確率に効く）
-    if let Some(l) = &value.lethal_head {
+    // リーサルの出力・勝ちの出力（ヘッダの JSON に残る。winForm が survival・survivalWin なら勝つ確率に効く）。
+    // 読みの出力（readHead）は手を選ぶのに使わず、ページにも詰めない（scripts/pack-nets.ts）ので入れない
+    for l in [&value.lethal_head, &value.win_head].into_iter().flatten() {
         nums(&l.w);
         nums(&[l.b]);
     }
@@ -216,6 +217,10 @@ pub fn checksum(value: &RawValueNet, potential: &RawPotentialNet) -> String {
         value.lethal_head.is_some(),
         value.win_form.as_deref().unwrap_or("logit")
     ));
+    // 勝ちの出力のあるモデルだけ（無いモデルの指紋は今までと同じ）
+    if value.win_head.is_some() {
+        text("winHead");
+    }
     format!("{h:08x}")
 }
 

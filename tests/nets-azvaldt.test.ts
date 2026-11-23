@@ -1,16 +1,17 @@
-// アズヴォルト環境のページの AI（WASM の探索 AI に、ページが読み込んだ補正と見込み（今は R5。2026-11-21 に R3 から R4 に、2026-11-22 に R5 に替えた。R5 の見込みは R4 のまま）を入れたもの）が、
+// アズヴォルト環境のページの AI（WASM の探索 AI に、ページが読み込んだ補正と見込み（今は R6。2026-11-21 に R3 から R4 に、2026-11-22 に R5 に、2026-11-23 に R6 に替えた。R5・R6 の見込みは R4 のまま）を入れたもの）が、
 // コマンドの同じ補正（compare・misses の --opts の valueNet・potentialNet。rust/engine/yardstick/<PAGE_NET>-net.json・<PAGE_POTENTIAL>-potential.json）と同じ値の補正を持ち、決まった局面から同じ手を打つか。
 // 局面と手は tests/fixtures/browser-azvaldt.json（コマンドの側の手を rust/engine/tests/browser_azvaldt.rs が確かめる）
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { actingPlayer, applyAction, createGame, legalActions, selectNets, type Action, type GameState } from "../src/engine";
 import { callEngine, currentNets, netsChecksum, netsChecksumOfJson } from "../src/engine/wasm";
+import { packNets } from "../scripts/pack-nets";
 
 // エンジンを使う前に選ぶ（このファイルの WASM はアズヴォルト環境の補正を入れる）
 selectNets("azvaldt");
 
 /** ページの補正と見込みの凍結した写し（rust/engine/yardstick/<PAGE_NET>-net.json・<PAGE_POTENTIAL>-potential.json。rust/engine/tests/browser_azvaldt.rs と同じ） */
-const PAGE_NET = "pool-r5";
+const PAGE_NET = "pool-r6";
 const PAGE_POTENTIAL = "pool-r4";
 
 const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
@@ -54,7 +55,7 @@ describe("補正のファイル（アズヴォルト環境）", () => {
     expect(loaded).toBe(netsChecksumOfJson(read(`rust/engine/yardstick/${PAGE_NET}-net.json`), read(`rust/engine/yardstick/${PAGE_POTENTIAL}-potential.json`)));
   });
 
-  it("リーサルの出力と勝つ確率の形もハッシュに入る（R5 は winForm が survival。ヘッダの JSON に残る値も確かめる）", () => {
+  it("リーサルの出力と勝つ確率の形もハッシュに入る（R5・R6 は winForm が survival。ヘッダの JSON に残る値も確かめる）", () => {
     const valueText = read("data/pools/azvaldt/value-net.json");
     const potentialText = read("data/pools/azvaldt/potential-net.json");
     const value = JSON.parse(valueText) as { lethalHead?: { w: number[]; b: number }; winForm?: string };
@@ -69,6 +70,33 @@ describe("補正のファイル（アズヴォルト環境）", () => {
     const logit = structuredClone(value);
     logit.winForm = "logit";
     expect(netsChecksumOfJson(JSON.stringify(logit), potentialText)).not.toBe(base);
+  });
+
+  it("勝ちの出力（winHead）と winForm survivalWin もハッシュに入り、読みの出力（readHead）は入らず、ページにも詰めない", () => {
+    const valueText = read("data/pools/azvaldt/value-net.json");
+    const potentialText = read("data/pools/azvaldt/potential-net.json");
+    type Head = { w: number[]; b: number };
+    const value = JSON.parse(valueText) as { lethalHead: Head; winHead?: Head; readHead?: Head; winForm?: string };
+    const base = netsChecksumOfJson(valueText, potentialText);
+    const n = value.lethalHead.w.length;
+    const win = { ...structuredClone(value), winHead: { w: new Array<number>(n).fill(0), b: -1 }, winForm: "survivalWin" };
+    const winSum = netsChecksumOfJson(JSON.stringify(win), potentialText);
+    expect(winSum).not.toBe(base);
+    const moved = structuredClone(win);
+    moved.winHead.w[3] = 1e-6;
+    expect(netsChecksumOfJson(JSON.stringify(moved), potentialText)).not.toBe(winSum);
+    const aux = { ...structuredClone(win), winForm: "survival" };
+    expect(netsChecksumOfJson(JSON.stringify(aux), potentialText)).not.toBe(winSum);
+    const withRead = { ...structuredClone(win), readHead: { w: new Array<number>(n).fill(0.5), b: 2 } };
+    expect(netsChecksumOfJson(JSON.stringify(withRead), potentialText)).toBe(winSum);
+    // 詰めたファイルのヘッダの JSON: 勝ちの出力は残り、読みの出力は無い
+    type PackJson = Parameters<typeof packNets>[0];
+    const packed = packNets(JSON.parse(JSON.stringify(withRead)) as PackJson, JSON.parse(potentialText) as PackJson);
+    const len = new DataView(packed.buffer, packed.byteOffset).getUint32(8, true);
+    const header = JSON.parse(new TextDecoder().decode(packed.subarray(12, 12 + len))) as { value: Record<string, unknown> };
+    expect(header.value["winHead"]).toEqual(win.winHead);
+    expect(header.value["winForm"]).toBe("survivalWin");
+    expect("readHead" in header.value).toBe(false);
   });
 
   const rows = JSON.parse(read("tests/fixtures/browser-azvaldt.json")) as Row[];

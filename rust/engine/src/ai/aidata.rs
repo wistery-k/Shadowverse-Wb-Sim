@@ -99,8 +99,16 @@ pub struct RawValueNet {
     /// 相手の次のターンにリーサルがある確率の出力（実験。最後の隠れ層 → 1 つ。無ければ使わない）。docs/value-net.md「リーサルの出力（実験）」
     #[serde(default, rename = "lethalHead")]
     pub lethal_head: Option<RawLethalHead>,
+    /// 自分の次のターンに勝つ確率の出力（次の相手のターンを生き延びたとき。最後の隠れ層 → 1 つ。winForm が survivalWin なら勝つ確率に入る）。
+    /// docs/value-net.md「勝ちの出力・読みの出力」
+    #[serde(default, rename = "winHead")]
+    pub win_head: Option<RawLethalHead>,
+    /// 読みの中の相手に負けた割合を当てる補助の出力（学ぶときだけ使う。手を選ぶのには使わない）
+    #[serde(default, rename = "readHead")]
+    pub read_head: Option<RawLethalHead>,
     /// 勝つ確率の出し方。無いか "logit" なら今までどおり σ(a·S + c + z)（リーサルの出力は学ぶときだけ使う）、
-    /// "survival" なら (1 − リーサルの確率) × σ(c + z)（z は生き残った場合の勝率のロジット。出発点の評価 S が 0 のモデルだけ）
+    /// "survival" なら (1 − リーサルの確率) × σ(c + z)（z は生き残った場合の勝率のロジット。出発点の評価 S が 0 のモデルだけ）、
+    /// "survivalWin" なら (1 − リーサルの確率) × (w + (1 − w) × σ(c + z))（w は勝ちの出力の確率）
     #[serde(default, rename = "winForm")]
     pub win_form: Option<String>,
 }

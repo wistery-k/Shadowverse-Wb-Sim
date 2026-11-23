@@ -137,6 +137,24 @@ describe("TD 学習の評価の補正のモデル（scripts/valueNet.ts）", () 
     expect(() => parseValueNetModel({ ...m, winForm: "other" })).toThrow();
   });
 
+  it("勝ちの出力・読みの出力（winHead・readHead・winForm survivalWin）も読み直して残り、Rust と同じ項目の順（td extend・td attr が書き出す）", () => {
+    const m = {
+      ...model(2, (i) => (i % 7) / 10, 0.5),
+      lethalHead: { w: [0.25, -1], b: -3 },
+      winHead: { w: [0.5, 0], b: -2 },
+      readHead: { w: [0, 1], b: 1 },
+      winForm: "survivalWin" as const,
+    };
+    const back = parseValueNetModel(JSON.parse(JSON.stringify(m)) as unknown);
+    expect(back).toEqual(m);
+    expect(Object.keys(back).slice(-4)).toEqual(["lethalHead", "winHead", "readHead", "winForm"]);
+    expect(() => compileValueNet(back)).toThrow(/勝ちの出力/);
+    expect(() => compileValueNet(back, { keepHead: true })).not.toThrow();
+    expect(() => compileValueNet({ ...back, readHead: { w: [1], b: 0 } }, { keepHead: true })).toThrow();
+    const { winHead: _w, ...noWin } = back;
+    expect(() => compileValueNet(noWin, { keepHead: true })).toThrow(/survivalWin/);
+  });
+
   it("隠れ層を重ねたモデル（layers）を読み、単位行列の層を挟んでも出力は同じ", () => {
     const m = model(3, (i) => ((i * 31) % 11) / 10 - 0.5, 0.7);
     const identity = { w: Array.from({ length: 9 }, (_, k) => (k % 4 === 0 ? 1 : 0)), b: [0, 0, 0] };

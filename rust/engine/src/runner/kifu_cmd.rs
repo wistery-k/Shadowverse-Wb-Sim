@@ -1437,14 +1437,21 @@ fn value_rows(
             ("endWin".into(), Json::Num(sig(end))),
         ]);
         if let Some(net) = head {
-            // 補正のリーサルの出力（相手が次のターンにリーサルを持つ確率、%）
-            let q = at_turn_end(agent, &e.s, p, |at| {
-                net.lethal_prob(at, p, crate::ai::valuenet::ValuePhase::End)
+            // 補正のリーサルの出力（相手が次のターンにリーサルを持つ確率、%）と、あれば勝ちの出力（自分の次のターンに勝つ確率、%）・
+            // 読みの出力（読みの中の相手に負ける割合の見込み、%）
+            let probs = at_turn_end(agent, &e.s, p, |at| {
+                net.head_probs(at, p, crate::ai::valuenet::ValuePhase::End)
             });
-            row.push((
-                "netLethal".into(),
-                q.map_or(Json::Null, |q| Json::Num(100.0 * q)),
-            ));
+            let pct = |x: Option<f64>| x.map_or(Json::Null, |x| Json::Num(100.0 * x));
+            if net.has_lethal_head() {
+                row.push(("netLethal".into(), pct(probs[0])));
+            }
+            if net.has_win_head() {
+                row.push(("netWin".into(), pct(probs[1])));
+            }
+            if net.has_read_head() {
+                row.push(("netRead".into(), pct(probs[2])));
+            }
         }
         if reads > 0 {
             let base = super::human_plan::mix(r.seed, e.n as u32);
@@ -1573,11 +1580,12 @@ fn values(argv: &[String]) -> Result<(), String> {
         } else {
             None
         };
-    // 補正にリーサルの出力（lethalHead）があれば、その確率も書く（netLethal。docs/value-net.md「リーサルの出力（実験）」）
+    // 補正にリーサルの出力（lethalHead）・勝ちの出力（winHead）・読みの出力（readHead）があれば、その確率も書く
+    // （netLethal・netWin・netRead。docs/value-net.md「リーサルの出力（実験）」「勝ちの出力・読みの出力」）
     let head = match Json::parse(&text)?.get("valueNet") {
         Some(Json::Str(path)) => {
             let net = crate::ai::valuenet::ValueNet::load(path)?;
-            net.has_lethal_head().then_some(net)
+            (net.has_lethal_head() || net.has_win_head() || net.has_read_head()).then_some(net)
         }
         _ => None,
     };
