@@ -1,4 +1,4 @@
-// 夜のキューのテストの道具（tests/night.test.ts・tests/night-queue.test.ts）
+// キューのテストの道具（tests/night.test.ts・tests/night-queue.test.ts）
 
 import { spawnSync } from "node:child_process";
 

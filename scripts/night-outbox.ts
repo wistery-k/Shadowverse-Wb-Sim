@@ -1,6 +1,6 @@
-// 夜のキューの出口（docs/night.md「朝」）。worker が止まるとき、回のフォルダの結果を出口のフォルダ（~/svwb-data/outbox/<回の名前>/）に
+// キューの出口（docs/queue.md「止まったときのまとめ」）。worker が止まるとき、回のフォルダの結果を出口のフォルダ（~/svwb-data/outbox/<回の名前>/）に
 // .tar.gz（300MB ごとに分ける）と案内（案内.txt）としてまとめる。ユーザーはそのフォルダのファイルを全部スレッドに上げ、
-// スレッドは npm run night -- ingest <ファイル…> で、壊れていないかを確かめて共有フォルダに展開する（台帳の行は night-main.ts が足す）。
+// スレッドは npm run queue -- ingest <ファイル…> で、壊れていないかを確かめて共有フォルダに展開する（台帳の行は night-main.ts が足す）。
 // ここはファイルを選ぶ・まとめる・読む・展開するところだけ。
 //
 // アーカイブの中は共有フォルダと同じ形（pack-run と同じ）: data/selfplay/<名前>/・data/models/<名前>/・data/kifu/<名前>/・logs/<名前>/。
@@ -17,7 +17,7 @@ import { classify, formatBytes, packItems, skipReason, sortItems, type Kind, typ
 export const OUTBOX_JSON = "outbox.json";
 /** 出口のフォルダの案内。1 行目がこれで始まる（ingest は読み飛ばす） */
 export const GUIDE = "案内.txt";
-export const GUIDE_MARK = "夜のキューの出口";
+export const GUIDE_MARK = "キューの出口";
 /** 1 つのアーカイブの大きさの上限（共有フォルダに上げやすい大きさ。環境変数 SVWB_OUTBOX_MAX_MB で替えられる） */
 export const OUTBOX_MAX_MB = 300;
 
@@ -151,8 +151,8 @@ export async function writeOutbox<R>(o: {
     note: o.note,
     dir: o.dir,
     created,
-    command: "夜のキューが止まったときに自分でまとめた（npm run night -- wrap でも作り直せる）",
-    howTo: "取り込み: スレッドで `npm run night -- ingest <上がったファイル…>`（壊れていないかを確かめて共有フォルダの data/・logs/ に展開し、台帳に行を足す。docs/night.md）。",
+    command: "キューが止まったときに自分でまとめた（npm run queue -- wrap でも作り直せる）",
+    howTo: "取り込み: スレッドで `npm run queue -- ingest <上がったファイル…>`（壊れていないかを確かめて共有フォルダの data/・logs/ に展開し、台帳に行を足す。docs/queue.md）。",
     repo: o.repo,
     items,
     skipped,

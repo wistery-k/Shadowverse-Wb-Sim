@@ -1,4 +1,4 @@
-// 夜のキュー（scripts/night-main.ts・docs/night.md）。svwb の代わりに、台帳の行だけを書く偽物を回して、区切り・再開・止め方・まとめを確かめる
+// キュー（scripts/night-main.ts・docs/queue.md）。svwb の代わりに、台帳の行だけを書く偽物を回して、区切り・再開・止め方・まとめを確かめる
 
 import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, truncateSync, unlinkSync, writeFileSync } from "node:fs";
@@ -744,10 +744,10 @@ describe("区切って回す（偽物の svwb で）", () => {
     expect(await main(["finish", "n1", "--root", root, "--ledger", byFinish])).toBe(0);
     const tip1 = gitT(pcGit, "rev-parse", "night/n1");
     expect(gitT(pcGit, "rev-parse", "night/n1^")).toBe(head);
-    expect(gitT(pcGit, "log", "-1", "--format=%s", "night/n1")).toBe(`台帳: 夜のキュー n1 の結果（1 行、${process.env.SVWB_COMMIT}）`);
+    expect(gitT(pcGit, "log", "-1", "--format=%s", "night/n1")).toBe(`台帳: キュー n1 の結果（1 行、${process.env.SVWB_COMMIT}）`);
     // コミットのメッセージ（公開するブランチ）にも、PC の中の回のフォルダの道は書かない
     expect(gitT(pcGit, "log", "-1", "--format=%B", "night/n1")).not.toContain(root);
-    expect(gitT(pcGit, "log", "-1", "--format=%B", "night/n1")).toContain("夜のキュー n1（@n1）");
+    expect(gitT(pcGit, "log", "-1", "--format=%B", "night/n1")).toContain("キュー n1（@n1）");
     expect(readStatus(dir())).toMatchObject({ branch: expect.stringMatching(/^night\/n1（.*台帳の行 1）$/), outbox: expect.stringContaining(join(tmp, "outbox", "n1")) });
     // 2 晩目: 続きを回す。ブランチの上に、残りの区切りの行を積む
     expect(await resume()).toBe(0);
@@ -788,7 +788,7 @@ describe("区切って回す（偽物の svwb で）", () => {
     process.env.FAKE_STOP_AT = "50";
     expect(await start("--foreground")).toBe(1);
     delete process.env.FAKE_STOP_AT;
-    expect(gitT(pcGit, "log", "-1", "--format=%an <%ae>|%cn <%ce>", "night/n1")).toBe("svwb night queue <night-queue@svwb.invalid>|svwb night queue <night-queue@svwb.invalid>");
+    expect(gitT(pcGit, "log", "-1", "--format=%an <%ae>|%cn <%ce>", "night/n1")).toBe("svwb queue <queue@svwb.invalid>|svwb queue <queue@svwb.invalid>");
     // まとめの途中で電源が切れた: status にまとめの結果が無く、ブランチもまだ無い
     const st = readStatus(dir());
     writeFileSync(join(dir(), "status.json"), JSON.stringify({ ...st, outbox: undefined, branch: undefined }));
@@ -797,7 +797,7 @@ describe("区切って回す（偽物の svwb で）", () => {
     expect(await main(["status", "n1", "--root", root])).toBe(0);
     expect(said()).toContain("まとめ: まだ");
     expect(await main(["wrap", "--pending", "--root", root])).toBe(0);
-    expect(gitT(pcGit, "log", "-1", "--format=%s", "night/n1")).toMatch(/^台帳: 夜のキュー n1 の結果（1 行、/);
+    expect(gitT(pcGit, "log", "-1", "--format=%s", "night/n1")).toMatch(/^台帳: キュー n1 の結果（1 行、/);
     expect(readStatus(dir())).toMatchObject({ state: "stopped", branch: expect.stringMatching(/^night\/n1（/) });
     vi.mocked(console.log).mockClear();
     expect(await main(["wrap", "--pending", "--root", root])).toBe(0);
@@ -824,7 +824,7 @@ describe("区切って回す（偽物の svwb で）", () => {
     expect(existsSync(join(tmp, "outbox", "n1"))).toBe(false);
     expect(spawnSync("git", ["rev-parse", "--verify", "--quiet", "night/n1"], { cwd: pcGit }).status).not.toBe(0);
     expect(await main(["wrap", "n1", "--root", root])).toBe(0);
-    expect(gitT(pcGit, "log", "-1", "--format=%s", "night/n1")).toMatch(/^台帳: 夜のキュー n1 の結果（3 行、/);
+    expect(gitT(pcGit, "log", "-1", "--format=%s", "night/n1")).toMatch(/^台帳: キュー n1 の結果（3 行、/);
   });
 
   it("出口の一覧にあっても、その回の data/…/<回の名前>/・logs/<回の名前>/ の外には置かない", async () => {
@@ -874,7 +874,7 @@ describe("区切って回す（偽物の svwb で）", () => {
   });
 
   it("券（go）: 券のコミットを取ってきて回のフォルダに出し、そこで回す。止まった回は同じ券で続きから、済んだ回・動いている回は回さない", async () => {
-    // GitHub の代わりのリポジトリ。夜のキューのスクリプト（今のもの）とジョブのファイルをコミットする
+    // GitHub の代わりのリポジトリ。キューのスクリプト（今のもの）とジョブのファイルをコミットする
     const here = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts");
     const orig = join(tmp, "origin-git");
     mkdirSync(join(orig, "scripts"), { recursive: true });
@@ -887,7 +887,7 @@ describe("区切って回す（偽物の svwb で）", () => {
     writeFileSync(join(orig, "package-lock.json"), "{}\n");
     gitT(orig, "init", "-q", "-b", "claude/x");
     gitT(orig, "add", ".");
-    gitT(orig, "commit", "-q", "-m", "夜のキュー");
+    gitT(orig, "commit", "-q", "-m", "キュー");
     const full = gitT(orig, "rev-parse", "HEAD");
     process.env.SVWB_NIGHT_REMOTE = orig;
     // PC の /workspace（pcGit）には券のコミットが無い。依存は同じ（node_modules を指す）
@@ -953,7 +953,7 @@ describe("区切って回す（偽物の svwb で）", () => {
     expect(files).toContain("案内.txt");
     const parts = files.filter((f) => f.endsWith(".tar.gz"));
     expect(parts.length).toBeGreaterThan(2);
-    expect(readFileSync(join(box, "案内.txt"), "utf8")).toMatch(/^夜のキューの出口: n1\n/);
+    expect(readFileSync(join(box, "案内.txt"), "utf8")).toMatch(/^キューの出口: n1\n/);
     const shared = join(tmp, "shared");
     mkdirSync(shared);
     // 1 つ足りないと、置けるものは置いて、足りないものを言う

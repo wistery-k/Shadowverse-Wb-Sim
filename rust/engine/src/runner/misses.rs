@@ -815,7 +815,7 @@ fn run(argv: &[String]) -> Result<(), String> {
         }
         ps.retain(|p| want.contains(&p.id.as_str()));
     }
-    // 回数 0 なら問題集と設定を読むだけ（夜のキューが、回す前に書き間違いを見つけるのに使う）
+    // 回数 0 なら問題集と設定を読むだけ（キューが、回す前に書き間違いを見つけるのに使う）
     if trials == 0 {
         println!("{} 問を読みました（設定も読めました）", ps.len());
         return Ok(());

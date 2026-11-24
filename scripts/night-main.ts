@@ -1,45 +1,45 @@
-// 夜のキュー: ジョブを並べたファイルを上から順に、5〜10 分の区切りに分けて回す（npm run night）。運用は docs/night.md。
+// キュー: ジョブを並べたファイルを上から順に、5〜10 分の区切りに分けて回す（npm run queue）。運用は docs/queue.md。
 //
-//   npm run night -- plan <ジョブのファイル> [--threads N] [--machine 名前] [--chunk-min 7.5] [--tz Asia/Tokyo] [--at 23:00] [--name 名前] [--until 07:00] [--legacy]
-//   積むキュー（pueue。docs/night.md「積むキュー」。2026-11-23 から）:
-//   npm run night -- add <券|回の名前>
-//   npm run night -- start [--until 07:00|+2h|none] [--yes]
-//   npm run night -- pause [--wait]
-//   npm run night -- status [名前]
-//   npm run night -- remove <回の名前>
+//   npm run queue -- plan <ジョブのファイル> [--threads N] [--machine 名前] [--chunk-min 7.5] [--tz Asia/Tokyo] [--at 23:00] [--name 名前] [--until 07:00] [--legacy]
+//   キュー（回す係は pueue。docs/queue.md「キュー（pueue）」。2026-11-23 から）:
+//   npm run queue -- add <券|回の名前>
+//   npm run queue -- start [--until 07:00|+2h]
+//   npm run queue -- pause [--wait]
+//   npm run queue -- status [名前]
+//   npm run queue -- remove <回の名前>
 //   （pueue の task が流すもの: enqueue・prepare・chunk・wrap）
-//   前の形（PC の 1 晩で積むキューを確かめるまで残す）:
-//   npm run night -- go <券>
-//   npm run night -- start <ジョブのファイル> --yes [--name 名前] [--until 07:00] [--threads N] [--chunk-min 7.5] [--allow-dirty]
-//   npm run night -- stop [名前] [--now]
-//   npm run night -- resume [名前] --yes [--until 07:00] [--threads N]
-//   npm run night -- finish [名前] [--commit] [--pack] [--ledger 台帳]
+//   前のやり方（PC でキューを確かめるまで残す）:
+//   npm run queue -- go <券>
+//   npm run queue -- start <ジョブのファイル> --yes [--name 名前] [--until 07:00] [--threads N] [--chunk-min 7.5] [--allow-dirty]
+//   npm run queue -- stop [名前] [--now]
+//   npm run queue -- resume [名前] --yes [--until 07:00] [--threads N]
+//   npm run queue -- finish [名前] [--commit] [--pack] [--ledger 台帳]
 //   どちらでも:
-//   npm run night -- wrap [名前|--pending]
-//   npm run night -- ingest <回の名前|ファイル…> [--ledger 台帳] [--to /mnt/project-files]
-//   npm run night -- list
+//   npm run queue -- wrap [名前|--pending]
+//   npm run queue -- ingest <回の名前|ファイル…> [--ledger 台帳] [--to /mnt/project-files]
+//   npm run queue -- list
 //
 // - ジョブのファイルは 1 行 1 ジョブで、svwb のコマンドと同じ形（compare・yardstick・profile・misses・survey）。# から行の終わりまでは書き添え
-// - 学び直しの流れ（docs/night.md「学び直しの流れ」）: td selfplay・td branch・beam-gap（--chunk 試合ずつ {k} を入れたファイルに書く）、
+// - 学び直しの流れ（docs/queue.md「学び直しの流れ」）: td selfplay・td branch・beam-gap（--chunk 試合ずつ {k} を入れたファイルに書く）、
 //   td・potential（TypeScript の学習。--out のファイルを 1 つ作る）、pick（前の compare の結果で、決めておいた線を越えたかでファイルを選ぶ）。
 //   @/ は回のフォルダ、{1..20} は 1,2,…,20 に開く。作ったファイルがあれば済んだものとし、前のジョブの作るファイルが無ければ失敗にする。
-//   @run:<回の名前>/<ファイル> は、同じ根の下の前の回のフォルダのファイル（前の夜に作ったモデルを読む。PC の中の道をジョブのファイルに書かない）。
+//   @run:<回の名前>/<ファイル> は、同じ根の下の前の回のフォルダのファイル（前の回で作ったモデルを読む。PC の中の道をジョブのファイルに書かない）。
 //   start のときにあるかを確かめ、無ければ始めない
 // - 回は ~/svwb-data/night/<名前>/ に置く（環境変数 SVWB_NIGHT_DIR か --root で替えられる）。区切りが済むたびに印を書き、
 //   やり直したときは済んだ区切りを飛ばす。電源が切れても、失うのは回していた区切りだけ
-// - 積むキュー: plan が計画の表と積む券（svwb-night-2。ブランチ・コミット・ジョブのファイル・計画の指紋の 1 行。止める時刻は持たない）を出す。
-//   ユーザーがホストで docker/remote-control/night.sh add <券> を流すと（昼でもよい）、券のコミットを回のフォルダの src/ に出し、そこの enqueue が
+// - キュー: plan が計画の表と積む券（svwb-queue-1。ブランチ・コミット・ジョブのファイル・計画の指紋の 1 行。止める時刻は持たない）を出す。
+//   ユーザーがホストで docker/remote-control/queue.sh add <券> を流すと（昼でもよい）、券のコミットを回のフォルダの src/ に出し、そこの enqueue が
 //   組み立て・区切りごと・まとめの task を pueue の組 svwb（同時に 1 つ）に積む（scripts/night-pueue.ts）。積んだだけでは回らない。
-//   回すのはユーザーが決めた夜の start（止める時刻に組を一時停止する task を組 svwb-ctl に置く）、止めるのは pause（回している区切りは凍らせる）。
+//   回すのはユーザーが決めたときの start（--until を付ければ、その時刻に組を一時停止する task を組 svwb-ctl に置く）、止めるのは pause（回している区切りは凍らせる）。
 //   どこまで済んだかは回のフォルダの印（done/）で決め、pueue は流すだけ（pueue の状態が消えても、add <回の名前> で続きから積み直せる）
-// - 前の形: plan --legacy の券（svwb-night-1。止める時刻を持つ）を night.sh go <券> で流すと、go が券のコミットを src/ に出して、そこの start を流す。
+// - 前のやり方: plan --legacy の券（svwb-night-1。止める時刻を持つ）を queue.sh go <券> で流すと、go が券のコミットを src/ に出して、そこの start を流す。
 //   start・resume は、組み立てた svwb を回のフォルダに写し、セッションから切り離した worker を立てて、すぐに戻る。
 //   止める時刻（--until）までに次の区切りが終わらない見込みなら、区切りの切れ目で止まる。stop で手で止める（--now ならすぐ）。
-//   どちらの形も、PC やコンテナの起動で勝手には始めない。2 つの形の回は同時には回さない（互いに断る）
-// - 区切りの結果は回のフォルダの台帳（ledger.jsonl）にだけ書く。止まるとき（全部済んだ・止める時刻・失敗・stop。積むキューでは回の最後の task のまとめと、
-//   朝の wrap --pending）に worker が自分で、
+//   どちらも、PC やコンテナの起動で勝手には始めない。2 つのやり方の回は同時には回さない（互いに断る）
+// - 区切りの結果は回のフォルダの台帳（ledger.jsonl）にだけ書く。止まるとき（全部済んだ・止める時刻・失敗・stop。キューでは回の最後の task のまとめと、
+//   queue-push.sh の wrap --pending）に worker が自分で、
 //   ジョブごとに 1 行にまとめた行をブランチ night/<回の名前> にコミットし（作業ツリーには触らない）、棋譜などを出口（~/svwb-data/outbox/<回の名前>/）にまとめる。
-//   朝はホストで push だけ（docker/remote-control/night-push.sh）。スレッドは ingest <回の名前> で台帳に足す（finish は残してある）
+//   ユーザーはホストで push だけ（docker/remote-control/queue-push.sh）。スレッドは ingest <回の名前> で台帳に足す（finish は残してある）
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -829,16 +829,16 @@ export interface Plan {
   jobs: Job[];
   estimates: Estimate[];
   chunks: Chunk[];
-  /** 積むキュー（pueue。add で積んだ回）の印 */
+  /** キュー（pueue。add で積んだ回）の印 */
   queue?: 1;
   /** 試す用: 組み立てずに写す svwb と、ビルドせずに写す td・potential（add の --bin・--node-bin） */
   prebuilt?: string;
   nodeBin?: string;
 }
 
-/** 1 回の start・resume の設定（積むキューの回は、積んだときの設定） */
+/** 1 回の start・resume の設定（キューの回は、積んだときの設定） */
 export interface Session {
-  /** 始めた時刻と止める時刻（ミリ秒）。積むキューの回の止める時刻は 0（回のものではなく、キューの start で決める） */
+  /** 始めた時刻と止める時刻（ミリ秒）。キューの回の止める時刻は 0（回のものではなく、キューの start で決める） */
   started: number;
   until: number;
   tz: string;
@@ -846,7 +846,7 @@ export interface Session {
   machine: string;
   /** 止まるときに自分でまとめる版（2026-11-19 から）で start・resume した回の印。まとめが済んでいない回を拾う（needsWrap）のは、これがある回だけ */
   wraps?: 1;
-  /** 積むキュー（pueue）の回の印 */
+  /** キュー（pueue）の回の印 */
   queue?: 1;
 }
 
@@ -1262,27 +1262,27 @@ export function statusText(dir: string, o: { final?: boolean } = {}): string {
   });
   const s = session;
   const head = [
-    `夜のキュー ${plan.name}（${dir}）`,
+    `キュー ${plan.name}（${dir}）`,
     `状態: ${state}`,
     `コミット ${plan.commit}（${plan.branch}）、${
-      s ? `${s.machine}・${s.threads} スレッド、${s.until > 0 ? `止める時刻 ${fmtClock(s.until, tz)}（${tz}）` : "積むキュー（回す・止めるは night.sh start・pause）"}` : ""
+      s ? `${s.machine}・${s.threads} スレッド、${s.until > 0 ? `止める時刻 ${fmtClock(s.until, tz)}（${tz}）` : "キュー（回す・止めるは queue.sh start・pause）"}` : ""
     }`,
-    ...(o.final !== true && st?.branch !== undefined ? [`台帳の行: ${st.branch}（朝はホストで docker/remote-control/night-push.sh）`] : []),
+    ...(o.final !== true && st?.branch !== undefined ? [`台帳の行: ${st.branch}（朝はホストで docker/remote-control/queue-push.sh）`] : []),
     ...(o.final !== true && st?.outbox !== undefined ? [`出口: ${st.outbox}`] : []),
     ...(o.final !== true && pid === null && needsWrap(dir)
-      ? ["まとめ: まだ（電源が切れたか、まとめている途中で落ちた）。朝の docker/remote-control/night-push.sh がまとめてから push する（手でなら npm run night -- wrap）"]
+      ? ["まとめ: まだ（電源が切れたか、まとめている途中で落ちた）。朝の docker/remote-control/queue-push.sh がまとめてから push する（手でなら npm run queue -- wrap）"]
       : []),
   ];
   return `${head.join("\n")}\n\n${markdownTable(["#", "ジョブ", "台帳の名前", "区切り", "試合", "かかった時間", "結果（A の勝率・正解率・局面・ファイル）", "メモ"], tableRows)}`;
 }
 
 /** 止まったときのまとめが済んでいない回か（止まるときにまとめる版で回した・worker がいない・済んだ区切りがある・status にまとめの結果が無い）。
- * 電源が切れた回と、まとめている途中で落ちた回。朝の night-push.sh が wrap --pending でまとめる。
+ * 電源が切れた回と、まとめている途中で落ちた回。朝の queue-push.sh が wrap --pending でまとめる。
  * 前の版で回した回（session.json に wraps が無い）は拾わない（手で wrap <名前> を流したときだけまとめる） */
 export function needsWrap(dir: string): boolean {
   if (!existsSync(join(dir, "session.json")) || readSession(dir).wraps !== 1) return false;
   const st = readStatus(dir);
-  // 積むキューの回は、区切りが回っている間はまとめない（一時停止して凍っている区切りは、まとめてよい）
+  // キューの回は、区切りが回っている間はまとめない（一時停止して凍っている区切りは、まとめてよい）
   return st !== null && (st.outbox === undefined || st.branch === undefined) && markers(dir).size > 0 && workerPid(dir) === null && !chunkRunning(dir);
 }
 
@@ -1455,7 +1455,7 @@ function runChunk(plan: Plan, session: Session, dir: string, c: Chunk, ctl: Work
       why = "すぐ止めた";
       child.kill("SIGTERM");
     };
-    // 止める時刻を HARD_GRACE 過ぎても終わらなければ止める（朝に PC を使う人のため）。積むキューの回は止める時刻を持たない（キューを一時停止すると区切りごと凍る）
+    // 止める時刻を HARD_GRACE 過ぎても終わらなければ止める（朝に PC を使う人のため）。キューの回は止める時刻を持たない（キューを一時停止すると区切りごと凍る）
     const hard =
       session.until > 0
         ? setTimeout(
@@ -1589,7 +1589,7 @@ export async function runWorker(dir: string, ctl: WorkerControl = { stopNow: fal
     try {
       w = await wrapUp(dir, (t) => log(dir, tz, t));
     } catch (e) {
-      const why = `まとめられなかった（${(e as Error).message}。npm run night -- wrap でやり直す）`;
+      const why = `まとめられなかった（${(e as Error).message}。npm run queue -- wrap でやり直す）`;
       log(dir, tz, why);
       w = { outbox: why, branch: why };
     }
@@ -1829,8 +1829,8 @@ function afterStart(dir: string, session: Session): string {
   return [
     `回のフォルダ: ${dir}（進み具合は night.log）`,
     `止める時刻: ${fmtClock(session.until, session.tz)}（${session.tz}）`,
-    "様子: npm run night -- status　止める: npm run night -- stop（--now ですぐ）（ホストからは docker/remote-control/night.sh status・stop）",
-    "朝: 止まるときに結果を自分でまとめる。ホストで docker/remote-control/night-push.sh を流し、スレッドに「回の名前 を push した」と伝える",
+    "様子: npm run queue -- status　止める: npm run queue -- stop（--now ですぐ）（ホストからは docker/remote-control/queue.sh status・stop）",
+    "朝: 止まるときに結果を自分でまとめる。ホストで docker/remote-control/queue-push.sh を流し、スレッドに「回の名前 を push した」と伝える",
   ].join("\n");
 }
 
@@ -1851,9 +1851,9 @@ export async function cmdStart(a: Args): Promise<number> {
   const { estimates, chunks } = makePlanParts(jobs, repoLedger().runs, machine, session.threads, chunkMin, repoLedger().misses);
   const name = a.opts.get("--name") ?? `night-${stamp(session.started, session.tz)}`;
   if (!/^[A-Za-z0-9._-]+$/.test(name)) throw new Error(`--name は英数字と . _ - だけ: ${name}`);
-  console.log(planText({ jobs, estimates, chunks }, { threads: session.threads, machine, startAt: session.started, until: session.until, tz: session.tz, title: `夜のキュー ${name}（${file}）` }));
+  console.log(planText({ jobs, estimates, chunks }, { threads: session.threads, machine, startAt: session.started, until: session.until, tz: session.tz, title: `キュー ${name}（${file}）` }));
   if (!a.opts.has("--yes")) {
-    console.log("\nまだ始めていません。ユーザーが今夜回すと決めたら --yes を付けて流します（前のやり方。積むなら plan の券を night.sh add で。docs/night.md）。");
+    console.log("\nまだ始めていません。ユーザーが回すと決めたら --yes を付けて流します（前のやり方。積むなら plan の券を queue.sh add で。docs/queue.md）。");
     return 0;
   }
   const active = activeRuns(root);
@@ -1925,7 +1925,7 @@ export async function cmdResume(a: Args): Promise<number> {
   if (prev && !a.opts.has("--tz")) session.tz = prev.tz;
   if (!a.opts.has("--until")) session.until = parseUntil("07:00", session.started, session.tz);
   console.log(
-    planText(plan, { threads: session.threads, machine, startAt: session.started, until: session.until, tz: session.tz, done: markers(dir), title: `夜のキュー ${plan.name} の続き` }),
+    planText(plan, { threads: session.threads, machine, startAt: session.started, until: session.until, tz: session.tz, done: markers(dir), title: `キュー ${plan.name} の続き` }),
   );
   if (!a.opts.has("--yes")) {
     console.log("\nまだ始めていません。ユーザーが今夜回すと決めたら --yes を付けて流します。");
@@ -1977,7 +1977,7 @@ function checkGitIdent(): void {
       throw new Error(
         "git の名前とメールが決まらないので、コミットできません。台帳には何も足していません。\n" +
           "コンテナなら docker/remote-control/.env に GIT_AUTHOR_NAME・GIT_AUTHOR_EMAIL・GIT_COMMITTER_NAME・GIT_COMMITTER_EMAIL を書き、" +
-          "ホストで docker compose up -d を流してから、finish --commit を流し直す（docs/night.md「台帳の行のコミット」）",
+          "ホストで docker compose up -d を流してから、finish --commit を流し直す（docs/queue.md「台帳の行のコミット」）",
       );
     }
   }
@@ -2237,7 +2237,7 @@ export function cmdFinish(a: Args): number {
     // 今回足した行だけでなく、前の finish で足したがコミットできなかった行もコミットする（流し直せば済むように）
     const pending = uncommittedQueueRows(plan.name);
     if (pending > 0) {
-      const msg = `台帳: 夜のキュー ${plan.name} の結果（${pending} 行、${plan.commit}）`;
+      const msg = `台帳: キュー ${plan.name} の結果（${pending} 行、${plan.commit}）`;
       const r = spawnSync("git", ["commit", "-m", msg, "--", "docs/ledger.jsonl"], { cwd: REPO, stdio: "inherit" });
       if (r.status !== 0) throw new Error("コミットできませんでした。直してから finish --commit を流し直す（足した行はそのままコミットする）");
       console.log(`コミットしました（${gitState().branch}）。push はしていません（コンテナからはできない。ホストで git push）`);
@@ -2246,18 +2246,18 @@ export function cmdFinish(a: Args): number {
     }
   }
   if (a.opts.has("--pack")) {
-    run("npm", ["run", "-s", "pack-run", "--", dir, "--name", plan.name, "--note", `夜のキュー ${plan.name}（${plan.commit}）`, "--only", "logs,kifu", "--force"]);
+    run("npm", ["run", "-s", "pack-run", "--", dir, "--name", plan.name, "--note", `キュー ${plan.name}（${plan.commit}）`, "--only", "logs,kifu", "--force"]);
   }
   return 0;
 }
 
 // ---------------------------------------------------------------- 止まったときのまとめ（朝に何も打たなくてよいように）
 //
-// worker が止まるとき（全部済んだ・止める時刻・失敗・stop）に、自分で次の 2 つをする（docs/night.md「朝」）。
+// worker が止まるとき（全部済んだ・止める時刻・失敗・stop）に、自分で次の 2 つをする（docs/queue.md「止まったときのまとめ」）。
 // 1. 台帳の行を、ブランチ night/<回の名前> にコミットする（回のコミットから枝分かれ。作業ツリーと index には触らない）。
-//    ユーザーは朝にホストで push だけをし（docker/remote-control/night-push.sh）、スレッドは npm run night -- ingest <回の名前> で台帳に足す
+//    ユーザーは朝にホストで push だけをし（docker/remote-control/queue-push.sh）、スレッドは npm run queue -- ingest <回の名前> で台帳に足す
 // 2. 棋譜・ログ・作ったデータとモデルを、出口のフォルダ（~/svwb-data/outbox/<回の名前>/）に .tar.gz でまとめる。要るときだけスレッドに上げ、
-//    スレッドは npm run night -- ingest <ファイル…> で共有フォルダに展開する
+//    スレッドは npm run queue -- ingest <ファイル…> で共有フォルダに展開する
 
 /** 出口の outbox.json の result */
 export interface OutboxResult {
@@ -2332,7 +2332,7 @@ export async function makeOutbox(dir: string, summary?: string): Promise<{ folde
     dir,
     name: plan.name,
     outRoot: outboxRoot(dir),
-    note: `夜のキュー ${plan.name}（${plan.commit}）`,
+    note: `キュー ${plan.name}（${plan.commit}）`,
     repo: `回のコミット: ${plan.commit}（ブランチ ${plan.branch}）`,
     result,
     now,
@@ -2371,10 +2371,10 @@ function gitIn(repo: string, args: string[], o: { input?: string; env?: NodeJS.P
 
 /** コミットに使う名前とメール。行を運ぶだけのコミットで、ブランチは公開されるので、git の設定（.env のメールなど）は使わずにいつも決まったものにする */
 const NIGHT_IDENT: NodeJS.ProcessEnv = {
-  GIT_AUTHOR_NAME: "svwb night queue",
-  GIT_AUTHOR_EMAIL: "night-queue@svwb.invalid",
-  GIT_COMMITTER_NAME: "svwb night queue",
-  GIT_COMMITTER_EMAIL: "night-queue@svwb.invalid",
+  GIT_AUTHOR_NAME: "svwb queue",
+  GIT_AUTHOR_EMAIL: "queue@svwb.invalid",
+  GIT_COMMITTER_NAME: "svwb queue",
+  GIT_COMMITTER_EMAIL: "queue@svwb.invalid",
 };
 
 /**
@@ -2399,9 +2399,9 @@ export function commitNight(dir: string, summary: string, outbox: string): { bra
   const n = rowCount(rows);
   const text = rowsText(rows);
   const msg = [
-    `台帳: 夜のキュー ${plan.name} の結果（${n} 行、${plan.commit}）`,
+    `台帳: キュー ${plan.name} の結果（${n} 行、${plan.commit}）`,
     "",
-    "このブランチは夜のキューの結果の台帳の行を運ぶためのもの（PC で作った）。スレッドは npm run night -- ingest " + plan.name + " で自分のブランチの台帳に足す。",
+    "このブランチはキューの結果の台帳の行を運ぶためのもの（PC で作った）。スレッドは npm run queue -- ingest " + plan.name + " で自分のブランチの台帳に足す。",
     `出口: ${portableText(outbox, dir, plan.name)}`,
     "",
     summary,
@@ -2419,7 +2419,7 @@ export function commitNight(dir: string, summary: string, outbox: string): { bra
     gitIn(repo, ["update-index", "--add", "--cacheinfo", `100644,${blob},${ledgerPath}`], { env });
     const tree = gitIn(repo, ["write-tree"], { env }).trim();
     const sha = gitIn(repo, ["commit-tree", tree, "-p", parent, "-F", "-"], { input: msg, env: NIGHT_IDENT }).trim();
-    gitIn(repo, ["update-ref", "-m", `夜のキュー ${plan.name}`, ref, sha, old ?? ""]);
+    gitIn(repo, ["update-ref", "-m", `キュー ${plan.name}`, ref, sha, old ?? ""]);
     return { branch, sha, rows: n };
   } finally {
     rmSync(dirname(index), { recursive: true, force: true });
@@ -2438,7 +2438,7 @@ export async function wrapUp(dir: string, log: (text: string) => void): Promise<
     log(`出口に置いた: ${outbox}`);
   } catch (e) {
     outbox = `まとめられなかった（${(e as Error).message}）`;
-    log(`出口にまとめられなかった: ${(e as Error).message}（npm run night -- wrap で作り直す）`);
+    log(`出口にまとめられなかった: ${(e as Error).message}（npm run queue -- wrap で作り直す）`);
   }
   let branch: string;
   try {
@@ -2447,13 +2447,13 @@ export async function wrapUp(dir: string, log: (text: string) => void): Promise<
     log(`台帳の行をコミットした: ${branch}`);
   } catch (e) {
     branch = `コミットできなかった（${(e as Error).message}）`;
-    log(`台帳の行をコミットできなかった: ${(e as Error).message}（npm run night -- wrap でやり直す）`);
+    log(`台帳の行をコミットできなかった: ${(e as Error).message}（npm run queue -- wrap でやり直す）`);
   }
   return { outbox, branch };
 }
 
 /** 手でまとめ直す（worker が止まったときと同じこと。電源が切れた回や、まとめが失敗したときに）。
- * --pending は、まとめが済んでいない回（needsWrap）を全部まとめる（朝の night-push.sh が push の前に流す） */
+ * --pending は、まとめが済んでいない回（needsWrap）を全部まとめる（朝の queue-push.sh が push の前に流す） */
 async function cmdWrap(a: Args): Promise<number> {
   known(a, ["--pending"], 1);
   const root = runsRoot(a.opts.get("--root"));
@@ -2469,7 +2469,7 @@ async function cmdWrap(a: Args): Promise<number> {
   }
   const dir = findRun(root, a.pos[0], () => true);
   if (workerPid(dir) !== null) throw new Error(`まだ動いています: ${dir}（止まるときに自分でまとめる）`);
-  if (chunkRunning(dir)) throw new Error(`区切りを回しています: ${dir}（積むキューの回は、最後の task がまとめる）`);
+  if (chunkRunning(dir)) throw new Error(`区切りを回しています: ${dir}（キューの回は、最後の task がまとめる）`);
   await wrapOne(dir);
   return 0;
 }
@@ -2480,7 +2480,7 @@ async function wrapOne(dir: string): Promise<void> {
   const r = await wrapUp(dir, (t) => log(dir, tz, t));
   const st = readStatus(dir);
   if (st !== null) writeAtomic(join(dir, "status.json"), JSON.stringify({ ...st, outbox: r.outbox, branch: r.branch }));
-  console.log(`出口: ${r.outbox}\n台帳のブランチ: ${r.branch}\n朝はホストで docker/remote-control/night-push.sh（push だけ）`);
+  console.log(`出口: ${r.outbox}\n台帳のブランチ: ${r.branch}\n朝はホストで docker/remote-control/queue-push.sh（push だけ）`);
 }
 
 /** 台帳の行の重なり（同じ回・種類・名前・コミットで試合番号が重なる行、misses は同じ鍵、survey は同じ名前があるか） */
@@ -2505,7 +2505,7 @@ export function branchRows(ledgerText: string, name: string): { runs: QueueRun[]
 }
 
 /**
- * スレッド: 夜のキューの結果を取り込む。引数が回の名前（か night/<回の名前>）なら、GitHub からそのブランチを取ってきて、台帳にまだ無い行を足す。
+ * スレッド: キューの結果を取り込む。引数が回の名前（か night/<回の名前>）なら、GitHub からそのブランチを取ってきて、台帳にまだ無い行を足す。
  * ファイルなら出口のアーカイブとして、壊れていないかを確かめて共有フォルダに展開する
  */
 export async function cmdIngest(a: Args): Promise<number> {
@@ -2540,7 +2540,7 @@ export async function cmdIngest(a: Args): Promise<number> {
       continue;
     }
     if (f.status !== 0) {
-      notes.push(`${branch}: GitHub から取ってこられませんでした（ホストで docker/remote-control/night-push.sh を流したか）: ${(f.stderr || f.stdout).trim()}`);
+      notes.push(`${branch}: GitHub から取ってこられませんでした（ホストで docker/remote-control/queue-push.sh を流したか）: ${(f.stderr || f.stdout).trim()}`);
       ok = false;
       continue;
     }
@@ -2647,17 +2647,17 @@ async function ingestFiles(paths: string[], to: string): Promise<{ ok: boolean; 
   return { ok, text, notes };
 }
 
-// ---------------------------------------------------------------- 券と go（夕方の 1 行。docs/night.md「券と go」）
+// ---------------------------------------------------------------- 券と go（夕方の 1 行。docs/queue.md「券と go」）
 
-/** 券の 1 語目（形を変えたら数を上げる）。svwb-night-1 は今夜回す券（go）、svwb-night-2 は積む券（add。止める時刻を持たない） */
+/** 券の 1 語目（形を変えたら数を上げる）。svwb-night-1 は前のやり方の券（go。止める時刻を持つ）、svwb-queue-1 は積む券（add。止める時刻を持たない） */
 export const TICKET_V = "svwb-night-1";
-export const TICKET_Q = "svwb-night-2";
+export const TICKET_Q = "svwb-queue-1";
 /** ユーザーがホストで券を流すスクリプト */
-export const NIGHT_SH = "~/Shadowverse-Wb-Sim/docker/remote-control/night.sh";
+export const QUEUE_SH = "~/Shadowverse-Wb-Sim/docker/remote-control/queue.sh";
 
-/** 券: 回すものの 1 行（スレッドが plan で出し、ユーザーがホストで night.sh add <券>（積む券）か night.sh go <券>（前の形）を流す） */
+/** 券: 回すものの 1 行（スレッドが plan で出し、ユーザーがホストで queue.sh add <券>（積む券）か queue.sh go <券>（前の形）を流す） */
 export interface Ticket {
-  /** 2 なら積む券（svwb-night-2。until・tz を持たない）。無ければ今夜回す券（svwb-night-1） */
+  /** 2 なら積む券（svwb-queue-1。until・tz を持たない）。無ければ前のやり方の券（svwb-night-1） */
   v?: 2;
   name: string;
   branch: string;
@@ -2697,8 +2697,8 @@ export function parseTicket(words: string[]): Ticket {
   const ws = words.join(" ").trim().split(/\s+/).filter((w) => w !== "");
   const head = ws[0];
   if (head !== TICKET_V && head !== TICKET_Q) {
-    if (head !== undefined && /^svwb-night-\d+$/.test(head)) {
-      throw new Error(`この券（${head}）は、このチェックアウトの夜のキューと形が違います。ホストの ~/Shadowverse-Wb-Sim で git pull してから流します`);
+    if (head !== undefined && /^svwb-(night|queue)-\d+$/.test(head)) {
+      throw new Error(`この券（${head}）は、このチェックアウトのキューと形が違います。ホストの ~/Shadowverse-Wb-Sim で git pull してから流します`);
     }
     throw new Error(`券ではありません（${TICKET_Q} か ${TICKET_V} で始まる 1 行。スレッドが出したものをそのまま渡します）`);
   }
@@ -2725,7 +2725,7 @@ export function parseTicket(words: string[]): Ticket {
   if (!/^[0-9a-f]{12,40}$/.test(commit)) throw bad("commit", commit);
   const jobs = need("jobs");
   if (!SAFE_PATH.test(jobs)) throw bad("jobs", jobs);
-  if (queued && (kv.has("until") || kv.has("tz"))) throw new Error("積む券（svwb-night-2）には止める時刻（until・tz）を書きません（止める時刻は night.sh start --until で決める）");
+  if (queued && (kv.has("until") || kv.has("tz"))) throw new Error("積む券（svwb-queue-1）には止める時刻（until・tz）を書きません（止める時刻は queue.sh start --until で決める）");
   const tz = kv.get("tz");
   if (tz !== undefined) {
     try {
@@ -2873,7 +2873,7 @@ async function askYes(question: string): Promise<boolean> {
 }
 
 /**
- * 券で回す（コンテナの中で。ホストからは docker/remote-control/night.sh go <券>）。
+ * 券で回す（コンテナの中で。ホストからは docker/remote-control/queue.sh go <券>）。
  * 券のコミットを取ってきて（無ければ）、計画の指紋を確かめ、回のフォルダの src/ に出して、そこの start を流す（svwb もそこで組み立てる）。
  * 同じ券の回があれば、動いていればそう言い、済んでいればそう言い、途中なら resume。昼なら 1 回確かめる
  */
@@ -2882,7 +2882,7 @@ export async function cmdGo(a: Args): Promise<number> {
   known(a, ["--yes", "--bin", "--node-bin", "--foreground"], Number.POSITIVE_INFINITY);
   if (a.pos.length === 0) throw new Error("券を渡します（スレッドが出した svwb-night-1 で始まる 1 行）");
   const t = parseTicket(a.pos);
-  if (t.v === 2 || t.until === undefined) throw new Error(`これは積む券（${TICKET_Q}）です。night.sh add <券> で積みます（docs/night.md「積むキュー」）`);
+  if (t.v === 2 || t.until === undefined) throw new Error(`これは積む券（${TICKET_Q}）です。queue.sh add <券> で積みます（docs/queue.md「キュー（pueue）」）`);
   const until = t.until;
   const root = runsRoot(a.opts.get("--root"));
   const repo = nightGitDir(REPO);
@@ -2904,7 +2904,7 @@ export async function cmdGo(a: Args): Promise<number> {
     }
   }
   const started = existsSync(join(dir, "plan.json"));
-  const morning = `朝は ${NIGHT_SH.replace("night.sh", "night-push.sh")} を流し、スレッドに「${t.name} を push した」と伝えてください。`;
+  const morning = `朝は ${QUEUE_SH.replace("queue.sh", "queue-push.sh")} を流し、スレッドに「${t.name} を push した」と伝えてください。`;
   if (started) {
     if (workerPid(dir) !== null) {
       console.log(`${statusText(dir)}\n\nこの回はもう動いています。${morning}`);
@@ -2917,7 +2917,7 @@ export async function cmdGo(a: Args): Promise<number> {
     }
   }
   const others = activeRuns(root).filter((d) => d !== dir);
-  if (others.length > 0) throw new Error(`ほかの回が動いています: ${others.map((d) => basename(d)).join(", ")}（1 晩に 1 つ。止めるなら night.sh stop）`);
+  if (others.length > 0) throw new Error(`ほかの回が動いています: ${others.map((d) => basename(d)).join(", ")}（1 晩に 1 つ。止めるなら queue.sh stop）`);
   refuseIfQueueBusy();
   const now = Date.now();
   if (isDaytime(now, tz) && !a.opts.has("--yes")) {
@@ -2969,9 +2969,9 @@ export async function cmdGo(a: Args): Promise<number> {
   return r.status ?? 1;
 }
 
-// ---------------------------------------------------------------- 積むキュー（pueue。docs/night.md「積むキュー」）
+// ---------------------------------------------------------------- キュー（pueue。docs/queue.md「キュー（pueue）」）
 //
-// 券（svwb-night-2）を add で積むと、回のフォルダに計画を作り、組み立て・区切り・まとめを 1 つずつ pueue の task にして組 svwb に積む。
+// 券（svwb-queue-1）を add で積むと、回のフォルダに計画を作り、組み立て・区切り・まとめを 1 つずつ pueue の task にして組 svwb に積む。
 // 回す・止めるは積むことと別で、キュー全体の start（止める時刻は組 svwb-ctl に積む時刻つきの pause）と pause。
 // どこまで済んだかは回のフォルダの印で決める（pueue は流すだけ）。pueue の状態が消えても、add <回の名前> で続きから積み直せる。
 
@@ -2991,12 +2991,12 @@ function pueueOrNull(): PStatus | null {
   }
 }
 
-/** 前のやり方（go・start・resume）で回すとき、積むキューが回っていれば断る（同時に 2 つ回さない） */
+/** 前のやり方（go・start・resume）で回すとき、キューが回っていれば断る（同時に 2 つ回さない） */
 function refuseIfQueueBusy(): void {
   const st = pueueOrNull();
   if (st === null || st.groups[QUEUE_GROUP]?.status !== "Running") return;
   const live = st.tasks.filter((t) => t.group === QUEUE_GROUP && (t.state === "Running" || t.state === "Queued") && labelOf(t.label) !== null);
-  if (live.length > 0) throw new Error("積むキューが回っています（同時には回さない。止めるなら night.sh pause）");
+  if (live.length > 0) throw new Error("キューが回っています（同時には回さない。止めるなら queue.sh pause）");
 }
 
 /** これから回る・回っている・止めてあるか、中断した（start が積み直す）task */
@@ -3120,7 +3120,7 @@ export function enqueueRun(dir: string, root: string): { added: number; kept: nu
   return { added, kept };
 }
 
-/** 積むキューの回の様子（1 行） */
+/** キューの回の様子（1 行） */
 function queueRunState(plan: Plan, tasks: Map<string, PTask> | null, done: Map<string, Marker>, tz: string): string {
   const left = plan.chunks.filter((c) => !done.has(c.id));
   if (left.length === 0) return "全部済んだ";
@@ -3138,15 +3138,15 @@ function queueRunState(plan: Plan, tasks: Map<string, PTask> | null, done: Map<s
   const loose = left.length - waiting - killed;
   const parts: string[] = [];
   if (running) parts.push(`回している（${role(running)}${running.start === null ? "" : `、${fmtClock(running.start, tz)} から`}）`);
-  else if (paused) parts.push(`一時停止している（${role(paused)} の途中。night.sh start で続きから）`);
+  else if (paused) parts.push(`一時停止している（${role(paused)} の途中。queue.sh start で続きから）`);
   if (prep !== undefined && (prep.state === "Failed" || prep.state === "FailedToSpawn" || prep.state === "Errored")) parts.push(`組み立てが失敗した（pueue log ${prep.id}）`);
   if (waiting > 0) parts.push(`積んである ${waiting} 区切り`);
-  if (killed > 0) parts.push(`中断した ${killed} 区切り（night.sh start で積み直す）`);
-  if (loose > 0) parts.push(`積んでいない ${loose} 区切り（失敗した・取り消した。直したら night.sh add ${plan.name} で積み直す）`);
+  if (killed > 0) parts.push(`中断した ${killed} 区切り（queue.sh start で積み直す）`);
+  if (loose > 0) parts.push(`積んでいない ${loose} 区切り（失敗した・取り消した。直したら queue.sh add ${plan.name} で積み直す）`);
   return parts.join("・");
 }
 
-/** 積むキューの回の区切りが、いま回っているか（一時停止して凍っているものは回っていないとする。まとめの task は数えない） */
+/** キューの回の区切りが、いま回っているか（一時停止して凍っているものは回っていないとする。まとめの task は数えない） */
 function chunkRunning(dir: string): boolean {
   const plan = readPlan(dir);
   if (plan.queue !== 1) return false;
@@ -3161,17 +3161,17 @@ function leftSeconds(plan: Plan, done: Map<string, Marker>, threads: number): nu
   return plan.chunks.filter((c) => !done.has(c.id)).reduce((s, c) => s + chunkSeconds(c, plan, measured), 0);
 }
 
-/** 積むキュー全体の様子（キューが回っているか・止める時刻・回ごとの残り） */
+/** キュー全体の様子（キューが回っているか・止める時刻・回ごとの残り） */
 export function queueOverview(root: string, st: PStatus | null = pueueOrNull(), tz = "Asia/Tokyo"): string {
-  if (st === null) return "pueue につながりません（積むキューの様子は出せません。コンテナを作り直してから流します: ホストで docker compose up -d）";
+  if (st === null) return "pueue につながりません（キューの様子は出せません。コンテナを作り直してから流します: ホストで docker compose up -d）";
   const g = st.groups[QUEUE_GROUP];
   const stop = st.tasks.find((t) => t.group === CTL_GROUP && t.label.startsWith(STOP_LABEL) && t.state === "Stashed" && t.enqueueAt !== null);
   const head =
     g === undefined
-      ? "キュー: まだありません（最初の night.sh add で作る）"
+      ? "キュー: まだありません（最初の queue.sh add で作る）"
       : g.status === "Running"
-        ? `キュー: 回っている（${stop?.enqueueAt ? `止める時刻 ${fmtClock(stop.enqueueAt, tz)}` : "止める時刻なし"}。止める: night.sh pause）`
-        : "キュー: 止まっている（回す: night.sh start）";
+        ? `キュー: 回っている（${stop?.enqueueAt ? `止める時刻 ${fmtClock(stop.enqueueAt, tz)}` : "止める時刻なし"}。止める: queue.sh pause）`
+        : "キュー: 止まっている（回す: queue.sh start）";
   const rows: string[][] = [];
   let total = 0;
   for (const dir of listRuns(root)) {
@@ -3187,7 +3187,7 @@ export function queueOverview(root: string, st: PStatus | null = pueueOrNull(), 
     total += secs;
     rows.push([plan.name, plan.commit, `${plan.chunks.length - left}/${plan.chunks.length}`, queueRunState(plan, tasks, done, tz), left === 0 ? "" : fmtDur(secs)]);
   }
-  const table = rows.length === 0 ? "積んである回はありません" : `${markdownTable(["回", "コミット", "区切り", "状態", "残りの見込み"], rows)}\n\n残りの見込みの合計: ${fmtDur(total)}（回ごとの詳しい様子は night.sh status <回の名前>）`;
+  const table = rows.length === 0 ? "積んである回はありません" : `${markdownTable(["回", "コミット", "区切り", "状態", "残りの見込み"], rows)}\n\n残りの見込みの合計: ${fmtDur(total)}（回ごとの詳しい様子は queue.sh status <回の名前>）`;
   return `${head}\n\n${table}`;
 }
 
@@ -3231,7 +3231,7 @@ const lockAlive = (pid: number): boolean => {
   }
 };
 
-/** 積む（コンテナの中で。ホストからは night.sh add <券>）。券の代わりに回の名前を渡すと、その回の券で済んでいない作業を積み直す */
+/** 積む（コンテナの中で。ホストからは queue.sh add <券>）。券の代わりに回の名前を渡すと、その回の券で済んでいない作業を積み直す */
 export async function cmdAdd(a: Args): Promise<number> {
   // --bin・--node-bin は試す用（組み立てずにこの svwb・td・potential を使う）
   known(a, ["--bin", "--node-bin"], Number.POSITIVE_INFINITY);
@@ -3246,7 +3246,7 @@ export async function cmdAdd(a: Args): Promise<number> {
   } else {
     t = parseTicket(a.pos);
   }
-  if (t.v !== 2) throw new Error(`これは今夜回す券（${TICKET_V}）です。night.sh go <券> で流します（積むなら、スレッドに ${TICKET_Q} の券を作り直してもらう）`);
+  if (t.v !== 2) throw new Error(`これは前のやり方の券（${TICKET_V}）です。queue.sh go <券> で流します（積むなら、スレッドに ${TICKET_Q} の券を作り直してもらう）`);
   const repo = nightGitDir(REPO);
   const dir = join(root, t.name);
   const src = join(dir, "src");
@@ -3269,7 +3269,7 @@ export async function cmdAdd(a: Args): Promise<number> {
     exportSource(repo, full, src);
   }
   if (!existsSync(join(src, "scripts", "night-pueue.ts"))) {
-    throw new Error(`この券のコミット（${t.commit}）の夜のキューは、積むキューを知りません（スレッドに新しいコミットで券を作り直してもらう）`);
+    throw new Error(`この券のコミット（${t.commit}）のキューは、キューを知りません（スレッドに新しいコミットで券を作り直してもらう）`);
   }
   const pass = (k: string): string[] => {
     const v = a.opts.get(k);
@@ -3347,25 +3347,25 @@ async function cmdEnqueue(a: Args): Promise<number> {
     writeFileSync(join(dir, "jobs.txt"), jobsText);
     writeAtomic(join(dir, "plan.json"), JSON.stringify(plan, null, 1));
     writeAtomic(join(dir, "session.json"), JSON.stringify(session));
-    log(dir, session.tz, `積むキューの回を作った（${jobs.length} ジョブ・${chunks.length} 区切り、コミット ${g.commit}）`);
+    log(dir, session.tz, `キューの回を作った（${jobs.length} ジョブ・${chunks.length} 区切り、コミット ${g.commit}）`);
   }
   const plan = readPlan(dir);
-  if (plan.queue !== 1) throw new Error(`この回は積むキューの回ではありません: ${dir}`);
+  if (plan.queue !== 1) throw new Error(`この回はキューの回ではありません: ${dir}`);
   const session = readSession(dir);
   const done = markers(dir);
-  console.log(planText(plan, { threads: session.threads, machine: session.machine, startAt: Date.now(), until: null, tz: session.tz, done, title: `積むキューの回 ${name}` }));
+  console.log(planText(plan, { threads: session.threads, machine: session.machine, startAt: Date.now(), until: null, tz: session.tz, done, title: `キューの回 ${name}` }));
   const r = enqueueRun(dir, root);
   log(dir, session.tz, `積んだ（task ${r.added} 個。前から積んであった ${r.kept} 個）`);
   console.log(
     r.added + r.kept === 0
       ? "\nこの回は全部済んでいます。"
-      : `\n積みました（task ${r.added} 個。前から積んであった ${r.kept} 個）。回すのは night.sh start（キューの先頭から順に回る）\n`,
+      : `\n積みました（task ${r.added} 個。前から積んであった ${r.kept} 個）。回すのは queue.sh start（キューの先頭から順に回る）\n`,
   );
   console.log(queueOverview(root, pueueOrNull(), session.tz));
   return 0;
 }
 
-/** 組み立て（積むキューの最初の task。回のソースで svwb を組み立てて回のフォルダに写し、設定の書き間違いを確かめる） */
+/** 組み立て（キューの最初の task。回のソースで svwb を組み立てて回のフォルダに写し、設定の書き間違いを確かめる） */
 async function cmdPrepare(a: Args): Promise<number> {
   known(a, ["--root"], 1);
   const dirArg = a.pos[0];
@@ -3404,7 +3404,7 @@ async function cmdPrepare(a: Args): Promise<number> {
   return 0;
 }
 
-/** 区切りを 1 つ回す（積むキューの task。済んでいれば何もしない） */
+/** 区切りを 1 つ回す（キューの task。済んでいれば何もしない） */
 async function cmdChunk(a: Args): Promise<number> {
   known(a, ["--root"], 2);
   const [dirArg, id] = a.pos;
@@ -3472,23 +3472,16 @@ async function cmdChunk(a: Args): Promise<number> {
 }
 
 /** キューを回す（積んである task を先頭から。止める時刻を決めると、その時刻にキューを一時停止する task を積む） */
-async function cmdQueueStart(a: Args): Promise<number> {
-  known(a, ["--until", "--tz", "--yes"], 0);
+function cmdQueueStart(a: Args): number {
+  // いつ回すかはユーザーが決める（流したら回す。昼かは聞かない）。止める時刻は --until を付けたときだけ（none は付けないのと同じ）
+  known(a, ["--until", "--tz"], 0);
   const root = runsRoot(a.opts.get("--root"));
   const tz = a.opts.get("--tz") ?? "Asia/Tokyo";
   const now = Date.now();
-  const untilText = a.opts.get("--until") ?? "07:00";
+  const untilText = a.opts.get("--until") ?? "none";
   const until = untilText === "none" ? null : parseUntil(untilText, now, tz);
-  if (isDaytime(now, tz) && !a.opts.has("--yes")) {
-    const msg = `今は ${fmtClock(now, tz)}（${tz}）で、昼です（7 時〜18 時）。昼はゲームがカクつくので、ふつうは夜に回します。`;
-    if (process.stdin.isTTY !== true) throw new Error(`${msg}今から回すなら、端末で流して y と答えます`);
-    if (!(await askYes(`${msg}\n今から回しますか？ [y/N] `))) {
-      console.log("回しませんでした。");
-      return 1;
-    }
-  }
   const active = activeRuns(root);
-  if (active.length > 0) throw new Error(`前のやり方（go・start・resume）の回が動いています: ${active.map((d) => basename(d)).join(", ")}（同時には回さない。止めるなら night.sh stop）`);
+  if (active.length > 0) throw new Error(`前のやり方（go・start・resume）の回が動いています: ${active.map((d) => basename(d)).join(", ")}（同時には回さない。止めるなら queue.sh stop）`);
   const st = ensureGroups();
   // 中断した task（電源が切れた・コンテナが止まった）を、同じ番号のまま積み直す（後ろの task はそれを待っている）
   const killed = st.tasks.filter((t) => t.group === QUEUE_GROUP && t.state === "Killed" && labelOf(t.label) !== null).map((t) => String(t.id));
@@ -3511,8 +3504,8 @@ async function cmdQueueStart(a: Args): Promise<number> {
   pq(["start", "--group", CTL_GROUP]);
   pq(["start", "--group", QUEUE_GROUP]);
   console.log(
-    `キューを回しました。${until === null ? "止める時刻なし（全部済むまで回る）" : `止める時刻 ${fmtClock(until, tz)}（${tz}）に一時停止する（回していた区切りは凍らせ、次の start で続きから）`}。\n` +
-      "止める: night.sh pause（すぐ一時停止。--wait なら回している区切りが済んでから）　様子: night.sh status\n",
+    `キューを回しました。${until === null ? "止める時刻なし（全部済むか pause まで回る）" : `止める時刻 ${fmtClock(until, tz)}（${tz}）に一時停止する（回していた区切りは凍らせ、次の start で続きから）`}。\n` +
+      "止める: queue.sh pause（すぐ一時停止。--wait なら回している区切りが済んでから）　様子: queue.sh status\n",
   );
   console.log(queueOverview(root, pueueOrNull(), tz));
   return 0;
@@ -3526,8 +3519,8 @@ function cmdPause(a: Args): number {
   pq(["pause", "--group", QUEUE_GROUP, ...(wait ? ["--wait"] : [])]);
   console.log(
     wait
-      ? "回している区切りが済んだら止まります（次の区切りは始めません）。続きは night.sh start"
-      : "止めました。回していた区切りは凍らせてあり（CPU は使わないが、メモリは持ったまま）、night.sh start で続きから回ります",
+      ? "回している区切りが済んだら止まります（次の区切りは始めません）。続きは queue.sh start"
+      : "止めました。回していた区切りは凍らせてあり（CPU は使わないが、メモリは持ったまま）、queue.sh start で続きから回ります",
   );
   return 0;
 }
@@ -3543,7 +3536,7 @@ function cmdRemove(a: Args): number {
   const busy = mine.filter((t) => t.state === "Running" || t.state === "Paused");
   if (ids.length > 0) pq(["remove", ...ids]);
   console.log(
-    `${name} の task を ${ids.length} 個外しました。${busy.length > 0 ? `回している・一時停止している task（${busy.map((t) => t.id).join(", ")}）は残しました（止めるなら pueue kill <番号>）。` : ""}積み直すなら night.sh add ${name}`,
+    `${name} の task を ${ids.length} 個外しました。${busy.length > 0 ? `回している・一時停止している task（${busy.map((t) => t.id).join(", ")}）は残しました（止めるなら pueue kill <番号>）。` : ""}積み直すなら queue.sh add ${name}`,
   );
   return 0;
 }
@@ -3562,7 +3555,7 @@ function cmdList(a: Args): number {
       plan.commit,
       `${plan.chunks.filter((c) => done.has(c.id)).length}/${plan.chunks.length}`,
       plan.queue === 1
-        ? `積むキュー: ${queueRunState(plan, ps === null ? null : runTasks(ps, plan.name), done, "Asia/Tokyo")}`
+        ? `キュー: ${queueRunState(plan, ps === null ? null : runTasks(ps, plan.name), done, "Asia/Tokyo")}`
         : pid !== null
           ? "動いている" : st === null ? "まだ" : st.state === "done" ? "全部済んだ" : st.state === "running" ? "止まっている（落ちた？）" : `止まった（${st.reason}）`,
     ];
@@ -3571,24 +3564,24 @@ function cmdList(a: Args): number {
   return 0;
 }
 
-const USAGE = `使い方（docs/night.md）:
-  npm run night -- plan <ジョブのファイル> [--threads N] [--machine 名前] [--chunk-min 7.5] [--name 名前] [--until 07:00] [--legacy]   （見込みと積む券。--legacy は前の形の券）
-  積むキュー（pueue。コンテナの中で。ホストからは docker/remote-control/night.sh <同じ引数>）:
-  npm run night -- add <券|回の名前>           （積む。いつ流してもよい。回の名前なら、済んでいない作業を積み直す）
-  npm run night -- start [--until 07:00|+2h|none] [--yes]   （キューを回す。止める時刻に一時停止する）
-  npm run night -- pause [--wait]              （キューを一時停止。回している区切りは凍らせる。--wait なら済んでから止まる）
-  npm run night -- status [名前]               （名前なしはキュー全体）
-  npm run night -- remove <回の名前>           （まだ回していない task をキューから外す）
-  前の形（PC の 1 晩で積むキューを確かめるまで残す）:
-  npm run night -- go <券>                    （コンテナの中で。ホストからは docker/remote-control/night.sh go <券>。券は plan --legacy が出す 1 行）
-  npm run night -- start <ジョブのファイル> --yes [--name 名前] [--until 07:00] [--threads N] [--chunk-min 7.5] [--allow-dirty]
-  npm run night -- status [名前]
-  npm run night -- stop [名前] [--now]
-  npm run night -- resume [名前] --yes [--until 07:00] [--threads N]
-  npm run night -- finish [名前] [--commit] [--pack] [--ledger 台帳]   （止まったときのまとめで要らなくなった。PC の 1 晩で確かめるまで残す）
-  npm run night -- wrap [名前|--pending]       （止まったときのまとめをやり直す: 台帳の行を night/<名前> にコミットし、出口にまとめる。--pending はまとめていない回を全部）
-  npm run night -- ingest <回の名前|ファイル…> [--ledger 台帳] [--to /mnt/project-files]   （スレッドで: 台帳に足す・出口のファイルを展開する）
-  npm run night -- list
+const USAGE = `使い方（docs/queue.md）:
+  npm run queue -- plan <ジョブのファイル> [--threads N] [--machine 名前] [--chunk-min 7.5] [--name 名前] [--until 07:00] [--legacy]   （見込みと積むコマンド。--legacy は前のやり方の券）
+  キュー（pueue。コンテナの中で。ホストからは docker/remote-control/queue.sh <同じ引数>）:
+  npm run queue -- add <券|回の名前>           （積む。いつ流してもよい。回の名前なら、済んでいない作業を積み直す）
+  npm run queue -- start [--until 07:00|+2h]   （キューを回す。全部済むか pause まで。--until を付ければその時刻に一時停止する）
+  npm run queue -- pause [--wait]              （キューを一時停止。回している区切りは凍らせる。--wait なら済んでから止まる）
+  npm run queue -- status [名前]               （名前なしはキュー全体）
+  npm run queue -- remove <回の名前>           （まだ回していない task をキューから外す）
+  前のやり方（PC でキューを確かめるまで残す）:
+  npm run queue -- go <券>                    （コンテナの中で。ホストからは docker/remote-control/queue.sh go <券>。券は plan --legacy が出す 1 行）
+  npm run queue -- start <ジョブのファイル> --yes [--name 名前] [--until 07:00] [--threads N] [--chunk-min 7.5] [--allow-dirty]
+  npm run queue -- status [名前]
+  npm run queue -- stop [名前] [--now]
+  npm run queue -- resume [名前] --yes [--until 07:00] [--threads N]
+  npm run queue -- finish [名前] [--commit] [--pack] [--ledger 台帳]   （止まったときのまとめで要らなくなった。PC で確かめるまで残す）
+  npm run queue -- wrap [名前|--pending]       （止まったときのまとめをやり直す: 台帳の行を night/<名前> にコミットし、出口にまとめる。--pending はまとめていない回を全部）
+  npm run queue -- ingest <回の名前|ファイル…> [--ledger 台帳] [--to /mnt/project-files]   （スレッドで: 台帳に足す・出口のファイルを展開する）
+  npm run queue -- list
   （回の置き場所は --root か環境変数 SVWB_NIGHT_DIR。既定は ~/svwb-data/night。出口は SVWB_OUTBOX_DIR、既定は ~/svwb-data/outbox）`;
 
 export async function main(argv: string[]): Promise<number> {
@@ -3597,7 +3590,7 @@ export async function main(argv: string[]): Promise<number> {
     const a = parseArgs(rest);
     switch (cmd) {
       case "plan": {
-        // --at: 始める時刻（見込みの表だけ。既定は今。--until と同じ形）。--legacy: 今夜回す前の形の券（go）を出す。
+        // --at: 始める時刻（見込みの表だけ。既定は今。--until と同じ形）。--legacy: 前のやり方の券（go）を出す。
         // 既定は積む券（add。止める時刻を持たない。--until は見込みの表だけ）
         known(a, ["--until", "--tz", "--threads", "--machine", "--chunk-min", "--at", "--name", "--legacy"], 1);
         const legacy = a.opts.has("--legacy");
@@ -3616,7 +3609,7 @@ export async function main(argv: string[]): Promise<number> {
             : at === undefined || a.opts.has("--until")
               ? session.until
               : parseUntil(a.opts.get("--until") ?? "07:00", startAt, session.tz);
-        console.log(planText({ jobs, ...parts }, { threads: session.threads, machine, startAt, until, tz: session.tz, title: `夜のキュー（${file}）` }));
+        console.log(planText({ jobs, ...parts }, { threads: session.threads, machine, startAt, until, tz: session.tz, title: `キュー（${file}）` }));
         const w = wallClock(startAt, session.tz);
         const date = `${w.y}${p2(w.mo)}${p2(w.d)}`;
         const stem = basename(file).replace(/\.txt$/, "");
@@ -3627,21 +3620,21 @@ export async function main(argv: string[]): Promise<number> {
           ...(a.opts.has("--chunk-min") ? { chunk: chunkMin } : {}),
         };
         if (legacy) {
-          // 今夜回す券（ユーザーがホストで night.sh go <券> を流す。docs/night.md「券と go」）
+          // 前のやり方の券（ユーザーがホストで queue.sh go <券> を流す。docs/queue.md「券と go」）
           const tk = ticketHere(file, { name, until: a.opts.get("--until") ?? "07:00", ...(a.opts.has("--tz") ? { tz: session.tz } : {}), ...shared });
           console.log(
             "ticket" in tk
-              ? `\n券（今夜回すと決めたら、ユーザーがホストでこの 1 行を流す。docs/night.md「券と go」）:\n${NIGHT_SH} go ${ticketText(tk.ticket)}`
+              ? `\n前のやり方の券（ユーザーがホストでこの 1 行を流すと、すぐ回り始める。docs/queue.md「券と go」）:\n${QUEUE_SH} go ${ticketText(tk.ticket)}`
               : `\n券は出していません: ${tk.why}`,
           );
           return 0;
         }
-        // 積む券（ユーザーがホストで night.sh add <券> を流す。いつ流してもよく、回すのは night.sh start。docs/night.md「積むキュー」）
+        // 積む券（ユーザーがホストで queue.sh add <券> を流す。いつ流してもよく、回すのは queue.sh start。docs/queue.md「キュー（pueue）」）
         const tk = ticketHere(file, { v: 2, name, ...shared });
         console.log(
           "ticket" in tk
-            ? `\n積む券（積んでよいと決めたら、ユーザーがホストでこの 1 行を流す。昼に積んでも回らない。docs/night.md「積むキュー」）:\n${NIGHT_SH} add ${ticketText(tk.ticket)}`
-            : `\n券は出していません: ${tk.why}`,
+            ? `\n積むコマンド（ユーザーがホストで流す。積むだけでは回らず、回すのは queue.sh start。docs/queue.md「キュー（pueue）」）:\n${QUEUE_SH} add ${ticketText(tk.ticket)}`
+            : `\n積むコマンドは出していません: ${tk.why}`,
         );
         return 0;
       }
@@ -3660,14 +3653,14 @@ export async function main(argv: string[]): Promise<number> {
       case "remove":
         return cmdRemove(a);
       case "start":
-        // ジョブのファイルを渡せば前の形（回を 1 つ作って worker で回す）、渡さなければ積むキューを回す
+        // ジョブのファイルを渡せば前の形（回を 1 つ作って worker で回す）、渡さなければキューを回す
         return a.pos.length === 0 ? await cmdQueueStart(a) : await cmdStart(a);
       case "resume":
         return await cmdResume(a);
       case "status": {
         known(a, [], 1);
         const root = runsRoot(a.opts.get("--root"));
-        // 名前を渡さず、積むキューの回があれば、キュー全体の様子
+        // 名前を渡さず、キューの回があれば、キュー全体の様子
         if (a.pos.length === 0 && listRuns(root).some((d) => readPlan(d).queue === 1)) {
           console.log(queueOverview(root));
           return 0;

@@ -27,7 +27,7 @@ RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-too
  && rustup component add rustfmt clippy \
  && rustup target add wasm32-unknown-unknown
 
-# 夜のキュー（積むキュー）の回す係 pueue（https://github.com/Nukesor/pueue。docs/night.md「積むキュー」）。
+# ジョブのキューの回す係 pueue（https://github.com/Nukesor/pueue。docs/queue.md「キュー（pueue）」）。
 # 版は固定する（4.0 で状態の形が変わり、前の版の状態は読めなくなった。上げるときはキューが空のときに）。~/.cargo/bin に pueue・pueued が入る
 RUN cargo install --locked pueue@4.0.5 \
  && pueue --version

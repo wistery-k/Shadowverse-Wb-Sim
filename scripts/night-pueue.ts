@@ -1,4 +1,4 @@
-// 夜のキューの回す係（pueue。https://github.com/Nukesor/pueue）とのやり取り。運用は docs/night.md「積むキュー（pueue）」。
+// キューの回す係（pueue。https://github.com/Nukesor/pueue）とのやり取り。運用は docs/queue.md「キュー（pueue）」。
 //
 // - 区切りを 1 つずつ pueue の task にして、組 svwb（同時に 1 つ）に積む。止める時刻は組 svwb-ctl（同時にいくつでも）の、時刻を決めた task
 // - どこまで済んだかは、今までどおり回のフォルダの印（done/）で決める。pueue は流すだけ（pueue の状態が消えても、同じ券を積み直せば続きから）
@@ -135,7 +135,7 @@ export function addTask(o: { group: string; label: string; command: string; cwd:
 /** task の名前: 「<回の名前> <役目> <書き添え>」。回の名前と役目には空白が無い */
 export const taskLabel = (run: string, role: string, note: string): string => `${run} ${role}${note === "" ? "" : ` ${note}`}`;
 
-/** task の名前から回の名前と役目を読む（夜のキューの task でなければ null） */
+/** task の名前から回の名前と役目を読む（キューの task でなければ null） */
 export function labelOf(label: string): { run: string; role: string } | null {
   const [run, role] = label.split(" ");
   return run !== undefined && role !== undefined && /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(run) ? { run, role } : null;

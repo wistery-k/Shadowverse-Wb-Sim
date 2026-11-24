@@ -35,8 +35,8 @@ services:
         bind:
           create_host_path: false
     # claude remote-control が終わっても（ネットワークが 10 分ほど切れた等）、コンテナは止めずに中で立ち上げ直す。
-    # コンテナが止まると、中で動いている夜のキュー（npm run night。docs/night.md）も止まるため。
-    # 積むキューの回す係（pueued）も先に立てておく（落ちたら 10 秒後に立ち上げ直す。立てるだけで、キューは night.sh start まで回らない）
+    # コンテナが止まると、中で動いているキュー（npm run queue。docs/queue.md）も止まるため。
+    # キューの回す係（pueued）も先に立てておく（落ちたら 10 秒後に立ち上げ直す。立てるだけで、キューは queue.sh start まで回らない）
     command:
       - bash
       - -c
@@ -51,7 +51,7 @@ services:
             sleep 10
           done) &
         else
-          echo "pueued がありません（イメージを作り直す: docker compose up -d --build）。積むキューは使えません" >&2
+          echo "pueued がありません（イメージを作り直す: docker compose up -d --build）。キューは使えません" >&2
         fi
         while :; do
           claude remote-control --permission-mode "$$CLAUDE_PERMISSION_MODE" --spawn "$$CLAUDE_SPAWN"

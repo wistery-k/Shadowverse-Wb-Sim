@@ -7,15 +7,15 @@ Claude Code の Remote Control（`claude remote-control`）を Docker のコン�
 AI の実験（自己対戦・勝率比較など）は、既定でこのコンテナで回す（CLAUDE.md の 9「実験を回す場所」）。Google Cloud（`cloud/gcp.sh`）は
 使うたびにユーザーの承認が要り、十分速く終わるものは Claude のクラウド環境で回してよい。
 
-- `Dockerfile`: Node 22・Rust（stable と `wasm32-unknown-unknown`。CI と同じ）・夜のキューの回す係 pueue（版は固定）・Claude Code（公式のインストーラ）を入れたイメージ
+- `Dockerfile`: Node 22・Rust（stable と `wasm32-unknown-unknown`。CI と同じ）・キューの回す係 pueue（版は固定）・Claude Code（公式のインストーラ）を入れたイメージ
 - `entrypoint.sh`: 起動のたびに `~/svwb-data` の中のフォルダへのリンクを `~` に作る（下の「自己対戦などのデータ」）。pueue の設定が無ければ作る
 - `compose.yaml`: リポジトリを `/workspace` に、ホストの `~/svwb-data`（自己対戦などの置き場所）をコンテナの `~/svwb-data` に見せ、
   ログイン情報と設定を名前付きボリュームに残し、`claude remote-control` を常駐させる（終わっても、コンテナを止めずに中で立ち上げ直す）。
-  夜のキューの pueue のデーモン（`pueued`）も立てる（落ちたら立て直す。状態は `~/svwb-data/pueue/` に残る）
+  キューの pueue のデーモン（`pueued`）も立てる（落ちたら立て直す。状態は `~/svwb-data/pueue/` に残る）
 
-PC で対戦を回すのは、ユーザーが回すと決めた夜だけ。compare・yardstick は夜のキュー（`npm run night`、`docs/night.md`）で回す。
+PC で対戦を回すのは、ユーザーが回すと決めたときだけ。compare・yardstick はジョブのキュー（`npm run queue`、`docs/queue.md`）で回す。
 キューはセッションから切り離して動くので、Remote Control のセッションが終わっても、`claude remote-control` が立ち上げ直っても続く
-（コンテナが止まると止まる。積むキューは次の `./night.sh start` で、前のやり方は次の夜に同じ券の `./night.sh go` で続きから）。
+（コンテナが止まると止まる。キューは次の `./queue.sh start` で、前のやり方は同じ券の `./queue.sh go` で続きから）。
 pueue を入れる前のイメージなら、一度 `docker compose up -d --build` で作り直す（数分。回していない昼に）。
 
 公式の説明: [Remote Control](https://code.claude.com/docs/en/remote-control)・[ログイン](https://code.claude.com/docs/en/authentication)・
@@ -103,11 +103,11 @@ cd ~/Shadowverse-Wb-Sim/docker/remote-control && docker compose build && docker 
 | 止める | `docker compose down`（ログインと設定はボリュームに残る） |
 | 動かす | `docker compose up -d` |
 | 様子を見る | `docker compose logs -f` |
-| 夜のキューに積む（いつでも） | `./night.sh add <券>`（このフォルダの。券はスレッドが出す `svwb-night-2` で始まる 1 行。スレッドが見せる `~/Shadowverse-Wb-Sim/docker/remote-control/night.sh add …` の行をそのまま流せばよい。積むだけで回らない。`docs/night.md`「積むキュー」） |
-| 夜のキューを回す・止める | `./night.sh start`（積んだものを順に回し、朝 7 時に一時停止。`--until 05:30`・`--until none`）・`./night.sh pause`（すぐ一時停止。回していた区切りは凍り、次の `start` で続きから。`--wait` で区切りが済んでから） |
-| 夜のキューの様子を見る | `./night.sh status`（キュー全体）・`./night.sh status <回の名前>`。積んだ回をやめるのは `./night.sh remove <回の名前>`（中は `docker compose exec rc npm run night -- …`） |
-| 前のやり方で夜のキューを始める・止める | `./night.sh go <券>`（券は `svwb-night-1` で始まる 1 行。`docs/night.md`「券と go」）・`./night.sh stop`（`--now` ですぐ）。PC の 1 晩で積むキューを確かめるまで残す |
-| 朝、夜のキューの結果を上げる | `./night-push.sh`（このフォルダの。キューが止まるときにコミットしたブランチ `night/<回の名前>` を push する。まとめていない回のまとめと、main に入った回のブランチの片付けもする。ホストで流す） |
+| キューに積む（いつでも） | `./queue.sh add <券>`（このフォルダの。券はスレッドが出す `svwb-queue-1` で始まる 1 行。スレッドが見せる `~/Shadowverse-Wb-Sim/docker/remote-control/queue.sh add …` の行をそのまま流せばよい。積むだけで回らない。`docs/queue.md`「キュー（pueue）」） |
+| キューを回す・止める | `./queue.sh start`（積んだものを順に、全部済むか止めるまで回す。`--until 07:00` でその時刻に一時停止）・`./queue.sh pause`（すぐ一時停止。回していた区切りは凍り、次の `start` で続きから。`--wait` で区切りが済んでから） |
+| キューの様子を見る | `./queue.sh status`（キュー全体）・`./queue.sh status <回の名前>`。積んだ回をやめるのは `./queue.sh remove <回の名前>`（中は `docker compose exec rc npm run queue -- …`） |
+| 前のやり方でキューを始める・止める | `./queue.sh go <券>`（券は `svwb-night-1` で始まる 1 行。`docs/queue.md`「券と go」）・`./queue.sh stop`（`--now` ですぐ）。PC でキューを確かめるまで残す |
+| キューの結果を上げる | `./queue-push.sh`（このフォルダの。キューが止まるときにコミットしたブランチ `night/<回の名前>` を push する。まとめていない回のまとめと、main に入った回のブランチの片付けもする。ホストで流す） |
 | コンテナの中でシェルを開く | `docker compose exec rc bash` |
 | ログインし直す | `docker compose exec rc claude auth login` の後に `docker compose restart` |
 | Claude Code・Rust を新しくする | `docker compose build --pull --no-cache && docker compose up -d`（Claude Code は動いている間にも自分で更新する） |
@@ -123,10 +123,10 @@ cd ~/Shadowverse-Wb-Sim/docker/remote-control && docker compose build && docker 
 - `SVWB_DATA`: 自己対戦などの置き場所（ホストの場所）。既定は `~/svwb-data`
 - `CLAUDE_SPAWN`: 新しいセッションの作り方。既定は `same-dir`（どのセッションも `/workspace` で作業する）。`worktree` にすると
   セッションごとに git の worktree を作る（同時に複数のスレッドが作業しても混ざらないが、worktree ごとに Rust を作り直すので遅い）
-- コミットするなら `GIT_AUTHOR_NAME`・`GIT_AUTHOR_EMAIL`・`GIT_COMMITTER_NAME`・`GIT_COMMITTER_EMAIL`。夜のキューの `finish --commit` にも要る
-  （`docs/night.md`「台帳の行のコミット」）。止まったときのまとめのコミット（ブランチ `night/<回の名前>`）は、いつも「svwb night queue」の名前で作る（公開するブランチなので、ここの名前とメールは使わない）
+- コミットするなら `GIT_AUTHOR_NAME`・`GIT_AUTHOR_EMAIL`・`GIT_COMMITTER_NAME`・`GIT_COMMITTER_EMAIL`。キューの `finish --commit` にも要る
+  （`docs/queue.md`「台帳の行のコミット」）。止まったときのまとめのコミット（ブランチ `night/<回の名前>`）は、いつも「svwb queue」の名前で作る（公開するブランチなので、ここの名前とメールは使わない）
 
-`.env` を書き換えたら、ホストで `docker compose up -d` を流してコンテナを作り直す（`.env` はコンテナを作るときに読む。動いているセッションと夜のキューは止まるので、回していない昼に）
+`.env` を書き換えたら、ホストで `docker compose up -d` を流してコンテナを作り直す（`.env` はコンテナを作るときに読む。動いているセッションとキューは止まるので、回していない昼に）
 
 ## 気をつけること
 
@@ -134,7 +134,7 @@ cd ~/Shadowverse-Wb-Sim/docker/remote-control && docker compose build && docker 
   `CLAUDE_CODE_OAUTH_TOKEN`・`ANTHROPIC_BASE_URL`・`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`・`DISABLE_GROWTHBOOK`
   （公式の dev container の例は `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を入れているので、そこは真似しない）
 - 通信は外向きの HTTPS（443）だけで、ホストのポートは開けない。ネットワークが 10 分ほど切れると `claude remote-control` は終わるが、
-  `compose.yaml` の `command` が 30 秒後にコンテナの中で立ち上げ直す（2026-11-10 から。前はコンテナごと立ち上げ直していて、中の夜のキューも止まった。
+  `compose.yaml` の `command` が 30 秒後にコンテナの中で立ち上げ直す（2026-11-10 から。前はコンテナごと立ち上げ直していて、中のキューも止まった。
   Claude のクラウド環境の Docker で、`claude` の代わりに 20 秒で終わる偽物を置いて、前の形ではコンテナが立ち上げ直ってキューが止まり、今の形では続くことを確かめた）。
   この形にするには、`git pull` の後に一度 `docker compose up -d` を流してコンテナを作り直す（動いているセッションは切れる）
 - ログインには期限がある。期限が近いと起動時に `Your login expires in 3 days` と出る。切れるとセッションが進まなくなるので、ログインし直す

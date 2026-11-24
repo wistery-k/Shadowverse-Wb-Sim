@@ -1,4 +1,4 @@
-// 積むキュー（pueue。scripts/night-main.ts・scripts/night-pueue.ts・docs/night.md「積むキュー」）。
+// キュー（pueue。scripts/night-main.ts・scripts/night-pueue.ts・docs/queue.md「キュー（pueue）」）。
 // 券と task の作り方はいつも確かめる。本物の pueue（pueue・pueued が PATH にあるか、SVWB_PUEUE が pueue を指すとき）で、
 // 積む・回す・一時停止・落ちたときの続きを、svwb の偽物で通す（pueue の無いところでは飛ばす）
 
@@ -15,23 +15,23 @@ import { FAKE, gitT } from "./night-helpers";
 
 describe("積む券", () => {
   const body = { v: 2 as const, name: "branch-1-20261124", branch: "claude/x", commit: "0123456789ab", jobs: "night/t.txt" };
-  it("止める時刻を持たず、書いて読み直すと同じ。今夜回す券（svwb-night-1）とは指紋が違う", () => {
+  it("止める時刻を持たず、書いて読み直すと同じ。前のやり方の券（svwb-night-1）とは指紋が違う", () => {
     const t = makeTicket(body, "profile --games 2\n");
-    expect(ticketText(t)).toBe(`svwb-night-2 name=branch-1-20261124 branch=claude/x commit=0123456789ab jobs=night/t.txt plan=${t.plan}`);
+    expect(ticketText(t)).toBe(`svwb-queue-1 name=branch-1-20261124 branch=claude/x commit=0123456789ab jobs=night/t.txt plan=${t.plan}`);
     expect(parseTicket([ticketText(t)])).toEqual(t);
     const u = makeTicket({ ...body, threads: 8, chunk: 15 }, "x");
     expect(parseTicket(ticketText(u).split(" "))).toEqual(u);
     const { v: _, ...old } = body;
     expect(makeTicket({ ...old, until: "07:00" }, "profile --games 2\n").plan).not.toBe(t.plan);
   });
-  it("積む券に止める時刻は書けない。add は今夜回す券を、go は積む券を断る", async () => {
+  it("積む券に止める時刻は書けない。add は前のやり方の券を、go は積む券を断る", async () => {
     const t = ticketText(makeTicket(body, "x"));
     expect(() => parseTicket([`${t.replace(/ plan=/, " until=07:00 plan=")}`])).toThrow(/止める時刻/);
     expect(() => parseTicket([`${t.replace(/ plan=/, " tz=Asia/Tokyo plan=")}`])).toThrow(/止める時刻/);
     const errs = vi.spyOn(console, "error").mockImplementation(() => {});
     const { v: _, ...old } = body;
     expect(await main(["add", ...ticketText(makeTicket({ ...old, until: "07:00" }, "x")).split(" ")])).toBe(2);
-    expect(errs.mock.calls.map((c) => String(c[0])).join("\n")).toContain("今夜回す券");
+    expect(errs.mock.calls.map((c) => String(c[0])).join("\n")).toContain("前のやり方の券");
     expect(await main(["go", ...t.split(" ")])).toBe(2);
     expect(errs.mock.calls.map((c) => String(c[0])).join("\n")).toContain("積む券");
     errs.mockRestore();
@@ -183,7 +183,7 @@ function procState(match: (cmd: string) => boolean): string[] {
   return out;
 }
 
-describe.skipIf(!hasPueue)("積むキュー（本物の pueue・偽物の svwb で）", () => {
+describe.skipIf(!hasPueue)("キュー（本物の pueue・偽物の svwb で）", () => {
   let tmp = "";
   let root = "";
   let fake = "";
@@ -254,7 +254,7 @@ describe.skipIf(!hasPueue)("積むキュー（本物の pueue・偽物の svwb �
     gitT(pcGit, "add", ".");
     gitT(pcGit, "commit", "-q", "-m", "最初");
     process.env.SVWB_NIGHT_GIT_DIR = pcGit;
-    // GitHub の代わり。夜のキューのスクリプト（今のもの）をコミットする
+    // GitHub の代わり。キューのスクリプト（今のもの）をコミットする
     const here = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts");
     orig = join(tmp, "origin-git");
     for (const d of ["scripts", "night", "docs"]) mkdirSync(join(orig, d), { recursive: true });
@@ -263,7 +263,7 @@ describe.skipIf(!hasPueue)("積むキュー（本物の pueue・偽物の svwb �
     writeFileSync(join(orig, "package-lock.json"), "{}\n");
     gitT(orig, "init", "-q", "-b", "claude/x");
     gitT(orig, "add", ".");
-    gitT(orig, "commit", "-q", "-m", "夜のキュー");
+    gitT(orig, "commit", "-q", "-m", "キュー");
     process.env.SVWB_NIGHT_REMOTE = orig;
     fake = join(tmp, "fake-svwb");
     writeFileSync(fake, FAKE, { mode: 0o755 });
@@ -308,7 +308,7 @@ describe.skipIf(!hasPueue)("積むキュー（本物の pueue・偽物の svwb �
     expect(said()).toContain("キュー: 止まっている");
     expect(said()).toMatch(/q1 .*積んである 4 区切り/);
     // 回す
-    expect(await main(["start", "--yes", "--root", root, "--until", "+2h"])).toBe(0);
+    expect(await main(["start", "--root", root, "--until", "+2h"])).toBe(0);
     st = await idle();
     expect(st.tasks.filter((t) => t.group === "svwb-ctl").map((t) => [t.label.split(" ")[0], t.state])).toEqual([["止める時刻", "Stashed"]]);
     expect(mine(st, "q1").every((t) => t.state === "Success")).toBe(true);
@@ -329,7 +329,10 @@ describe.skipIf(!hasPueue)("積むキュー（本物の pueue・偽物の svwb �
     vi.mocked(console.log).mockClear();
     expect(await main(["status", "--root", root])).toBe(0);
     expect(said()).toContain("積んである回はありません");
-    // まとめが済んだ回は、朝の wrap --pending が拾わない
+    // --until を付けずに start し直すと、前の止める時刻はやめる（止める時刻は付けたときだけ）
+    expect(await main(["start", "--root", root])).toBe(0);
+    expect(pueueStatus().tasks.filter((t) => t.group === "svwb-ctl" && t.state === "Stashed")).toEqual([]);
+    // まとめが済んだ回は、queue-push.sh の wrap --pending が拾わない
     vi.mocked(console.log).mockClear();
     expect(await main(["wrap", "--pending", "--root", root])).toBe(0);
     expect(said()).toContain("まとめが済んでいない回はありません");
@@ -340,7 +343,7 @@ describe.skipIf(!hasPueue)("積むキュー（本物の pueue・偽物の svwb �
     process.env.FAKE_HANG_MS = "3000";
     const t1 = ticket("q1", "t.txt", "compare 150 '{}' '{\"beamWidth\":8}' 0 --label 幅 --est 0.5\n");
     expect(await add(t1)).toBe(0);
-    expect(await main(["start", "--yes", "--root", root, "--until", "none"])).toBe(0);
+    expect(await main(["start", "--root", root, "--until", "none"])).toBe(0);
     await until((st) => mine(st, "q1").some((t) => labelOf(t.label)?.role === "1-2" && t.state === "Running"));
     await sleep(300);
     expect(await main(["pause", "--root", root])).toBe(0);
@@ -349,11 +352,11 @@ describe.skipIf(!hasPueue)("積むキュー（本物の pueue・偽物の svwb �
     expect(procState((c) => c.includes(join(root, "q1", "bin", "svwb")) && c.includes(" 50 --label"))).toEqual(["T"]);
     await sleep(3500);
     expect(done("q1")).toEqual(["1-1"]);
-    // 凍っている間でも、済んだ区切りはまとめられる（朝の night-push.sh）
+    // 凍っている間でも、済んだ区切りはまとめられる（朝の queue-push.sh）
     vi.mocked(console.log).mockClear();
     expect(await main(["wrap", "--pending", "--root", root])).toBe(0);
     expect(said()).toContain("q1 をまとめる");
-    expect(await main(["start", "--yes", "--root", root, "--until", "none"])).toBe(0);
+    expect(await main(["start", "--root", root])).toBe(0);
     await idle();
     expect(done("q1")).toEqual(["1-1", "1-2", "1-3"]);
     // 回し直していない（g50 の区切りは 1 回だけ）
@@ -366,12 +369,12 @@ describe.skipIf(!hasPueue)("積むキュー（本物の pueue・偽物の svwb �
     // 偽物の svwb が回り始めてから（引数を書いた後）
     const g50 = (c: string) => c.includes("compare 50 '{}' '{\"beamWidth\":16}' 50 ");
     for (let i = 0; i < 100 && !calls().some(g50); i++) await sleep(100);
-    // 回っている間は、前のやり方（start）では始めない。逆に積むキューの start も、前のやり方の回が動いていれば断る（同時に 2 つ回さない）
+    // 回っている間は、前のやり方（start）では始めない。逆にキューの start も、前のやり方の回が動いていれば断る（同時に 2 つ回さない）
     const err = vi.spyOn(console, "error").mockImplementation(() => {});
     const old = join(tmp, "old.txt");
     writeFileSync(old, "compare 10 '{}' '{}' 0 --label 前 --est 0.5\n");
     expect(await main(["start", old, "--yes", "--root", root, "--name", "old", "--bin", fake, "--allow-dirty", "--until", "+2h"])).toBe(2);
-    expect(String(err.mock.calls[0]?.[0])).toContain("積むキューが回っています");
+    expect(String(err.mock.calls[0]?.[0])).toContain("キューが回っています");
     expect(existsSync(join(root, "old"))).toBe(false);
     killAll(tmp);
     await sleep(300);
@@ -389,7 +392,7 @@ describe.skipIf(!hasPueue)("積むキュー（本物の pueue・偽物の svwb �
     vi.mocked(console.log).mockClear();
     expect(await main(["status", "--root", root])).toBe(0);
     expect(said()).toMatch(/q2 .*中断した 1 区切り/);
-    expect(await main(["start", "--yes", "--root", root, "--until", "none"])).toBe(0);
+    expect(await main(["start", "--root", root])).toBe(0);
     st = await idle();
     expect(done("q2")).toEqual(["1-1", "1-2", "1-3"]);
     // 中断した区切りは最初から回し直した（g50 を 2 回）
@@ -403,7 +406,7 @@ describe.skipIf(!hasPueue)("積むキュー（本物の pueue・偽物の svwb �
     const t2 = ticket("q2", "u.txt", "yardstick --ref classic --games 40 --start 10 --label 弱 --est 0.5\n");
     expect(await add(t1)).toBe(0);
     expect(await add(t2)).toBe(0);
-    expect(await main(["start", "--yes", "--root", root, "--until", "none"])).toBe(0);
+    expect(await main(["start", "--root", root])).toBe(0);
     let st = await idle();
     expect(mine(st, "q1").map((t) => [labelOf(t.label)?.role, t.state])).toEqual([
       ["組み立て", "Success"],
@@ -425,7 +428,7 @@ describe.skipIf(!hasPueue)("積むキュー（本物の pueue・偽物の svwb �
     expect(await main(["add", "q1", "--root", root])).toBe(0);
     st = pueueStatus();
     expect(mine(st, "q1").filter((t) => t.state === "Queued").map((t) => labelOf(t.label)?.role)).toEqual(["1-2", "1-3", "まとめ"]);
-    expect(await main(["start", "--yes", "--root", root, "--until", "none"])).toBe(0);
+    expect(await main(["start", "--root", root])).toBe(0);
     st = await idle();
     expect(done("q1")).toEqual(["1-1", "1-2", "1-3", "2-1"]);
     expect(JSON.parse(readFileSync(join(root, "q1", "failed.json"), "utf8"))).toEqual({});

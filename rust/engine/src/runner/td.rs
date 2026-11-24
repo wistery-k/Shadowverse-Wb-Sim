@@ -89,7 +89,7 @@
 //!
 //! もとの試合（介入した試合と打ち比べは除く）ごとの棋譜（デッキ・シード・行動の列と、回・席の AI・エンジンの版。runner/kifu.rs、
 //! 形は docs/kifu.md）を既定で書く。書く先は --kifu <ファイル>（前の名前 --replays も使える）か、既定のフォルダ（`~/svwb-data/kifu`、
-//! 夜のキューは回のフォルダの kifu/）。--no-kifu で書かない。打つ手は変わらない。
+//! キューは回のフォルダの kifu/）。--no-kifu で書かない。打つ手は変わらない。
 //!
 //! --check 1 なら、各局面にモデルの補正の値（評価の点数の単位）も書く（"z"）。`npm run td -- check` で、学習側（scripts/valueNet.ts）が
 //! "x" と "b" から出す補正が探索の補正と同じかを確かめる（場のカードのネットワークを変えたとき用）。
@@ -1845,7 +1845,7 @@ fn branch(args: &[(String, String)]) -> Result<(), String> {
         return Err("--extra は 0 以上の整数".into());
     }
     let turns = super::human_plan::parse_range(arg(args, "turns").unwrap_or("4-9"))?;
-    // --start・--games: 枝を作る試合番号の範囲 [start, start + games)（夜のキューの区切り）。--games が無ければ start から棋譜の全部
+    // --start・--games: 枝を作る試合番号の範囲 [start, start + games)（キューの区切り）。--games が無ければ start から棋譜の全部
     let start = num_arg(args, "start", 0.0)?;
     let games = match arg(args, "games") {
         None => None,
@@ -1858,7 +1858,7 @@ fn branch(args: &[(String, String)]) -> Result<(), String> {
     let mut file = std::fs::File::create(out).map_err(|e| format!("{out} に書けません: {e}"))?;
     writeln!(file, "{{\"tdLayout\":{}}}", net.layout_json())
         .map_err(|e| format!("{out} に書けません: {e}"))?;
-    // 夜のキューの確かめ（--games 0）は棋譜を読まない
+    // キューの確かめ（--games 0）は棋譜を読まない
     if games == Some(0.0) {
         println!("{out}: 0 試合");
         return Ok(());
@@ -1872,7 +1872,7 @@ fn branch(args: &[(String, String)]) -> Result<(), String> {
             if !l.starts_with("{\"kind\":\"replay\"") {
                 continue;
             }
-            // 範囲の外の試合は読まない（夜のキューの区切りはどれも同じ棋譜を読むので、全部を読み解くと遅い）
+            // 範囲の外の試合は読まない（キューの区切りはどれも同じ棋譜を読むので、全部を読み解くと遅い）
             if let Some(g) = head_g(l) {
                 if !in_range(g) {
                     continue;
@@ -2454,7 +2454,7 @@ mod tests {
     #[test]
     fn potential_file_same_as_builtin_default() {
         // --potential に組み込みの既定と同じファイル（data/potential-net.json）を渡しても、試合は同じ
-        // （夜のキュー night/pool-r1.txt の R1 の自己対戦は、今の既定の見込みを写したファイルを渡す）。null なら見込みを使わない。classic とは一緒に使えない
+        // （キュー night/pool-r1.txt の R1 の自己対戦は、今の既定の見込みを写したファイルを渡す）。null なら見込みを使わない。classic とは一緒に使えない
         let root = format!("{}/../..", env!("CARGO_MANIFEST_DIR"));
         let dir = std::env::temp_dir().join(format!("svwb-td-potential-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("フォルダ");

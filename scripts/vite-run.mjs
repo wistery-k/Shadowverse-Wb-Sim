@@ -5,7 +5,7 @@
 // 以前は Vite のモジュールランナーで直接実行していたが、モジュールをまたぐ呼び出しが遅く（探索 AI で約 1 割）、
 // worker_threads でも使えないため、ビルドしてから実行する。
 // 自動対戦を並列に回すとき（scripts/parallel.ts）は、このファイルを Worker として起動し、同じビルド結果を読み込む。
-// 環境変数 VITE_RUN_OUT_DIR があれば、そのディレクトリにビルドするだけで実行しない（夜のキューが回のフォルダに写す。scripts/night-main.ts。
+// 環境変数 VITE_RUN_OUT_DIR があれば、そのディレクトリにビルドするだけで実行しない（キューが回のフォルダに写す。scripts/night-main.ts。
 // 実行は node scripts/run-bundle.mjs <ディレクトリ>/<名前>.mjs [引数...]）。
 // エンジンと AI は WASM（src/engine/svwb.wasm）なので、先に npm run wasm と同じことをして作り直す（変更が無ければすぐ終わる）。
 

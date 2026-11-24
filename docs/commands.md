@@ -46,7 +46,7 @@
 | `npm run pack-run` | PC で回した 1 回分の出力（自己対戦・モデル・棋譜・ログ）を、共有フォルダに上げる `.tar.gz` にまとめる（下） | `scripts/pack-run-main.ts` |
 | `npm run review` | 試合の記録の検討: 勝敗まで入れたプロの試合の記録で、プロの手番ごとにプロの並びと今の AI の並びを打ち比べる（`docs/match-record.md`「検討（段階 4）」。開発のコマンドだけ） | `scripts/review-main.ts`・`rust/engine/src/runner/review.rs` |
 | `npm run ledger` | 実験の台帳（`docs/ledger.jsonl`）を表にする・採否の行を足す（下） | `scripts/ledger-main.ts` |
-| `npm run night` | 夜のキュー: ジョブを並べたファイルを 5〜10 分の区切りで回し、朝の時刻に止まり、続きから再開する（下） | `scripts/night-main.ts` |
+| `npm run queue` | ジョブのキュー: ジョブを並べたファイルを積み、積んだ順に 5〜10 分の区切りで回す。止めても続きから再開する（下） | `scripts/night-main.ts` |
 | `cloud/gcp.sh` | ジョブ（meta.sh 等）をクラウドの Spot VM で回す。使うたびにユーザーの承認が要る（下） | `cloud/gcp.sh`・`cloud/vm-startup.sh` |
 | `docker/remote-control` | Claude Code の Remote Control を Docker のコンテナの中で動かす。実験を回す既定の場所（使い方は本体の README.md） | `docker/remote-control/compose.yaml`・`Dockerfile` |
 
@@ -321,26 +321,26 @@ npm run ledger -- check
 `check` は全部の行が形に合うかを確かめる。どれも `--file` で別の台帳を読む（既定は環境変数 `SVWB_LEDGER` か `docs/ledger.jsonl`）。
 行の形と使い方は [ledger.md](ledger.md)。
 
-## night
+## queue
 
 ```sh
-npm run night -- plan <ジョブのファイル> [--threads N] [--machine svwb-docker] [--legacy]     # ジョブの一覧と見込みと積む券（積まない。--legacy は前の go の券）
-docker/remote-control/night.sh add <券>                                                      # 積む（ユーザーがホストで、いつでも。中は npm run night -- add）
-docker/remote-control/night.sh start [--until 07:00|none] | pause [--wait] | status | remove <回>   # 回す・止める（回すのはユーザーが決めた夜）
-docker/remote-control/night.sh go <券>                                                       # 前のやり方（PC で積むキューを確かめるまで残す）
-npm run night -- start <ジョブのファイル> --yes [--until 07:00] [--threads N]               # もっと前の始め方
-npm run night -- status | stop [--now] | resume --yes | wrap | list
-npm run night -- ingest <回の名前|ファイル…>                                                     # スレッドで: 台帳に足す・出口のファイルを展開する
+npm run queue -- plan <ジョブのファイル> [--threads N] [--machine svwb-docker] [--legacy]     # ジョブの一覧と見込みと積むコマンド（積まない。--legacy は前の go の券）
+docker/remote-control/queue.sh add <券>                                                      # 積む（ユーザーがホストで、いつでも。中は npm run queue -- add）
+docker/remote-control/queue.sh start [--until 07:00] | pause [--wait] | status | remove <回>   # 回す・止める（いつ回すかはユーザーが決める）
+docker/remote-control/queue.sh go <券>                                                       # 前のやり方（PC でキューを確かめるまで残す）
+npm run queue -- start <ジョブのファイル> --yes [--until 07:00] [--threads N]               # もっと前の始め方
+npm run queue -- status | stop [--now] | resume --yes | wrap | list
+npm run queue -- ingest <回の名前|ファイル…>                                                     # スレッドで: 台帳に足す・出口のファイルを展開する
 ```
 
-PC で対戦を回す夜のキュー。ジョブのファイルは 1 行 1 ジョブで、svwb の `compare`・`yardstick`・`profile`・`misses`・`survey` と同じ形（`--label` が要る）。
-ユーザーがホストで `plan` の出した券の 1 行（`docker/remote-control/night.sh add <券>`）を流して積み（いつでも。積むだけでは回らない）、
-回すと決めた夜に `night.sh start` で回す（回す係は pueue。止めるのは `night.sh pause`。[night.md](night.md)「積むキュー」）。
+PC で対戦を回すキュー。ジョブのファイルは 1 行 1 ジョブで、svwb の `compare`・`yardstick`・`profile`・`misses`・`survey` と同じ形（`--label` が要る）。
+ユーザーがホストで `plan` の出した券の 1 行（`docker/remote-control/queue.sh add <券>`）を流して積み（いつでも。積むだけでは回らない）、
+回したいときに `queue.sh start` で回す（回す係は pueue。止めるのは `queue.sh pause`。[queue.md](queue.md)「キュー（pueue）」）。前の名前の `npm run night` も同じものを流す。
 5〜10 分の区切りごとに結果を回のフォルダ（`~/svwb-data/night/<名前>/`）に残し、電源が切れても続きから回る。止まるときに、ジョブごとに 1 行にまとめた行を
-ブランチ `night/<名前>` にコミットし、棋譜などを出口のフォルダ（`~/svwb-data/outbox/<名前>/`）にまとめる。朝はホストで `docker/remote-control/night-push.sh` を流すだけで、
+ブランチ `night/<名前>` にコミットし、棋譜などを出口のフォルダ（`~/svwb-data/outbox/<名前>/`）にまとめる。ユーザーはホストで `docker/remote-control/queue-push.sh` を流すだけで、
 スレッドが `ingest` で台帳に足す。
 自己対戦から学習・判定までの学び直しの流れ（`td selfplay`・`beam-gap`・`td`・`potential`・`pick` のジョブ）も並べられる（`night/relearn-b.txt`）。
-物差し 2 つと速さと見落とし問題集の定例は `night/routine.txt`。流れ・引数・止まり方・台帳のコミットのしかたは [night.md](night.md)（`npm run night -- help` にも引数の一覧）。
+物差し 2 つと速さと見落とし問題集の定例は `night/routine.txt`。流れ・引数・止まり方・台帳のコミットのしかたは [queue.md](queue.md)（`npm run queue -- help` にも引数の一覧）。
 
 ## profile
 
@@ -429,7 +429,7 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
   残し方の因果的な効き目の推定と、どんなマリガンの勝率も試合を打たずに推定する（逆確率重み付け）のに使う
 - `td branch`: 自己対戦の棋譜の試合ごとに、自分のターンの最初で探索が選ばなかった候補を 1 つ打ち、最後まで同じ打ち方で打った枝を、自己対戦と同じ形の行で書く
   （学びのデータに足す。`"iv"` の `"zone"` が `"plan"`）。`--model` は棋譜の試合を打った補正。引数は `rust/engine/src/runner/td.rs` の先頭、
-  考えは docs/ai-notes.md の索引「選ばなかった候補を学びに足す」。夜のキューでは `td selfplay` と同じく `--chunk` で区切れる
+  考えは docs/ai-notes.md の索引「選ばなかった候補を学びに足す」。キューでは `td selfplay` と同じく `--chunk` で区切れる
 - `td selfplay`: TD 学習の自己対戦。各引数の意味は `rust/engine/src/runner/td.rs` の先頭。
   `--decks` で、比較用の 7 デッキの代わりに並べたデッキ（デフォルトデッキの名前かデッキのテキストファイル。`@<デッキの組>` も。上の「compare」）の全組を回す（例: `rust/engine/td-pool/royal-counter/*.txt`）。
   `--ivZone drawn` は、カードを引いた瞬間に手札から抜いて最後まで打つ介入（`td ivcheck` で「（引いたとき）」の行。デッキに 1 枚入れる価値に近い）。
@@ -453,7 +453,7 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
   同じモデルのファイル（バイトまで）を書く。学び直しの流れ（`night/relearn-b.txt`）が使う引数だけを持ち、実験用の引数（`--attr`・`--cmpWeight`・`--v1Only`・`--searchTarget`・
   `--seat`・`--exclude` 等）・場のカードのネットワークを持つモデル・属性の分（`attr`）を持つモデルの間引きはエラーにする（それは TypeScript 版で）。
   データを詰めた配列で持つのでメモリが少なく、ミニバッチの中の局面ごとの計算と、重みの行ごとの更新をスレッド（`THREADS`）に分ける（スレッドの数で結果は変わらない）。
-  `npm run td -- train … --impl rust` でも呼べる。夜のキューの `td train`・`td prune` の行は 2026-11-15 からこちらが既定（`--impl ts` で TypeScript 版）。
+  `npm run td -- train … --impl rust` でも呼べる。キューの `td train`・`td prune` の行は 2026-11-15 からこちらが既定（`--impl ts` で TypeScript 版）。
   時間とメモリは docs/ai-notes.md「補正の学習を Rust に移す」。
   `--lethalHead aux|survival`・`--lethalWeight`・`--lethalTarget lost|search` は Rust 版だけの実験用の引数で、補正にリーサルの出力（次の相手のターンに負ける確率）を付けて一緒に学ぶ（[value-net.md](value-net.md)「リーサルの出力（実験）」）
 - `deep-gap`: 今の既定の AI どうしの自己対戦（`ai-play` と同じ試合）の、自分のターンの最初の局面ごとに、試合のターンと深い読み（`--deep`。既定は
@@ -468,7 +468,7 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
 - `survey`: 候補の打ち比べ調査（[survey.md](survey.md)）。今の既定の AI どうしの自己対戦から自分のターンの最初の局面を無作為に取り、AI が読み直す候補（上位 4 つと引く手）と、
   使うカードの組の違う並び（`--extra`）を、同じ乱数で `--m` 回ずつ最後まで打ち比べる（差の大きい局面は二段目で `--confirm` 回足す）。`report` は、半分の回で選び半分で測る
   選び直しの得（1 試合あたり、上位 4 つだけと全部）・二段目で測る得・替える決まりの表（一段目の差の幅・AI 自身の点の差・安くする決まり）・大きなミス・内訳・
-  問題集に足す候補を出し、台帳に 1 行足す。夜のキューのジョブにできる（[night.md](night.md)）。`recheck` は、二段目に回した局面を相手の手札を実際のままで打ち直す（台帳には書かない）
+  問題集に足す候補を出し、台帳に 1 行足す。キューのジョブにできる（[queue.md](queue.md)）。`recheck` は、二段目に回した局面を相手の手札を実際のままで打ち直す（台帳には書かない）
 - `review`: 試合の記録の検討（[match-record.md](match-record.md)「検討（段階 4）」）。`run` は `npm run review` が記録から作った局面（`--points`）と記録（`--record`）を受け取り、
   プロの手番ごとにプロの並びと今の AI の並びを同じ乱数で打ち比べる（勝敗の無い記録や、局面が記録の `turns` と合わないものは受け取らない。画面とコマンドに局面を入れる口は無い）。
   `zero` は道具の検査（AI どうしの試合の片方の手を記録の手として同じ手順にかけ、差が 0 になるかを見る）、`report` は Markdown の報告。台帳には書かない
@@ -513,7 +513,7 @@ npm run td -- eval --model a.json,b.json --data d.jsonl [--cards <カード名,�
 
 自己対戦（`selfplay`）は Rust 版（`npm run svwb -- td selfplay`）で行う。各引数の意味は `scripts/td-main.ts` の先頭。
 `train`・`prune` に `--impl rust` を付けると、Rust 版（上の「svwb」の `td train`・`td prune`。同じモデルを書き、速くてメモリが少ない）を作って、`--impl` を除いた引数で回す。
-`npm run td` の既定は TypeScript 版のまま（照らし合わせの元・実験用の引数のため。夜のキューの既定は Rust 版。[night.md](night.md)「学び直しの流れ」）。
+`npm run td` の既定は TypeScript 版のまま（照らし合わせの元・実験用の引数のため。キューの既定は Rust 版。[queue.md](queue.md)「学び直しの流れ」）。
 `extend --vocab` は語彙（入力のカード・クレストの並び）をその範囲に広げる（`scripts/vocab.ts`。今の語彙の後ろに足し、足したカードの行は 0。場のカードのネットワークの最初の層も）。
 範囲は `starter`（スターターのカードとクレスト）・`pool`（エンジンのカードの表の全部）・`@<デッキの組>`（その組のデッキのカードと、そこから出うるトークン・
 アクセラレート・結晶の姿・信仰・クレスト）。見込みのモデル（`data/potential-net.json`）も語彙だけ同じように広げる。足した行を属性の分で埋めるなら、続けて
@@ -566,7 +566,7 @@ PC で回した 1 回分の出力（フォルダの中のファイル）を、1 
 |---|---|---|
 | 自己対戦 | `td selfplay` の `.jsonl`（1 行目に `"samples"` があるもの） | `data/selfplay/<名前>/`（1 ファイルずつ gzip して `.jsonl.gz`） |
 | モデル | 学習した補正（`"kind":"td-value-net"` で始まる `.json`） | `data/models/<名前>/` |
-| 棋譜 | 1 行目が `{"kind":"replay"` の `.jsonl`（[kifu.md](kifu.md)）と、フォルダの中の `kifu/` の下のファイル（夜のキューの回のフォルダ） | `data/kifu/<名前>/`（gzip して `.jsonl.gz`） |
+| 棋譜 | 1 行目が `{"kind":"replay"` の `.jsonl`（[kifu.md](kifu.md)）と、フォルダの中の `kifu/` の下のファイル（キューの回のフォルダ） | `data/kifu/<名前>/`（gzip して `.jsonl.gz`） |
 | ログ等 | それ以外（`.log`・`.sh`・`.txt`、`--out` で書いた試合ごとの結果の `.jsonl`（gzip する）など） | `logs/<名前>/` |
 | 一覧 | メモ、まとめた日時・元のフォルダ・その時の commit、ファイルごとの元の大きさ・行数・更新日時・sha256、入れなかったファイル | `logs/<名前>/MANIFEST.md` |
 
