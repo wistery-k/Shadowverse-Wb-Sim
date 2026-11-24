@@ -1,5 +1,5 @@
 # 案 B の流れを小さく試す（night/relearn-b.txt と同じ並びで、試合数だけ小さくしたもの。Claude のクラウド環境の 4 スレッドで 30 分ほど）。
-# 流し方: npm run night -- start night/relearn-b-small.txt --yes --name relearn-b-small --foreground --until +2h
+# 流し方: npm run queue -- start night/relearn-b-small.txt --yes --name relearn-b-small --foreground --until +2h
 # 見込みの --est はクラウド環境（4 スレッド）のもの。結果の数字（勝率）は試合が少ないので見ない（流れが通るか・時間・ファイルの大きさを見る）
 
 td extend --model data/value-net.json --out @/net0.json --est 5

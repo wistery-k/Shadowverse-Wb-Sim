@@ -5,7 +5,7 @@ import { defineConfig } from "vitest/config";
 import preact from "@preact/preset-vite";
 import { devOnlyModules, replayFiles } from "./scripts/replay-files.ts";
 
-/** ビルド時点の最終コミット（画面に表示する）。git が使えなければ空（夜のキューの回のソースのように .git が無いところでも、git の文句は出さない） */
+/** ビルド時点の最終コミット（画面に表示する）。git が使えなければ空（キューの回のソースのように .git が無いところでも、git の文句は出さない） */
 function gitInfo(): { commit: string; date: string; dirty: boolean } {
   const quiet: ExecSyncOptionsWithStringEncoding = { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] };
   try {

@@ -25,7 +25,7 @@
 #   - 自己対戦の --start を重ならない番号に（R1 は g7000000〜7059999。R2 は 7100000 から等）
 #   - compare は 1.2 万試合（compare 6000）、--label を 新しいプール-R2 に（線は S2: 差 − 2 SE > 0 なら採る、差が +2 以上ならもう 1 回）
 
-# 定例（night/routine.txt と同じ 4 行。docs/night.md「定例」）: 既定を B の入力ありの補正に替えたので、その最初の測り（物差し 5・強い相手の物差し 4・速さ・見落とし問題集）。PC で 20 分ほど
+# 定例（night/routine.txt と同じ 4 行。docs/queue.md「定例」）: 既定を B の入力ありの補正に替えたので、その最初の測り（物差し 5・強い相手の物差し 4・速さ・見落とし問題集）。PC で 20 分ほど
 yardstick --ref classic --opts '{}' --games 4000 --start 0 --label 定例-弱い相手
 yardstick --ref strong --opts '{}' --games 4000 --start 0 --label 定例-強い相手
 profile --games 49

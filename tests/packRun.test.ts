@@ -174,7 +174,7 @@ describe("npm run pack-run", () => {
     expect(b).toEqual(["data/selfplay/b/f0.jsonl.gz", "data/selfplay/b/f1.jsonl.gz", "logs/b/MANIFEST.md", "logs/b/f0.log"]);
   });
 
-  it("棋譜は data/kifu/ に入れ、夜のキューの回のフォルダの kifu/ の下も入れる（書きかけの .tmp は入れない）", async () => {
+  it("棋譜は data/kifu/ に入れ、キューの回のフォルダの kifu/ の下も入れる（書きかけの .tmp は入れない）", async () => {
     const line = (g: number) => JSON.stringify({ kind: "replay", version: 2, source: "compare", g, seed: g, decks: [[], []], winner: 0, actions: [] });
     mkdirSync(join(src, "kifu"));
     writeFileSync(join(src, "kifu", "compare-r-g0-1-aaaa0000-abc1234.jsonl.gz"), gzipSync(`${line(0)}\n${line(1)}\n`));

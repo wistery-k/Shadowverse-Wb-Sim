@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   # 変わったファイルから、下の check と rust のどちらを回すかを決める。
-  # - ドキュメント（*.md と docs/ の下。台帳 docs/ledger.jsonl も）と夜のキューのジョブのファイル（night/ の下。PC で回すコマンドの並びで、テストもビルドも読まない）だけなら、両方飛ばす。
+  # - ドキュメント（*.md と docs/ の下。台帳 docs/ledger.jsonl も）とキューのジョブのファイル（night/ の下。PC で回すコマンドの並びで、テストもビルドも読まない）だけなら、両方飛ばす。
   #   テストはリポジトリの台帳を読まない（台帳を書く側・読む側は決まった行で確かめる。今の台帳の行の形は npm run ledger -- check）
   # - それに加えて、画面（src/ui/ の下）と TypeScript のテスト（tests/ の下）だけなら、rust を飛ばす
   #   （Rust に埋め込むデータ（npm run rust-data）も Rust のテストも、この 2 つを読まない。エンジンと AI は check の npm test でも WASM で動く）
@@ -138,7 +138,7 @@ jobs:
               if before_passed; then
                 code=false
                 rust=false
-                note="前の push から変わったのはドキュメントと夜のキューのジョブのファイルだけなので、check と rust は前の push の結果（$prev_url）を使う"
+                note="前の push から変わったのはドキュメントとキューのジョブのファイルだけなので、check と rust は前の push の結果（$prev_url）を使う"
               fi
             elif [ "$inc_rust" = false ] && [ "$pr_rust" = true ]; then
               if before_passed; then
@@ -151,7 +151,7 @@ jobs:
           if [ -n "$note" ]; then
             echo "$note"
           elif [ "$code" = false ]; then
-            note="ドキュメントと夜のキューのジョブのファイルだけの変更なので check と rust を飛ばす"
+            note="ドキュメントとキューのジョブのファイルだけの変更なので check と rust を飛ばす"
             echo "$note"
           elif [ "$rust" = false ]; then
             note="画面と TypeScript のテストだけの変更なので rust を飛ばす"
