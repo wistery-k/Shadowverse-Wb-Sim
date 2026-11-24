@@ -1,5 +1,5 @@
 // 調べもの用のスクリプト（think-at・diverge）が、記録した試合を読む口。
-// 棋譜（ランナーが既定で書く .jsonl・夜のキューが持ち帰った .jsonl.gz。docs/kifu.md）と、npm run game --json の出力と、
+// 棋譜（ランナーが既定で書く .jsonl・キューが持ち帰った .jsonl.gz。docs/kifu.md）と、npm run game --json の出力と、
 // 前の形の記録（2026-11-17 までの npm run game --json・rhino-compare --record の 1 試合 1 ファイル）を、同じ形（ReplayRecord）で読む。
 
 import { readFileSync } from "node:fs";

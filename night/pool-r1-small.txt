@@ -1,5 +1,5 @@
 # 段階 4 の本番（新しいプールの学び直し R1）を小さく試す（night/pool-r1.txt と同じ並びで、試合数だけ小さくしたもの。Claude のクラウド環境の 4 スレッド）。
-# 流し方: npm run night -- start night/pool-r1-small.txt --yes --name pool-r1-small --foreground --until +2h
+# 流し方: npm run queue -- start night/pool-r1-small.txt --yes --name pool-r1-small --foreground --until +2h
 # 見込みの --est はクラウド環境（4 スレッド）のもの。結果の数字（勝率）は試合が少ないので見ない（流れが通るか・時間・ファイルの大きさ・メモリを見る）。
 # 入力あり・なしの両方の学習を通す（本番はどちらか 1 つ）
 

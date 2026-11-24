@@ -23,7 +23,7 @@ AI の実験の結果を、1 行 1 件の JSON（JSON Lines）で残す台帳。
   （GitHub の画面で衝突と出たら、手元で main をマージして push する）
 - 書けたときは何も出さない（出力は前と同じ。ジョブが読む最後の行を変えないため）。書けなければ注意を出す（結果は失わない）
 - `cloud/jobs/` のジョブも、回したチェックアウトの `docs/ledger.jsonl` に足す（速さだけを測る `bench.sh`・`bench-scale.sh` は `--no-ledger`）
-- 夜のキュー（`npm run night`、[night.md](night.md)）は、区切りごとの行を回のフォルダの台帳（`SVWB_LEDGER`）に書き、止まるときに
+- キュー（`npm run queue`、[queue.md](queue.md)）は、区切りごとの行を回のフォルダの台帳（`SVWB_LEDGER`）に書き、止まるときに
   ジョブの続いた区切りを 1 行にまとめて、ブランチ `night/<回の名前>` からこの台帳に足す（1 回で回したときと同じ勝ち数・組・誤差。`queue`・`chunks` が付く）。
   行の中の回のフォルダの道（PC の中の `/home/wk/svwb-data/night/<回>/…`）は `@<回>/…` と書く（2026-11-19 から。前の行は PC の道のまま）。
   共有フォルダでは、`@<回>/<ファイル>` は `ingest` が置いた `data/selfplay/<回>/`・`data/models/<回>/`・`data/kifu/<回>/`・`logs/<回>/` の同じ名前（`.jsonl` には `.gz` が付く）
@@ -37,7 +37,7 @@ AI の実験の結果を、1 行 1 件の JSON（JSON Lines）で残す台帳。
 | `commit`・`branch` | コミット（コミットしていない変更があれば末尾に `+`。台帳と物差しの表の変更は数えない）とブランチ |
 | `label` | `--label` の名前（無ければ空） |
 | `a`・`b` | 両方の設定（渡した JSON のまま）。yardstick の `b` は相手（`classic`・`strong`） |
-| `vs`・`kifu` | compare の B のデッキの絞り込み（5 番目の引数）と、棋譜のファイルの名前（[kifu.md](kifu.md)。フォルダは入れない（台帳は公開のリポジトリにコミットするので）。共有フォルダに持ち帰った後は `data/kifu/<回の名前>/` の下にあり、夜のキューの分は `.gz` が付く。夜のキューがまとめた行は区切りごとの名前の列。書かなければ null。yardstick にもある。2026-11-16 までの行は `--replays` のファイルの道の `replays`） |
+| `vs`・`kifu` | compare の B のデッキの絞り込み（5 番目の引数）と、棋譜のファイルの名前（[kifu.md](kifu.md)。フォルダは入れない（台帳は公開のリポジトリにコミットするので）。共有フォルダに持ち帰った後は `data/kifu/<回の名前>/` の下にあり、キューの分は `.gz` が付く。キューがまとめた行は区切りごとの名前の列。書かなければ null。yardstick にもある。2026-11-16 までの行は `--replays` のファイルの道の `replays`） |
 | `with`・`without`・`involving` | compare の組の絞り込み（`--with`・`--without` のデッキ名。無ければ null。足し合わせる組を分ける）。`involving` は 2026-11-16 までの行だけ（消した `--involving` の文字列をカンマでつないだもの。今は棋譜から `svwb kifu winrate` で絞る） |
 | `refVersion`・`refFingerprint`・`refFingerprintOk`・`recorded` | yardstick の相手の版・指紋・指紋が記録と合ったか・`--record` で表に足したか |
 | `files` | 設定の中のファイル（`"valueNet":"tpa.json"` 等）の中身の指紋。同じ名前で中身の違うファイルを見分ける |
@@ -50,8 +50,8 @@ AI の実験の結果を、1 行 1 件の JSON（JSON Lines）で残す台帳。
 | `perDeck` | A のデッキごとの [勝ち, 試合数] |
 | `seconds`・`perGame` | かかった時間（秒）と 1 試合あたり |
 | `threads`・`machine` | 並列数とマシン（環境変数 `SVWB_MACHINE`、無ければホスト名。PC の Docker は `svwb-docker`） |
-| `cmd` | 回したコマンド（`svwb` の後ろ。シェルにそのまま貼れる形）。夜のキューのまとめた行は、1 回で回すときのコマンド |
-| `queue`・`chunks` | 夜のキューのまとめた行だけ: 回の名前と、まとめた区切りの数（`seconds` は区切りの和） |
+| `cmd` | 回したコマンド（`svwb` の後ろ。シェルにそのまま貼れる形）。キューのまとめた行は、1 回で回すときのコマンド |
+| `queue`・`chunks` | キューのまとめた行だけ: 回の名前と、まとめた区切りの数（`seconds` は区切りの和） |
 
 ### 見落とし問題集の行（`misses`）: ランナーが自動で書く
 
@@ -68,7 +68,7 @@ AI の実験の結果を、1 行 1 件の JSON（JSON Lines）で残す台帳。
 | `rate`・`se` | 正解率（問ごとの合格率の平均、0〜1）と標準誤差（問ごとの合格率のぶれから。問題集は決まったものとして） |
 | `perProblem` | 問ごとの [合格, 回数] |
 | `seconds`・`threads`・`machine`・`cmd` | 回の行と同じ |
-| `queue`・`chunks` | 夜のキューで回した行だけ: 回の名前と区切りの数（いつも 1） |
+| `queue`・`chunks` | キューで回した行だけ: 回の名前と区切りの数（いつも 1） |
 
 ### 候補の打ち比べ調査の行（`survey`）: `svwb survey report` が書く
 
@@ -88,7 +88,7 @@ AI の実験の結果を、1 行 1 件の JSON（JSON Lines）で残す台帳。
 | `splitAny`・`splitPair`・`pairSe` | 候補の勝ち負けが割れた回の割合（どれかの候補で・AI の選んだ候補と差の最も大きい候補で）・一段目の差の標準誤差の平均（ポイント） |
 | `perRollout`・`seconds` | 1 回最後まで打つスレッド秒・打ち比べのスレッド秒の和 |
 | `machines`・`commits`・`cmd` | 局面を打ったマシンとコミット・まとめたコマンド |
-| `queue`・`chunks` | 夜のキューでまとめた行だけ: 回の名前と区切りの数 |
+| `queue`・`chunks` | キューでまとめた行だけ: 回の名前と区切りの数 |
 
 ### 採否の行（`decision`）: `npm run ledger -- decide` で足す
 

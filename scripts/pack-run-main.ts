@@ -7,7 +7,7 @@
 // アーカイブの中は共有フォルダと同じ形にする（そのまま /mnt/project-files/ に展開できる）:
 //   data/selfplay/<名前>/  td selfplay の自己対戦（.jsonl は 1 ファイルずつ gzip して .jsonl.gz にする）
 //   data/models/<名前>/    学習した補正（"kind":"td-value-net" の .json）と見込みのネットワーク（"kind":"potential-net"）
-//   data/kifu/<名前>/      棋譜（"kind":"replay" の .jsonl。docs/kifu.md）。フォルダの中の kifu/ の下のファイルも入れる（夜のキューの回のフォルダ）
+//   data/kifu/<名前>/      棋譜（"kind":"replay" の .jsonl。docs/kifu.md）。フォルダの中の kifu/ の下のファイルも入れる（キューの回のフォルダ）
 //   logs/<名前>/           それ以外（.log・.sh・.txt・他の .jsonl（gzip する）など）と、中身の一覧 MANIFEST.md
 // tar は自前で書く（ustar。名前が長いか ASCII 以外を含むときは PAX の path を付ける）。外部のコマンドは git だけ（無くてもよい）。
 
@@ -24,7 +24,7 @@ export type Kind = "selfplay" | "models" | "logs" | "kifu";
 export const KINDS: readonly Kind[] = ["selfplay", "models", "logs", "kifu"];
 const KIND_LABEL: Record<Kind, string> = { selfplay: "自己対戦", models: "モデル", logs: "ログ等", kifu: "棋譜" };
 
-/** 中も入れるフォルダ（夜のキューの回のフォルダの棋譜の置き場） */
+/** 中も入れるフォルダ（キューの回のフォルダの棋譜の置き場） */
 export const KIFU_SUBDIR = "kifu";
 
 const USAGE = `使い方: npm run pack-run -- <フォルダ> [--name 名前] [--note 'メモ'] [--out ~/svwb-upload] [--only selfplay,models,logs,kifu]

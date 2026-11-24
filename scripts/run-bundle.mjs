@@ -1,4 +1,4 @@
-// vite-run.mjs が VITE_RUN_OUT_DIR に作ったビルド結果を実行する（夜のキューが回のフォルダに写したものを回す。scripts/night-main.ts）。
+// vite-run.mjs が VITE_RUN_OUT_DIR に作ったビルド結果を実行する（キューが回のフォルダに写したものを回す。scripts/night-main.ts）。
 // 使い方: node scripts/run-bundle.mjs <ディレクトリ>/<名前>.mjs [引数...]
 // 並列に回すとき（scripts/parallel.ts）の Worker は、リポジトリの vite-run.mjs を使う（ビルド結果を読み込むだけ）。
 

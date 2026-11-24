@@ -27,6 +27,11 @@ RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-too
  && rustup component add rustfmt clippy \
  && rustup target add wasm32-unknown-unknown
 
+# ジョブのキューの回す係 pueue（https://github.com/Nukesor/pueue。docs/queue.md「キュー（pueue）」）。
+# 版は固定する（4.0 で状態の形が変わり、前の版の状態は読めなくなった。上げるときはキューが空のときに）。~/.cargo/bin に pueue・pueued が入る
+RUN cargo install --locked pueue@4.0.5 \
+ && pueue --version
+
 # Claude Code（公式のインストーラ。~/.local/bin/claude に入り、動いている間に自分で更新する）
 RUN curl -fsSL https://claude.ai/install.sh | bash \
  && claude --version
