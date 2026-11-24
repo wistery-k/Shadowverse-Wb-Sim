@@ -81,6 +81,10 @@ pub struct OpponentSearch {
     pub beam_width: usize,
     pub max_depth: usize,
     pub extra_eval: bool,
+    /// 読みの中の相手の手で作った評価を、方策の重み（policyWeights）でなく自分の評価の重み（weights）にする（既定 false）。
+    /// 出発点の重みを 0 にした補正（R6 等。S = 0）なら、extra_eval と合わせて、相手も自分と同じ「補正だけ」で採点する
+    /// （docs/ai-notes/15-2026-11-22.md「読みの中の相手を強くしたときの楽観と費用」）
+    pub own_weights: bool,
 }
 
 /// 読み直す並びに、自分の山札から引く手かランダムな手（引くカード・ランダムの結果が決定化で決まっている手）があれば、その手の直前で区切り、
@@ -441,6 +445,7 @@ impl Default for SearchOptions {
                 beam_width: 8,
                 max_depth: 8,
                 extra_eval: false,
+                own_weights: false,
             }),
             opp_hand_samples: 12,
             opp_hand_common: true,
@@ -2070,11 +2075,17 @@ pub fn simulate_opponent_turn_by_search(
     let opts = env.opts;
     let q = opponent(p);
     let opp_opts = opponent_search_options(opts);
-    // 読みの中の相手は、自分の評価の重みでなく方策の重み（policy_weights。既定は同じ）で打つ
+    // 読みの中の相手は、自分の評価の重みでなく方策の重み（policy_weights。既定は同じ）で打つ。
+    // opponentSearch.ownWeights なら自分の評価の重みで打つ
+    let ow = if opts.opponent_search.is_some_and(|o| o.own_weights) {
+        env.w
+    } else {
+        env.opp_w
+    };
     let opp_env = Env {
         opts: &opp_opts,
-        w: env.opp_w,
-        opp_w: env.opp_w,
+        w: ow,
+        opp_w: ow,
         policy_w: env.policy_w,
     };
     let mut s: Option<GameState> = Some(state.clone());

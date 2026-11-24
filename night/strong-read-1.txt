@@ -1,17 +1,21 @@
 # 読みの中の相手を強く読む（1 晩目）。ユーザーの見方（2026-11-24。値引きがいらないくらい正確に読む）と審査の頼みから。
 # 調べた結果は docs/ai-notes/15-2026-11-22.md「読みの中の相手を強くしたときの楽観と費用」
 #
-# 問い: 読みの中の相手のビームを幅 32・深さ 16 にし、相手のターン末を補正で採点させる（"opponentSearch":{"beamWidth":32,"maxDepth":16,"extraEval":true}）と、勝率が上がるか。
+# 問い: 読みの中の相手のビームを幅 32・深さ 16 にし、相手のターン末を自分と同じ評価（手で作った重み 0 ＋ 補正。S = 0）で採点させる
+#   （"opponentSearch":{"beamWidth":32,"maxDepth":16,"extraEval":true,"ownWeights":true}）と、勝率が上がるか。
+#   ownWeights はユーザーの指摘（2026-11-24。今の補正は S = 0 で学んだので、相手に使わせるなら相手も S = 0 が妥当）で足した。
+#   ownWeights なしの extraEval は、相手が手で作った重み（policyWeights）＋補正で採点する（下の測りの数はほぼ同じ）
 #   想像の局面の印あり・印なしの両方で R6 と比べる（印なしは学び直さずに試せる組み合わせ。印ありは強く読むと引きすぎる見込み）。
-#   クラウド環境の測り（1000 局面）: 印なしの楽観（相手の本当のターンの後の値との差）は +6.4 → +2.5 ポイント、印ありは −1.0 → −2.8。
-#   ユーザーの挙げた 5 枚（イマリ・カミシラ・ジンジャー・徒姫・イステンデッド）を出したターン 1250 局面では、印なし +9.6 → +4.9、印あり −0.4 → −2.6。
-#   1 試合の思考は R6 の 3.9 倍（profile、代表 10 型 40 試合）。いちばん安い点（幅 8・深さ 8・補正あり）は 2.1 倍で、印なしの楽観は +6.4 → +3.8（5 枚のターンで +9.6 → +7.4）。
+#   クラウド環境の測り（1000 局面。S = 0 ＋補正）: 印なしの楽観（相手の本当のターンの後の値との差）は +6.4 → +2.7 ポイント、印ありは −1.0 → −2.6。
+#   ユーザーの挙げた 5 枚（イマリ・カミシラ・ジンジャー・徒姫・イステンデッド）を出したターン 1250 局面では、印なし +9.6 → +5.2、印あり −0.4 → −2.3。
+#   1 試合の思考は R6 の 3.9 倍（profile、代表 10 型 40 試合。手で作った重み＋補正の版の実測。相手のターン 1 回の時間は S = 0 の版と同じ）。
+#   いちばん安い点（幅 8・深さ 8・S = 0 ＋補正）は 2.1 倍で、印なしの楽観は +6.4 → +4.0（5 枚のターンで +9.6 → +7.7）。
 #   前に（2026-10-21、補正 p60p・相手の幅 4）読みの中の相手に補正を足したときは、直接 51.3%・物差し −1 ポイントで採らなかった（印を学ぶ前）
 #
 # やること（審査の勧めで 3 を足した。印ありは引きすぎる見込みが既にあるので最後に置く）:
-#   1. 強く読む（幅 32・深さ 16・補正あり）＋印なし 対 R6（84 個のデッキの鏡の compare 2 万試合、± 0.24 ほど。見込みはどちらも R4）
-#   2. 安く強く読む（幅 8・深さ 8・補正あり）＋印なし 対 R6（同じ。採れる形にいちばん近い点）
-#   3. 強く読む（幅 32・深さ 16・補正あり）＋印あり 対 R6（同じ）
+#   1. 強く読む（幅 32・深さ 16・S = 0 ＋補正）＋印なし 対 R6（84 個のデッキの鏡の compare 2 万試合、± 0.24 ほど。見込みはどちらも R4）
+#   2. 安く強く読む（幅 8・深さ 8・S = 0 ＋補正）＋印なし 対 R6（同じ。採れる形にいちばん近い点）
+#   3. 強く読む（幅 32・深さ 16・S = 0 ＋補正）＋印あり 対 R6（同じ）
 #
 # 回す前に決めた問いと線:
 #   どれかで 差 − 2 SE > 0 なら、採否をユーザーに出す（思考が 2.1 倍・3.9 倍になるので、ブラウザの速さと合わせて）。2 つ以上なら、思考の倍率と差を並べて出す。
@@ -29,11 +33,11 @@
 # 朝: 止まったときのまとめを push してもらい、ingest する
 # 回の名前は strong-read-1
 
-# 1. 強く読む＋印なし 対 R6
-compare 10000 '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":32,"maxDepth":16,"extraEval":true},"imaginedInput":false}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 強読み印なし対R6 --est 0.42
+# 1. 強く読む（S = 0 ＋補正）＋印なし 対 R6
+compare 10000 '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":32,"maxDepth":16,"extraEval":true,"ownWeights":true},"imaginedInput":false}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 強読みS0印なし対R6 --est 0.42
 
-# 2. 安く強く読む（幅 8・深さ 8・補正あり）＋印なし 対 R6
-compare 10000 '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true},"imaginedInput":false}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 安く強読み印なし対R6 --est 0.26
+# 2. 安く強く読む（幅 8・深さ 8・S = 0 ＋補正）＋印なし 対 R6
+compare 10000 '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 安く強読みS0印なし対R6 --est 0.26
 
-# 3. 強く読む＋印あり 対 R6
-compare 10000 '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":32,"maxDepth":16,"extraEval":true}}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 強読み印あり対R6 --est 0.42
+# 3. 強く読む（S = 0 ＋補正）＋印あり 対 R6
+compare 10000 '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":32,"maxDepth":16,"extraEval":true,"ownWeights":true}}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 強読みS0印あり対R6 --est 0.42

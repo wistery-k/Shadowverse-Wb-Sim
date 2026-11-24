@@ -131,6 +131,54 @@ fn imagined_input_off_scores_reads_without_the_mark() {
     }
 }
 
+#[test]
+fn opponent_own_weights_switches_the_read_opponent_eval() {
+    // opponentSearch.ownWeights なら、読みの中の相手のビームを方策の重み（policyWeights）でなく自分の評価の重みで打つ。
+    // 自分の重みと方策の重みが同じなら何も変わらず、違えば読みが変わる
+    use crate::runner::options::compare_options;
+    let mut s = new_game(deck_at(0), deck_at(1), 7);
+    let mut rng = Rng::new(7);
+    let mut greedy = greedy_base();
+    while s.turn < 6 && s.phase != Phase::Ended {
+        let a = greedy.choose_action(&s, &legal_actions(&s), &mut rng);
+        s = apply(&s, &a);
+    }
+    while s.pending.is_some() {
+        let a = greedy.choose_action(&s, &legal_actions(&s), &mut rng);
+        s = apply(&s, &a);
+    }
+    assert_eq!(s.phase, Phase::Main);
+    let p = s.active;
+    let seeds: Vec<u32> = (0..8).collect();
+    let reads =
+        |text: &str| SearchAgent::new(compare_options(text).unwrap()).read_values(&s, p, &seeds);
+    let os = |own: bool| {
+        format!(r#""opponentSearch":{{"beamWidth":8,"maxDepth":8,"ownWeights":{own}}}"#)
+    };
+    // 同じ重みなら同じ
+    assert_eq!(
+        reads(&format!(
+            r#"{{"weights":"search","policyWeights":"search",{}}}"#,
+            os(true)
+        )),
+        reads(&format!(
+            r#"{{"weights":"search","policyWeights":"search",{}}}"#,
+            os(false)
+        ))
+    );
+    // 自分の重みが 0 で方策の重みが手で作った重みなら、相手の打ち方が変わる
+    assert_ne!(
+        reads(&format!(
+            r#"{{"weights":"zero","policyWeights":"search",{}}}"#,
+            os(true)
+        )),
+        reads(&format!(
+            r#"{{"weights":"zero","policyWeights":"search",{}}}"#,
+            os(false)
+        ))
+    );
+}
+
 /// ロイヤルの 8 ターン目（PP 8・SEP 2）。相手は体力 20 で場に opp を置く
 fn geno_turn(geno_in_hand: bool, opp: &[&str]) -> GameState {
     let s = new_game(deck("アマリアロイヤル"), deck("ランプドラゴン"), 1);

@@ -373,6 +373,10 @@ pub fn search_options(
                                 None => false,
                                 Some(x) => flag("opponentSearch.extraEval", x)?,
                             },
+                            own_weights: match v.get("ownWeights") {
+                                None => false,
+                                Some(x) => flag("opponentSearch.ownWeights", x)?,
+                            },
                         })
                     }
                     _ => {
@@ -726,6 +730,23 @@ mod tests {
                 .imagined_input
         );
         assert!(compare_options(r#"{"imaginedInput":0}"#).is_err());
+        // 読みの中の相手を自分の評価の重みで打たせる（既定は方策の重み）
+        let own = |t: &str| {
+            compare_options(t)
+                .unwrap()
+                .opponent_search
+                .unwrap()
+                .own_weights
+        };
+        assert!(!own("{}"));
+        assert!(!own(r#"{"opponentSearch":{"beamWidth":8,"maxDepth":8}}"#));
+        assert!(own(
+            r#"{"opponentSearch":{"beamWidth":8,"maxDepth":8,"ownWeights":true}}"#
+        ));
+        assert!(compare_options(
+            r#"{"opponentSearch":{"beamWidth":8,"maxDepth":8,"ownWeights":1}}"#
+        )
+        .is_err());
         // 消した実験用の項目は、使わないときの値だけを受け付ける
         for ok in [
             r#"{"rescoreAverage":"score","tree":null,"nextLethal":0,"scoreTurnEnd":"all"}"#,
