@@ -29,12 +29,12 @@ const PRESETS: readonly DeckPreset[] = [
   { label: "全部（84 個）", keys: AZVALDT_DECK_OPTIONS.map((o) => o.key) },
 ];
 
-/** 問題集: 新しいプールの問（misses/azvaldt/）。シミュレータの中の R3 どうしの自己対戦から取った局面だけ */
+/** 問題集: 新しいプールの問（misses/azvaldt/）。シミュレータの中の AI どうしの自己対戦（R3 の打ち比べ調査と、R6 の 1 試合）から取った局面だけ */
 const MISSES: MissesSource = {
   load: () => import("../misses/azvaldtData").then((m) => m.loadMisses()),
   dir: "misses/azvaldt",
   about:
-    "局面はどれも、このシミュレータの中の AI（探索 AI に補正 R3 を入れたもの）どうしの自己対戦（打ち比べ調査）から取ったもので、ここで見られるのはリポジトリにある問だけです。",
+    "局面はどれも、このシミュレータの中の AI（探索 AI）どうしの自己対戦（補正 R3 での打ち比べ調査と、補正 R6 での 1 試合）から取ったもので、ここで見られるのはリポジトリにある問だけです。",
 };
 
 type Tab = "sim" | "misses";

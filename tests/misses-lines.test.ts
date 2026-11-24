@@ -44,9 +44,10 @@ describe("アズヴォルト環境の問題集の手順の候補", () => {
         else expect(line.second, l.id).toBeNull();
       }
     }
-    // 手で書いた並び: witch-tico-g1006 の良い手（ユーザーが見つけたリーサル）だけ
+    // 手で書いた並び: witch-tico-g1006 の良い手（ユーザーが見つけたリーサル）と、調査ではなくユーザーの指摘から足した
+    // witch-ginger-ara-s425114133 の 2 本（元の試合の AI の手と、ユーザーが見つけた手順。2026-11-24）
     const hands = [...data.lines.values()].flatMap((l) => l.lines.filter((x) => x.hand !== null).map((x) => `${l.id} ${x.kind}`));
-    expect(hands).toEqual(["witch-tico-g1006 good"]);
+    expect(hands.sort()).toEqual(["witch-ginger-ara-s425114133 ai", "witch-ginger-ara-s425114133 good", "witch-tico-g1006 good"]);
   });
 
   it("AI が打つ前の手は、調査の読んだ並び（full）と同じ説明になる", () => {

@@ -108,7 +108,7 @@ R3 のときに測った。R4・R5・R6 は測り直していない（PC の pro
 
 ページの探索 AI（今は補正 R6・見込み R4）は、WASM の探索 AI の既定の設定に、ページが読み込んだ補正と見込みを入れたもの。コマンドの R6 は
 `--opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}'`（R5・R6 は補正だけを学び直したので、見込みは R4 のファイル）。
-同じ局面（`misses/azvaldt/` の 12 問と、代表 10 型のデッキのマリガン 2 つ）から同じ乱数で打った手を `tests/fixtures/browser-azvaldt.json` に書き、
+同じ局面（`misses/azvaldt/` の 13 問と、代表 10 型のデッキのマリガン 2 つ）から同じ乱数で打った手を `tests/fixtures/browser-azvaldt.json` に書き、
 CLI（`rust/engine/tests/browser_azvaldt.rs`）と WASM（`tests/nets-azvaldt.test.ts`）の両方で比べる。
 読み込んだ補正の指紋も、JSON を serde_json で読んだものと比べる（`data/pools/azvaldt/` と `rust/engine/yardstick/` の写しの両方。指紋にはリーサルの出力と winForm も入る。2026-11-22 から）。
 ページの補正を入れ替えるときは、`data/pools/azvaldt/` と `rust/engine/yardstick/pool-<版>-*.json` を同じファイルにし、両方のテストの `PAGE_NET`（見込みを替えないなら `PAGE_POTENTIAL` はそのまま）を直して、

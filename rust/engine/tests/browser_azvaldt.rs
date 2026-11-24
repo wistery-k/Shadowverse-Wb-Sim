@@ -5,7 +5,7 @@
 //! `--opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}'`（下の PAGE_NET・PAGE_POTENTIAL。
 //! R5・R6 は補正だけを学び直したもので、見込みは R4 のまま）。
 //!
-//! ここではコマンドの側が決まった局面（新しいプールの問題集 misses/azvaldt/ の 12 問と、代表 10 型のデッキのマリガン）から打つ手を求め、
+//! ここではコマンドの側が決まった局面（新しいプールの問題集 misses/azvaldt/ の 13 問と、代表 10 型のデッキのマリガン）から打つ手を求め、
 //! tests/fixtures/browser-azvaldt.json と比べる。問の局面からは、1 つの AI でそのターンの終わりまで打つ（並びを覚えて使い回す経路も通る。
 //! 判断ごとの乱数は「局面のシード + 何手目か」）。マリガンは最初の 1 回だけ。
 //! 同じファイルを、ブラウザの経路（WASM）で tests/nets-azvaldt.test.ts が比べる。
