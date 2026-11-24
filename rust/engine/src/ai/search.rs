@@ -366,6 +366,10 @@ pub struct SearchOptions {
     pub pick: Option<PickByPlayout>,
     /// 補正のリーサルの出力が線以上の終局面だけ、読みの中の相手にリーサル探索を先にさせる（ReadLethal。None なら使わない。既定 None）
     pub read_lethal: Option<ReadLethal>,
+    /// 相手のターンを読んだ後の局面（想像の局面）を、補正に「想像の局面」の印（入力 imagined）を立てて採点する（既定 true）。
+    /// false なら印を立てず、ターンの途中の局面（ValuePhase::After）として採点する。実験用（2026-11-24。印が、相手の返せない盤面を
+    /// 大きく割り引くことを確かめる。docs/ai-notes/15-2026-11-22.md「想像の局面の印が、相手の返せない盤面を大きく割り引く」）
+    pub imagined_input: bool,
 }
 
 impl Default for SearchOptions {
@@ -453,6 +457,7 @@ impl Default for SearchOptions {
             sequential_rng: false,
             pick: None,
             read_lethal: None,
+            imagined_input: true,
         }
     }
 }
@@ -810,8 +815,17 @@ impl<'a> Planner<'a> {
     fn eval_after(&self, s: &GameState) -> f64 {
         let v = evaluate_with(s, self.p, self.env.w);
         match &self.opts().extra_eval {
-            Some(f) => v + f(s, self.p, ValuePhase::Imagined),
+            Some(f) => v + f(s, self.p, self.imagined_phase()),
             None => v,
+        }
+    }
+
+    /// 想像の局面を補正に渡すときの局面の種類（imaginedInput を切ると、印を立てない ValuePhase::After）
+    fn imagined_phase(&self) -> ValuePhase {
+        if self.opts().imagined_input {
+            ValuePhase::Imagined
+        } else {
+            ValuePhase::After
         }
     }
 
@@ -1348,7 +1362,7 @@ pub fn plan_turn_traced(
         let mut afters: Vec<Rc<GameState>> = Vec::new();
         let mut add = |after: GameState| {
             if tracing {
-                let (e, x) = pl.parts(&after, ValuePhase::Imagined);
+                let (e, x) = pl.parts(&after, pl.imagined_phase());
                 parts.0 += e;
                 parts.1 += x;
             }

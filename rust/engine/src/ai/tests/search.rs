@@ -85,6 +85,52 @@ fn peek_all_reads_the_real_state() {
     }
 }
 
+#[test]
+fn imagined_input_off_scores_reads_without_the_mark() {
+    // 実験用の imaginedInput を切ると、相手のターンを読んだ後の局面を、補正に「想像の局面」の印を立てずに（ValuePhase::After で）採点する
+    use crate::ai::valuenet::ValuePhase;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    let mut s = new_game(deck_at(0), deck_at(1), 7);
+    let mut rng = Rng::new(7);
+    let mut greedy = greedy_base();
+    while s.turn < 6 && s.phase != Phase::Ended {
+        let a = greedy.choose_action(&s, &legal_actions(&s), &mut rng);
+        s = apply(&s, &a);
+    }
+    while s.pending.is_some() {
+        let a = greedy.choose_action(&s, &legal_actions(&s), &mut rng);
+        s = apply(&s, &a);
+    }
+    assert_eq!(s.phase, Phase::Main);
+    for on in [true, false] {
+        // 補正に渡された局面の種類ごとの回数（End・After・Imagined）
+        let seen: Arc<[AtomicUsize; 3]> = Arc::new(Default::default());
+        let counter = seen.clone();
+        let mut agent = SearchAgent::new(SearchOptions {
+            imagined_input: on,
+            extra_eval: Some(Arc::new(move |_, _, phase| {
+                let i = match phase {
+                    ValuePhase::End => 0,
+                    ValuePhase::After => 1,
+                    ValuePhase::Imagined => 2,
+                };
+                counter[i].fetch_add(1, Ordering::Relaxed);
+                0.0
+            })),
+            ..SearchOptions::default()
+        });
+        agent.choose_action(&s, &legal_actions(&s), &mut Rng::new(1));
+        let [end, after, imagined] = [0, 1, 2].map(|i| seen[i].load(Ordering::Relaxed));
+        assert!(end > 0, "{on}");
+        if on {
+            assert!(imagined > 0 && after == 0, "{after} {imagined}");
+        } else {
+            assert!(imagined == 0 && after > 0, "{after} {imagined}");
+        }
+    }
+}
+
 /// ロイヤルの 8 ターン目（PP 8・SEP 2）。相手は体力 20 で場に opp を置く
 fn geno_turn(geno_in_hand: bool, opp: &[&str]) -> GameState {
     let s = new_game(deck("アマリアロイヤル"), deck("ランプドラゴン"), 1);

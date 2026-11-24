@@ -148,6 +148,7 @@ pub fn reference_options() -> SearchOptions {
         sequential_rng: true,
         pick: None,
         read_lethal: None,
+        imagined_input: true,
     }
 }
 
@@ -235,6 +236,7 @@ pub fn strong_reference_options() -> SearchOptions {
         sequential_rng: true,
         pick: None,
         read_lethal: None,
+        imagined_input: true,
     }
 }
 
@@ -367,6 +369,7 @@ pub fn pool_reference_options(name: &str) -> SearchOptions {
         sequential_rng: false,
         pick: None,
         read_lethal: None,
+        imagined_input: true,
     }
 }
 

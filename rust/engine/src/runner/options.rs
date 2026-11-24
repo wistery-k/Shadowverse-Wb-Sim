@@ -311,6 +311,7 @@ pub fn search_options(
             "reusePlan" => o.reuse_plan = flag(k, v)?,
             "peekOppHand" => o.peek_opp_hand = flag(k, v)?,
             "peekAll" => o.peek_all = flag(k, v)?,
+            "imaginedInput" => o.imagined_input = flag(k, v)?,
             "oppHandBoosts" => o.opp_hand_boosts = flag(k, v)?,
             "oppHandCommon" => o.opp_hand_common = flag(k, v)?,
             "readOwnDeckApart" => o.read_own_deck_apart = flag(k, v)?,
@@ -717,6 +718,14 @@ mod tests {
             0.25
         );
         assert!(compare_options(r#"{"rescoreMix":1.5}"#).is_err());
+        // 想像の局面の印（既定は立てる）
+        assert!(compare_options("{}").unwrap().imagined_input);
+        assert!(
+            !compare_options(r#"{"imaginedInput":false}"#)
+                .unwrap()
+                .imagined_input
+        );
+        assert!(compare_options(r#"{"imaginedInput":0}"#).is_err());
         // 消した実験用の項目は、使わないときの値だけを受け付ける
         for ok in [
             r#"{"rescoreAverage":"score","tree":null,"nextLethal":0,"scoreTurnEnd":"all"}"#,
