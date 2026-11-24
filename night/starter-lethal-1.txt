@@ -1,0 +1,35 @@
+# スターターでも「勝つ確率 = (1 − 負ける確率) × 生き延びたときの勝率」が効くかの 1 晩目: 自己対戦と C'・Z' の学習まで。
+# 2 晩目（night/starter-lethal-2.txt）で Z' 対 C' と C' 対 今の既定を回す。
+# ユーザーの依頼 2026-11-23（審査のスレッドで）: 「勝率＝（１－負ける確率）＊生き延びた時の勝率の形をスターター環境でも試してみる」。別のプールでも効くかの知見が目的。
+# 新しいプールでは、同じ自己対戦から学んだ Z（--lethalHead survival）が C（今の形のまま）に 50.48% ± 0.20（4 万試合）で、R5 として採った
+#   （docs/ai-notes/14-2026-11-16.md「リーサルの出力を足して学ぶ準備」、night/lethal-heads-1.txt・lethal-heads-2.txt）。ここでは同じ学び方をスターターで繰り返す。
+#
+#   C': 今の形のまま学び直す（出力なし）。Z': --lethalHead survival（勝つ確率 = (1 − q) × s。q は次の相手のターンに負ける確率の出力）
+#   どちらも出発はスターターの今の既定（補正 B、data/value-net.json。--base zero で学んだもの）。見込みは今の既定のまま（data/potential-net.json）
+#
+# 回す前に決めた問いと線（2 晩目の線は night/starter-lethal-2.txt の先頭）:
+#   1 晩目の翌朝（クラウド環境）、学びに使っていない s-21 の自己対戦の棋譜（3000 試合、両方の席）で、今の既定・C'・Z' の svwb kifu values を出し、
+#     勝敗の交差エントロピー・偏りを除いた交差エントロピー（logit に 1 つの定数を当てはめた後）・勝敗の AUC・Z' の q の AUC・体力 10 以下の交差エントロピー・
+#     値 50% 以上のまま次の相手のターンに負けた行を並べる（共有フォルダの logs/r6-heads-pick/ の pick.py・bias.py・qce.py）。
+#     これは選ぶためではなく、新しいプール（Z が C より q の当て方・体力 10 以下で良く、勝敗の交差エントロピーも 0.003 小さかった）と同じ向きかを見るため。
+#     2 晩目はこの結果によらず回す。ただし Z' が壊れている（q の AUC が 0.95 未満か、エポック 0 の重みが選ばれた）ときは、2 晩目の前に止めて審査とユーザーに相談する
+#   線ではないが見る数字: 学習の報告のリーサルの出力の AUC・交差エントロピー（確かめ用のターン末）、選ばれたエポック
+#
+# 見込み（PC、svwb-docker・28 スレッド）: 自己対戦は 0.42 秒/試合（relearn-b の 0.40 に、その後の補正 B の分を少し足した）で 6.3 万試合 7 時間 21 分。
+#   負けの印は試合の結果から書くだけで、打つ手・速さは変わらない。学習は 1 つ 15 分ほど（新しいプールの 6 万試合が Rust 版で 11 分）、間引き・属性で 3 分ほど
+# 朝: 止まったときのまとめを push してもらい、ingest する。出口のファイル（c.json・z.json と s-21 の棋譜）を共有フォルダへ
+# 回の名前は starter-lethal-1（2 晩目のキューがこの回のフォルダのモデルを読む）
+
+# 1. 自己対戦 6.3 万試合（g6400000〜6462999。前の学び直しの g6300000〜6359999・g6390000〜 と重ならない）。3000 試合ずつ s-1〜s-21。
+#    今の既定と同じ打ち方（relearn-b と同じ引数）に、ターン末ごとの次の相手のターンに負けたかの印（--lostLabel 1）を足す。s-21 は学びに使わない（翌朝の取り置き）
+td selfplay --model data/value-net.json --games 63000 --start 6400000 --chunk 3000 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --lostLabel 1 --out @/s-{k}.jsonl.gz --est 0.42
+
+# 2. C': 今の形のまま、今の既定から学び直す（新しいプールの C と同じ学び方）→ 間引き → 属性で埋める
+td train --impl rust --model data/value-net.json --data @/s-{1..20}.jsonl.gz --out @/ct.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --est 900
+td prune --impl rust --model @/ct.json --data @/s-{1..20}.jsonl.gz --out @/cp.json --est 120
+td attr --model @/cp.json --out @/c.json --keepA 0 --est 60
+
+# 2'. Z': 勝つ確率を (1 − リーサルの出力) × 生き延びたときの勝率 にして学ぶ（新しいプールの Z と同じ）
+td train --impl rust --model data/value-net.json --data @/s-{1..20}.jsonl.gz --out @/zt.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --est 1000
+td prune --impl rust --model @/zt.json --data @/s-{1..20}.jsonl.gz --out @/zp.json --est 120
+td attr --model @/zp.json --out @/z.json --keepA 0 --est 60
