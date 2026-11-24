@@ -1,0 +1,44 @@
+# 大きい補正を 0 から学ぶ（空いた夜用の控え）。ユーザーの話 2026-11-24「大きい補正をゼロからは、PC の夜が空いていて埋められないときがあれば回してもいい」。
+#   回すかと、いつ回すかはユーザーが決める（券はそのときに出す）。前の確かめは docs/ai-notes/15-2026-11-22.md「大きい補正の確かめ」
+#
+# 問い: 大きい補正（512・64）を、前の版の続きからではなく 0 から学ぶと、局面の中の候補の当て方が動くか。
+#   前の確かめ（W・WD）は v0 を td widen で広げた出発点で、足した素子は出力の重み 0・同じ種から始まり、一番良いのはエポック 1 で、R6 とほとんど同じものになった。
+#   R6 は R1 から学び直しを重ねた版（もとはスターターの補正）の続きなので、0 から学ぶ大きい版だけだと「大きさ」と「0 から」が混ざる。
+#   対照に、R6 と同じ 256・32 も 0 から学ぶ（審査の案）。
+#
+# やること（学びだけ。compare は入れない。当て方が動いたら、比べをどうするかはユーザーに改めて聞く）:
+#   0. td init で隠れ層 256・32 と 512・64 の補正 0 のモデルを作り（入力の並びは今のもの、a は R6 と同じ 0.0126253）、td extend で新しいプールの語彙（476 枚）に広げる。
+#      R6 の出発点（v0）と、語彙・ゾーン・数値の並びが同じになるのをクラウド環境で確かめた。足した語彙の行は 0 から、ほかは乱数から始まる（出力の重みが 0 なので、最初は補正 0）
+#   1. Z256（対照）と Z512 を、R6（B）と同じデータ（回 r6-heads-1 の自己対戦 6 万試合、s-1〜20）・同じ引数で学び、間引き・属性で埋める。
+#      違うのはエポックだけで 8（--best 1 で、確かめ用の局面の交差エントロピーが一番小さいエポックを採る）。リーサルの出力は td train が付ける
+# エポックと学習率の決め方（クラウド環境の小さな試し、2026-11-24。s-1〜4 の 1.2 万試合・3 エポック）:
+#   0 からの 256・32 は、確かめ用の交差エントロピー 0.548（学習率 0.0003）・0.553（0.001）、512・64 は 0.555（0.001）で、3 エポック目でもまだ 1 エポック 0.02 ほど下がっていた。
+#   同じデータで v0 から学ぶと 0.503（エポック 1 が一番良い）。学習率は B と同じ 0.0003 にし、エポックを 8 に増やす
+#
+# 回す前に決めた問いと線（翌朝、クラウド環境で。前の確かめと同じ数・同じ線）:
+#   調査の局面（survey-2 の 6135 対）の割り戻した相関と本当の外しの分散を、R6 と同じ対で比べる（試合で引き直したブートストラップ。共有フォルダの logs/bignet-2026-11-24/corrdiff.py）。
+#   取り置きのデータ（Z 対 C の A の席のターン末）の偏りを除いた交差エントロピーと AUC（logs/branch-1-check-2026-11-24/bias.py）
+#   線: Z512 の割り戻した相関が、R6 との差 − 2 SE > 0 で、かつ差が +0.03 以上なら「動いた」。届かなければ「動かない」
+#   線ではないが並べる数: Z512 − Z256（0 から学ぶ同士の大きさの効き）、Z256 − R6（0 から学ぶことの効き）。どれもユーザーと審査に出す
+#
+# 見込み（PC、svwb-docker・28 スレッド）: クラウド環境（4 スレッド）の 3 エポックの実測（256・32 が 1065 秒、512・64 が 2736 秒）を 8 エポックに延ばし、
+#   PC とクラウド環境の比（B の学びが PC 11 分・クラウド環境 18 分で 0.62）を掛けて、学びは Z256 が 30 分・Z512 が 75 分ほど。--est は 2 割ほど足した。
+#   メモリの山は 512・64 で 3GB ほど（クラウド環境の実測）。全部で 2 時間 10 分ほど（券は until=+3h で足りる）
+# 朝: 止まったときのまとめを push してもらい、ingest する。モデル（z256.json・z512.json）は出口のファイルで共有フォルダへ（翌朝の数が読む）
+# 回の名前は bignet-zero
+
+# 0. 補正 0 のモデル（R6 と同じ入力の並び・a）を作り、新しいプールの語彙に広げる
+td init --hidden 256,32 --a 0.0126253 --seed 1 --out @/i256.json --est 20
+td extend --model @/i256.json --vocab @data/pools/azvaldt/sets/all84.txt --out @/z256-0.json --est 30
+td init --hidden 512,64 --a 0.0126253 --seed 1 --out @/i512.json --est 30
+td extend --model @/i512.json --vocab @data/pools/azvaldt/sets/all84.txt --out @/z512-0.json --est 60
+
+# 1. Z256（対照: R6 と同じ形を 0 から）
+td train --impl rust --model @/z256-0.json --data @run:r6-heads-1/s-{1..20}.jsonl.gz --out @/z256t.json --epochs 8 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks --est 2160
+td prune --impl rust --model @/z256t.json --data @run:r6-heads-1/s-{1..20}.jsonl.gz --out @/z256p.json --est 40
+td attr --model @/z256p.json --out @/z256.json --keepA 0 --est 15
+
+# 2. Z512（大きい補正を 0 から）
+td train --impl rust --model @/z512-0.json --data @run:r6-heads-1/s-{1..20}.jsonl.gz --out @/z512t.json --epochs 8 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks --est 5400
+td prune --impl rust --model @/z512t.json --data @run:r6-heads-1/s-{1..20}.jsonl.gz --out @/z512p.json --est 80
+td attr --model @/z512p.json --out @/z512.json --keepA 0 --est 30
