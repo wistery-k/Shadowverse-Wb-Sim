@@ -683,6 +683,8 @@ pub enum IvZone {
     OppBoard,
     Res,
     OppRes,
+    /// 選ばなかった候補の枝（td branch）。もとの試合と同じ局面から分かれるので、もとの局面との組は作らない
+    Plan,
 }
 
 impl IvZone {
@@ -694,6 +696,7 @@ impl IvZone {
             "oppBoard" => IvZone::OppBoard,
             "res" => IvZone::Res,
             "oppRes" => IvZone::OppRes,
+            "plan" => IvZone::Plan,
             z => return Err(format!("知らない介入の場所: {z}")),
         })
     }
@@ -1277,6 +1280,7 @@ fn add_game(
     }
     let gk = r.g.to_bits();
     match &r.iv {
+        Some(iv) if iv.zone == IvZone::Plan => {}
         Some(iv) => {
             let base = pos_of.get(&gk).and_then(|ps| ps[iv.p].get(iv.k).copied());
             let variant = pos[iv.p].first().copied();

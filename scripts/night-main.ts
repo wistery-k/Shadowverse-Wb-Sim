@@ -12,7 +12,7 @@
 //   npm run night -- list
 //
 // - ジョブのファイルは 1 行 1 ジョブで、svwb のコマンドと同じ形（compare・yardstick・profile・misses・survey）。# から行の終わりまでは書き添え
-// - 学び直しの流れ（docs/night.md「学び直しの流れ」）: td selfplay・beam-gap（--chunk 試合ずつ {k} を入れたファイルに書く）、
+// - 学び直しの流れ（docs/night.md「学び直しの流れ」）: td selfplay・td branch・beam-gap（--chunk 試合ずつ {k} を入れたファイルに書く）、
 //   td・potential（TypeScript の学習。--out のファイルを 1 つ作る）、pick（前の compare の結果で、決めておいた線を越えたかでファイルを選ぶ）。
 //   @/ は回のフォルダ、{1..20} は 1,2,…,20 に開く。作ったファイルがあれば済んだものとし、前のジョブの作るファイルが無ければ失敗にする。
 //   @run:<回の名前>/<ファイル> は、同じ根の下の前の回のフォルダのファイル（前の夜に作ったモデルを読む。PC の中の道をジョブのファイルに書かない）。
@@ -84,7 +84,7 @@ export type JobSpec =
   | { kind: "misses"; opts: string; seed: number }
   /** 候補の打ち比べ調査（docs/survey.md）。games は自己対戦の試合の数（1 つの番号で 1 試合）。opts は AI の設定（--opts）、decks は --decks */
   | { kind: "survey"; rate: number; m: number; extra: number; confirm: number; flag: number; batch: number; opts: string; decks: string | null }
-  /** データを作る svwb（td selfplay・beam-gap）。chunk 試合ずつ、out（{k} に区切りの番号を入れる）に書く。out が .gz なら書いた後に gzip する。
+  /** データを作る svwb（td selfplay・td branch・beam-gap）。chunk 試合ずつ、out（{k} に区切りの番号を入れる）に書く。out が .gz なら書いた後に gzip する。
    * args はそのほかの引数（そのまま渡す。{k} は区切りの番号にする） */
   | { kind: "data"; cmd: string[]; startFlag: "--start" | "--from"; outFlag: "--out" | "--inputs"; out: string; chunk: number; args: string[] }
   /** 学習（npm run td・npm run potential）。out を 1 つ作る。args は --out も含めた全部。
@@ -327,10 +327,11 @@ export function parseJob(line: string, index: number): Job {
     case "td":
     case "potential": {
       for (let i = 0; i < rest.length; i++) rest[i] = expandBraces(rest[i] ?? "");
-      if (kind === "beam-gap" || rest[0] === "selfplay") {
-        // データを作る svwb。区切りの大きさは --chunk で決める（後のジョブがファイルの名前で読むので、時間では決めない）
+      if (kind === "beam-gap" || rest[0] === "selfplay" || rest[0] === "branch") {
+        // データを作る svwb。区切りの大きさは --chunk で決める（後のジョブがファイルの名前で読むので、時間では決めない）。
+        // td branch（選ばなかった候補の枝）は、--from の棋譜の試合番号 [--start, --start + --games) を区切って回す
         const selfplay = kind === "td";
-        if (selfplay) rest.splice(0, 1);
+        const sub = selfplay ? rest.splice(0, 1)[0]! : "";
         const startFlag = selfplay ? "--start" : "--from";
         const outFlag = selfplay ? "--out" : "--inputs";
         refuse(["--positions", "--refFrom"], "キューではデータを作るときだけ");
@@ -346,7 +347,7 @@ export function parseJob(line: string, index: number): Job {
         const out = take(outFlag);
         if (out === null || !out.includes("{k}")) throw new Error(`${outFlag} は {k}（区切りの番号）を入れたファイル（例: @/s-{k}.jsonl.gz）`);
         if (est === null) throw new Error("--est で 1 試合の見込みの秒（回すマシン・並列数で）を書きます");
-        const cmd = selfplay ? ["td", "selfplay"] : ["beam-gap"];
+        const cmd = selfplay ? ["td", sub] : ["beam-gap"];
         return { index, line: text, label, games, start, est, spec: { kind: "data", cmd, startFlag, outFlag, out, chunk, args: [...rest] } };
       }
       const tool = kind === "potential" ? "potential" : "td";

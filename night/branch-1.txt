@@ -1,0 +1,50 @@
+# 選ばなかった候補を学びに足す（1 晩目）。ユーザーの依頼 2026-11-23「選び直しの得を勝率に変える」。計画は docs/ai-notes/15-2026-11-22.md「選ばなかった候補を学びに足す」
+#
+# 問い: AI が選ばなかった候補を打った枝を学びのデータに足すと、勝率が上がるか。
+#   調査（同じファイルの「選び直しの得が逃げる場所」）では、選び直しの得 7.74 点の大半は評価の誤りで、補正は良い候補を広く下に見ていた
+#   （打ち比べの良い候補の値の順位は 1 位・2 位・3〜4 位・5 位以下のどこにも散る）。自己対戦の行は AI が選んだ手の先しか無いので、
+#   選ばなかった候補の先の局面を、最後まで打った結果で学ばせる。
+#
+# やること:
+#   1. 枝（svwb td branch。rust/engine/src/runner/td.rs）: R6 を学んだ自己対戦（回 r6-heads-1。R5 が打った 6 万試合、g7500000〜7559999）の棋譜の
+#      試合ごとに、席 g mod 2 の自分の 4〜9 ターン目の最初を 1 つ選び、候補（探索が読み直した候補と、足した候補 4 つ。survey run と同じ作り方）から
+#      探索が選んだもの以外を 1 つ一様に選んで打ち、試合の終わりまで自己対戦と同じ打ち方（R5・--eps 0.1・同じ印）で 1 回打つ。
+#      枝のターン末からの局面を、自己対戦と同じ形の行で書く（"iv" の "zone" が "plan"。学習は普通の行として読み、介入の対にはしない）
+#   2. B′: R6（B）と同じ学び方（出発の補正・引数・間引き・属性で埋める）で、自己対戦の 20 ファイルに枝の 20 ファイルを足して学ぶ
+#   3. B′ 対 R6（84 個のデッキの鏡の compare 2 万試合、± 0.29 ほど。見込みはどちらも R4）
+#   4. 対照: データの量だけを倍にした B（回 r6-heads-2 の d120。R6 の自己対戦 6 万試合に lethal-heads-1 の 6 万試合を足して同じ学び方で学んだもの）対 R6（同じ 2 万試合）。
+#      枝は局面を 2 割ほど足すだけなので、B′ が勝ったときに量のせいかを、量を 10 割足した版の勝率で見分ける
+#      （d120 は棋譜のリーサルよけに近い数が 6 万 → 12 万でどれも良くならなかったが、勝率では測っていない）
+#   5. B′ の物差し 2 つと profile（採る前に測っておく。R6 と同じ試合数。採らなければ台帳に候補の名前で残るだけ）
+#
+# 回す前に決めた問いと線:
+#   B′ 対 R6: 差 − 2 SE > 0 なら、B′ を R7 の候補として採否をユーザーに出す。ただし d120 対 R6 も線を越えたら、量のせいでないかを
+#     B′ 対 d120 で確かめてから出す（回すかはユーザーと決める）。越えなければ枝の 1 回目は「やめた」にして、次の手をユーザーと決める
+#   試合数の決め方: 学び直し 1 回の伸びは R3 対 R2 +1.56、R4 対 R3 +2.13、C 対 R4 +1.16、R6 対 R5 +1.54。+1 のとき線を越える割合は 2 万試合で 9 割ほど
+#   線ではないが見る数（翌朝、クラウド環境で）: 調査の局面（survey-2）で、値と打ち比べの同じ局面の中の相関（R6 の補正後 0.69）と値で選んだときの得、
+#     棋譜のターン末の値の平均と実際の勝率の差（R6 は 2〜5 ポイント高い）とその偏りを除いた勝敗の交差エントロピー、型ごとの勝率、問題集
+#
+# 見込み（PC、svwb-docker・28 スレッド）: 枝はクラウド環境（4 スレッド）の実測 0.38 秒/試合（120 試合）から 0.06 秒/試合で 1 時間ほど。
+#   学びは B の実測 11 分に局面の 2 割を足して 14 分、間引き 30 秒・属性で埋める 10 秒。compare は 0.17 秒/試合で 57 分を 2 つ、
+#   物差しは R6 の実測 0.15・0.18 秒/試合で 4000 試合ずつ 22 分、profile 1 分
+# 朝: 止まったときのまとめを push してもらい、ingest する。B′ のモデル（bb.json）・枝のデータ・棋譜は出口のファイルで共有フォルダへ（翌朝の数が読む）
+# 回の名前は branch-1
+
+# 1. 枝 6 万（r6-heads-1 の自己対戦の棋譜から。打ち方と印は r6-heads-1 の自己対戦と同じ引数）
+td branch --model @run:r6-heads-1/v0.json --from @run:r6-heads-1/kifu --games 60000 --start 7500000 --chunk 3000 --turns 4-9 --extra 4 --eps 0.1 --opp beam --sampling default --imagined 2 --searchValue 1 --lostLabel 1 --wonLabel 1 --readLabel 1 --potential rust/engine/yardstick/pool-r4-potential.json --out @/b-{k}.jsonl.gz --est 0.06
+
+# 2. B′（B と同じ学び方。データに枝を足す）
+td train --impl rust --model @run:r6-heads-1/v0.json --data @run:r6-heads-1/s-{1..20}.jsonl.gz,@/b-{1..20}.jsonl.gz --out @/bbt.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks --est 840
+td prune --impl rust --model @/bbt.json --data @run:r6-heads-1/s-{1..20}.jsonl.gz,@/b-{1..20}.jsonl.gz --out @/bbp.json --est 30
+td attr --model @/bbp.json --out @/bb.json --keepA 0 --est 10
+
+# 3. B′ 対 R6（2 万試合。見込みはどちらも R4）
+compare 10000 '{"valueNet":"@/bb.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 枝の学び対R6 --est 0.17
+
+# 4. 対照: データの量だけを倍にした B 対 R6（同じ 2 万試合）
+compare 10000 '{"valueNet":"@run:r6-heads-2/d120.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 量の倍対R6 --est 0.17
+
+# 5. B′ の物差し 2 つと、線ではないが毎回見る数字
+yardstick --ref pool-v0 --opts '{"valueNet":"@/bb.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' --games 4000 --start 0 --label 新しいプール-物差し-枝の学び --est 0.15
+yardstick --ref pool-r3 --opts '{"valueNet":"@/bb.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' --games 4000 --start 0 --label 新しいプール-強い物差し-枝の学び --est 0.18
+profile --opts '{"valueNet":"@/bb.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.16
