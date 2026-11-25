@@ -5,7 +5,7 @@
 | ページ | URL | 入口 | タブ | 探索 AI の補正 |
 | --- | --- | --- | --- | --- |
 | スターター | `/Shadowverse-Wb-Sim/` | `index.html`・`src/main.tsx`・`src/ui/App.tsx` | 対戦・デッキ・AI対戦・人間との比較・問題集（開発サーバーではサンドボックス等も） | `starter`（`data/value-net.json`・`data/potential-net.json`） |
-| アズヴォルト環境 | `/Shadowverse-Wb-Sim/azvaldt/` | `azvaldt/index.html`・`src/azvaldt/main.tsx`・`src/azvaldt/App.tsx` | AI対戦（総当たり）・問題集 | `azvaldt`（`data/pools/azvaldt/` の補正 R6・見込み R4。2026-11-21 までは R3、2026-11-22 までは R4、2026-11-23 までは R5） |
+| アズヴォルト環境 | `/Shadowverse-Wb-Sim/azvaldt/` | `azvaldt/index.html`・`src/azvaldt/main.tsx`・`src/azvaldt/App.tsx` | AI対戦（総当たり）・問題集 | `azvaldt`（`data/pools/azvaldt/` の補正 R6・見込み R4。2026-11-21 までは R3、2026-11-22 までは R4、2026-11-23 までは R5。探索 AI の設定 `search-options.json` は 2026-11-25 から。下の「ブラウザの探索 AI とコマンドの探索 AI」） |
 
 `vite build` は 2 つの入口を束ね（`vite.config.ts` の `rollupOptions.input`）、画面の共通の部分は 1 つのチャンクにまとまる。
 ページの上の端に、もう片方のページへのリンクがある。
@@ -97,7 +97,17 @@
 
 ### ページの試合の時間
 
-R3 のときに測った。R4・R5・R6 は測り直していない（PC の profile で 1 手の思考は R4 43.4 ミリ秒・R3 50.8 ミリ秒で、同じほど。版が違う。R5 は R4 と同じ形のネットワークにリーサルの出力の 1 つの数を足しただけで、PC の compare は R4 対 R3 と同じ 0.17 秒/試合。R6 は R5 と同じ形で、クラウド環境の profile で同じ 80 試合の思考は R5 と差が見えない）。
+2026-11-25 に、新しいプールの既定の設定（読みの中の相手を補正で打たせる。上の表の `search-options.json`）を入れたときに測り直した（クラウド環境、4 スレッド。同じ日に設定なしの R6 と比べた）:
+
+| 設定 | Node の WASM の 1 手（代表 10 型の 20 試合、同じシード） | Node の 1 試合 | ヘッドレスの Chromium で既定の 90 試合（Worker 3 つ） |
+| --- | --- | ---: | ---: |
+| 新しいプールの既定（2026-11-25 から） | 平均 122 ミリ秒（中央 1.6・90% 389・99% 1440・最大 2463） | 11.4 秒 | 263 秒 |
+| R6 だけ（2026-11-24 まで） | 平均 54 ミリ秒（中央 1.4・90% 142・99% 833・最大 2319） | 5.5 秒 | 127 秒 |
+
+1 試合は 2.1 倍。4 スレッドのマシンで既定の 90 試合が 4 分半ほど（Worker 1 つで 1 試合 8.7 秒ほど）。1 手の長いほうは 99% で 1.4 秒、最大は前と同じ 2.5 秒ほど。
+ページのエラーは出なかった（Worker が設定を入れて打ったことは、`tests/nets-azvaldt.test.ts` の同じ手で確かめる）。
+
+その前は R3 のときに測った。R4・R5・R6 は測り直していなかった（PC の profile で 1 手の思考は R4 43.4 ミリ秒・R3 50.8 ミリ秒で、同じほど。版が違う。R5 は R4 と同じ形のネットワークにリーサルの出力の 1 つの数を足しただけで、PC の compare は R4 対 R3 と同じ 0.17 秒/試合。R6 は R5 と同じ形で、クラウド環境の profile で同じ 80 試合の思考は R5 と差が見えない）。
 
 
 - Node の WASM で、代表 10 型の R3 どうしの 1 試合は 2.9〜11.5 秒（平均 5.7 秒）
@@ -106,11 +116,17 @@ R3 のときに測った。R4・R5・R6 は測り直していない（PC の pro
 
 ### ブラウザの探索 AI とコマンドの探索 AI
 
-ページの探索 AI（今は補正 R6・見込み R4）は、WASM の探索 AI の既定の設定に、ページが読み込んだ補正と見込みを入れたもの。コマンドの R6 は
-`--opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}'`（R5・R6 は補正だけを学び直したので、見込みは R4 のファイル）。
+ページの探索 AI（今は補正 R6・見込み R4）は、WASM の探索 AI に、ページが読み込んだ補正と見込みを既定として入れ、新しいプールの既定の設定
+（`data/pools/azvaldt/search-options.json`。2026-11-25 から。読みの中の相手を幅 8・深さ 8 のまま S = 0 ＋補正で打たせ、想像の局面の印を切る）を入れたもの。
+`src/engine/wasm.ts` が補正を入れた後に WASM に渡し（`setSearchOptions`。補正を入れ直すたびに入れる）、名前が `search` の AI だけに効く。スターターのページは設定を入れない（探索 AI の既定のまま）。
+コマンドの新しいプールの既定は、補正・見込みとこの設定を `--opts` に並べたもの
+`'{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}'`
+（R5・R6 は補正だけを学び直したので、見込みは R4 のファイル。2026-11-24 までは補正と見込みだけ）。
 同じ局面（`misses/azvaldt/` の 13 問と、代表 10 型のデッキのマリガン 2 つ）から同じ乱数で打った手を `tests/fixtures/browser-azvaldt.json` に書き、
 CLI（`rust/engine/tests/browser_azvaldt.rs`）と WASM（`tests/nets-azvaldt.test.ts`）の両方で比べる。
 読み込んだ補正の指紋も、JSON を serde_json で読んだものと比べる（`data/pools/azvaldt/` と `rust/engine/yardstick/` の写しの両方。指紋にはリーサルの出力と winForm も入る。2026-11-22 から）。
+入れた設定も、`search-options.json` と同じかを確かめる（WASM の `searchOptions`。コマンドの側の `browser_azvaldt.rs` も同じファイルを読む）。
 ページの補正を入れ替えるときは、`data/pools/azvaldt/` と `rust/engine/yardstick/pool-<版>-*.json` を同じファイルにし、両方のテストの `PAGE_NET`（見込みを替えないなら `PAGE_POTENTIAL` はそのまま）を直して、
-表を `SVWB_WRITE_FIXTURE=1 cargo test --release --test browser_azvaldt` で書き直す。R3 → R4 では 14 行のうち 11 行の手が変わった（2026-11-21）。R4 → R5 では 10 行（2026-11-22）。R5 → R6 では 9 行（2026-11-23）。
+表を `SVWB_WRITE_FIXTURE=1 cargo test --release --test browser_azvaldt` で書き直す。設定を替えるときは `search-options.json` を直して、同じく表を書き直す。
+R3 → R4 では 14 行のうち 11 行の手が変わった（2026-11-21）。R4 → R5 では 10 行（2026-11-22）。R5 → R6 では 9 行（2026-11-23）。設定を足したときは 15 行のうち 4 行（2026-11-25）。
 2026-11-19 には、ブラウザで打った 1 試合（R3 どうし）を、リプレイの「再現」のコマンドで打ち直して同じ手数・ターン数になることも確かめた。

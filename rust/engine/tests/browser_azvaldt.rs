@@ -1,16 +1,18 @@
-//! ブラウザのアズヴォルト環境のページの AI が、コマンドの同じ補正（今は R6）と同じ手を選ぶか（ユーザーの依頼 2026-11-19。R3 から R4 にしたのは 2026-11-21、R5 にしたのは 2026-11-22、R6 にしたのは 2026-11-23）。
+//! ブラウザのアズヴォルト環境のページの AI が、コマンドの同じ補正（今は R6）・同じ設定と同じ手を選ぶか（ユーザーの依頼 2026-11-19。R3 から R4 にしたのは 2026-11-21、R5 にしたのは 2026-11-22、R6 にしたのは 2026-11-23。設定を足したのは 2026-11-25）。
 //!
 //! ページの AI は、WASM の探索 AI（`search`）に、ページが読み込んだ補正と見込み（data/pools/azvaldt/ の JSON を詰めたもの。
-//! scripts/pack-nets.ts、src/engine/wasm.ts）を既定として入れたもの。コマンドの側は、compare・misses の
-//! `--opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}'`（下の PAGE_NET・PAGE_POTENTIAL。
-//! R5・R6 は補正だけを学び直したもので、見込みは R4 のまま）。
+//! scripts/pack-nets.ts、src/engine/wasm.ts）を既定として入れ、探索 AI の設定（data/pools/azvaldt/search-options.json。下の PAGE_OPTIONS）を入れたもの。
+//! コマンドの側は、compare・misses の `--opts` に補正・見込みと同じ設定を書いたもの（2026-11-25 から
+//! `'{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}'`。
+//! 下の PAGE_NET・PAGE_POTENTIAL・PAGE_OPTIONS。R5・R6 は補正だけを学び直したもので、見込みは R4 のまま。
+//! 設定は、2026-11-25 に読みの中の相手を幅 8 のまま補正で打たせ、想像の局面の印を切った。それまでは補正と見込みだけ）。
 //!
 //! ここではコマンドの側が決まった局面（新しいプールの問題集 misses/azvaldt/ の 13 問と、代表 10 型のデッキのマリガン）から打つ手を求め、
 //! tests/fixtures/browser-azvaldt.json と比べる。問の局面からは、1 つの AI でそのターンの終わりまで打つ（並びを覚えて使い回す経路も通る。
 //! 判断ごとの乱数は「局面のシード + 何手目か」）。マリガンは最初の 1 回だけ。
 //! 同じファイルを、ブラウザの経路（WASM）で tests/nets-azvaldt.test.ts が比べる。
 //! 両方が通れば、ブラウザの AI はこれらの局面でコマンドの同じ補正と同じ手を選ぶ。
-//! ファイルを書き直すのは、ページの補正を替えたときか、手が意図して変わったとき（探索 AI の既定を変えた等）だけ:
+//! ファイルを書き直すのは、ページの補正・設定を替えたときか、手が意図して変わったとき（探索 AI の既定を変えた等）だけ:
 //! `SVWB_WRITE_FIXTURE=1 cargo test --release --test browser_azvaldt`
 
 use std::fs;
@@ -31,6 +33,8 @@ const MAX_STEPS: u32 = 60;
 const PAGE_NET: &str = "pool-r6";
 /// ページの見込みの凍結した写し（rust/engine/yardstick/<PAGE_POTENTIAL>-potential.json。data/pools/azvaldt/potential-net.json と同じ中身）
 const PAGE_POTENTIAL: &str = "pool-r4";
+/// ページの探索 AI の設定（補正と見込みの他。src/engine/wasm.ts が WASM に入れる。新しいプールの既定の探索 AI の --opts から補正と見込みを除いたもの）
+const PAGE_OPTIONS: &str = "data/pools/azvaldt/search-options.json";
 
 fn root() -> String {
     format!("{}/../..", env!("CARGO_MANIFEST_DIR"))
@@ -97,10 +101,13 @@ fn positions() -> Vec<Position> {
 #[test]
 fn browser_matches_command() {
     let dir = format!("{}/rust/engine/yardstick", root());
-    let opts = compare_options(&format!(
+    let nets = Json::parse(&format!(
         r#"{{"valueNet":"{dir}/{PAGE_NET}-net.json","potentialNet":"{dir}/{PAGE_POTENTIAL}-potential.json"}}"#
     ))
-    .expect("ページの補正の設定");
+    .expect("補正の JSON");
+    let page = fs::read_to_string(format!("{}/{PAGE_OPTIONS}", root())).expect(PAGE_OPTIONS);
+    let page = Json::parse(&page).expect("探索 AI の設定の JSON");
+    let opts = compare_options(&nets.spread(&page).stringify()).expect("ページの補正の設定");
     let mut rows = Vec::new();
     for p in positions() {
         let mut agent = svwb_engine::ai::search::SearchAgent::new(opts.clone());

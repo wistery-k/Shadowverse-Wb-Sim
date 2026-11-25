@@ -114,7 +114,7 @@ npm run svwb -- survey values 結果.jsonl… --kifu <棋譜>[,<棋譜>…] --sc
 | `--confirm` | 96 | 二段目に打つ回数（AI の選んだ候補と、差の最も大きい候補の 2 つ） |
 | `--flag` | 10 | 二段目に回す、一段目の差（ポイント） |
 | `--batch` | 8 | まとめて打って書く試合の数の上限（大きさはそろえる。17 試合なら 6・6・5。止めたときに失うのは書いていない分だけ） |
-| `--opts` | `{}`（今の既定） | 自己対戦を打つ AI、候補を作る AI、続きを打つ AI（両方の席）の設定。`compare` の A・B と同じ形。新しいプールでは新しいプールの補正と見込みを渡す（[yardstick.md](yardstick.md)「新しいプールの物差し」。今は補正 R6 の `pool-r6-net.json` と見込み R4 の `pool-r4-potential.json`、2026-11-21 までは `pool-r3-*.json`、2026-11-22 までは `pool-r4-*.json`、2026-11-23 までは `pool-r5-net.json`）。試合の行に `opts` として書き、`report`（台帳の `a`）と `recheck` はそれを使う（違う設定の行が混ざっていれば断る）。2026-11-16 から |
+| `--opts` | `{}`（今の既定） | 自己対戦を打つ AI、候補を作る AI、続きを打つ AI（両方の席）の設定。`compare` の A・B と同じ形。新しいプールでは新しいプールの補正と見込みを渡す（[yardstick.md](yardstick.md)「新しいプールの物差し」。今は補正 R6 の `pool-r6-net.json` と見込み R4 の `pool-r4-potential.json` に、2026-11-25 からは `opponentSearch`・`imaginedInput` も足した新しいプールの既定（yardstick.md の同じ節）、2026-11-21 までは `pool-r3-*.json`、2026-11-22 までは `pool-r4-*.json`、2026-11-23 までは `pool-r5-net.json`）。試合の行に `opts` として書き、`report`（台帳の `a`）と `recheck` はそれを使う（違う設定の行が混ざっていれば断る）。2026-11-16 から |
 | `--decks` | 比較用の 7 デッキ（`svwb ai-play` と同じ試合） | 並べたデッキ（`@<デッキの組>` も。[commands.md](commands.md)「compare」）で自己対戦を打つ。組とシードは `compare --decks` と同じ（先の席が A）。デフォルトデッキと違うデッキのマリガンは compare と同じ |
 | `report --label` | なし | 台帳の名前 |
 | `report --no-ledger` | なし | 台帳に書かない |
