@@ -13,7 +13,7 @@ use svwb_engine::ai::lethal_hint::lethal_hint;
 use svwb_engine::ai::netpack;
 use svwb_engine::ai::potential::install_default_potential_net;
 use svwb_engine::ai::registry::create_agent;
-use svwb_engine::ai::search::ScoreParts;
+use svwb_engine::ai::search::{ScoreParts, SearchAgent, SearchOptions};
 use svwb_engine::ai::think::Thought;
 use svwb_engine::ai::valuenet::install_default_value_net;
 use svwb_engine::ai::{Agent, Rng};
@@ -21,6 +21,7 @@ use svwb_engine::data::{data, CardIdx};
 use svwb_engine::game::{attack_reach, attack_targets, fusion_candidates};
 use svwb_engine::json::Json;
 use svwb_engine::replay_index::replay_index;
+use svwb_engine::runner::options::compare_options;
 use svwb_engine::sim::{branch_line_playout, branch_playout};
 use svwb_engine::state::Iid;
 use svwb_engine::state_json::{action_from_json, action_to_json, state_from_json, state_to_json};
@@ -36,6 +37,8 @@ thread_local! {
     static AGENTS: RefCell<Vec<Option<Box<dyn Agent>>>> = const { RefCell::new(Vec::new()) };
     /// 読み込んだ補正・見込みのハッシュ（netpack::checksum。読み込む前は空）
     static NETS: RefCell<String> = const { RefCell::new(String::new()) };
+    /// 探索 AI（"search"）の設定と、入れたときの JSON（setSearchOptions。入れる前は None で、探索 AI の既定 SearchOptions::default()）
+    static SEARCH: RefCell<Option<(SearchOptions, String)>> = const { RefCell::new(None) };
 }
 
 enum Fail {
@@ -219,6 +222,16 @@ fn deck(v: &Json) -> R<Vec<CardIdx>> {
         .collect()
 }
 
+/// 名前から AI を作る。"search" は、setSearchOptions で設定を入れていればその設定の探索 AI
+fn new_agent(name: &str) -> R<Box<dyn Agent>> {
+    if name == "search" {
+        if let Some(o) = SEARCH.with(|s| s.borrow().as_ref().map(|(o, _)| o.clone())) {
+            return Ok(Box::new(SearchAgent::new(o)));
+        }
+    }
+    create_agent(name).ok_or_else(|| Fail::Error(format!("未知の AI: {name}")))
+}
+
 /// 打ち比べの続きを打つ 2 つの AI（要求の agents。試合ごとに作り直す）
 fn branch_agents(req: &Json) -> R<Vec<Box<dyn Agent>>> {
     let Json::Arr(names) = field(req, "agents")? else {
@@ -229,7 +242,7 @@ fn branch_agents(req: &Json) -> R<Vec<Box<dyn Agent>>> {
         let Json::Str(n) = n else {
             return Err(Fail::Error("agents は 2 つの AI の名前の配列".into()));
         };
-        made.push(create_agent(n).ok_or_else(|| Fail::Error(format!("未知の AI: {n}")))?);
+        made.push(new_agent(n)?);
     }
     Ok(made)
 }
@@ -348,13 +361,42 @@ fn dispatch(req: &Json) -> R<Json> {
                 Json::Str(n.clone())
             }
         }),
+        // ページの探索 AI（"search"）の設定を入れる（src/engine/wasm.ts が補正を入れた後に呼ぶ。data/pools/<プール>/search-options.json）。
+        // compare の --opts と同じ形で読む。補正と見込みはページが入れた既定のものなので、ファイルを読む項目（valueNet・potentialNet）は書けない
+        "setSearchOptions" => {
+            let opts = field(req, "opts")?;
+            if !opts.is_obj() {
+                return Err(Fail::Error("opts は設定のオブジェクト".into()));
+            }
+            for key in ["valueNet", "potentialNet"] {
+                if opts.get(key).is_some() {
+                    return Err(Fail::Error(format!(
+                        "\"{key}\" は書けません（ページの補正と見込みは load_nets で入れたもの）"
+                    )));
+                }
+            }
+            if NETS.with(|n| n.borrow().is_empty()) {
+                return Err(Fail::Error(
+                    "補正を入れる前に探索 AI の設定は入れられません（load_nets の後に呼びます）"
+                        .into(),
+                ));
+            }
+            let text = opts.stringify();
+            let o = compare_options(&text)?;
+            SEARCH.with(|s| *s.borrow_mut() = Some((o, text)));
+            Json::Null
+        }
+        // 入れた探索 AI の設定（setSearchOptions の opts。入れていなければ null）
+        "searchOptions" => match SEARCH.with(|s| s.borrow().as_ref().map(|(_, t)| t.clone())) {
+            Some(t) => Json::parse(&t)?,
+            None => Json::Null,
+        },
         "agentNew" => {
             let name = match field(req, "name")? {
                 Json::Str(n) => n.as_str(),
                 _ => return Err(Fail::Error("name は AI の名前".into())),
             };
-            let agent =
-                create_agent(name).ok_or_else(|| Fail::Error(format!("未知の AI: {name}")))?;
+            let agent = new_agent(name)?;
             AGENTS.with(|a| {
                 let mut a = a.borrow_mut();
                 a.push(Some(agent));
@@ -367,8 +409,7 @@ fn dispatch(req: &Json) -> R<Json> {
                 Json::Str(n) => n.as_str(),
                 _ => return Err(Fail::Error("name は AI の名前".into())),
             };
-            let agent =
-                create_agent(name).ok_or_else(|| Fail::Error(format!("未知の AI: {name}")))?;
+            let agent = new_agent(name)?;
             Json::Bool(agent.sequential_rng())
         }
         "agentFree" => {
@@ -490,8 +531,7 @@ fn dispatch(req: &Json) -> R<Json> {
                 Json::Str(n) => n.as_str(),
                 _ => return Err(Fail::Error("agent は AI の名前".into())),
             };
-            let mut agent =
-                create_agent(name).ok_or_else(|| Fail::Error(format!("未知の AI: {name}")))?;
+            let mut agent = new_agent(name)?;
             let s = state(req)?;
             let legal = legal_actions(&s);
             reset_exact_lethal_cache();

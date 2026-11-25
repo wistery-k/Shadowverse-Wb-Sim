@@ -1,6 +1,6 @@
 //! TD 学習の自己対戦（TypeScript 版 scripts/td-main.ts の selfplay。npm run td -- selfplay と同じ試合・同じ JSON Lines）。
 //!
-//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--searchValue 0] [--lethalLabel 0] [--lostLabel 0] [--wonLabel 0] [--readLabel 0] [--sampling classic|default] [--potential p.json|null] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--kifu k.jsonl | --no-kifu] --out d0.jsonl
+//!   svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] [--opp greedy|beam] [--iv 0] [--ivZone hand|board|both|drawn] [--ivRes 0] [--imagined 0] [--searchValue 0] [--lethalLabel 0] [--lostLabel 0] [--wonLabel 0] [--readLabel 0] [--sampling classic|default] [--potential p.json|null] [--searchOptions <設定の JSON かファイル>] [--cmp 0] [--rollouts 8] [--board 1] [--check 0] [--sDefault 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--kifu k.jsonl | --no-kifu] --out d0.jsonl
 //!
 //! --sampling default なら探索 AI の既定の読み方（ビームは 1 回・既定の幅（今は 256）、上位の手の読み直しで相手の手札を 12 通り引き直す）で打つ
 //! （既定の classic は今までの自己対戦と同じ、決定化 3 回・幅 32）。
@@ -8,6 +8,10 @@
 //! --potential <ファイル> なら、ビームの並べ替えに使う学習した見込みを、組み込みの既定（data/potential-net.json）の代わりにそのファイルにする
 //! （compare の設定の "potentialNet" と同じ。null なら見込みを使わない。--cmp の最後まで打つ側にも使う）。学び直しの 2 回目から、
 //! 前の回で学び直した見込みで打つ用（`night/pool-r1.txt`）。--sampling classic は見込みを使わない読み方なので、一緒には使えない。
+//! --searchOptions <設定の JSON かファイル> なら、そこまでで作った探索 AI の設定の項目を上書きする（compare の --opts と同じ形。
+//! 補正・見込み・評価の重みの項目は --model・--potential から作るので書けない。--cmp の最後まで打つ側には使わない）。
+//! 新しいプールの既定（2026-11-25 から）は `--opp beam --sampling default --potential <見込み> --searchOptions data/pools/azvaldt/search-options.json`
+//! で、compare の新しいプールの既定と同じ手を打つ（docs/yardstick.md「新しいプールの物差し」。tests の selfplay_search_options_match_compare）。
 //! --iv k なら、各試合で 1 つの自分のターンの最初（どちらかのプレイヤーの 3〜8 ターン目）から、手札のカードを 1 枚抜いた局面を
 //! k 個（小数なら平均 k 個。抜くカードは別々）作り、そこから最後まで同じ --eps で打った試合も書き出す（"iv": {"p", "k", "card"} 付きの行。
 //! k はもとの試合のその局面の添字）。カードを抜くのは打ち方と関係ないので、学習した補正が手札のカードの価値を
@@ -109,7 +113,7 @@
 use super::deck_compare::{read_deck, read_deck_list};
 use super::human_plan::mix;
 use super::kifu::{self, RunInfo, Seat};
-use super::options::{compare_options, model_eval};
+use super::options::{compare_options, model_eval, search_options};
 use super::parallel::parallel_map;
 use super::{compare_decks, fixed, seconds_since, Tally};
 use crate::ai::aidata::{ai_data, weights_with};
@@ -1302,7 +1306,35 @@ fn play_one(
     }
 }
 
-/// selfplay と branch に共通の、打ち方と局面に書く印の引数（--opp・--sampling・--potential・--board・--imagined・--searchValue・
+/// --searchOptions の値（設定の JSON か、JSON のファイルの道）を読む。compare の --opts と同じ形で、
+/// 補正・見込みと評価の重みは --model・--potential から作るので書けない
+fn search_options_arg(v: &str) -> Result<Json, String> {
+    let text = if v.trim_start().starts_with('{') {
+        v.to_string()
+    } else {
+        std::fs::read_to_string(v).map_err(|e| format!("--searchOptions {v} を読めません: {e}"))?
+    };
+    let raw = Json::parse(&text).map_err(|e| format!("--searchOptions: {e}"))?;
+    if !raw.is_obj() {
+        return Err("--searchOptions は設定のオブジェクトの JSON（かそのファイル）".into());
+    }
+    for key in [
+        "valueNet",
+        "potentialNet",
+        "extraEval",
+        "weights",
+        "policyWeights",
+    ] {
+        if raw.get(key).is_some() {
+            return Err(format!(
+                "--searchOptions に \"{key}\" は書けません（補正は --model、見込みは --potential で渡す）"
+            ));
+        }
+    }
+    Ok(raw)
+}
+
+/// selfplay と branch に共通の、打ち方と局面に書く印の引数（--opp・--sampling・--potential・--searchOptions・--board・--imagined・--searchValue・
 /// --wonLabel・--readLabel・--lethalLabel・--lostLabel・--check・--sDefault）から作る自己対戦の設定。
 /// 返すのは（設定, 補正, --potential（無ければ None、null なら Some(None)）, --sampling classic か, --opp beam か）
 #[allow(clippy::type_complexity)]
@@ -1353,6 +1385,12 @@ fn common_model(
     let mut m = model_options(net.clone(), opp_beam, classic)?;
     if let Some(p) = &potential {
         m.opts.potential = p.clone();
+    }
+    // --searchOptions: 探索 AI の設定を上書きする（--opp・--sampling・--potential の後に。新しいプールの既定は
+    // data/pools/azvaldt/search-options.json。2026-11-25 から、アズヴォルト環境のページ・compare と同じ）
+    if let Some(v) = arg(args, "searchOptions") {
+        m.opts = search_options(&search_options_arg(v)?, None, m.opts.clone(), &[])
+            .map_err(|e| format!("--searchOptions: {e}"))?;
     }
     m.board = board;
     m.imagined = imagined as usize;
@@ -1538,6 +1576,9 @@ fn selfplay(args: &[(String, String)]) -> Result<(), String> {
         ];
         if let Some(p) = arg(args, "potential") {
             ai.push(("potential".into(), Json::Str(p.into())));
+        }
+        if let Some(v) = arg(args, "searchOptions") {
+            ai.push(("searchOptions".into(), search_options_arg(v)?));
         }
         let td_seat = Seat {
             side: m.frozen.as_ref().map(|_| "learner".to_string()),
@@ -2029,6 +2070,7 @@ pub fn main(argv: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ai::Agent;
     use crate::data::AMBUSH;
     use crate::state::{EVOLVE_BONUS, HAND_LIMIT};
 
@@ -2505,6 +2547,79 @@ mod tests {
         );
         assert!(missing.is_err());
         std::fs::remove_dir_all(&dir).expect("片付け");
+    }
+
+    #[test]
+    fn selfplay_search_options_match_compare() {
+        // 新しいプールの既定（2026-11-25）: td selfplay の --opp beam --sampling default --potential <R4> --searchOptions <ページの設定>
+        // の探索 AI は、compare の --opts（補正・見込みとページの設定を並べたもの）の探索 AI と、新しいプールの問の局面で同じ手を選ぶ。
+        // --searchOptions が無い（R6 だけ）と手が変わる局面がある（設定が読みに届いている）
+        let root = format!("{}/../..", env!("CARGO_MANIFEST_DIR"));
+        let dir = format!("{root}/rust/engine/yardstick");
+        let model = format!("{dir}/pool-r6-net.json");
+        let potential = format!("{dir}/pool-r4-potential.json");
+        let page = format!("{root}/data/pools/azvaldt/search-options.json");
+        let td = |extra: &[&str]| -> Result<SearchOptions, String> {
+            let mut argv: Vec<String> = [
+                "--opp",
+                "beam",
+                "--sampling",
+                "default",
+                "--potential",
+                &potential,
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+            argv.extend(extra.iter().map(|s| s.to_string()));
+            Ok(common_model(&parse_args(&argv)?, &model, 0.0)?.0.opts)
+        };
+        let page_json =
+            Json::parse(&std::fs::read_to_string(&page).expect("ページの設定")).expect("JSON");
+        let nets = Json::parse(&format!(
+            r#"{{"valueNet":"{model}","potentialNet":"{potential}"}}"#
+        ))
+        .expect("JSON");
+        let cmp = compare_options(&nets.spread(&page_json).stringify()).expect("compare の設定");
+        let with = td(&["--searchOptions", &page]).expect("ファイル");
+        let inline = td(&["--searchOptions", &page_json.stringify()]).expect("JSON");
+        let without = td(&[]).expect("設定なし");
+        let problems = format!("{root}/misses/azvaldt");
+        let mut files: Vec<String> = std::fs::read_dir(&problems)
+            .expect("misses/azvaldt")
+            .map(|e| e.expect("ファイル").path().display().to_string())
+            .filter(|f| f.ends_with(".json"))
+            .collect();
+        files.sort();
+        let first = |o: &SearchOptions, s: &GameState, seed: u32| -> String {
+            let legal = legal_actions(s);
+            let a = SearchAgent::new(o.clone()).choose_action(s, &legal, &mut Rng::new(seed));
+            crate::state_json::action_to_json(&a).stringify()
+        };
+        let mut differ = 0;
+        for (i, f) in files.iter().enumerate() {
+            let problem = Json::parse(&std::fs::read_to_string(f).expect("問")).expect("JSON");
+            let s = crate::state_json::state_from_json(problem.get("state").expect("state"))
+                .expect("局面");
+            let seed = 1000 + i as u32;
+            let want = first(&cmp, &s, seed);
+            assert_eq!(first(&with, &s, seed), want, "{f}");
+            assert_eq!(first(&inline, &s, seed), want, "{f}");
+            if first(&without, &s, seed) != want {
+                differ += 1;
+            }
+        }
+        assert!(differ > 0, "--searchOptions が無くても同じ手");
+        // 補正・見込み・重みは --model・--potential から作るので書けない
+        for bad in [
+            r#"{"valueNet":"x.json"}"#,
+            r#"{"potentialNet":"x.json"}"#,
+            r#"{"weights":"zero"}"#,
+            "[1]",
+        ] {
+            assert!(td(&["--searchOptions", bad]).is_err(), "{bad}");
+        }
+        assert!(td(&["--searchOptions", "/nonexistent/o.json"]).is_err());
     }
 
     #[test]

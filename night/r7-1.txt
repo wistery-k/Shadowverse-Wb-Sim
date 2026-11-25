@@ -14,7 +14,8 @@
 #   勝ちの出力・読みの出力の印（--wonLabel・--readLabel）は使わないので付けない。見込み（potential）は R4 のまま（R6 と同じ）
 #   シードは g7600000〜7659999（r6-heads-1 は 7500000〜7559999）
 #
-# 見込み（PC、svwb-docker・28 スレッド）: 自己対戦は R6 の学び（r6-heads-1）の実測 0.43 秒/試合に、新しい既定の思考の倍率をかけた秒/試合（下の --est）。
+# 見込み（PC、svwb-docker・28 スレッド）: 自己対戦は R6 の学び（r6-heads-1）の実測 0.43 秒/試合に、新しい既定の倍率 1.51（打ち比べのスレッドがクラウド環境で、
+#   R6 の学びと同じ引数の自己対戦を設定あり・なし 48 試合ずつ打った比。1 割ほどぶれる）をかけた 0.65 秒/試合で 10 時間 50 分ほど。
 #   学び 1 つは R6 の学び（B）の実測 11 分に、I は入力の分を足して 12〜13 分。間引き 30 秒・属性 10 秒ほど、profile 2 分
 # 朝: 止まったときのまとめを push してもらい、ingest する。モデル（c・k・i・ki.json）は 2 晩目が @run:r7-1/<版>.json で読む
 # 回の名前は r7-1（plan に --name r7-1 を付ける。2 晩目のキューがこの回のフォルダのモデルを読む）
@@ -23,7 +24,7 @@
 td extend --model rust/engine/yardstick/pool-r6-net.json --out @/v0.json --est 120
 
 # 1. 自己対戦 6 万試合（新しい既定）
-td selfplay --model @/v0.json --decks @data/pools/azvaldt/sets/all84.txt --games 60000 --start 7600000 --chunk 3000 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --lostLabel 1 --potential rust/engine/yardstick/pool-r4-potential.json --searchOptions data/pools/azvaldt/search-options.json --out @/s-{k}.jsonl.gz --est 0.80
+td selfplay --model @/v0.json --decks @data/pools/azvaldt/sets/all84.txt --games 60000 --start 7600000 --chunk 3000 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --lostLabel 1 --potential rust/engine/yardstick/pool-r4-potential.json --searchOptions data/pools/azvaldt/search-options.json --out @/s-{k}.jsonl.gz --est 0.65
 
 # 2. C 対照（R6 と同じ入力・目標）
 td train --impl rust --model @/v0.json --data @/s-{1..20}.jsonl.gz --out @/ct.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks,oppDeckAtkMod,oppDeckDefMod,oppHandAtkMod,oppHandDefMod,myMaxHp,oppMaxHp --est 720

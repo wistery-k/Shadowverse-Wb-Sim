@@ -34,6 +34,7 @@ wasm-bindgen は使わず、要求と結果を JSON の文字列で受け渡す�
 `svwb-engine` の feature `embedded-nets`（既定で入る）が埋め込みで、CLI・テストは今までどおり `data/value-net.json`・`data/potential-net.json` を埋め込む。
 `rust/wasm` は `default-features = false` で埋め込まず、`ai-data-web.json` を読む。代わりにページが補正のファイルを読み込んで、
 `load_nets` で既定の補正・見込みとして入れる（`ValueNet`・`PotentialNet` の `install_default_*`。入れる前に探索 AI を使うと止まる）。
+ページの探索 AI（`search`）の設定も、補正を入れた後に `call` の `setSearchOptions` で入れられる（compare の `--opts` と同じ形。アズヴォルト環境のページは `data/pools/azvaldt/search-options.json`、2026-11-25 から。`docs/browser.md`「ブラウザの探索 AI とコマンドの探索 AI」）。
 
 - 補正のファイル: `npm run wasm` の終わりに `scripts/pack-nets.ts` が JSON から作る `src/engine/nets/<名前>.bin`（コミットしない）。
   `starter` はスターターのページ（`data/value-net.json`・`data/potential-net.json`）、`azvaldt` はアズヴォルト環境のページ（`data/pools/azvaldt/` の補正 R6・見込み R4。2026-11-21 までは R3、2026-11-22 までは R4、2026-11-23 までは R5）
