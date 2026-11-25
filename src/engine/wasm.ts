@@ -12,9 +12,13 @@
 // スターターのページは starter（data/value-net.json と同じ）、アズヴォルト環境のページは azvaldt（今は補正 R6・見込み R4）。selectNets で選ぶ。
 // AI を動かす Worker が自分で読み込む（Worker は作った画面が付けた名前 workerName() で、同じ補正を選ぶ）。
 // 画面は AI を動かさないので補正を読み込まない（initEngine の nets: false。src/ui/boot.tsx）。
+// 補正と一緒に、ページの探索 AI（"search"）の設定も入れる（SEARCH_OPTIONS。アズヴォルト環境のページは data/pools/azvaldt/search-options.json。
+// 新しいプールの既定の探索 AI で、コマンドの compare・自己対戦の --opts と同じ。スターターのページは探索 AI の既定のまま）。
 //
 // Node（テスト・スクリプト）では、最初の呼び出しで src/engine/svwb.wasm と src/engine/nets/<名前>.bin を読み込む。
 // どちらも npm run wasm（scripts/build-wasm.mjs）で作る（ビルドの生成物なのでコミットしない）。
+
+import azvaldtSearchOptions from "../../data/pools/azvaldt/search-options.json";
 
 /** WASM が書き出す関数（rust/wasm/src/lib.rs） */
 interface Exports {
@@ -36,6 +40,15 @@ const isNetsName = (x: unknown): x is NetsName => typeof x === "string" && (NETS
 const NETS_URLS: Record<NetsName, URL> = {
   starter: new URL("./nets/starter.bin", import.meta.url),
   azvaldt: new URL("./nets/azvaldt.bin", import.meta.url),
+};
+
+/**
+ * ページの探索 AI（"search"）の設定（compare の --opts と同じ形。補正と見込みの項目は書かない。補正を入れた後に WASM に入れる）。
+ * null なら探索 AI の既定（rust/engine/src/ai/search.rs の SearchOptions::default()）
+ */
+const SEARCH_OPTIONS: Record<NetsName, object | null> = {
+  starter: null,
+  azvaldt: azvaldtSearchOptions,
 };
 
 /** 行動が今の局面で打てないときのエラー */
@@ -89,7 +102,7 @@ export const currentNets = (): NetsName => nets;
 /** Worker を作るときの名前（Worker が画面と同じ補正を読み込む）。new Worker(url, { type: "module", name: workerName() }) */
 export const workerName = (): string => `nets:${nets}`;
 
-/** WASM に補正を入れる */
+/** WASM に補正と、ページの探索 AI の設定を入れる */
 function installNets(w: Exports, bytes: Uint8Array): void {
   const ptr = w.alloc(bytes.length);
   new Uint8Array(w.memory.buffer, ptr, bytes.length).set(bytes);
@@ -100,6 +113,14 @@ function installNets(w: Exports, bytes: Uint8Array): void {
     throw new Error(`補正（${nets}）を読み込めません: ${readOut(w) || String(e)}`);
   }
   if (code !== 0) throw new Error(`補正（${nets}）を読み込めません: ${readOut(w)}`);
+  const opts = SEARCH_OPTIONS[nets];
+  if (opts) {
+    try {
+      callOn(w, { f: "setSearchOptions", opts });
+    } catch (e) {
+      throw new Error(`探索 AI の設定（${nets}）を入れられません: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 }
 
 function use(instance: WebAssembly.Instance): void {
@@ -251,7 +272,11 @@ function readOut(w: Exports): string {
  * 不正な行動なら IllegalActionError を投げる。WASM の中で panic したら、その内容でエラーを投げ、次の呼び出しで読み込み直す
  */
 export function callEngine(req: { f: string; [key: string]: unknown }): unknown {
-  const w = exports();
+  return callOn(exports(), req);
+}
+
+/** callEngine の本体（WASM を指定して呼ぶ。補正を入れるときは、使う前の WASM を呼ぶ） */
+function callOn(w: Exports, req: { f: string; [key: string]: unknown }): unknown {
   const bytes = encoder.encode(JSON.stringify(req));
   const ptr = w.alloc(bytes.length);
   new Uint8Array(w.memory.buffer, ptr, bytes.length).set(bytes);
@@ -267,6 +292,11 @@ export function callEngine(req: { f: string; [key: string]: unknown }): unknown 
   if (code === 0) return JSON.parse(text) as unknown;
   if (code === 1) throw new IllegalActionError(text);
   throw new Error(text);
+}
+
+/** WASM に入れたページの探索 AI の設定（SEARCH_OPTIONS。入れていなければ null で、探索 AI の既定） */
+export function searchOptions(): unknown {
+  return callEngine({ f: "searchOptions" });
 }
 
 /** 読み込んだ補正と見込みのハッシュ（rust/engine/src/ai/netpack.rs の checksum。読み込んでいなければ null） */

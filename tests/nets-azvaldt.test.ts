@@ -1,10 +1,11 @@
-// アズヴォルト環境のページの AI（WASM の探索 AI に、ページが読み込んだ補正と見込み（今は R6。2026-11-21 に R3 から R4 に、2026-11-22 に R5 に、2026-11-23 に R6 に替えた。R5・R6 の見込みは R4 のまま）を入れたもの）が、
-// コマンドの同じ補正（compare・misses の --opts の valueNet・potentialNet。rust/engine/yardstick/<PAGE_NET>-net.json・<PAGE_POTENTIAL>-potential.json）と同じ値の補正を持ち、決まった局面から同じ手を打つか。
+// アズヴォルト環境のページの AI（WASM の探索 AI に、ページが読み込んだ補正と見込み（今は R6。2026-11-21 に R3 から R4 に、2026-11-22 に R5 に、2026-11-23 に R6 に替えた。R5・R6 の見込みは R4 のまま）と、
+// 探索 AI の設定（data/pools/azvaldt/search-options.json。2026-11-25 から。読みの中の相手を補正で打たせ、想像の局面の印を切る）を入れたもの）が、
+// コマンドの同じ補正・同じ設定（compare・misses の --opts の valueNet・potentialNet と、残りの項目。rust/engine/yardstick/<PAGE_NET>-net.json・<PAGE_POTENTIAL>-potential.json）と同じ値の補正を持ち、決まった局面から同じ手を打つか。
 // 局面と手は tests/fixtures/browser-azvaldt.json（コマンドの側の手を rust/engine/tests/browser_azvaldt.rs が確かめる）
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { actingPlayer, applyAction, createGame, legalActions, selectNets, type Action, type GameState } from "../src/engine";
-import { callEngine, currentNets, netsChecksum, netsChecksumOfJson } from "../src/engine/wasm";
+import { callEngine, currentNets, netsChecksum, netsChecksumOfJson, searchOptions } from "../src/engine/wasm";
 import { packNets } from "../scripts/pack-nets";
 
 // エンジンを使う前に選ぶ（このファイルの WASM はアズヴォルト環境の補正を入れる）
@@ -53,6 +54,10 @@ describe("補正のファイル（アズヴォルト環境）", () => {
     const loaded = netsChecksum();
     expect(loaded).toBe(netsChecksumOfJson(read("data/pools/azvaldt/value-net.json"), read("data/pools/azvaldt/potential-net.json")));
     expect(loaded).toBe(netsChecksumOfJson(read(`rust/engine/yardstick/${PAGE_NET}-net.json`), read(`rust/engine/yardstick/${PAGE_POTENTIAL}-potential.json`)));
+  });
+
+  it("WASM に入れた探索 AI の設定が data/pools/azvaldt/search-options.json と同じ（rust/engine/tests/browser_azvaldt.rs のコマンドの側も同じファイルを読む）", () => {
+    expect(searchOptions()).toEqual(JSON.parse(read("data/pools/azvaldt/search-options.json")));
   });
 
   it("リーサルの出力と勝つ確率の形もハッシュに入る（R5・R6 は winForm が survival。ヘッダの JSON に残る値も確かめる）", () => {

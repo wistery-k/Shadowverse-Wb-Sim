@@ -9,34 +9,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseLedger, type RunRow } from "../scripts/ledger-main";
-import { main, makeTicket, parseJobs, parseTicket, queueSpecs, ticketText, type Plan } from "../scripts/night-main";
+import { main, makeTicket, parseJobs, queueSpecs, ticketText, type Plan } from "../scripts/night-main";
 import { labelOf, parseStatus, pueueStatus, taskLabel, type PStatus } from "../scripts/night-pueue";
 import { FAKE, gitT } from "./night-helpers";
-
-describe("積む券", () => {
-  const body = { v: 2 as const, name: "branch-1-20261124", branch: "claude/x", commit: "0123456789ab", jobs: "night/t.txt" };
-  it("止める時刻を持たず、書いて読み直すと同じ。前のやり方の券（svwb-night-1）とは指紋が違う", () => {
-    const t = makeTicket(body, "profile --games 2\n");
-    expect(ticketText(t)).toBe(`svwb-queue-1 name=branch-1-20261124 branch=claude/x commit=0123456789ab jobs=night/t.txt plan=${t.plan}`);
-    expect(parseTicket([ticketText(t)])).toEqual(t);
-    const u = makeTicket({ ...body, threads: 8, chunk: 15 }, "x");
-    expect(parseTicket(ticketText(u).split(" "))).toEqual(u);
-    const { v: _, ...old } = body;
-    expect(makeTicket({ ...old, until: "07:00" }, "profile --games 2\n").plan).not.toBe(t.plan);
-  });
-  it("積む券に止める時刻は書けない。add は前のやり方の券を、go は積む券を断る", async () => {
-    const t = ticketText(makeTicket(body, "x"));
-    expect(() => parseTicket([`${t.replace(/ plan=/, " until=07:00 plan=")}`])).toThrow(/止める時刻/);
-    expect(() => parseTicket([`${t.replace(/ plan=/, " tz=Asia/Tokyo plan=")}`])).toThrow(/止める時刻/);
-    const errs = vi.spyOn(console, "error").mockImplementation(() => {});
-    const { v: _, ...old } = body;
-    expect(await main(["add", ...ticketText(makeTicket({ ...old, until: "07:00" }, "x")).split(" ")])).toBe(2);
-    expect(errs.mock.calls.map((c) => String(c[0])).join("\n")).toContain("前のやり方の券");
-    expect(await main(["go", ...t.split(" ")])).toBe(2);
-    expect(errs.mock.calls.map((c) => String(c[0])).join("\n")).toContain("積む券");
-    errs.mockRestore();
-  });
-});
 
 describe("pueue の様子と task の名前", () => {
   it("pueue status --json（4.0.5 の形）を読む", () => {
@@ -231,7 +206,7 @@ describe.skipIf(!hasPueue)("キュー（本物の pueue・偽物の svwb で）"
     gitT(orig, "add", ".");
     gitT(orig, "commit", "-q", "--allow-empty", "-m", `ジョブ ${file}`);
     const full = gitT(orig, "rev-parse", "HEAD");
-    return ticketText(makeTicket({ v: 2, name, branch: "claude/x", commit: full.slice(0, 12), jobs: `night/${file}`, threads: 2, chunk: 1 }, text));
+    return ticketText(makeTicket({ name, branch: "claude/x", commit: full.slice(0, 12), jobs: `night/${file}`, threads: 2, chunk: 1 }, text));
   };
   const add = (t: string) => main(["add", ...t.split(" "), "--root", root, "--bin", fake]);
 
@@ -369,13 +344,6 @@ describe.skipIf(!hasPueue)("キュー（本物の pueue・偽物の svwb で）"
     // 偽物の svwb が回り始めてから（引数を書いた後）
     const g50 = (c: string) => c.includes("compare 50 '{}' '{\"beamWidth\":16}' 50 ");
     for (let i = 0; i < 100 && !calls().some(g50); i++) await sleep(100);
-    // 回っている間は、前のやり方（start）では始めない。逆にキューの start も、前のやり方の回が動いていれば断る（同時に 2 つ回さない）
-    const err = vi.spyOn(console, "error").mockImplementation(() => {});
-    const old = join(tmp, "old.txt");
-    writeFileSync(old, "compare 10 '{}' '{}' 0 --label 前 --est 0.5\n");
-    expect(await main(["start", old, "--yes", "--root", root, "--name", "old", "--bin", fake, "--allow-dirty", "--until", "+2h"])).toBe(2);
-    expect(String(err.mock.calls[0]?.[0])).toContain("キューが回っています");
-    expect(existsSync(join(root, "old"))).toBe(false);
     killAll(tmp);
     await sleep(300);
     await startDaemon();

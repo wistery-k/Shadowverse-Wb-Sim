@@ -1,0 +1,12 @@
+# 新しいプールの物差しを、新しい既定（2026-11-25、ユーザーの決定）で測る。見込み 1 時間 3 分ほど。
+# 新しいプールの既定の探索 AI は、補正 R6・見込み R4 のまま、読みの中の相手を幅 8・深さ 8 のまま S = 0 ＋補正で打たせ（並べ直しも補正）、
+# 想像の局面の印を切ったもの（data/pools/azvaldt/search-options.json。アズヴォルト環境のページも同じ）。
+# キュー light-read-1 で対 R6 50.59% ± 0.25（2 万試合、思考 1.7 倍）、問題集 46.8%（R6 は 39.4%）。
+# R6 の物差しは相手 v0 80.80% ± 0.42・相手 R3 54.23% ± 0.48（2026-11-23、キュー r6-heads-2）。強く読む幅 32 の版は 80.50%・55.26%（キュー strong-read-2）。
+# 見込み（PC、svwb-docker・28 スレッド）: R6 の実測（0.158・0.186 秒/試合）に、light-read-1 の compare の実測の比（0.234 / 0.171 = 1.37 倍）をかけて
+#   0.216・0.254 秒/試合で、8000 試合ずつ 29 分・34 分
+# 朝: 止まったときのまとめを push してもらい、ingest する。docs/yardstick.md の新しいプールの表 2 つに行を足し（--record と同じ形）、STATE.md の数字を直す
+# 回の名前は light-read-yardstick
+
+yardstick --ref pool-v0 --opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' --games 4000 --start 0 --label 新しいプール-物差し-軽読み8S0印なし --est 0.216
+yardstick --ref pool-r3 --opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' --games 4000 --start 0 --label 新しいプール-強い物差し-軽読み8S0印なし --est 0.254

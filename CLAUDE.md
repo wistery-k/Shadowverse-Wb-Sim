@@ -29,7 +29,7 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
     1. スターターのページとは URL を分ける。タブは「AI対戦（総当たり）」と「問題集」の 2 つだけで、AI 同士の試合と問題集の局面を表示・再生する。人間と AI の対戦・デッキの編集や貼り付け・サンドボックス・試合の記録・局面の入力は付けない
     2. デッキは取り込んだプロのデッキ（`data/pools/azvaldt/decks/` の 84 個）からだけ選べる（既定は代表 10 型 `data/pools/azvaldt/sets/rep10.txt`）。PS（プレミアシリーズ）のデッキに入らないカードは実装しない
     3. 問題集は `misses/azvaldt/` の問（シミュレータの中の自己対戦から取った局面）だけ。プロの試合の局面は入れない。URL の `#misses/<問>` は問を選ぶだけ
-    4. スターターの補正・見込み（`data/value-net.json` 等）を読み込まない（ロードを軽くするため）。探索 AI はこのページの補正・見込み（`data/pools/azvaldt/`。今は補正 R6・見込み R4）で打ち、コマンドの同じ補正と同じ手を選ぶ（`rust/engine/tests/browser_azvaldt.rs`・`tests/nets-azvaldt.test.ts`）
+    4. スターターの補正・見込み（`data/value-net.json` 等）を読み込まない（ロードを軽くするため）。探索 AI はこのページの補正・見込み（`data/pools/azvaldt/`。今は補正 R6・見込み R4）と新しいプールの既定の設定（`data/pools/azvaldt/search-options.json`）で打ち、コマンドの同じ補正・同じ設定と同じ手を選ぶ（`rust/engine/tests/browser_azvaldt.rs`・`tests/nets-azvaldt.test.ts`）
     5. 前期のローテーションのプールだけ。今のローテーションのカード・選手の名前は入れない
     - この条件を崩す変更はユーザーに確認する
 - ドキュメント・UI 文言・コミットメッセージは日本語。識別子・コードコメントの用語は英語でもよいが、ゲーム用語は `docs/rules.md` の対応表に従う
@@ -58,8 +58,7 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
         compare・yardstick・速さはキュー（`npm run queue`、`docs/queue.md`）に積んで回す。積むのも、いつ回す・止めるかもユーザーが決める（ユーザー決定 2026-11-24）:
         スレッドは `npm run queue -- plan <ファイル> --machine svwb-docker` のジョブの一覧と見込みと、積むコマンド（ホストで流す `docker/remote-control/queue.sh add <券>` の 1 行）を示すだけで、
         積んでよいかは聞かない。ユーザーが積み（`queue.sh add`）、回したいときに回す（`queue.sh start`。止めるのは `queue.sh pause`）。スレッドは `add`・`start` を流さない（`docs/queue.md`「キュー（pueue）」）。
-        キューの外で PC で対戦を回すのは、ユーザーが回してよいと言ったときだけ（昼はゲームがカクつくので、短いものも回さない。2026-11-10）。
-        PC で確かめるまで、前のやり方の券と `queue.sh go <券>` も残す（`docs/queue.md`「券と go」）
+        キューの外で PC で対戦を回すのは、ユーザーが回してよいと言ったときだけ（昼はゲームがカクつくので、短いものも回さない。2026-11-10）
      2. Google Cloud（`cloud/gcp.sh` の Spot VM など）は、所要時間や費用にかかわらず、使うたびにユーザーの承認を得てから使う。PC より速いことは承認なしで使う理由にならない。2026-11-08 から当分使わないことにして課金を外した（`cloud/README.md`「今は使っていない」）
      3. 十分速く終わるもの（小さく試す・短い確かめなど）は、Claude のクラウド環境（スレッド自身の環境。4 スレッドほどで、PC の 28 スレッドより何倍も遅い）で回してよい
      - どこで回すときも、回す前に変更を作業ブランチに push し、所要時間を見積もる。見積もりが 1 時間以上なら、回す前にユーザーに確かめる（PC のキューは、積むコマンドと見込みを示せばよい。積むかはユーザーが決める）

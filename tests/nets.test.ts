@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { currentNets } from "../src/engine";
-import { netsChecksum, netsChecksumOfJson } from "../src/engine/wasm";
+import { netsChecksum, netsChecksumOfJson, searchOptions } from "../src/engine/wasm";
 import { decode, split } from "../scripts/pack-nets";
 
 const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
@@ -14,6 +14,10 @@ describe("補正のファイル（スターター）", () => {
     const loaded = netsChecksum();
     expect(loaded).toMatch(/^[0-9a-f]{8}$/);
     expect(loaded).toBe(netsChecksumOfJson(read("data/value-net.json"), read("data/potential-net.json")));
+  });
+
+  it("スターターのページの探索 AI は既定の設定のまま（設定を入れない）", () => {
+    expect(searchOptions()).toBeNull();
   });
 
   it("違う補正ならハッシュも違う（ハッシュが中身を見ている）", () => {

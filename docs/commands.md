@@ -324,18 +324,16 @@ npm run ledger -- check
 ## queue
 
 ```sh
-npm run queue -- plan <ジョブのファイル> [--threads N] [--machine svwb-docker] [--legacy]     # ジョブの一覧と見込みと積むコマンド（積まない。--legacy は前の go の券）
+npm run queue -- plan <ジョブのファイル> [--threads N] [--machine svwb-docker]              # ジョブの一覧と見込みと積むコマンド（積まない）
 docker/remote-control/queue.sh add <券>                                                      # 積む（ユーザーがホストで、いつでも。中は npm run queue -- add）
 docker/remote-control/queue.sh start [--until 07:00] | pause [--wait] | status | remove <回>   # 回す・止める（いつ回すかはユーザーが決める）
-docker/remote-control/queue.sh go <券>                                                       # 前のやり方（PC でキューを確かめるまで残す）
-npm run queue -- start <ジョブのファイル> --yes [--until 07:00] [--threads N]               # もっと前の始め方
-npm run queue -- status | stop [--now] | resume --yes | wrap | list
+npm run queue -- status | wrap [名前|--pending] | list
 npm run queue -- ingest <回の名前|ファイル…>                                                     # スレッドで: 台帳に足す・出口のファイルを展開する
 ```
 
 PC で対戦を回すキュー。ジョブのファイルは 1 行 1 ジョブで、svwb の `compare`・`yardstick`・`profile`・`misses`・`survey` と同じ形（`--label` が要る）。
 ユーザーがホストで `plan` の出した券の 1 行（`docker/remote-control/queue.sh add <券>`）を流して積み（いつでも。積むだけでは回らない）、
-回したいときに `queue.sh start` で回す（回す係は pueue。止めるのは `queue.sh pause`。[queue.md](queue.md)「キュー（pueue）」）。前の名前の `npm run night` も同じものを流す。
+回したいときに `queue.sh start` で回す（回す係は pueue。止めるのは `queue.sh pause`。[queue.md](queue.md)「キュー（pueue）」）。
 5〜10 分の区切りごとに結果を回のフォルダ（`~/svwb-data/night/<名前>/`）に残し、電源が切れても続きから回る。止まるときに、ジョブごとに 1 行にまとめた行を
 ブランチ `night/<名前>` にコミットし、棋譜などを出口のフォルダ（`~/svwb-data/outbox/<名前>/`）にまとめる。ユーザーはホストで `docker/remote-control/queue-push.sh` を流すだけで、
 スレッドが `ingest` で台帳に足す。
@@ -392,7 +390,7 @@ npm run svwb -- meta …                                  # npm run meta と同�
 npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mulligan":"sample"}'] [--b '{}'] [--decks <デッキ>,…] [--rhino]
 npm run svwb -- mulligan-data --games 6000 [--start 0] [--seed 1] [--flip 0.5] --out d.jsonl
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
-                [--sampling classic|default] [--potential p.json|null] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
+                [--sampling classic|default] [--potential p.json|null] [--searchOptions <設定の JSON かファイル>] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
                 [--sDefault 0] [--searchValue 0] [--lethalLabel 0] [--lostLabel 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--kifu k.jsonl | --no-kifu]
 npm run svwb -- td branch --model m.json --from <自己対戦の棋譜>,… --out b.jsonl [--start 0] [--games N] [--turns 4-9] [--extra 4] [打ち方と印は td selfplay と同じ]   # 選ばなかった候補の枝
 npm run svwb -- td train --model m0.json --data d0.jsonl[,d1.jsonl.gz] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001]
@@ -431,6 +429,8 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
   （学びのデータに足す。`"iv"` の `"zone"` が `"plan"`）。`--model` は棋譜の試合を打った補正。引数は `rust/engine/src/runner/td.rs` の先頭、
   考えは docs/ai-notes.md の索引「選ばなかった候補を学びに足す」。キューでは `td selfplay` と同じく `--chunk` で区切れる
 - `td selfplay`: TD 学習の自己対戦。各引数の意味は `rust/engine/src/runner/td.rs` の先頭。
+  `--searchOptions` で、`--opp`・`--sampling`・`--potential` から作った探索 AI の設定の項目を上書きする（compare の `--opts` と同じ形。補正・見込み・重みは書けない）。
+  新しいプールの既定（2026-11-25 から）は `--opp beam --sampling default --potential <見込み> --searchOptions data/pools/azvaldt/search-options.json`（compare の新しいプールの既定と同じ手。`td branch` も同じ）。
   `--decks` で、比較用の 7 デッキの代わりに並べたデッキ（デフォルトデッキの名前かデッキのテキストファイル。`@<デッキの組>` も。上の「compare」）の全組を回す（例: `rust/engine/td-pool/royal-counter/*.txt`）。
   `--ivZone drawn` は、カードを引いた瞬間に手札から抜いて最後まで打つ介入（`td ivcheck` で「（引いたとき）」の行。デッキに 1 枚入れる価値に近い）。
   `--vs <デッキ>` で、どの試合も片方をそのデッキにし、もう片方（挑戦する側）だけ並べたデッキを回して、介入も挑戦する側だけにする（特定の相手との試合でのカードの価値を測る用）。
