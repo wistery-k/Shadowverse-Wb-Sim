@@ -623,12 +623,35 @@ impl ValueNet {
         head_of(self.lethal.as_ref().expect("リーサルの出力"), h)
     }
 
+    /// 隠れ層の値（ReLU の後。最初の層から順に。終わった局面は空）。
+    /// 調べもの用（kifu values --hidden 1。docs/kifu.md「補正の読みの測り」）。前向きの計算は eval と同じ（forward）
+    pub fn hidden_layers(&self, s: &GameState, p: PlayerIndex, phase: ValuePhase) -> Vec<Vec<f64>> {
+        if s.phase == Phase::Ended {
+            return Vec::new();
+        }
+        let mut layers = Vec::new();
+        self.forward(s, p, phase, Some(&mut layers), |_| ());
+        layers
+    }
+
     /// 最後の隠れ層の値（ReLU の後）を f に渡す
     fn last_hidden<R>(
         &self,
         s: &GameState,
         p: PlayerIndex,
         phase: ValuePhase,
+        f: impl FnOnce(&[f64]) -> R,
+    ) -> R {
+        self.forward(s, p, phase, None, f)
+    }
+
+    /// 前向きの計算。keep があれば、隠れ層ごとの値（ReLU の後）を写して入れる。最後の隠れ層を f に渡す
+    fn forward<R>(
+        &self,
+        s: &GameState,
+        p: PlayerIndex,
+        phase: ValuePhase,
+        mut keep: Option<&mut Vec<Vec<f64>>>,
         f: impl FnOnce(&[f64]) -> R,
     ) -> R {
         let hn = self.hidden;
@@ -659,6 +682,9 @@ impl ValueNet {
             h.extend_from_slice(&self.b1);
             add_rows(&self.w1, rows, h);
             relu(h);
+            if let Some(k) = keep.as_mut() {
+                k.push(h.clone());
+            }
             // 足した隠れ層（valueNet.ts の forwardRest と同じ順で足す）
             for (w, b) in &self.layers {
                 let m = b.len();
@@ -673,6 +699,9 @@ impl ValueNet {
                 add_rows(w, rows, h2);
                 relu(h2);
                 std::mem::swap(h, h2);
+                if let Some(k) = keep.as_mut() {
+                    k.push(h.clone());
+                }
             }
             f(h)
         })
