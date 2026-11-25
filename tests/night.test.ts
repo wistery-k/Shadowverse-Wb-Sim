@@ -1,17 +1,19 @@
-// キュー（scripts/night-main.ts・docs/queue.md）。svwb の代わりに、台帳の行だけを書く偽物を回して、区切り・再開・止め方・まとめを確かめる
+// キュー（scripts/night-main.ts・docs/queue.md）。svwb と pueue の代わりに偽物を回して、区切り・積み直し・まとめ・券を確かめる
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, truncateSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseLedger, type MissesRow, type RunRow, type SurveyRow } from "../scripts/ledger-main";
+import { parseLedger, type MissesRow, type RunRow } from "../scripts/ledger-main";
 import { outboxPathAllowed } from "../scripts/night-outbox";
 import { packItems, type PackItem } from "../scripts/pack-run-main";
-import { FAKE, gitT } from "./night-helpers";
+import { labelOf, pueueStatus } from "../scripts/night-pueue";
+import { FAKE, FAKE_PUEUE, drainQueue, gitT } from "./night-helpers";
 import {
+  branchRows,
   checkArgv,
   checkRunRefs,
   chunkJob,
@@ -20,7 +22,6 @@ import {
   expandBraces,
   gzipKifu,
   httpsRemote,
-  isDaytime,
   jobInputs,
   jobRunRefs,
   kifuDir,
@@ -36,7 +37,6 @@ import {
   portableRow,
   prepareNodeModules,
   readStatus,
-  runWorker,
   shellLine,
   shellWords,
   standIn,
@@ -45,8 +45,6 @@ import {
   ticketPlan,
   ticketText,
   wallClock,
-  workerPid,
-  type WorkerControl,
 } from "../scripts/night-main";
 
 describe("ジョブの行", () => {
@@ -424,40 +422,29 @@ describe("棋譜の gzip", () => {
   });
 });
 
-/** svwb の代わり。台帳の行だけを書く（FAKE_FAIL の区切りは失敗、FAKE_HANG は 1 分待つ、FAKE_STOP_AT は終わった後に STOP を置く） */
-
-describe("worker の pid", () => {
-  it("切り離した worker は引数の回のフォルダで、--foreground は start・resume のプロセスそのもので見分ける", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "night-pid-"));
-    const sleeper = (...args: string[]) => spawn(process.execPath, ["-e", "setTimeout(() => {}, 20000)", ...args], { stdio: "ignore" });
-    const kids = [sleeper("night-main", "worker", dir), sleeper("night-main", "start", "q.txt", "--foreground"), sleeper("night-main", "start", "q.txt")];
-    try {
-      await new Promise((r) => setTimeout(r, 300));
-      const at = (i: number) => {
-        writeFileSync(join(dir, "worker.pid"), String(kids[i]!.pid));
-        return workerPid(dir);
-      };
-      expect(at(0)).toBe(kids[0]!.pid);
-      expect(at(1)).toBe(kids[1]!.pid);
-      // 回のフォルダも --foreground も無いプロセスは、pid が使い回されたもの
-      expect(at(2)).toBeNull();
-    } finally {
-      for (const k of kids) k.kill();
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-});
-
-
-describe("区切って回す（偽物の svwb で）", () => {
+describe("区切って回す（偽物の svwb・偽物の pueue で）", () => {
   let tmp = "";
   let root = "";
   let jobs = "";
   let fake = "";
   let fakeLog = "";
-  /** PC のリポジトリの代わり（止まったときに台帳の行を night/<回> にコミットする先） */
+  /** 偽物の pueue の状態（tests/night-helpers.ts の FAKE_PUEUE・drainQueue） */
+  let pueue = "";
+  /** PC のリポジトリの代わり（台帳の行を night/<回> にコミットする先） */
   let pcGit = "";
-  const env = ["FAKE_FAIL", "FAKE_HANG", "FAKE_STOP_AT", "FAKE_LOG", "FAKE_WIN", "FAKE_TD_FAIL", "SVWB_NIGHT_GIT_DIR", "SVWB_COMMIT", "SVWB_OUTBOX_MAX_MB", "SVWB_NIGHT_REMOTE"];
+  const env = [
+    "FAKE_FAIL",
+    "FAKE_HANG",
+    "FAKE_LOG",
+    "FAKE_WIN",
+    "FAKE_TD_FAIL",
+    "SVWB_NIGHT_GIT_DIR",
+    "SVWB_COMMIT",
+    "SVWB_OUTBOX_MAX_MB",
+    "SVWB_NIGHT_REMOTE",
+    "SVWB_PUEUE",
+    "FAKE_PUEUE_STATE",
+  ];
 
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "night-"));
@@ -475,6 +462,11 @@ describe("区切って回す（偽物の svwb で）", () => {
     writeFileSync(fake, FAKE, { mode: 0o755 });
     fakeLog = join(tmp, "calls.log");
     process.env.FAKE_LOG = fakeLog;
+    const fakePueue = join(tmp, "fake-pueue");
+    writeFileSync(fakePueue, FAKE_PUEUE, { mode: 0o755 });
+    process.env.SVWB_PUEUE = fakePueue;
+    pueue = join(tmp, "pueue.json");
+    process.env.FAKE_PUEUE_STATE = pueue;
     jobs = join(tmp, "jobs.txt");
     // 1 試合 0.5 秒・1 区切り 1 分 → compare 150 組は 50 組ずつ 3 区切り。物差し・速さ・見落とし問題集は 1 区切り
     writeFileSync(
@@ -496,19 +488,36 @@ describe("区切って回す（偽物の svwb で）", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  const start = (...more: string[]) =>
-    main(["start", jobs, "--yes", "--root", root, "--name", "n1", "--bin", fake, "--allow-dirty", "--threads", "2", "--chunk-min", "1", "--until", "+2h", ...more]);
-  const resume = (...more: string[]) => main(["resume", "n1", "--yes", "--root", root, "--foreground", "--threads", "2", "--until", "+2h", ...more]);
+  /** 回 n1 を積み（無ければ作る。あれば済んでいない区切りを積み直す）、キューを回して、流せるものが無くなるまで流す */
+  const run = async (...more: string[]) => {
+    expect(await main(["enqueue", jobs, "--name", "n1", "--root", root, "--bin", fake, "--threads", "2", "--chunk-min", "1", ...more])).toBe(0);
+    expect(await main(["start", "--root", root])).toBe(0);
+    drainQueue(pueue);
+  };
   const dir = () => join(root, "n1");
   const calls = () => (existsSync(fakeLog) ? readFileSync(fakeLog, "utf8").trim().split("\n") : []);
-  const done = () => readdirSync(join(dir(), "done")).map((f) => f.replace(/\.json$/, "")).sort();
+  const done = (name = "n1") => readdirSync(join(root, name, "done")).map((f) => f.replace(/\.json$/, "")).sort();
+  /** ブランチ night/<回> の台帳の、その回の行 */
+  const branch = (name = "n1") => branchRows(gitT(pcGit, "show", `night/${name}:docs/ledger.jsonl`), name);
+  const roles = (name = "n1") => pueueStatus().tasks.filter((t) => labelOf(t.label)?.run === name).map((t) => [labelOf(t.label)?.role, t.state]);
+  const said = () => vi.mocked(console.log).mock.calls.map((c) => String(c[0])).join("\n");
 
-  it("全部の区切りを回し、finish がジョブごとに 1 行にまとめて台帳に足す（2 回目は足さない）", async () => {
-    expect(await start("--foreground")).toBe(0);
+  it("全部の区切りを積んで回し、回の最後の task（まとめ）がジョブごとに 1 行にまとめた行を night/<回> にコミットする（まとめ直しても足さない）", async () => {
+    await run();
+    expect(roles()).toEqual([
+      ["組み立て", "Success"],
+      ["1-1", "Success"],
+      ["1-2", "Success"],
+      ["1-3", "Success"],
+      ["2-1", "Success"],
+      ["3-1", "Success"],
+      ["4-1", "Success"],
+      ["まとめ", "Success"],
+    ]);
     expect(done()).toEqual(["1-1", "1-2", "1-3", "2-1", "3-1", "4-1"]);
     expect(calls()).toHaveLength(5);
     expect(calls()[4]).toBe(`misses run --opts '{}' --trials 4 --seed 1 --label '問題集'`);
-    expect(readStatus(dir())).toMatchObject({ state: "done" });
+    expect(readStatus(dir())).toMatchObject({ state: "done", branch: expect.stringMatching(/^night\/n1（/) });
     expect(existsSync(join(dir(), "speed-3.md"))).toBe(true);
     // 棋譜は回のフォルダの kifu/ に区切りごとに書かれ、区切りが済むと gzip される
     expect(readdirSync(join(dir(), "kifu")).sort()).toEqual([
@@ -518,92 +527,94 @@ describe("区切って回す（偽物の svwb で）", () => {
       "yardstick-g10-49.jsonl.gz",
     ]);
     expect(gunzipSync(readFileSync(join(dir(), "kifu", "compare-g50-99.jsonl.gz"))).toString()).toBe('{"kind":"replay","version":2,"g":50}\n');
-    const target = join(tmp, "ledger.jsonl");
-    writeFileSync(target, "");
-    expect(await main(["finish", "n1", "--root", root, "--ledger", target])).toBe(0);
-    const rows = parseLedger(readFileSync(target, "utf8")).runs as (RunRow & { queue: string; chunks: number })[];
-    expect(rows.map((r) => [r.label, r.g, r.n, r.chunks, r.queue])).toEqual([
+    const rows = branch();
+    expect(rows.runs.map((r) => [r.label, r.g, r.n, r.chunks, r.queue])).toEqual([
       ["幅", [0, 149], 300, 3, "n1"],
       ["弱", [10, 49], 80, 1, "n1"],
     ]);
-    expect(rows[0]?.cmd).toBe(`compare 150 '{}' '{"beamWidth":8}' 0 --label '幅'`);
-    expect(rows[1]?.seKind).toBe("binomial");
-    expect(rows[0]?.threads).toBe(2);
-    const misses = parseLedger(readFileSync(target, "utf8")).misses as (MissesRow & { queue: string; chunks: number })[];
-    expect(misses.map((r) => [r.label, r.trials, r.rate, r.queue, r.chunks])).toEqual([["問題集", 4, 0.5, "n1", 1]]);
-    expect(await main(["finish", "n1", "--root", root, "--ledger", target])).toBe(0);
-    expect(parseLedger(readFileSync(target, "utf8")).runs).toHaveLength(2);
-    expect(parseLedger(readFileSync(target, "utf8")).misses).toHaveLength(1);
+    expect(rows.runs[0]?.cmd).toBe(`compare 150 '{}' '{"beamWidth":8}' 0 --label '幅'`);
+    expect(rows.runs[1]?.seKind).toBe("binomial");
+    expect(rows.runs[0]?.threads).toBe(2);
+    expect(rows.misses.map((r) => [r.label, r.trials, r.rate, r.queue, r.chunks])).toEqual([["問題集", 4, 0.5, "n1", 1]]);
+    // まとめ直しても（queue-push.sh の wrap --pending・手の wrap）、足す行も様子の違いも無ければコミットしない
+    const tip = gitT(pcGit, "rev-parse", "night/n1");
+    expect(await main(["wrap", "--pending", "--root", root])).toBe(0);
+    expect(said()).toContain("まとめが済んでいない回はありません");
+    expect(await main(["wrap", "n1", "--root", root])).toBe(0);
+    expect(gitT(pcGit, "rev-parse", "night/n1")).toBe(tip);
+    // 済んだ回をもう一度積んでも、何も積まない
+    expect(await main(["enqueue", jobs, "--name", "n1", "--root", root])).toBe(0);
+    expect(pueueStatus().tasks).toHaveLength(8);
+    // start はジョブのファイルを受けない（積むのは add）
+    const errs = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await main(["start", jobs, "--root", root])).toBe(2);
+    expect(String(errs.mock.calls[0]?.[0])).toContain("ジョブのファイルは渡しません");
   });
 
-  it("打ち比べ調査は区切りごとに同じ出力に足し、全部済んでから finish が survey report の 1 行を足す", async () => {
-    // 1 試合 20 秒・1 区切り 1 分 → 3 試合ずつ 4 区切り
+  it("打ち比べ調査は区切りごとに同じ出力に足し、全部の区切りが済んでから、まとめが survey report の 1 行を足す", async () => {
+    // 1 試合 20 秒・1 区切り 1 分 → 3 試合ずつ 4 区切り。最後の区切りが失敗する
     writeFileSync(jobs, "survey run --games 0-9 --label 調査 --est 20\n");
-    expect(await start("--foreground")).toBe(0);
-    expect(done()).toEqual(["1-1", "1-2", "1-3", "1-4"]);
+    process.env.FAKE_FAIL = "9";
+    await run();
+    expect(done()).toEqual(["1-1", "1-2", "1-3"]);
     expect(calls().map((c) => c.split(" ").slice(4, 6).join(" "))).toEqual(["--games 0-2", "--games 3-5", "--games 6-8", "--games 9-9"]);
     const out = join(dir(), "survey-1.jsonl");
-    expect(readFileSync(out, "utf8").trim().split("\n")).toHaveLength(20);
-    // 出力に試合が揃っていて印が無い区切りは回さない。最後の区切りを消すと、finish は待つ
+    expect(readFileSync(out, "utf8").trim().split("\n")).toHaveLength(18);
+    // 途中の調査は台帳に足さない（まとめの表の下に「まだ途中」と出る）
+    expect(branch().surveys).toHaveLength(0);
+    expect(gitT(pcGit, "log", "-1", "--format=%B", "night/n1")).toContain("ジョブ 1（調査）はまだ途中（区切り 3/4）");
+    // 出力に試合が揃っていて印が無い区切りは回さない
     unlinkSync(join(dir(), "done", "1-2.json"));
-    unlinkSync(join(dir(), "done", "1-4.json"));
-    writeFileSync(out, readFileSync(out, "utf8").split("\n").filter((l) => !l.includes('"g":9')).join("\n"));
-    const target = join(tmp, "ledger.jsonl");
-    writeFileSync(target, "");
-    expect(await main(["finish", "n1", "--root", root, "--ledger", target])).toBe(0);
-    expect(parseLedger(readFileSync(target, "utf8")).surveys).toHaveLength(0);
-    const before = calls().length;
-    expect(await resume()).toBe(0);
-    expect(calls().slice(before).map((c) => c.split(" ").slice(4, 6).join(" "))).toEqual(["--games 9-9"]);
-    expect(JSON.parse(readFileSync(join(dir(), "done", "1-2.json"), "utf8"))).toMatchObject({ recovered: true });
-    expect(await main(["finish", "n1", "--root", root, "--ledger", target])).toBe(0);
-    const rows = parseLedger(readFileSync(target, "utf8")).surveys as (SurveyRow & { queue: string; chunks: number })[];
-    expect(rows.map((r) => [r.label, r.g, r.games, r.positions, r.queue, r.chunks])).toEqual([["調査", [0, 9], 10, 10, "n1", 4]]);
-    expect(readFileSync(join(dir(), "survey-1.md"), "utf8")).toContain("打ち比べ調査");
-    expect(await main(["finish", "n1", "--root", root, "--ledger", target])).toBe(0);
-    expect(parseLedger(readFileSync(target, "utf8")).surveys).toHaveLength(1);
-  });
-
-  it("失敗した区切りの後はそのジョブを飛ばし、resume で続きから回す", async () => {
-    process.env.FAKE_FAIL = "50";
-    expect(await start("--foreground")).toBe(1);
-    expect(done()).toEqual(["1-1", "2-1", "3-1", "4-1"]);
-    expect(readFileSync(join(dir(), "failed.json"), "utf8")).toContain("1-2");
     delete process.env.FAKE_FAIL;
     const before = calls().length;
-    expect(await resume()).toBe(0);
+    await run();
+    expect(calls().slice(before).map((c) => c.split(" ").slice(4, 6).join(" "))).toEqual(["--games 9-9"]);
+    expect(JSON.parse(readFileSync(join(dir(), "done", "1-2.json"), "utf8"))).toMatchObject({ recovered: true });
+    expect(readFileSync(out, "utf8").trim().split("\n")).toHaveLength(20);
+    const rows = branch().surveys;
+    expect(rows.map((r) => [r.label, r.g, r.games, r.positions, r.queue, r.chunks])).toEqual([["調査", [0, 9], 10, 10, "n1", 4]]);
+    expect(readFileSync(join(dir(), "survey-1.md"), "utf8")).toContain("打ち比べ調査");
+    expect(await main(["wrap", "n1", "--root", root])).toBe(0);
+    expect(branch().surveys).toHaveLength(1);
+  });
+
+  it("区切りが失敗したらそのジョブの残りは回らず（pueue の DependencyFailed）、ほかのジョブとまとめは回る。積み直すと続きから", async () => {
+    process.env.FAKE_FAIL = "50";
+    await run();
+    expect(roles()).toEqual([
+      ["組み立て", "Success"],
+      ["1-1", "Success"],
+      ["1-2", "Failed"],
+      ["1-3", "DependencyFailed"],
+      ["2-1", "Success"],
+      ["3-1", "Success"],
+      ["4-1", "Success"],
+      ["まとめ", "Success"],
+    ]);
+    expect(done()).toEqual(["1-1", "2-1", "3-1", "4-1"]);
+    expect(readFileSync(join(dir(), "failed.json"), "utf8")).toContain("1-2");
+    vi.mocked(console.log).mockClear();
+    expect(await main(["status", "--root", root])).toBe(0);
+    expect(said()).toMatch(/n1 .*積んでいない 2 区切り/);
+    delete process.env.FAKE_FAIL;
+    const before = calls().length;
+    await run();
     // 済んだ区切りは回さない
     expect(calls().slice(before).map((c) => c.split(" ").slice(0, 5).join(" "))).toEqual(["compare 50 '{}' '{\"beamWidth\":8}' 50", "compare 50 '{}' '{\"beamWidth\":8}' 100"]);
     expect(done()).toEqual(["1-1", "1-2", "1-3", "2-1", "3-1", "4-1"]);
+    expect(JSON.parse(readFileSync(join(dir(), "failed.json"), "utf8"))).toEqual({});
   });
 
   it("台帳に行があって印が無い区切り（行を書いた直後に電源が切れた）は回さない", async () => {
-    expect(await start("--foreground")).toBe(0);
+    await run();
     unlinkSync(join(dir(), "done", "1-2.json"));
     const before = calls().length;
-    expect(await resume()).toBe(0);
+    await run();
     expect(calls().length).toBe(before);
     expect(JSON.parse(readFileSync(join(dir(), "done", "1-2.json"), "utf8"))).toMatchObject({ recovered: true });
   });
 
-  it("STOP があれば区切りの切れ目で止まる", async () => {
-    process.env.FAKE_STOP_AT = "50";
-    expect(await start("--foreground")).toBe(1);
-    expect(done()).toEqual(["1-1", "1-2"]);
-    expect(readStatus(dir())?.reason).toMatch(/手で止めた/);
-    // resume は STOP を消して続きから
-    expect(await resume()).toBe(0);
-    expect(done()).toEqual(["1-1", "1-2", "1-3", "2-1", "3-1", "4-1"]);
-  });
-
-  it("止める時刻までに終わらない区切りは始めない", async () => {
-    // 50 組（100 試合）× 0.5 秒 = 50 秒の区切りを、残り 20 秒では始めない
-    expect(await start("--foreground", "--until", "+20s")).toBe(1);
-    expect(existsSync(join(dir(), "done"))).toBe(false);
-    expect(readStatus(dir())?.reason).toMatch(/止める時刻/);
-  });
-
-  it("学び直しの流れ: 自己対戦のファイル・学習・pick・見込みを順に作り、失敗したら後ろのジョブは入力が無いので飛ばし、resume で続きから", async () => {
+  it("学び直しの流れ: 自己対戦のファイル・学習・pick・見込みを順に作り、失敗したら、その作るファイルを読む後ろのジョブは回らず、積み直すと続きから", async () => {
     // td・potential の代わり（--out に引数を書く。FAKE_TD_FAIL を含む引数なら失敗）
     const nodeBin = join(tmp, "nodebin");
     const fakeTool = (tool: string) =>
@@ -636,17 +647,21 @@ describe("区切って回す（偽物の svwb で）", () => {
     );
     // 自己対戦の 2 つ目の区切り（g104〜）が失敗する
     process.env.FAKE_FAIL = "104";
-    expect(await start("--foreground", "--node-bin", nodeBin)).toBe(1);
+    await run("--node-bin", nodeBin);
     const f = (name: string) => join(dir(), name);
     expect(existsSync(f("net0.json")) && existsSync(f("s-1.jsonl.gz"))).toBe(true);
     expect(existsSync(f("s-2.jsonl.gz")) || existsSync(f("a.json")) || existsSync(f("q2.json"))).toBe(false);
     const failed = JSON.parse(readFileSync(f("failed.json"), "utf8")) as Record<string, string>;
-    expect(Object.keys(failed)).toEqual(["2", "3", "4", "5", "6", "7", "8", "9"]);
-    expect(failed["3"]).toMatch(/入力がありません: s-2.jsonl.gz・s-3.jsonl.gz/);
+    expect(Object.keys(failed)).toEqual(["2"]);
+    expect(failed["2"]).toMatch(/区切り 2-2/);
+    // 後ろの区切りは、待つ区切りが失敗したので回っていない
+    vi.mocked(console.log).mockClear();
+    expect(await main(["status", "--root", root])).toBe(0);
+    expect(said()).toMatch(/n1 .*積んでいない 10 区切り/);
     delete process.env.FAKE_FAIL;
     const before = calls().length;
     process.env.FAKE_WIN = "1";
-    expect(await resume()).toBe(0);
+    await run();
     const after = calls().slice(before);
     // 済んだ区切り（td extend・自己対戦の 1 つ目）は回さない
     expect(after.filter((c) => c.startsWith("td extend") || c.includes("--start 100 "))).toEqual([]);
@@ -674,20 +689,17 @@ describe("区切って回す（偽物の svwb で）", () => {
     // 作ったファイルがあれば、印が無くても回さない
     unlinkSync(join(dir(), "done", "3-1.json"));
     const n = calls().length;
-    expect(await resume()).toBe(0);
+    await run();
     expect(calls().length).toBe(n);
     expect(JSON.parse(readFileSync(join(dir(), "done", "3-1.json"), "utf8"))).toMatchObject({ recovered: true });
-    // finish は compare の行だけを足し、pick の結果を書き添える
-    const target = join(tmp, "ledger.jsonl");
-    writeFileSync(target, "");
-    expect(await main(["finish", "n1", "--root", root, "--ledger", target])).toBe(0);
-    const added = parseLedger(readFileSync(target, "utf8")).runs;
+    // まとめは compare の行だけを足し、pick の結果を書き添える
+    const added = branch().runs;
     expect(added.map((r) => r.label)).toEqual(["q1", "q2"]);
     // 台帳の行には、PC の中の回のフォルダの道ではなく、回の名前からの道（@<回>/…）を書く
     expect(added[1]?.a).toEqual({ valueNet: "@n1/q2.json", potentialNet: "@n1/q2pot.json" });
     expect(added[1]?.cmd).toBe(`compare 4 '{"valueNet":"@n1/q2.json","potentialNet":"@n1/q2pot.json"}' '{}' 0 --label q2`);
-    expect(readFileSync(target, "utf8")).not.toContain(dir());
-    expect(readFileSync(f("summary.md"), "utf8")).toMatch(/ジョブ 6（pick）: q1: 100.00%.*越えた。@\/q2.json は @\/a.json/);
+    expect(gitT(pcGit, "show", "night/n1:docs/ledger.jsonl")).not.toContain(dir());
+    expect(readFileSync(f("outbox-summary.md"), "utf8")).toMatch(/ジョブ 6（pick）: q1: 100.00%.*越えた。@\/q2.json は @\/a.json/);
   });
 
   it("pick は線を越えなければ fail のファイルを選ぶ", async () => {
@@ -706,57 +718,37 @@ describe("区切って回す（偽物の svwb で）", () => {
         "pick --compare q1 --pass @/a.json --fail @/b.json --out @/q2.json",
       ].join("\n"),
     );
-    expect(await start("--foreground", "--node-bin", nodeBin)).toBe(0);
+    await run("--node-bin", nodeBin);
+    expect(done()).toEqual(["1-1", "2-1", "3-1", "4-1"]);
     expect(readFileSync(join(dir(), "q2.json"), "utf8")).toContain("y.json");
     expect(JSON.parse(readFileSync(join(dir(), "pick-4.json"), "utf8"))).toMatchObject({ pass: false, chosen: "@/b.json" });
   });
 
-  it("すぐ止める（stop --now）と回していた区切りを捨て、resume で回し直す", async () => {
-    process.env.FAKE_HANG = "50";
-    expect(await start("--prepare-only")).toBe(0);
-    const ctl: WorkerControl = { stopNow: false };
-    const timer = setInterval(() => {
-      if (calls().length >= 2) {
-        ctl.stopNow = true;
-        ctl.kill?.();
-        clearInterval(timer);
-      }
-    }, 50);
-    const st = await runWorker(dir(), ctl);
-    expect(st.reason).toMatch(/すぐ止めた/);
-    expect(done()).toEqual(["1-1"]);
-    expect(parseLedger(readFileSync(join(dir(), "ledger.jsonl"), "utf8")).runs).toHaveLength(1);
-    delete process.env.FAKE_HANG;
-    expect(await resume()).toBe(0);
-    expect(done()).toEqual(["1-1", "1-2", "1-3", "2-1", "3-1", "4-1"]);
-  });
-
-  it("止まるたびに台帳の行を night/<回> にコミットし、スレッドの ingest は finish と同じ行を足す（2 回目は足さない）", async () => {
+  it("回の最後の task が台帳の行を night/<回> にコミットし、続きを回すと残りの行をその上に積む。スレッドの ingest はブランチの行を足す（2 回目は足さない）", async () => {
     const head = gitT(pcGit, "rev-parse", "HEAD");
     const work = readFileSync(join(pcGit, "docs", "ledger.jsonl"), "utf8");
-    // 1 晩目: compare の 2 つ目の区切りの後で止める
-    process.env.FAKE_STOP_AT = "50";
-    expect(await start("--foreground")).toBe(1);
-    delete process.env.FAKE_STOP_AT;
-    // 今の朝のやり方（finish）で足した行と比べる
-    const byFinish = join(tmp, "finish-ledger.jsonl");
-    writeFileSync(byFinish, "");
-    expect(await main(["finish", "n1", "--root", root, "--ledger", byFinish])).toBe(0);
+    // 1 回目: compare の 3 つ目の区切りが失敗する
+    process.env.FAKE_FAIL = "100";
+    await run();
+    delete process.env.FAKE_FAIL;
     const tip1 = gitT(pcGit, "rev-parse", "night/n1");
     expect(gitT(pcGit, "rev-parse", "night/n1^")).toBe(head);
-    expect(gitT(pcGit, "log", "-1", "--format=%s", "night/n1")).toBe(`台帳: キュー n1 の結果（1 行、${process.env.SVWB_COMMIT}）`);
+    expect(gitT(pcGit, "log", "-1", "--format=%s", "night/n1")).toBe(`台帳: キュー n1 の結果（3 行、${process.env.SVWB_COMMIT}）`);
     // コミットのメッセージ（公開するブランチ）にも、PC の中の回のフォルダの道は書かない
     expect(gitT(pcGit, "log", "-1", "--format=%B", "night/n1")).not.toContain(root);
     expect(gitT(pcGit, "log", "-1", "--format=%B", "night/n1")).toContain("キュー n1（@n1）");
-    expect(readStatus(dir())).toMatchObject({ branch: expect.stringMatching(/^night\/n1（.*台帳の行 1）$/), outbox: expect.stringContaining(join(tmp, "outbox", "n1")) });
-    // 2 晩目: 続きを回す。ブランチの上に、残りの区切りの行を積む
-    expect(await resume()).toBe(0);
-    expect(await main(["finish", "n1", "--root", root, "--ledger", byFinish])).toBe(0);
+    expect(readStatus(dir())).toMatchObject({ branch: expect.stringMatching(/^night\/n1（.*台帳の行 3）$/), outbox: expect.stringContaining(join(tmp, "outbox", "n1")) });
+    // 2 回目: 積み直して続きを回す。ブランチの上に、残りの区切りの行を積む
+    await run();
     expect(gitT(pcGit, "rev-parse", "night/n1^")).toBe(tip1);
+    expect(gitT(pcGit, "log", "-1", "--format=%s", "night/n1")).toBe(`台帳: キュー n1 の結果（1 行、${process.env.SVWB_COMMIT}）`);
     // PC の作業ツリーと HEAD には触らない
     expect(gitT(pcGit, "rev-parse", "HEAD")).toBe(head);
     expect(readFileSync(join(pcGit, "docs", "ledger.jsonl"), "utf8")).toBe(work);
     expect(gitT(pcGit, "status", "--porcelain")).toBe("");
+    const onBranch = gitT(pcGit, "show", "night/n1:docs/ledger.jsonl")
+      .split("\n")
+      .filter((l) => l.includes('"queue":"n1"'));
     // スレッド: GitHub の代わりに PC のリポジトリから取ってきて足す
     const threadGit = join(tmp, "thread-git");
     mkdirSync(threadGit);
@@ -765,15 +757,17 @@ describe("区切って回す（偽物の svwb で）", () => {
     const byIngest = join(tmp, "ingest-ledger.jsonl");
     writeFileSync(byIngest, "");
     expect(await main(["ingest", "n1", "--remote", pcGit, "--ledger", byIngest])).toBe(0);
-    const lines = (f: string) => readFileSync(f, "utf8").trim().split("\n");
-    expect(lines(byIngest)).toEqual(lines(byFinish));
+    // ingest は種類ごとに並べて足す（compare・yardstick の後に misses）
+    const lines = (f: string) => readFileSync(f, "utf8").trim().split("\n").sort();
+    expect(lines(byIngest)).toEqual([...onBranch].sort());
     expect(parseLedger(readFileSync(byIngest, "utf8")).runs.map((r) => [r.label, r.g])).toEqual([
       ["幅", [0, 99]],
-      ["幅", [100, 149]],
       ["弱", [10, 49]],
+      ["幅", [100, 149]],
     ]);
+    expect(parseLedger(readFileSync(byIngest, "utf8")).misses).toHaveLength(1);
     expect(await main(["ingest", "night/n1", "--remote", pcGit, "--ledger", byIngest])).toBe(0);
-    expect(lines(byIngest)).toEqual(lines(byFinish));
+    expect(lines(byIngest)).toEqual([...onBranch].sort());
     // まとめ直し（wrap）は、足すものも様子の違いも無ければコミットしない
     process.env.SVWB_NIGHT_GIT_DIR = pcGit;
     const tip2 = gitT(pcGit, "rev-parse", "night/n1");
@@ -785,20 +779,17 @@ describe("区切って回す（偽物の svwb で）", () => {
     // PC の git に名前とメールがあっても、公開するブランチには載せない
     gitT(pcGit, "config", "user.name", "誰か");
     gitT(pcGit, "config", "user.email", "someone@example.invalid");
-    process.env.FAKE_STOP_AT = "50";
-    expect(await start("--foreground")).toBe(1);
-    delete process.env.FAKE_STOP_AT;
+    await run();
     expect(gitT(pcGit, "log", "-1", "--format=%an <%ae>|%cn <%ce>", "night/n1")).toBe("svwb queue <queue@svwb.invalid>|svwb queue <queue@svwb.invalid>");
     // まとめの途中で電源が切れた: status にまとめの結果が無く、ブランチもまだ無い
     const st = readStatus(dir());
     writeFileSync(join(dir(), "status.json"), JSON.stringify({ ...st, outbox: undefined, branch: undefined }));
     gitT(pcGit, "update-ref", "-d", "refs/heads/night/n1");
-    const said = () => vi.mocked(console.log).mock.calls.map((c) => String(c[0])).join("\n");
     expect(await main(["status", "n1", "--root", root])).toBe(0);
     expect(said()).toContain("まとめ: まだ");
     expect(await main(["wrap", "--pending", "--root", root])).toBe(0);
-    expect(gitT(pcGit, "log", "-1", "--format=%s", "night/n1")).toMatch(/^台帳: キュー n1 の結果（1 行、/);
-    expect(readStatus(dir())).toMatchObject({ state: "stopped", branch: expect.stringMatching(/^night\/n1（/) });
+    expect(gitT(pcGit, "log", "-1", "--format=%s", "night/n1")).toMatch(/^台帳: キュー n1 の結果（3 行、/);
+    expect(readStatus(dir())).toMatchObject({ state: "done", branch: expect.stringMatching(/^night\/n1（/) });
     vi.mocked(console.log).mockClear();
     expect(await main(["wrap", "--pending", "--root", root])).toBe(0);
     expect(said()).toBe("まとめが済んでいない回はありません");
@@ -806,8 +797,8 @@ describe("区切って回す（偽物の svwb で）", () => {
     expect(said()).not.toContain("まとめ: まだ");
   });
 
-  it("前の版（止まるときにまとめない版）で回した回は、status も wrap --pending も拾わない。名前を渡した wrap ならまとめる", async () => {
-    expect(await start("--foreground")).toBe(0);
+  it("2026-11-19 より前の版（止まったときにまとめない版）で回した回は、status も wrap --pending も拾わない。名前を渡した wrap ならまとめる", async () => {
+    await run();
     // 前の版の回: session.json に wraps が無く、status にまとめの結果も無い。ブランチも無い
     const session = JSON.parse(readFileSync(join(dir(), "session.json"), "utf8")) as Record<string, unknown>;
     delete session.wraps;
@@ -815,7 +806,6 @@ describe("区切って回す（偽物の svwb で）", () => {
     writeFileSync(join(dir(), "status.json"), JSON.stringify({ ...readStatus(dir()), outbox: undefined, branch: undefined }));
     gitT(pcGit, "update-ref", "-d", "refs/heads/night/n1");
     rmSync(join(tmp, "outbox"), { recursive: true, force: true });
-    const said = () => vi.mocked(console.log).mock.calls.map((c) => String(c[0])).join("\n");
     expect(await main(["status", "n1", "--root", root])).toBe(0);
     expect(said()).not.toContain("まとめ: まだ");
     vi.mocked(console.log).mockClear();
@@ -873,7 +863,7 @@ describe("区切って回す（偽物の svwb で）", () => {
     expect(existsSync(join(shared, "data", "models", "other"))).toBe(false);
   });
 
-  it("券（go）: 券のコミットを取ってきて回のフォルダに出し、そこで回す。止まった回は同じ券で続きから、済んだ回・動いている回は回さない", async () => {
+  it("券（add）: 券のコミットを取ってきて回のフォルダに出し、そこで積む。積んだだけでは回らない。続きは回の名前で積み直し、済んだ回は積まない", async () => {
     // GitHub の代わりのリポジトリ。キューのスクリプト（今のもの）とジョブのファイルをコミットする
     const here = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts");
     const orig = join(tmp, "origin-git");
@@ -893,58 +883,69 @@ describe("区切って回す（偽物の svwb で）", () => {
     // PC の /workspace（pcGit）には券のコミットが無い。依存は同じ（node_modules を指す）
     writeFileSync(join(pcGit, "package-lock.json"), "{}\n");
     mkdirSync(join(pcGit, "node_modules"));
-    const t = makeTicket({ name: "g1", branch: "claude/x", commit: full.slice(0, 12), jobs: "night/t.txt", until: "+2h", threads: 2, chunk: 1 }, jobsText);
-    const go = (ticket: string) => main(["go", ...ticket.split(" "), "--root", root, "--yes", "--bin", fake, "--foreground"]);
+    const body = { name: "g1", branch: "claude/x", commit: full.slice(0, 12), jobs: "night/t.txt", threads: 2, chunk: 1 };
+    const t = makeTicket(body, jobsText);
+    const add = (...words: string[]) => main(["add", ...words, "--root", root, "--bin", fake]);
+    const go = async () => {
+      expect(await main(["start", "--root", root])).toBe(0);
+      drainQueue(pueue);
+    };
     const g1 = join(root, "g1");
-    const said = () => vi.mocked(console.log).mock.calls.map((c) => String(c[0])).join("\n");
     const errs = vi.spyOn(console, "error").mockImplementation(() => {});
-    // 1 晩目: compare の 2 つ目の区切りの後で止める
-    process.env.FAKE_STOP_AT = "50";
-    expect(await go(ticketText(t))).toBe(1);
-    delete process.env.FAKE_STOP_AT;
+    const why = () => errs.mock.calls.map((c) => String(c[0])).join("\n");
+    // 積むだけでは回らない
+    expect(await add(...ticketText(t).split(" "))).toBe(0);
+    expect(roles("g1").map(([, s]) => s)).toEqual(Array<string>(8).fill("Queued"));
+    expect(calls()).toEqual([]);
     expect(readFileSync(join(g1, "ticket.txt"), "utf8")).toBe(`${ticketText(t)}\n`);
     expect(readFileSync(join(g1, "src", "night", "t.txt"), "utf8")).toBe(jobsText);
-    const plan = JSON.parse(readFileSync(join(g1, "plan.json"), "utf8")) as { repo: string; gitDir: string; commit: string; commitFull: string; branch: string };
-    expect(plan).toMatchObject({ repo: join(g1, "src"), gitDir: pcGit, commit: full.slice(0, 7), commitFull: full, branch: "claude/x" });
-    expect(readStatus(g1)).toMatchObject({ state: "stopped" });
+    // 1 回目: compare の 3 つ目の区切りが失敗する
+    process.env.FAKE_FAIL = "100";
+    await go();
+    delete process.env.FAKE_FAIL;
+    const plan = JSON.parse(readFileSync(join(g1, "plan.json"), "utf8")) as Record<string, unknown>;
+    expect(plan).toMatchObject({ repo: join(g1, "src"), gitDir: pcGit, commit: full.slice(0, 7), commitFull: full, branch: "claude/x", queue: 1 });
+    expect(lstatSync(join(g1, "src", "node_modules")).isSymbolicLink()).toBe(true);
+    expect(done("g1")).toEqual(["1-1", "1-2", "2-1", "3-1", "4-1"]);
     expect(gitT(pcGit, "rev-parse", "night/g1^")).toBe(full);
-    const n1 = calls().length;
-    // 2 晩目: 同じ券で続きから
-    expect(await go(ticketText(t))).toBe(0);
+    // 2 回目: 回の名前で積み直すと、済んでいない区切りとまとめだけを積む
+    expect(await add("g1")).toBe(0);
+    expect(roles("g1").filter(([, s]) => s === "Queued")).toEqual([
+      ["1-3", "Queued"],
+      ["まとめ", "Queued"],
+    ]);
+    await go();
     expect(readStatus(g1)).toMatchObject({ state: "done" });
     expect(gitT(pcGit, "rev-parse", "night/g1^^")).toBe(full);
-    const n2 = calls().length;
-    expect(n2).toBeGreaterThan(n1);
-    // 済んだ回は回さない
-    vi.mocked(console.log).mockClear();
-    expect(await go(ticketText(t))).toBe(0);
-    expect(calls().length).toBe(n2);
-    expect(said()).toContain("この回は全部済んでいます");
-    // 止める時刻だけ替えた券でも、同じ回として扱う
-    const later = makeTicket({ ...t, until: "+3h" }, jobsText);
-    expect(await go(ticketText(later))).toBe(0);
-    expect(calls().length).toBe(n2);
-    // 写し間違い（指紋が合わない）・同じ名前の別の回・ブランチに無いコミットは断る
-    const why = () => errs.mock.calls.map((c) => String(c[0])).join("\n");
-    expect(await go(ticketText({ ...t, until: "+3h" }))).toBe(2);
+    // 済んだ回は、同じ券でも積まない
+    const n = pueueStatus().tasks.length;
+    expect(await add(...ticketText(t).split(" "))).toBe(0);
+    expect(pueueStatus().tasks).toHaveLength(n);
+    // 写し間違い（指紋が合わない）・同じ名前の別の回・ブランチに無いコミット・前のやり方の券は断る
+    expect(await add(...ticketText({ ...t, threads: 3 }).split(" "))).toBe(2);
     expect(why()).toContain("券の指紋が合いません");
-    writeFileSync(join(orig, "night", "t.txt"), `${jobsText}\nprofile --games 2\n`);
+    const jobs2 = `${jobsText}\nprofile --games 2\n`;
+    writeFileSync(join(orig, "night", "t.txt"), jobs2);
     gitT(orig, "commit", "-q", "-am", "足す");
     const full2 = gitT(orig, "rev-parse", "HEAD");
-    const other = makeTicket({ ...t, commit: full2.slice(0, 12) }, `${jobsText}\nprofile --games 2\n`);
-    expect(await go(ticketText(other))).toBe(2);
+    expect(await add(...ticketText(makeTicket({ ...body, commit: full2.slice(0, 12) }, jobs2)).split(" "))).toBe(2);
     expect(why()).toContain("同じ名前の別の回があります");
-    expect(await go(ticketText(makeTicket({ ...t, name: "g2", commit: "0123456789ab" }, jobsText)))).toBe(2);
+    expect(await add(...ticketText(makeTicket({ ...body, name: "g2", commit: "0123456789ab" }, jobsText)).split(" "))).toBe(2);
     expect(why()).toContain("券のコミット 0123456789ab がブランチ claude/x にありません");
+    expect(await add("svwb-night-1", "name=g2", "branch=claude/x", `commit=${full.slice(0, 12)}`, "jobs=night/t.txt", "until=07:00", "plan=0123456789ab")).toBe(2);
+    expect(why()).toContain("前のやり方の券");
+    expect(existsSync(join(root, "g2"))).toBe(false);
+    expect(pueueStatus().tasks).toHaveLength(n);
     // 別の名前なら、新しいコミットで回る
-    expect(await go(ticketText({ ...other, name: "g3", plan: ticketPlan({ ...other, name: "g3" }, `${jobsText}\nprofile --games 2\n`) }))).toBe(0);
+    expect(await add(...ticketText(makeTicket({ ...body, name: "g3", commit: full2.slice(0, 12) }, jobs2)).split(" "))).toBe(0);
+    await go();
+    expect(readStatus(join(root, "g3"))).toMatchObject({ state: "done" });
     expect(gitT(pcGit, "rev-parse", "night/g3^")).toBe(full2);
-    delete process.env.SVWB_NIGHT_REMOTE;
   }, 60_000);
 
   it("出口のアーカイブは、確かめて共有フォルダに展開する（分けたもの・足りないもの・壊れたもの）", async () => {
     process.env.SVWB_OUTBOX_MAX_MB = "0.002";
-    expect(await start("--foreground")).toBe(0);
+    await run();
     // 名前が ASCII でないファイルも入る（tar の PAX）
     writeFileSync(join(dir(), "メモ.txt"), "あいう");
     expect(await main(["wrap", "n1", "--root", root])).toBe(0);
@@ -992,33 +993,32 @@ describe("台帳の行の道", () => {
 });
 
 describe("券", () => {
-  const body = { name: "night-20261119", branch: "claude/x", commit: "0123456789ab", jobs: "night/t.txt", until: "07:00" };
-  it("書いて読み直すと同じ。指紋はジョブのファイルの中身と項目で変わる", () => {
-    const t = makeTicket(body, "compare 10 '{}' '{}' 0 --label a\n");
-    expect(ticketText(t)).toBe(`svwb-night-1 name=night-20261119 branch=claude/x commit=0123456789ab jobs=night/t.txt until=07:00 plan=${t.plan}`);
+  const body = { name: "branch-1-20261124", branch: "claude/x", commit: "0123456789ab", jobs: "night/t.txt" };
+  it("書いて読み直すと同じ。指紋はジョブのファイルの中身と項目で変わる（2026-11-24 に出した券と同じ指紋）", () => {
+    const t = makeTicket(body, "profile --games 2\n");
+    expect(ticketText(t)).toBe(`svwb-queue-1 name=branch-1-20261124 branch=claude/x commit=0123456789ab jobs=night/t.txt plan=${t.plan}`);
+    expect(t.plan).toBe("cc75e6283d6a");
     expect(parseTicket([ticketText(t)])).toEqual(t);
     expect(parseTicket(ticketText(t).split(" "))).toEqual(t);
-    const u = makeTicket({ ...body, tz: "Asia/Tokyo", threads: 8, chunk: 15 }, "x");
+    const u = makeTicket({ ...body, threads: 8, chunk: 15 }, "x");
     expect(parseTicket([ticketText(u)])).toEqual(u);
     expect(ticketPlan(body, "a")).not.toBe(ticketPlan(body, "b"));
-    expect(ticketPlan(body, "a")).not.toBe(ticketPlan({ ...body, until: "08:00" }, "a"));
+    expect(ticketPlan(body, "a")).not.toBe(ticketPlan({ ...body, threads: 8 }, "a"));
   });
-  it("形の違う券・読めない語・使えない値は断る", () => {
+  it("形の違う券・前のやり方の券・止める時刻・読めない語・使えない値は断る", () => {
     const t = ticketText(makeTicket(body, "x"));
-    expect(() => parseTicket(["svwb-night-9", "name=a"])).toThrow(/git pull/);
+    expect(() => parseTicket(["svwb-queue-9", "name=a"])).toThrow(/git pull/);
+    expect(() => parseTicket([t.replace("svwb-queue-1", "svwb-night-1")])).toThrow(/前のやり方の券/);
     expect(() => parseTicket(["compare", "10"])).toThrow(/券ではありません/);
+    expect(() => parseTicket([t.replace(/ plan=/, " until=07:00 plan=")])).toThrow(/止める時刻/);
+    expect(() => parseTicket([t.replace(/ plan=/, " tz=Asia/Tokyo plan=")])).toThrow(/止める時刻/);
     expect(() => parseTicket([`${t} extra=1`])).toThrow(/読めない語/);
-    expect(() => parseTicket([t.replace("name=night-20261119", "name=../x")])).toThrow(/name/);
+    expect(() => parseTicket([t.replace("name=branch-1-20261124", "name=../x")])).toThrow(/name/);
     expect(() => parseTicket([t.replace("jobs=night/t.txt", "jobs=../t.txt")])).toThrow(/jobs/);
     expect(() => parseTicket([t.replace("commit=0123456789ab", "commit=0123")])).toThrow(/commit/);
-    expect(() => parseTicket([t.replace("until=07:00", "until=朝")])).toThrow(/--until/);
     expect(() => parseTicket([t.replace(/ plan=\w+/, "")])).toThrow(/plan がありません/);
   });
-  it("昼（7 時〜18 時）を見分け、GitHub の URL を認証の要らない形にする", () => {
-    expect(isDaytime(Date.parse("2026-11-19T05:00:00Z"), "Asia/Tokyo")).toBe(true); // 14:00
-    expect(isDaytime(Date.parse("2026-11-19T13:00:00Z"), "Asia/Tokyo")).toBe(false); // 22:00
-    expect(isDaytime(Date.parse("2026-11-18T22:00:00Z"), "Asia/Tokyo")).toBe(true); // 07:00
-    expect(isDaytime(Date.parse("2026-11-19T09:00:00Z"), "Asia/Tokyo")).toBe(false); // 18:00
+  it("GitHub の URL を認証の要らない形にする", () => {
     expect(httpsRemote("git@github.com:o/r.git")).toBe("https://github.com/o/r.git");
     expect(httpsRemote("ssh://git@github.com/o/r")).toBe("https://github.com/o/r.git");
     expect(httpsRemote("https://github.com/o/r.git\n")).toBe("https://github.com/o/r.git");
@@ -1033,18 +1033,18 @@ describe("券", () => {
       writeFileSync(join(repo, "night", "t.txt"), "profile --games 2\n");
       gitT(repo, "init", "-q", "-b", "claude/x");
       const file = join(repo, "night", "t.txt");
-      expect(ticketHere(file, { name: "n", until: "07:00" }, repo)).toEqual({ why: expect.stringContaining("コミットしていない") });
+      expect(ticketHere(file, { name: "n" }, repo)).toEqual({ why: expect.stringContaining("コミットしていない") });
       gitT(repo, "add", ".");
       gitT(repo, "commit", "-q", "-m", "a");
       gitT(repo, "remote", "add", "origin", bare);
-      expect(ticketHere(file, { name: "n", until: "07:00" }, repo)).toEqual({ why: expect.stringContaining("push していない") });
+      expect(ticketHere(file, { name: "n" }, repo)).toEqual({ why: expect.stringContaining("push していない") });
       gitT(repo, "push", "-q", "origin", "claude/x");
-      const r = ticketHere(file, { name: "n", until: "07:00", threads: 8 }, repo);
+      const r = ticketHere(file, { name: "n", threads: 8 }, repo);
       const full = gitT(repo, "rev-parse", "HEAD");
-      expect(r).toEqual({ ticket: makeTicket({ name: "n", branch: "claude/x", commit: full.slice(0, 12), jobs: "night/t.txt", until: "07:00", threads: 8 }, "profile --games 2\n") });
+      expect(r).toEqual({ ticket: makeTicket({ name: "n", branch: "claude/x", commit: full.slice(0, 12), jobs: "night/t.txt", threads: 8 }, "profile --games 2\n") });
       writeFileSync(file, "profile --games 4\n");
-      expect(ticketHere(file, { name: "n", until: "07:00" }, repo)).toEqual({ why: expect.stringContaining("コミットしていない変更") });
-      expect(ticketHere(join(tmp, "outside.txt"), { name: "n", until: "07:00" }, repo)).toEqual({ why: expect.stringContaining("リポジトリの外") });
+      expect(ticketHere(file, { name: "n" }, repo)).toEqual({ why: expect.stringContaining("コミットしていない変更") });
+      expect(ticketHere(join(tmp, "outside.txt"), { name: "n" }, repo)).toEqual({ why: expect.stringContaining("リポジトリの外") });
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -1052,7 +1052,7 @@ describe("券", () => {
 });
 
 describe("回のソースの node_modules", () => {
-  it("依存が同じなら /workspace を指し、続きの go の前に /workspace の依存が変わっていたら指すのをやめて npm ci", () => {
+  it("依存が同じなら /workspace を指し、組み立ての前に /workspace の依存が変わっていたら指すのをやめて npm ci", () => {
     const tmp = mkdtempSync(join(tmpdir(), "night-nm-"));
     try {
       const repo = join(tmp, "workspace");

@@ -324,18 +324,16 @@ npm run ledger -- check
 ## queue
 
 ```sh
-npm run queue -- plan <ジョブのファイル> [--threads N] [--machine svwb-docker] [--legacy]     # ジョブの一覧と見込みと積むコマンド（積まない。--legacy は前の go の券）
+npm run queue -- plan <ジョブのファイル> [--threads N] [--machine svwb-docker]              # ジョブの一覧と見込みと積むコマンド（積まない）
 docker/remote-control/queue.sh add <券>                                                      # 積む（ユーザーがホストで、いつでも。中は npm run queue -- add）
 docker/remote-control/queue.sh start [--until 07:00] | pause [--wait] | status | remove <回>   # 回す・止める（いつ回すかはユーザーが決める）
-docker/remote-control/queue.sh go <券>                                                       # 前のやり方（PC でキューを確かめるまで残す）
-npm run queue -- start <ジョブのファイル> --yes [--until 07:00] [--threads N]               # もっと前の始め方
-npm run queue -- status | stop [--now] | resume --yes | wrap | list
+npm run queue -- status | wrap [名前|--pending] | list
 npm run queue -- ingest <回の名前|ファイル…>                                                     # スレッドで: 台帳に足す・出口のファイルを展開する
 ```
 
 PC で対戦を回すキュー。ジョブのファイルは 1 行 1 ジョブで、svwb の `compare`・`yardstick`・`profile`・`misses`・`survey` と同じ形（`--label` が要る）。
 ユーザーがホストで `plan` の出した券の 1 行（`docker/remote-control/queue.sh add <券>`）を流して積み（いつでも。積むだけでは回らない）、
-回したいときに `queue.sh start` で回す（回す係は pueue。止めるのは `queue.sh pause`。[queue.md](queue.md)「キュー（pueue）」）。前の名前の `npm run night` も同じものを流す。
+回したいときに `queue.sh start` で回す（回す係は pueue。止めるのは `queue.sh pause`。[queue.md](queue.md)「キュー（pueue）」）。
 5〜10 分の区切りごとに結果を回のフォルダ（`~/svwb-data/night/<名前>/`）に残し、電源が切れても続きから回る。止まるときに、ジョブごとに 1 行にまとめた行を
 ブランチ `night/<名前>` にコミットし、棋譜などを出口のフォルダ（`~/svwb-data/outbox/<名前>/`）にまとめる。ユーザーはホストで `docker/remote-control/queue-push.sh` を流すだけで、
 スレッドが `ingest` で台帳に足す。
