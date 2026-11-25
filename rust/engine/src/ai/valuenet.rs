@@ -6,6 +6,7 @@ use crate::state::*;
 use crate::state_json::ability_json_texts;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 /// カード・クレストごとの入力の種類。モデルはこの並びの部分列を持つ（足す前のモデルも読める）。
@@ -201,6 +202,9 @@ pub struct ValueNet {
     survival_win: bool,
     /// 読みの中の相手に負けた割合を当てる補助の出力（重み・バイアス。手を選ぶのには使わない。棋譜の数え用）
     read: Option<(Vec<f64>, f64)>,
+    /// この補正の番号（new が振る。同じ番号の補正は作られない）。最後の隠れ層の使い回しの表の鍵（MEMO）。
+    /// 補正の番地は鍵にしない（作っては捨てると、同じ番地に別の補正が来る）
+    id: u64,
 }
 
 /// 出力 1 つ（最後の隠れ層 h から σ(b + Σ w·h)）
@@ -494,6 +498,7 @@ impl ValueNet {
             win: raw.win_head.map(|l| (l.w, l.b)),
             survival_win,
             read: raw.read_head.map(|l| (l.w, l.b)),
+            id: NEXT_NET_ID.fetch_add(1, Ordering::Relaxed),
         })
     }
 
@@ -678,6 +683,16 @@ impl ValueNet {
                     }
                 });
             }
+            // 同じ補正に同じ行（順番まで）を足すなら、最後の隠れ層は前と同じ（MEMO）。
+            // 隠れ層ごとの値を写す（keep。調べもの）ときは、全部の層を計算するので引かない
+            let memo = if keep.is_none() {
+                memo_find(self.id, rows, h)
+            } else {
+                MemoFind::Off
+            };
+            if memo == MemoFind::Hit {
+                return f(h);
+            }
             h.clear();
             h.extend_from_slice(&self.b1);
             add_rows(&self.w1, rows, h);
@@ -702,6 +717,9 @@ impl ValueNet {
                 if let Some(k) = keep.as_mut() {
                     k.push(h.clone());
                 }
+            }
+            if let MemoFind::Miss(slot, key) = memo {
+                memo_store(slot, key, self.id, h);
             }
             f(h)
         })
@@ -1017,7 +1035,127 @@ fn push_counts(
     });
 }
 
+/// 次に作る補正の番号（ValueNet の id。0 は表の空きに使うので 1 から）
+static NEXT_NET_ID: AtomicU64 = AtomicU64::new(1);
+
+/// 最後の隠れ層の使い回しの表（MEMO）の大きさの 2 の冪。探索は同じ局面（同じ入力）を何度も採点するので（読み直しの相手のビームなど）、
+/// 当たりは半分ほど。値は表の大きさによらず同じ（当たれば前に計算した値そのもの）。docs/value-net.md「最後の隠れ層の使い回し」
+#[cfg(not(target_arch = "wasm32"))]
+const MEMO_BITS: u32 = 14;
+/// WASM はページのメモリに残るので小さめに
+#[cfg(target_arch = "wasm32")]
+const MEMO_BITS: u32 = 12;
+
+/// 使い回しを止める（svwb profile --no-memo で使い回しの無い速さを測る・テストで使い回しの有無の値を比べる）。
+/// 止めても止めなくても値は同じ
+static MEMO_OFF: AtomicBool = AtomicBool::new(false);
+
+/// 最後の隠れ層の使い回しを止める・戻す（全部のスレッド）。値は変わらない
+pub fn set_hidden_memo(on: bool) {
+    MEMO_OFF.store(!on, Ordering::Relaxed);
+}
+
+/// 使い回しの表の 1 つ（足した行の鍵・補正の番号・最後の隠れ層。net が 0 なら空き）
+#[derive(Default)]
+struct MemoSlot {
+    key: [u64; 2],
+    net: u64,
+    h: Vec<f64>,
+}
+
+/// スレッドごとの使い回しの表と、引いた数・当たった数（svwb profile が報告に書く）
+#[derive(Default)]
+struct Memo {
+    slots: Vec<MemoSlot>,
+    finds: u64,
+    hits: u64,
+}
+
+#[derive(PartialEq, Eq)]
+enum MemoFind {
+    /// 使い回しを止めている
+    Off,
+    /// 当たった（h に最後の隠れ層を入れた）
+    Hit,
+    /// 外れた（表のこの位置に、この鍵で、計算した最後の隠れ層を memo_store で入れる）
+    Miss(usize, [u64; 2]),
+}
+
+/// 128 ビットの積の上と下の排他的論理和（wyhash の mum）
+#[inline(always)]
+fn mum(a: u64, b: u64) -> u64 {
+    let r = (a as u128) * (b as u128);
+    (r as u64) ^ ((r >> 64) as u64)
+}
+
+/// 補正の番号と足す行（添字と値のビット、順番まで）の 128 ビットの鍵。64 ビットずつ、別の定数・別の組み方で行を 1 つずつ混ぜる
+/// （wyhash の混ぜ方）。別の行の鍵がぶつかる見込みは 1 回引くごとに 2^-128 ほどで、学習の自己対戦を何度回しても 1 度も起きない
+/// （6 万試合で引くのは 3×10^10 回ほど）
+#[inline]
+fn rows_key(net: u64, rows: &[(usize, f64)]) -> [u64; 2] {
+    const S: [u64; 4] = [
+        0xA076_1D64_78BD_642F,
+        0xE703_7ED1_A0B4_28DB,
+        0x8EBC_6AF0_9C88_C6E3,
+        0x5899_65CC_7537_4CC3,
+    ];
+    let n = rows.len() as u64;
+    let mut a = mum(net ^ S[0], n ^ S[1]);
+    let mut b = mum(net ^ S[2], n ^ S[3]);
+    for &(o, x) in rows {
+        let (o, x) = (o as u64, x.to_bits());
+        a = mum(o ^ S[1], x ^ a);
+        b = mum(x ^ S[3], o ^ b ^ S[2]);
+    }
+    [mum(a ^ S[0], b ^ S[1]), b]
+}
+
+/// 同じ補正（番号）に同じ行（添字と値のビットが、順番まで同じ）を足した最後の隠れ層が表にあれば h に入れる
+fn memo_find(net: u64, rows: &[(usize, f64)], h: &mut Vec<f64>) -> MemoFind {
+    if MEMO_OFF.load(Ordering::Relaxed) {
+        return MemoFind::Off;
+    }
+    let key = rows_key(net, rows);
+    MEMO.with(|m| {
+        let m = &mut *m.borrow_mut();
+        if m.slots.is_empty() {
+            m.slots.resize_with(1 << MEMO_BITS, MemoSlot::default);
+        }
+        m.finds += 1;
+        let i = (key[0] as usize) & ((1 << MEMO_BITS) - 1);
+        let e = &m.slots[i];
+        if e.net == net && e.key == key {
+            h.clear();
+            h.extend_from_slice(&e.h);
+            m.hits += 1;
+            return MemoFind::Hit;
+        }
+        MemoFind::Miss(i, key)
+    })
+}
+
+/// memo_find が外れた位置に、計算した最後の隠れ層を入れる
+fn memo_store(i: usize, key: [u64; 2], net: u64, h: &[f64]) {
+    MEMO.with(|m| {
+        let e = &mut m.borrow_mut().slots[i];
+        e.key = key;
+        e.net = net;
+        e.h.clear();
+        e.h.extend_from_slice(h);
+    });
+}
+
+/// このスレッドで使い回しの表を引いた数と当たった数
+pub fn hidden_memo_counts() -> (u64, u64) {
+    MEMO.with(|m| {
+        let m = m.borrow();
+        (m.finds, m.hits)
+    })
+}
+
 thread_local! {
+    /// 最後の隠れ層の使い回しの表（memo_find）
+    static MEMO: RefCell<Memo> = RefCell::new(Memo::default());
     /// push_counts の作業場所（vocab の添字ごとの枚数と、0 でない添字）
     static COUNTS: RefCell<(Vec<u32>, Vec<usize>)> = const { RefCell::new((Vec::new(), Vec::new())) };
     /// eval の作業場所（入力・隠れ層 2 つ・足す行）

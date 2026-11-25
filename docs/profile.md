@@ -28,6 +28,22 @@ npm run profile -- --rhino                        # リノセウスエルフは�
 - 変更の前後を比べる: 前のビルドの `svwb profile --json 前.json` を、後のビルドの `svwb profile --baseline 前.json` に渡すと、
   同じ試合になったかを確かめて（違えばエラー）思考の時間の比を出す。結果を変えない高速化の確かめに使える。
   前と後を交互に 2 回ずつ（前・後・前・後）続けて測ると、環境の揺れを避けられる
+- 補正の最後の隠れ層の使い回し（`docs/value-net.md`「最後の隠れ層の使い回し」）の効きは、同じビルドで `--no-memo --json 前.json` と
+  `--baseline 前.json` を比べて測れる（使い回しても値も試合も同じ）
+
+## メモリの確保
+
+探索は局面を写しては捨てるので、メモリの確保と解放が多い（2026-11-25、新しい既定の 2 試合を callgrind で数えた。命令の 17% ほどが glibc の malloc・free の中。
+多いのは、局面の共有した並びを書き換えるときの写し（`Shared::unshare`。場・手札・破壊されたカード等）、手札の記録（`HandLog::push`）、Vec を伸ばすところ）。
+確保の仕方を jemalloc に替えると、思考が 0.86 倍ほどになる（クラウド環境の 40 試合。補正の最後の隠れ層の使い回しと合わせて 0.73 倍ほど。docs/ai-notes/15-2026-11-22.md「手を変えずに自己対戦を速くする」）。
+値も試合も変わらない（同じ試合を確かめた）。glibc の設定（`GLIBC_TUNABLES` の tcache を大きくする等）では速くならなかった。
+
+- PC のコンテナ（`docker/remote-control/Dockerfile`。2026-11-25、ユーザーの決定。Rust の依存に足す案・確保を減らすコードを書く案は採らなかった）は `libjemalloc2` を入れ、環境変数 `SVWB_PRELOAD` にその場所を書く。
+  キュー（`scripts/night-main.ts` の `svwbPreload`）と `npm run svwb`（`scripts/svwb.mjs`）は、`SVWB_PRELOAD` があれば svwb にだけ `LD_PRELOAD` で差し込む
+  （node・cargo などには入れない）。ほかの環境（CI・クラウド環境）は変わらない。Rust の依存は増やしていない
+- 報告の先頭の「メモリの確保」の行に、差し込んだもの（`libjemalloc.so.2（LD_PRELOAD）`）か、Rust の既定かが出る
+- キューの profile の `--no-jemalloc` は差し込まない（効きを同じ回で比べる。`night/speedup-1.txt`）
+- 手元で試すなら `SVWB_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2 npm run svwb -- profile …`（`libjemalloc2` が入っていれば）
 
 ## 内訳の測り方
 

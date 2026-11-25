@@ -2,8 +2,10 @@
 //! デッキごとの 1 試合の時間と、思考の処理ごとの時間の内訳を出す。
 //!
 //!   svwb profile [--games 49] [--start 0] [--opts '<設定JSON>'] [--rhino] [--decks <デッキ>,…|@<デッキの組>] [--only <文字列>] [--check] [--log <フォルダ>] [--json 結果.json]
-//!                [--baseline 測らないビルドの結果.json] [--report 報告.md] [--label 名前] [--record] [--kifu <ファイル> | --no-kifu]
+//!                [--baseline 測らないビルドの結果.json] [--report 報告.md] [--label 名前] [--record] [--kifu <ファイル> | --no-kifu] [--no-memo]
 //!
+//! - --no-memo なら、補正の最後の隠れ層を使い回さない（ai/valuenet.rs の MEMO。値は同じで、試合も同じ）。
+//!   使い回しの効きを同じビルドで測るため（`--no-memo --json 前.json` の後に `--baseline 前.json`）
 //! - --check なら、手を打つたびに局面の不変条件（invariants.rs）を確かめ、破った局面を報告に並べる（1 つでもあれば終わりにエラーを返す）
 //! - 報告には、デッキ（名前の「（」の前が同じものは型にまとめる）ごとの勝率と、仕組み（アクセラレート・結晶・エンハンス・奥義・進化・
 //!   超進化・融合・アクト・エクストラPP・攻撃）を使った回数と、クレストの能力が誘発した回数も出す。これらは、打った試合を棋譜と同じ
@@ -39,6 +41,7 @@ use crate::ai::rhino::RhinoAgent;
 use crate::ai::search::{
     take_read_lethal_stats, ReadLethalStats, SearchAgent, SearchOptions, READ_LETHAL_EDGES,
 };
+use crate::ai::valuenet::hidden_memo_counts;
 use crate::ai::Agent;
 use crate::data::{data, CardIdx, CrestIdx, Deck};
 use crate::game::{acting_player, apply_action, create_game, legal_actions};
@@ -92,6 +95,8 @@ struct GameRecord {
     crest_held: [BTreeMap<CrestIdx, u32>; 2],
     /// 席ごとの readLethal の数（設定に readLethal があるときだけ数える）
     read_lethal: [ReadLethalStats; 2],
+    /// 補正の最後の隠れ層の使い回しの表を引いた数と当たった数（両方の席の合計。ai/valuenet.rs の MEMO）
+    memo: (u64, u64),
     /// 棋譜の 1 行（棋譜を書くときだけ）
     kifu: Option<String>,
 }
@@ -289,6 +294,7 @@ fn play_timed(
     let _ = prof::take();
     let _ = take_read_lethal_stats();
     let mut read_lethal: [ReadLethalStats; 2] = Default::default();
+    let memo0 = hidden_memo_counts();
     let t0 = Instant::now();
     let mut s = create_game([&seats[0].cards, &seats[1].cards], seed);
     let mut rng = MatchRng::new(seed);
@@ -406,7 +412,9 @@ fn play_timed(
             },
         )
     });
+    let memo1 = hidden_memo_counts();
     GameRecord {
+        memo: (memo1.0 - memo0.0, memo1.1 - memo0.1),
         kifu,
         g,
         swap,
@@ -655,6 +663,10 @@ struct Summary {
     check: Option<Vec<String>>,
     /// readLethal の数（全部の席の合計）
     read_lethal: ReadLethalStats,
+    /// 補正の最後の隠れ層の使い回しの表を引いた数と当たった数（全部の試合の合計）
+    memo: (u64, u64),
+    /// メモリの確保（LD_PRELOAD で差し込んだ共有ライブラリの名前。無ければ None。scripts/svwb.mjs・キューの SVWB_PRELOAD）
+    preload: Option<String>,
 }
 
 /// 報告の readLethal の節（q の区間ごとの、読みの起点・引き直し・リーサル探索をした数と見つけた数、線ごとの掛かる割合）
@@ -786,6 +798,27 @@ fn report(sm: &Summary, date: &str, commit: &str, label: &str) -> String {
             &mut out,
             "- 測らないビルドなので内訳は無し（`npm run profile` なら内訳も出る）",
         ),
+    }
+    push(
+        &mut out,
+        &format!(
+            "- メモリの確保: {}",
+            sm.preload
+                .as_deref()
+                .map_or("Rust の既定（glibc の malloc）".to_string(), |l| format!(
+                    "{l}（LD_PRELOAD）"
+                ))
+        ),
+    );
+    if sm.memo.0 > 0 {
+        push(
+            &mut out,
+            &format!(
+                "- 補正の最後の隠れ層の使い回し（docs/value-net.md）: 1 試合に {} 回引き、{}% が当たり",
+                fixed(sm.memo.0 as f64 / sm.total_games.max(1) as f64, 0),
+                fixed(100.0 * sm.memo.1 as f64 / sm.memo.0 as f64, 1)
+            ),
+        );
     }
     if !sm.read_lethal.is_empty() {
         read_lethal_section(&mut out, &sm.read_lethal, sm.all.seats);
@@ -1292,10 +1325,11 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             "--decks" => deck_list = Some(value(i)?),
             "--log" => log_dir = Some(value(i)?),
             "--only" => only = Some(value(i)?),
-            "--rhino" | "--record" | "--check" => {
+            "--rhino" | "--record" | "--check" | "--no-memo" => {
                 match argv[i].as_str() {
                     "--rhino" => rhino = true,
                     "--record" => write = true,
+                    "--no-memo" => crate::ai::valuenet::set_hidden_memo(false),
                     _ => check = true,
                 }
                 i += 1;
@@ -1531,6 +1565,13 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             }
             t
         },
+        memo: records
+            .iter()
+            .fold((0, 0), |(f, h), r| (f + r.memo.0, h + r.memo.1)),
+        preload: std::env::var("LD_PRELOAD")
+            .ok()
+            .filter(|x| !x.is_empty())
+            .map(|x| x.rsplit('/').next().unwrap_or(&x).to_string()),
     };
     let date = command_line("date", &["+%Y-%m-%d"]).unwrap_or("?".into());
     let commit = commit_label_excluding("docs/profile.md");
@@ -1565,6 +1606,8 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             "threads": threads,
             "cpu": sm.cpu,
             "profiled": prof::ENABLED,
+            "memo": { "finds": sm.memo.0, "hits": sm.memo.1 },
+            "preload": sm.preload,
             "games": records.iter().map(|r| r.to_json()).collect::<Vec<_>>(),
             "sections": sections,
         });

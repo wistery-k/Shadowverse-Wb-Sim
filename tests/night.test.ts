@@ -87,6 +87,14 @@ describe("ジョブの行", () => {
       "--report",
       "/r/speed-3.md",
     ]);
+    // --no-memo（補正の最後の隠れ層を使い回さない）はそのまま渡す
+    const pn = parseJob("profile --no-memo --games 2", 5);
+    expect(pn.spec).toEqual({ kind: "profile", opts: "{}", rhino: false, decks: null, noMemo: true });
+    expect(jobArgv(pn, 0, 2, "/r")).toContain("--no-memo");
+    // --no-jemalloc は svwb に渡さない（キューが LD_PRELOAD を入れないだけ）
+    const pj = parseJob("profile --no-jemalloc --games 2", 6);
+    expect(pj.spec).toEqual({ kind: "profile", opts: "{}", rhino: false, decks: null, noJemalloc: true });
+    expect(jobArgv(pj, 0, 2, "/r")).not.toContain("--no-jemalloc");
     expect(parseJob("misses run --trials 12 --seed 3 --label 定例", 4)).toMatchObject({ games: 12, start: 0, label: "定例", spec: { kind: "misses", opts: "{}", seed: 3 } });
     expect(parseJob(`misses --opts '{"beamWidth":512}' --label x`, 4)).toMatchObject({ games: 24, spec: { kind: "misses", opts: '{"beamWidth":512}', seed: 1 } });
     expect(() => parseJob("misses --trials 12", 1)).toThrow(/--label/);
