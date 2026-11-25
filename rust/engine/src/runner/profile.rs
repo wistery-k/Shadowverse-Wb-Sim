@@ -665,6 +665,8 @@ struct Summary {
     read_lethal: ReadLethalStats,
     /// 補正の最後の隠れ層の使い回しの表を引いた数と当たった数（全部の試合の合計）
     memo: (u64, u64),
+    /// メモリの確保（LD_PRELOAD で差し込んだ共有ライブラリの名前。無ければ None。scripts/svwb.mjs・キューの SVWB_PRELOAD）
+    preload: Option<String>,
 }
 
 /// 報告の readLethal の節（q の区間ごとの、読みの起点・引き直し・リーサル探索をした数と見つけた数、線ごとの掛かる割合）
@@ -797,6 +799,17 @@ fn report(sm: &Summary, date: &str, commit: &str, label: &str) -> String {
             "- 測らないビルドなので内訳は無し（`npm run profile` なら内訳も出る）",
         ),
     }
+    push(
+        &mut out,
+        &format!(
+            "- メモリの確保: {}",
+            sm.preload
+                .as_deref()
+                .map_or("Rust の既定（glibc の malloc）".to_string(), |l| format!(
+                    "{l}（LD_PRELOAD）"
+                ))
+        ),
+    );
     if sm.memo.0 > 0 {
         push(
             &mut out,
@@ -1555,6 +1568,10 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         memo: records
             .iter()
             .fold((0, 0), |(f, h), r| (f + r.memo.0, h + r.memo.1)),
+        preload: std::env::var("LD_PRELOAD")
+            .ok()
+            .filter(|x| !x.is_empty())
+            .map(|x| x.rsplit('/').next().unwrap_or(&x).to_string()),
     };
     let date = command_line("date", &["+%Y-%m-%d"]).unwrap_or("?".into());
     let commit = commit_label_excluding("docs/profile.md");
@@ -1589,6 +1606,8 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             "threads": threads,
             "cpu": sm.cpu,
             "profiled": prof::ENABLED,
+            "memo": { "finds": sm.memo.0, "hits": sm.memo.1 },
+            "preload": sm.preload,
             "games": records.iter().map(|r| r.to_json()).collect::<Vec<_>>(),
             "sections": sections,
         });

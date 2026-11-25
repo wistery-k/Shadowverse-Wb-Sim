@@ -6,10 +6,16 @@ ARG USERNAME=wk
 ARG USER_UID=1000
 ARG USER_GID=1000
 
-# 作業に使う道具（gcc・make・pkg-config・git・curl は元のイメージに入っている）
+# 作業に使う道具（gcc・make・pkg-config・git・curl は元のイメージに入っている）。
+# libjemalloc2 はメモリの確保を速くする共有ライブラリで、svwb にだけ差し込む（下の SVWB_PRELOAD）
 RUN apt-get update \
- && apt-get install -y --no-install-recommends jq ripgrep less tmux \
+ && apt-get install -y --no-install-recommends jq ripgrep less tmux libjemalloc2 \
  && rm -rf /var/lib/apt/lists/*
+
+# キュー（scripts/night-main.ts）と npm run svwb（scripts/svwb.mjs）が、svwb を動かすときだけ LD_PRELOAD でこれを差し込む
+# （node・cargo などには入れない）。値も試合も変わらず、自己対戦が速くなる（docs/profile.md「メモリの確保」。2026-11-25）。
+# 外すならこの行を消して作り直す
+ENV SVWB_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
 
 # node イメージにある node ユーザー（UID 1000）を消して、ホストと同じ UID のユーザーを作る。
 # 作業フォルダ（/workspace）と、名前付きボリュームを重ねる場所は先に作って持ち主を合わせておく（空のボリュームはこの持ち主を引き継ぐ）
