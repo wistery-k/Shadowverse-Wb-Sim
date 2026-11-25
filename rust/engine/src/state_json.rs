@@ -476,6 +476,19 @@ fn player_json(p: &PlayerState) -> Json {
     if !p.hand_log.is_empty() {
         o.push(("handLog", Json::Str(hand_log_text(&p.hand_log))));
     }
+    // 相手にも分かる強化の集計（山札の攻撃力・体力、伏せた手札の攻撃力・体力の順。無ければ省く）
+    if !p.pub_mods.is_zero() {
+        let m = &p.pub_mods;
+        o.push((
+            "pubMods",
+            Json::Arr(
+                [m.deck_atk, m.deck_def, m.hand_atk, m.hand_def]
+                    .iter()
+                    .map(|&x| num(x as i32))
+                    .collect(),
+            ),
+        ));
+    }
     o.extend([
         (
             "destroyedThisTurn",
@@ -1104,6 +1117,26 @@ fn player_of(v: &Json) -> R<PlayerState> {
             None | Some(Json::Null) => HandLog::default(),
             Some(Json::Str(t)) => parse_hand_log(t)?,
             Some(_) => return Err("\"handLog\" は文字列".into()),
+        },
+        pub_mods: match v.get("pubMods") {
+            None | Some(Json::Null) => PubMods::default(),
+            Some(Json::Arr(a)) if a.len() == 4 => {
+                let x = |i: usize| -> R<i16> {
+                    match &a[i] {
+                        Json::Num(n) if n.fract() == 0.0 && n.abs() <= i16::MAX as f64 => {
+                            Ok(*n as i16)
+                        }
+                        _ => Err("\"pubMods\" は整数 4 つ".into()),
+                    }
+                };
+                PubMods {
+                    deck_atk: x(0)?,
+                    deck_def: x(1)?,
+                    hand_atk: x(2)?,
+                    hand_def: x(3)?,
+                }
+            }
+            Some(_) => return Err("\"pubMods\" は整数 4 つ".into()),
         },
         destroyed_this_turn: array(v, "destroyedThisTurn")?
             .iter()

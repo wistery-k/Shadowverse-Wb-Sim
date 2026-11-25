@@ -763,6 +763,160 @@ fn deck_and_hand_buffs_are_inputs() {
 }
 
 #[test]
+fn opp_buffs_and_max_hp_are_public_inputs() {
+    // 相手の山札・手札の強化（2026-11-25、R7 の候補）は、本当のカードの状態ではなく相手にも分かる分（pub_mods）から作るので、
+    // 決定化で並べ直しても変わらない。両方のリーダーの最大体力も数値の入力に出る（docs/value-net.md「入力」）
+    use crate::ai::determinize::determinize;
+    use crate::ai::valuenet::{SCALARS, ZONES};
+    use crate::data::CardType;
+    let net = full_model(6);
+    let v = net.layout_json().matches("\"crest:").count() + data().cards.len();
+    let scalar = |x: &[(usize, f64)], name: &str| -> f64 {
+        let at = ZONES.len() * v + SCALARS.iter().position(|z| *z == name).unwrap();
+        x.iter().find(|(i, _)| *i == at).map_or(0.0, |(_, x)| *x)
+    };
+    let follower = |c: crate::data::CardIdx| card(c).ctype == CardType::Follower;
+    let states = played_states();
+    let s = states
+        .iter()
+        .find(|s| {
+            let opp = &s.players[opponent(s.active)];
+            s.phase == Phase::Main
+                && opp.hand.iter().filter(|h| !h.revealed).count() >= 2
+                && opp.hand.iter().any(|h| !h.revealed && follower(h.card))
+                && opp.deck.iter().filter(|r| follower(r.card)).count() >= 5
+        })
+        .expect("相手の伏せた手札と山札にフォロワーがある局面");
+    let (p, q) = (s.active, opponent(s.active));
+    let names = [
+        "oppDeckAtkMod",
+        "oppDeckDefMod",
+        "oppHandAtkMod",
+        "oppHandDefMod",
+    ];
+    let x = net.encode(s, p, ValuePhase::End);
+    for name in names {
+        assert_eq!(scalar(&x, name), 0.0, "{name}");
+    }
+    assert_eq!(
+        scalar(&x, "myMaxHp"),
+        s.players[p].leader_max_hp as f64 / 20.0
+    );
+    assert_eq!(
+        scalar(&x, "oppMaxHp"),
+        s.players[q].leader_max_hp as f64 / 20.0
+    );
+    // 相手の山札のフォロワーを全部 +1/+1、伏せた手札のフォロワー 1 枚を +3/+0 にしても、相手にも分かる分を数えなければ入力は変わらない
+    let mut t = s.clone();
+    let picked: Vec<_> = t.players[q]
+        .deck
+        .iter()
+        .filter(|r| follower(r.card))
+        .map(|r| (r.iid, r.card))
+        .collect();
+    for &(iid, c) in &picked {
+        let mut h = t
+            .take_kept(q, iid)
+            .unwrap_or_else(|| t.new_hand_card(c, Some(iid)));
+        h.attack_mod += 1;
+        h.defense_mod += 1;
+        t.players[q].deck_kept.push(h);
+    }
+    let i = t.players[q]
+        .hand
+        .iter()
+        .position(|h| !h.revealed && follower(h.card))
+        .unwrap();
+    t.players[q].hand.make_mut()[i].attack_mod += 3;
+    assert_eq!(net.encode(&t, p, ValuePhase::End), x);
+    // エンジンが数える相手にも分かる分（山札を +1/+1、伏せた手札を +3/+0）
+    t.players[q].pub_mods = PubMods {
+        deck_atk: 1,
+        deck_def: 1,
+        hand_atk: 3,
+        hand_def: 0,
+    };
+    t.players[q].leader_max_hp = 18;
+    let y = net.encode(&t, p, ValuePhase::End);
+    let opp = &t.players[q];
+    let unseen: Vec<_> = opp
+        .hand
+        .iter()
+        .filter(|h| !h.revealed)
+        .map(|h| h.card)
+        .chain(opp.deck.iter().map(|r| r.card))
+        .chain(opp.hidden_discards.iter().copied())
+        .collect();
+    let f = unseen.iter().filter(|&&c| follower(c)).count() as f64;
+    let deck = opp.deck.len() as f64 * f / unseen.len() as f64;
+    assert_eq!(scalar(&y, "oppDeckAtkMod"), deck / 20.0);
+    assert_eq!(scalar(&y, "oppDeckDefMod"), deck / 20.0);
+    // 公開された手札のフォロワーの強化も足す
+    let shown: f64 = opp
+        .hand
+        .iter()
+        .filter(|h| h.revealed && follower(h.card))
+        .map(|h| h.attack_mod as f64)
+        .sum();
+    assert_eq!(scalar(&y, "oppHandAtkMod"), (shown + 3.0) / 5.0);
+    assert_eq!(scalar(&y, "oppHandDefMod"), 0.0);
+    assert_eq!(scalar(&y, "oppMaxHp"), 18.0 / 20.0);
+    // 決定化（相手の伏せた手札・山札の状態を作り直す）でも同じ値
+    let mut rng = Rng::new(9);
+    for _ in 0..4 {
+        let d = determinize(&t, p, &mut rng, false);
+        assert!(d.players[q].deck_kept.is_empty());
+        assert_eq!(net.encode(&d, p, ValuePhase::End), y);
+    }
+    // 自分から見た入力（自分の側の分）は、相手の pub_mods を見ない
+    assert_eq!(
+        scalar(&net.encode(&t, q, ValuePhase::End), "oppDeckAtkMod"),
+        0.0
+    );
+    // 伏せた手札が無ければ、伏せた手札の分は数えない
+    let mut u = t.clone();
+    u.players[q].hand.make_mut().retain(|h| h.revealed);
+    let z = net.encode(&u, p, ValuePhase::End);
+    let shown: f64 = u.players[q]
+        .hand
+        .iter()
+        .filter(|h| follower(h.card))
+        .map(|h| h.attack_mod as f64)
+        .sum();
+    assert_eq!(scalar(&z, "oppHandAtkMod"), shown / 5.0);
+}
+
+#[test]
+fn pub_mods_reveal_and_restart() {
+    // 伏せた手札の強化の集計: 出したカードに見えた強化のうち、山札の強化の分を越える分だけを引き（0 より下にしない）、
+    // 伏せた手札が無い間に伏せたカードが入ったら 0 から数え直す
+    let mut m = PubMods::default();
+    m.add_hand(3, 0);
+    m.reveal_hand(0, 0);
+    assert_eq!((m.hand_atk, m.hand_def), (3, 0));
+    m.reveal_hand(5, 2);
+    assert_eq!((m.hand_atk, m.hand_def), (0, 0));
+    m.deck_atk = 2;
+    m.deck_def = 2;
+    m.add_hand(3, 0);
+    // 山札で +2/+2 されたカード（手札の強化は無い）を出しても引かない
+    m.reveal_hand(2, 2);
+    assert_eq!((m.hand_atk, m.hand_def), (3, 0));
+    m.reveal_hand(4, 2);
+    assert_eq!((m.hand_atk, m.hand_def), (1, 0));
+    let d = data();
+    let deck = d.decks[0].cards.clone();
+    let mut s = create_game([&deck, &deck], 1);
+    let pl = &mut s.players[0];
+    pl.pub_mods.hand_atk = 4;
+    pl.note_hidden_in();
+    assert_eq!(pl.pub_mods.hand_atk, 4, "伏せた手札がある");
+    pl.hand.make_mut().clear();
+    pl.note_hidden_in();
+    assert_eq!(pl.pub_mods.hand_atk, 0);
+}
+
+#[test]
 fn amulet_and_crest_counts_are_inputs() {
     // 相手の場のアミュレットのカウントと、両方のクレストのカウント・信仰値・信仰に付いた能力の数（2026-11-22）は
     // クレスト・カードごとの入力に出て、決定化で並べ直しても変わらない（docs/value-net.md「入力」）

@@ -178,6 +178,8 @@ describe("コンボE", () => {
     s.players[me].combo = 3;
     s = endTurn(s);
     expect(s.players[me].deck.every((d) => d.kept?.attackMod === 1 && d.kept.defenseMod === 1)).toBe(true);
+    // 山札を強化したことと 1 枚あたりの量は相手にも分かる（相手にも分かる強化の集計。補正の入力だけが使う）
+    expect(s.players[me].pubMods).toEqual([1, 1, 0, 0]);
     s = endTurn(s);
     // 自分のターンの始めに引いたキャラバンマンモスは 11/11
     const drawn = s.players[me].hand[0]!;
@@ -185,6 +187,8 @@ describe("コンボE", () => {
     s.players[me].pp = 10;
     const t = play(s, drawn.iid);
     expect([follower(t, drawn.iid)?.attack, follower(t, drawn.iid)?.defense]).toEqual([11, 11]);
+    // 山札の強化の分だけが見えたので、集計はそのまま
+    expect(t.players[me].pubMods).toEqual([1, 1, 0, 0]);
   });
 
   it("【コンボ_3】でないときは、デッキのフォロワーは変わらない", () => {

@@ -1,0 +1,56 @@
+# R7 の候補の 2 晩目: 1 晩目（r7-1）の版で、切る版 K 対 対照 C・入力の版 I 対 C（4 万試合ずつ）、C 対 R6（2 万試合）。どれも両方の席が新しい既定。
+# ユーザーの決定（2026-11-25）: 「入力と切る案を別々に測る」。計画は docs/ai-notes/15-2026-11-22.md「R7 の候補」。
+#
+# ---- 回す前に決めた線と試合数（この晩の後には変えない）----
+# 合否は 2 本立て: 強さ（勝率を落とさない）と表示（値と実際の勝ちのずれが、狙ったところで減る）。どちらも通った案を R7 に入れる。採るかはユーザーが決める。
+#
+# 強さ（K 対 C・I 対 C。84 個のデッキの鏡の compare、席を入れ替えた 4 万試合、g0〜19999。± 0.18 ほど）:
+#   全体: 差 − 2 SE > −0.3 なら「落とさない」（通る）。差 + 2 SE < 0 なら「下げる」（落ちる）。どちらでもなければ「分からない」
+#   I の関係する型の絡む組（どちらかの席のデッキがコンボE かアグロNi の試合。4 割ほどの 1.5 万試合、± 0.29 ほど）:
+#     差 − 2 SE > −1.0 を全体の線に加える（差 + 2 SE < 0 なら落ちる）。どちらでもなければ全体と同じく「分からない」
+#     信仰（アミュレットB・コンボE・海賊R）・最大体力（ランプD・スペルW）の型ごとの上積みは並べるだけ（線にしない）
+#   K は型を選ばない直し（どの試合にも相手のランダムな手がある）なので、全体だけ。型ごとの上積みは並べるだけ
+#   効きが 0 に近い直しの扱い（審査の指摘）: 本当の差が 0 のとき、4 万試合で「落とさない」と言えるのは 38%（落ちるは 2%、残りは分からない）。
+#     本当の差が −0.3 なら 2%、−0.5 なら 0.1%、+0.3 なら 92% が通る。
+#     「分からない」になった案は、別のシード（g20000〜39999）でもう 4 万試合を足して、8 万試合を合わせて同じ線で決める案をユーザーに出す（回すかはユーザー）。
+#     2 段で、本当の差 0 なら 69%、−0.3 なら 4%、−0.5 なら 0.1% が通る（模擬で数えた）。初めから 8 万試合にしないのは、1 つ 6 時間半かかり、
+#     はっきりした結果なら 4 万試合で決まるため。8 万試合でも「分からない」なら、表示の結果と並べてユーザーと決める
+#
+# 表示（翌朝、クラウド環境で。PR #310 の svwb kifu values --probe 1 を使う。回す前に main に入れる）:
+#   同じ行（その比べの棋譜の、両方の席の自分のターン末）を 2 つの補正の両方で採点し、勝ち − 値 の平均を比べる。± は試合ごとのブートストラップ（2 つの補正で同じ試合を引く）
+#   K（K 対 C の棋譜）: 全体の勝ち − 値（R6 は −5.0 ポイント。PR #310 の測りでは、うち 4 ポイントほどが学びの相手のランダムな手から）が 0 に近づく。
+#     線: (K の勝ち − 値) − (C の勝ち − 値) > 2 SE、かつ K の |勝ち − 値| が C より小さい（反対向きに行き過ぎない）。見込みは +3〜4 ポイント
+#   I（I 対 C の棋譜）: 入力が効くはずの局面の帯と、効かない局面の帯の差（帯の間の勝ち − 値の差）が縮む。全体の水準の動きは見ない
+#     (a) 相手がコンボE の行: probe の oppDeckAtkMod が 51 以上の帯 − 0 の帯（R6 は B2 で直して −5.9 と +0.6）
+#     (b) 相手がアグロNi の行: 挙げた 4 枚（ゴースト・悪辣のレッサーマミー・透き通る信念・アンサージュ・ガロダートVSゼット）に付いた強化の和
+#         oppHandCardAtkMod が 3 以上の帯 − 2 以下の帯（R6 は −9.8 と +1.1。--hand-card で 4 枚を渡す）
+#     線: (a)・(b) の両方で、|C の帯の差| − |I の帯の差| > 2 SE
+#     信仰値・最大体力の帯（ランプD のゾーイ、logs/probe-r6-2026-11-25/zoe.md）は並べるだけ
+#
+# C 対 R6（2 万試合、g0〜9999、± 0.25 ほど）: 新しい既定で学び直した分の伸び。差 − 2 SE > 0 なら学び直しが効いた（R6 対 R5 と同じ線）。
+#   学び直し 1 回の伸びは +1.2〜2.1（R3 対 R2 から R6 対 R5）で、+1 なら 98% が線を越える。差 + 2 SE < 0 なら新しい既定の自己対戦で弱くなったので、止めて調べる
+#
+# 組み合わせ（ユーザーに出す案）: 両方の線を通った案を C に足したものを R7 の候補にする。
+#   K・I の両方が通れば、1 晩目の控え KI を 3 晩目で R6 と 2 万試合と物差し 2 つ。片方なら、その版を 3 晩目で R6 と 2 万試合と物差し 2 つ。
+#   どちらも通らなければ C（C 対 R6 が線を越えたとき）。物差しは採る版だけ（R6 の候補と同じ試合数）
+# 線ではないが並べる数: 型ごとの勝率（svwb kifu winrate --where side=A --by arch・oppArch）、次の相手のターンに負けたターン末の割合、
+#   値の帯ごとの実際の勝率、K の学びの報告の切ったターン末の割合（1 晩目の小さな通しでは 10.7%）
+#
+# 見込み（PC、svwb-docker・28 スレッド）: 両方の席が新しい既定の compare は、light-read-1 の実測（片方だけ新しい既定で 0.234 秒/試合、R6 どうし 0.171）から
+#   0.297 秒/試合。4 万試合 3 時間 18 分 × 2 と 2 万試合 1 時間 39 分で、合わせて 8 時間 15 分ほど。写すのは数秒
+# 朝: 止まったときのまとめを push してもらい、ingest する。棋譜（出口）も上げてもらう（表示の測りが読む）
+# 回の名前は r7-2
+
+# 0. 1 晩目の回のフォルダのモデルを写す（td extend は語彙を替えない写し）
+td extend --model @run:r7-1/c.json --out @/c.json --est 10
+td extend --model @run:r7-1/k.json --out @/k.json --est 10
+td extend --model @run:r7-1/i.json --out @/i.json --est 10
+
+# 1. K 切る版 対 C 対照（4 万試合）
+compare 20000 '{"valueNet":"@/k.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' '{"valueNet":"@/c.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label R7切る対対照 --est 0.297
+
+# 2. I 入力の版 対 C 対照（4 万試合、1 と同じシード）
+compare 20000 '{"valueNet":"@/i.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' '{"valueNet":"@/c.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label R7入力対対照 --est 0.297
+
+# 3. C 対照 対 R6（2 万試合）
+compare 10000 '{"valueNet":"@/c.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label R7対照対R6 --est 0.297

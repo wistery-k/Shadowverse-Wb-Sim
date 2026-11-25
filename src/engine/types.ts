@@ -174,6 +174,11 @@ export interface PlayerState {
    * 相手の AI の決定化が、伏せた手札のスペルブーストの回数を見込むのに使う。形は rust/engine/src/state_json.rs の hand_log_text
    */
   handLog?: string;
+  /**
+   * 相手にも分かる強化の集計（山札の攻撃力・体力、伏せた手札の攻撃力・体力の順。無ければ省く）。ルールには影響しない。
+   * 補正の入力（相手の山札・手札の強化）だけが使う。意味は rust/engine/src/state.rs の PubMods
+   */
+  pubMods?: number[];
   /** このターン中に破壊された自分のフォロワー */
   destroyedThisTurn: DestroyedRecord[];
   /** コンボ（このターンにプレイしたカードの枚数と、効果による加算） */
