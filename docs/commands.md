@@ -390,7 +390,7 @@ npm run svwb -- meta …                                  # npm run meta と同�
 npm run svwb -- mulligan-compare [--games 50] [--start 0] [--seed 1] [--a '{"mulligan":"sample"}'] [--b '{}'] [--decks <デッキ>,…] [--rhino]
 npm run svwb -- mulligan-data --games 6000 [--start 0] [--seed 1] [--flip 0.5] --out d.jsonl
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
-                [--sampling classic|default] [--potential p.json|null] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
+                [--sampling classic|default] [--potential p.json|null] [--searchOptions <設定の JSON かファイル>] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
                 [--sDefault 0] [--searchValue 0] [--lethalLabel 0] [--lostLabel 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--kifu k.jsonl | --no-kifu]
 npm run svwb -- td branch --model m.json --from <自己対戦の棋譜>,… --out b.jsonl [--start 0] [--games N] [--turns 4-9] [--extra 4] [打ち方と印は td selfplay と同じ]   # 選ばなかった候補の枝
 npm run svwb -- td train --model m0.json --data d0.jsonl[,d1.jsonl.gz] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001]
@@ -429,6 +429,8 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
   （学びのデータに足す。`"iv"` の `"zone"` が `"plan"`）。`--model` は棋譜の試合を打った補正。引数は `rust/engine/src/runner/td.rs` の先頭、
   考えは docs/ai-notes.md の索引「選ばなかった候補を学びに足す」。キューでは `td selfplay` と同じく `--chunk` で区切れる
 - `td selfplay`: TD 学習の自己対戦。各引数の意味は `rust/engine/src/runner/td.rs` の先頭。
+  `--searchOptions` で、`--opp`・`--sampling`・`--potential` から作った探索 AI の設定の項目を上書きする（compare の `--opts` と同じ形。補正・見込み・重みは書けない）。
+  新しいプールの既定（2026-11-25 から）は `--opp beam --sampling default --potential <見込み> --searchOptions data/pools/azvaldt/search-options.json`（compare の新しいプールの既定と同じ手。`td branch` も同じ）。
   `--decks` で、比較用の 7 デッキの代わりに並べたデッキ（デフォルトデッキの名前かデッキのテキストファイル。`@<デッキの組>` も。上の「compare」）の全組を回す（例: `rust/engine/td-pool/royal-counter/*.txt`）。
   `--ivZone drawn` は、カードを引いた瞬間に手札から抜いて最後まで打つ介入（`td ivcheck` で「（引いたとき）」の行。デッキに 1 枚入れる価値に近い）。
   `--vs <デッキ>` で、どの試合も片方をそのデッキにし、もう片方（挑戦する側）だけ並べたデッキを回して、介入も挑戦する側だけにする（特定の相手との試合でのカードの価値を測る用）。
@@ -705,7 +707,7 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
 - `mulliganRolloutWeights`: `turn1` で貪欲法で先へ進めるときの重み。`"ramp"`（既定。貪欲法の既定の重みの `maxPp` だけ探索の重みの値にする。竜の啓示を打つ）・
   `"greedy"`（貪欲法の既定の重みのまま。PP 最大値の項が 0 なので竜の啓示を打たない。2026-10-26 より前の既定）・`"search"`（探索の重み）。
   `mulliganRolloutBeam` が 1 以上なら効かない（ビームは探索の重みで打つ）
-- `opponentSearch`: `null`（相手のターンを読まない）か `{"beamWidth": …, "maxDepth": …, "extraEval": true|false}`
+- `opponentSearch`: `null`（相手のターンを読まない）か `{"beamWidth": …, "maxDepth": …, "extraEval": true|false, "ownWeights": true|false, "handKey": true|false, "potential": true|false}`。`extraEval` は読みの中の相手のターン末に補正を足す。`ownWeights`（既定 false）は読みの中の相手のビームを `policyWeights` でなく自分の `weights` で採点する（R6 のように出発点の重みが 0 の補正なら、相手も自分と同じ「補正だけ」で採点する。docs/ai-notes/15-2026-11-22.md「読みの中の相手を強くしたときの楽観と費用」）。`handKey`（既定 false）は `extraEval` のとき、ビームの並べ直し（残す局面を選ぶキー）を補正なしの手で作った評価（`policyWeights`。`ownWeights` によらない）だけで行い、補正は最後に選ぶ終局面の採点だけに使う。`potential`（既定 false）は並べ直しのキーに `potentialNet` の見込み（相手の席の視点、`potentialWeight`）を足す（最後に選ぶ点には足さない。「読みの中の相手のビームの並べ直しを替えたときの楽観」）
 - `weights`: 自分の評価の重み。`"default"`（基準の重み）・`"search"`（探索の既定の重み）・`"zero"`（全部 0。手で作った評価を使わず補正だけで点数を付ける）か、
   変えたい項目だけのオブジェクト（`"holdScale"` で hold を何倍にするか）
 - `policyWeights`: 手を選ぶ方策として使う重み（読みの中の相手のビームの評価、相手のターン・選択待ちを打つ貪欲法の自壊の倍率、マリガンの打ち進めの PP 最大値）。

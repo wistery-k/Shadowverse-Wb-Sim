@@ -311,6 +311,7 @@ pub fn search_options(
             "reusePlan" => o.reuse_plan = flag(k, v)?,
             "peekOppHand" => o.peek_opp_hand = flag(k, v)?,
             "peekAll" => o.peek_all = flag(k, v)?,
+            "imaginedInput" => o.imagined_input = flag(k, v)?,
             "oppHandBoosts" => o.opp_hand_boosts = flag(k, v)?,
             "oppHandCommon" => o.opp_hand_common = flag(k, v)?,
             "readOwnDeckApart" => o.read_own_deck_apart = flag(k, v)?,
@@ -371,6 +372,18 @@ pub fn search_options(
                             extra_eval: match v.get("extraEval") {
                                 None => false,
                                 Some(x) => flag("opponentSearch.extraEval", x)?,
+                            },
+                            own_weights: match v.get("ownWeights") {
+                                None => false,
+                                Some(x) => flag("opponentSearch.ownWeights", x)?,
+                            },
+                            hand_key: match v.get("handKey") {
+                                None => false,
+                                Some(x) => flag("opponentSearch.handKey", x)?,
+                            },
+                            potential: match v.get("potential") {
+                                None => false,
+                                Some(x) => flag("opponentSearch.potential", x)?,
                             },
                         })
                     }
@@ -717,6 +730,45 @@ mod tests {
             0.25
         );
         assert!(compare_options(r#"{"rescoreMix":1.5}"#).is_err());
+        // 想像の局面の印（既定は立てる）
+        assert!(compare_options("{}").unwrap().imagined_input);
+        assert!(
+            !compare_options(r#"{"imaginedInput":false}"#)
+                .unwrap()
+                .imagined_input
+        );
+        assert!(compare_options(r#"{"imaginedInput":0}"#).is_err());
+        // 読みの中の相手を自分の評価の重みで打たせる（既定は方策の重み）
+        let own = |t: &str| {
+            compare_options(t)
+                .unwrap()
+                .opponent_search
+                .unwrap()
+                .own_weights
+        };
+        assert!(!own("{}"));
+        assert!(!own(r#"{"opponentSearch":{"beamWidth":8,"maxDepth":8}}"#));
+        assert!(own(
+            r#"{"opponentSearch":{"beamWidth":8,"maxDepth":8,"ownWeights":true}}"#
+        ));
+        assert!(compare_options(
+            r#"{"opponentSearch":{"beamWidth":8,"maxDepth":8,"ownWeights":1}}"#
+        )
+        .is_err());
+        // 並べ直しのキーを手で作った評価だけにする・見込みを足す（どちらも既定は切）
+        let os = |t: &str| compare_options(t).unwrap().opponent_search.unwrap();
+        let d = os(r#"{"opponentSearch":{"beamWidth":8,"maxDepth":8}}"#);
+        assert!(!d.hand_key && !d.potential);
+        let o = os(
+            r#"{"opponentSearch":{"beamWidth":8,"maxDepth":8,"handKey":true,"potential":true}}"#,
+        );
+        assert!(o.hand_key && o.potential);
+        for bad in [
+            r#"{"opponentSearch":{"beamWidth":8,"maxDepth":8,"handKey":1}}"#,
+            r#"{"opponentSearch":{"beamWidth":8,"maxDepth":8,"potential":"r4"}}"#,
+        ] {
+            assert!(compare_options(bad).is_err(), "{bad}");
+        }
         // 消した実験用の項目は、使わないときの値だけを受け付ける
         for ok in [
             r#"{"rescoreAverage":"score","tree":null,"nextLethal":0,"scoreTurnEnd":"all"}"#,

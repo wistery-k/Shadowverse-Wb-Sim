@@ -1,0 +1,30 @@
+# 軽い形の強い読みを R6 と比べる（採る前の比べ）。強く読む幅 32（S = 0 ＋補正＋印なし）は 2 晩とも線を越えたが、思考 3.5 倍
+# （キュー strong-read-1・strong-read-2。docs/ai-notes/15-2026-11-22.md「夜の結果（キュー strong-read-2…）」）。
+# ユーザーの決定（2026-11-25、審査のスレッド）: 大きい盤面の値引きは直したいが、自己対戦・compare・AI 同士の対戦が 3.4 倍になるのは避けたく、設定も分けたくない。
+#   軽い形を比べ、通った中でいちばん軽いものを、自己対戦・compare・ページ共通の 1 つの既定（新しいプールの探索 AI）にする案を出す。
+#
+# やること（どれも印なし。読みの中の相手は S = 0 ＋補正。84 個のデッキの鏡の compare 2 万試合、g10000〜19999。2 晩目と同じシード）:
+#   1. 幅 8・深さ 8 のまま、読みの中の相手に補正で打たせる（"opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true}）。
+#      1 晩目の手で作った重み＋補正の版は 50.46% ± 0.25・思考 1.5 倍（g0〜9999）
+#   2. 幅 32・深さ 16 で、並べ直しは手の評価のまま、最後に選ぶ点だけ補正（"handKey":true）。思考 2.25 倍、楽観は幅 32 の補正で並べる版とほぼ同じ（+2.9 と +2.7）
+#   外した候補: 幅 8・深さ 8 で最後だけ補正（思考 1.17 倍）。回す前の問題集が 39.1%（122/312）で R6 の 39.4% を越えず、線を通れないので回さない
+#     （royal-firstmate-g1104 が 24 → 2/24。最後だけ補正にすると、この問は幅 32 でも 8/24 に落ちる）
+#
+# 回す前に決めた線（見落としの直しの線。目的は「値引きを直して、勝率を落とさない」）:
+#   それぞれ、対 R6 の 差 − 2 SE が −0.3 より上、かつ問題集（misses/azvaldt の 13 問 × 24 回）の正解率が R6 の 39.4%（123/312）より上なら通る。
+#   通った中でいちばん思考の軽いものを、新しいプールの 1 つの既定にする案をユーザーに出す（ページの 1 手の速さの確かめと一緒に）。
+#   どれも通らなければ今の既定のまま（値引きの件は別の直し方を考える）。
+#   問題集はクラウド環境で回す前に測った（台帳の 新しいプール-問題集-軽読み…）: 1 は 46.8%（146/312）、2 は 45.2%（141/312）で、どちらも問題集の線は越えている
+#   線ではないが見る数（翌朝、クラウド環境で）: 2 晩目の幅 32 S = 0（50.64% ± 0.25、同じシード）と組を対にした差、型ごとの上積み（棋譜）
+#
+# 見込み（PC、svwb-docker・28 スレッド。R6 どうしは 0.171 秒/試合、1 試合は (m + 1) / 2 倍）:
+#   1 は 1 晩目の実測 0.217 秒/試合で 1 時間 12 分。
+#   2 は思考 2.25 倍（PC は幅 32 の補正で並べる版でクラウド環境の 0.96 倍だった）から 0.28 秒/試合で 1 時間 33 分。合わせて 2 時間 45 分ほど
+# 朝: 止まったときのまとめを push してもらい、ingest する。棋譜（出口）も上げてもらう
+# 回の名前は light-read-1
+
+# 1. 幅 8・深さ 8・S = 0 ＋補正（並べ直しも補正）＋印なし 対 R6
+compare 10000 '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 10000 --decks @data/pools/azvaldt/sets/all84.txt --label 軽読み8S0印なし対R6 --est 0.217
+
+# 2. 幅 32・深さ 16・最後だけ補正（handKey）＋印なし 対 R6
+compare 10000 '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":32,"maxDepth":16,"extraEval":true,"ownWeights":true,"handKey":true},"imaginedInput":false}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 10000 --decks @data/pools/azvaldt/sets/all84.txt --label 軽読み32手補正印なし対R6 --est 0.28

@@ -1,0 +1,32 @@
+# 想像の局面の印を切る（1 晩目）。ユーザーの指摘 2026-11-24（ジンジャーの問 witch-ginger-ara-s425114133）から。
+# 調べた結果は docs/ai-notes/15-2026-11-22.md「想像の局面の印が、相手の返せない盤面を大きく割り引く」
+#
+# 問い: 探索が相手のターンを読んだ後の局面（想像の局面）を、補正に「想像の局面」の印（入力 imagined）を立てずに採点すると、勝率が上がるか。
+#   ジンジャーの問では、読みの中で相手が盤面を返せていない想像の局面を、印が −250〜−344 点割り引いていた（元の試合の手は −24〜−34 点）。
+#   印を 0 にした R6 は、新しいプールの問題集で 39.4% → 43.6%（13 問 × 24 回。この問は 1/24 → 12/24）。
+#   一方、印は 2026-10-22 に「読みの中の相手は実際の相手より弱いので、想像の局面は楽観的」というずれを学ばせるために足し、+1.5 ポイントだった（台帳 s2b）。
+#   印が手を選ぶのに効くのは、候補ごとに割り引きが違うところだけ（どの候補も同じだけ引くなら順位は変わらない）
+#
+# やること:
+#   1. R6 の印なし（設定 "imaginedInput":false。自分のターンのビーム・ターン末の点・読みの中の相手は同じ）対 R6（84 個のデッキの鏡の compare 2 万試合、± 0.29 ほど。見込みはどちらも R4）
+#   2. 印なしの物差し 2 つ（採る前に測っておく。採らなければ台帳に候補の名前で残るだけ）
+#
+# 回す前に決めた問いと線:
+#   印なし 対 R6: 差 − 2 SE > 0 なら、新しいプールの既定を印なしにするかの採否をユーザーに出す。
+#     差 + 2 SE < 0 なら、印は平均では効いている。割り引きが盤面の大きさに偏る理由（学びのデータの想像の局面の作り方）を調べるかをユーザーと決める。
+#     どちらでもなければ、印を弱める（印ありと印なしの点を混ぜる）案を試すかをユーザーと決める
+#   試合数の決め方: 大きさの見込みが無い（問題集では +4 ポイントだが、印を足したときは +1.5）。±1 なら 2 万試合で 9 割ほど線を越える。
+#     ±0.5 は見分けられないが、それより小さいなら既定を替える理由にならない
+#   線ではないが見る数（翌朝、クラウド環境で）: 型ごとの勝率（svwb kifu winrate --where side=A --by arch・oppArch）、問題集（クラウド環境で回した印なしの数と並べる）
+#
+# 見込み（PC、svwb-docker・28 スレッド）: compare は R6 どうしと同じ 0.17 秒/試合で 57 分（印を切っても計算は同じ）、
+#   物差しは R6 の実測 0.15・0.18 秒/試合で 4000 試合ずつ 22 分。合わせて 1 時間 40 分ほど
+# 朝: 止まったときのまとめを push してもらい、ingest する
+# 回の名前は imagined-off-1
+
+# 1. 印なし 対 R6（2 万試合。見込みはどちらも R4）
+compare 10000 '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","imaginedInput":false}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 印なし対R6 --est 0.17
+
+# 2. 物差し 2 つ（新しいプールの弱い相手・強い相手。枝の学びと同じ試合数）
+yardstick --ref pool-v0 --opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","imaginedInput":false}' --games 4000 --start 0 --label 新しいプール-物差し-印なし --est 0.15
+yardstick --ref pool-r3 --opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","imaginedInput":false}' --games 4000 --start 0 --label 新しいプール-強い物差し-印なし --est 0.18

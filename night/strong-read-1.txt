@@ -1,0 +1,43 @@
+# 読みの中の相手を強く読む（1 晩目）。ユーザーの見方（2026-11-24。値引きがいらないくらい正確に読む）と審査の頼みから。
+# 調べた結果は docs/ai-notes/15-2026-11-22.md「読みの中の相手を強くしたときの楽観と費用」
+#
+# 問い: 読みの中の相手のビームを幅 32・深さ 16 にし、相手のターン末を自分と同じ評価（手で作った重み 0 ＋ 補正。S = 0）で採点させる
+#   （"opponentSearch":{"beamWidth":32,"maxDepth":16,"extraEval":true,"ownWeights":true}）と、勝率が上がるか。
+#   ownWeights はユーザーの指摘（2026-11-24。今の補正は S = 0 で学んだので、相手に使わせるなら相手も S = 0 が妥当）で足した。
+#   ownWeights なしの extraEval は、相手が手で作った重み（policyWeights）＋補正で採点する（下の測りの数はほぼ同じ）
+#   想像の局面の印あり・印なしの両方で R6 と比べる（印なしは学び直さずに試せる組み合わせ。印ありは強く読むと引きすぎる見込み）。
+#   クラウド環境の測り（1000 局面。S = 0 ＋補正）: 印なしの楽観（相手の本当のターンの後の値との差）は +6.4 → +2.7 ポイント、印ありは −1.0 → −2.6。
+#   ユーザーの挙げた 5 枚（イマリ・カミシラ・ジンジャー・徒姫・イステンデッド）を出したターン 1250 局面では、印なし +9.6 → +5.2、印あり −0.4 → −2.3。
+#   1 試合の思考は R6 の 3.9 倍（profile、代表 10 型 40 試合。手で作った重み＋補正の版の実測。相手のターン 1 回の時間は S = 0 の版と同じ）。
+#   いちばん安い点（幅 8・深さ 8・S = 0 ＋補正）は 2.1 倍で、印なしの楽観は +6.4 → +4.0（5 枚のターンで +9.6 → +7.7）。
+#   前に（2026-10-21、補正 p60p・相手の幅 4）読みの中の相手に補正を足したときは、直接 51.3%・物差し −1 ポイントで採らなかった（印を学ぶ前）
+#
+# やること（審査の勧めで 3 を足した。印ありは引きすぎる見込みが既にあるので最後に置く）:
+#   1. 強く読む（幅 32・深さ 16・S = 0 ＋補正）＋印なし 対 R6（84 個のデッキの鏡の compare 2 万試合、± 0.24 ほど。見込みはどちらも R4）
+#   2. 安く強く読む（幅 8・深さ 8・S = 0 ＋補正）＋印なし 対 R6（同じ。採れる形にいちばん近い点）
+#   3. 強く読む（幅 32・深さ 16・S = 0 ＋補正）＋印あり 対 R6（同じ）
+#
+# 回す前に決めた問いと線:
+#   どれかで 差 − 2 SE > 0 なら、採否をユーザーに出す（思考が 2.1 倍・3.9 倍になるので、ブラウザの速さと合わせて）。2 つ以上なら、思考の倍率と差を並べて出す。
+#   どれも 差 + 2 SE < 0 なら、この強さで読むのは平均では効かない。
+#   どちらでもなければ、物差しを足すか・別の強さを試すか・ここで止めるかをユーザーと決める
+#   試合数の決め方: 大きさの見込みが無い（前の印なし対 R6 は −0.27 ± 0.24、補正を足したときは +1.3）。±1 なら 2 万試合で 9 割ほど線を越える。
+#     ±0.5 は見分けられないが、思考が 3.9 倍になるので、それより小さいなら既定を替える理由にならない
+#   線ではないが見る数（翌朝、クラウド環境で）: 型ごとの勝率（svwb kifu winrate --where side=A --by arch・oppArch）、1 と 2 の差の差（強さに応じて勝率が動くか）、1 と 3 の差の差
+#   期待の持ち方（結果の読み方を先に決める）: 強く読むと楽観（水準）は減るが、ユーザーの挙げたカードのターンで次のターンの勝ちを見分ける力（AUC）は上がらなかった
+#     （今の読みの印なし 0.819、本番の AI の印なし 0.820）。直るのは水準で、候補の順位ではないかもしれない。印なし対 R6 が −0.27 ± 0.24 だったことと合わせると、
+#     勝率に出ない結果も十分ありうる（回さない理由ではない）
+#
+# 見込み（PC、svwb-docker・28 スレッド）: compare は R6 どうしの 0.17 秒/試合 × (倍率 + 1) / 2。幅 32 は 0.42 秒/試合で 2 万試合 2 時間 20 分ずつ、
+#   幅 8 は 0.26 秒/試合で 1 時間 27 分。合わせて 6 時間 7 分ほど（3 を外すなら 3 時間 47 分）
+# 朝: 止まったときのまとめを push してもらい、ingest する
+# 回の名前は strong-read-1
+
+# 1. 強く読む（S = 0 ＋補正）＋印なし 対 R6
+compare 10000 '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":32,"maxDepth":16,"extraEval":true,"ownWeights":true},"imaginedInput":false}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 強読みS0印なし対R6 --est 0.42
+
+# 2. 安く強く読む（幅 8・深さ 8・S = 0 ＋補正）＋印なし 対 R6
+compare 10000 '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 安く強読みS0印なし対R6 --est 0.26
+
+# 3. 強く読む（S = 0 ＋補正）＋印あり 対 R6
+compare 10000 '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":32,"maxDepth":16,"extraEval":true,"ownWeights":true}}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 強読みS0印あり対R6 --est 0.42

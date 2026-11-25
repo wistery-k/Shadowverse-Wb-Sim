@@ -148,6 +148,7 @@ pub fn reference_options() -> SearchOptions {
         sequential_rng: true,
         pick: None,
         read_lethal: None,
+        imagined_input: true,
     }
 }
 
@@ -219,6 +220,9 @@ pub fn strong_reference_options() -> SearchOptions {
             beam_width: 16,
             max_depth: 8,
             extra_eval: false,
+            own_weights: false,
+            hand_key: false,
+            potential: false,
         }),
         opp_hand_samples: 12,
         opp_hand_common: true,
@@ -235,6 +239,7 @@ pub fn strong_reference_options() -> SearchOptions {
         sequential_rng: true,
         pick: None,
         read_lethal: None,
+        imagined_input: true,
     }
 }
 
@@ -340,6 +345,9 @@ pub fn pool_reference_options(name: &str) -> SearchOptions {
             beam_width: 8,
             max_depth: 8,
             extra_eval: false,
+            own_weights: false,
+            hand_key: false,
+            potential: false,
         }),
         opp_hand_samples: 12,
         opp_hand_common: true,
@@ -367,6 +375,7 @@ pub fn pool_reference_options(name: &str) -> SearchOptions {
         sequential_rng: false,
         pick: None,
         read_lethal: None,
+        imagined_input: true,
     }
 }
 

@@ -2,7 +2,7 @@
 // タブは「AI対戦（総当たり）」と「問題集」の 2 つだけ。AI 同士の試合と、問題集の決まった局面を表示・再生する。
 // 人間と AI の対戦・デッキの編集や貼り付け・サンドボックス・試合の記録・局面の入力は付けない（実際の対戦の支援にならないように。CLAUDE.md「ソフト打ち」）。
 // AI 同士の試合のリプレイは、seed・両者の AI・デッキ（プロのデッキの ID）を持つ URL（#game?…。src/sim/gameLink.ts）で開ける（ユーザーの依頼 2026-11-20。局面は URL に入らない）。
-// AI は探索 AI に、このページが読み込む補正 R6 と見込み（data/pools/azvaldt/。2026-11-21 に R3 から R4 に、2026-11-22 に R5 に、2026-11-23 に R6 に入れ替えた。見込みは R4 のまま）を入れたもの（コマンドの R6 と同じ手を選ぶ。tests/nets-azvaldt.test.ts）
+// AI は探索 AI に、このページが読み込む補正 R6 と見込み（data/pools/azvaldt/。2026-11-21 に R3 から R4 に、2026-11-22 に R5 に、2026-11-23 に R6 に入れ替えた。見込みは R4 のまま）と、新しいプールの既定の設定（data/pools/azvaldt/search-options.json。2026-11-25 から。読みの中の相手も補正で打つ）を入れたもの（コマンドの新しいプールの既定と同じ手を選ぶ。tests/nets-azvaldt.test.ts）
 
 import { useEffect, useState } from "preact/hooks";
 import { Footer } from "../ui/Footer";
@@ -20,7 +20,8 @@ const AGENTS: Record<string, string> = {
 
 /**
  * 総当たりの最初の選択: 代表 10 型を探索 AI で、1組 2 試合（席を入れ替えて 1 回ずつ。45 組で 90 試合）。
- * R3 の 1 試合は Worker 1 つで 3.5 秒ほどで、4 スレッドのマシン（Worker 3 つ）で 90 試合が 2 分ほど（docs/browser.md「ページの試合の時間」。R4・R5・R6 は 1 手の思考が R3 と同じほど）
+ * 新しいプールの既定（2026-11-25 から）の 1 試合は Worker 1 つで 8.7 秒ほどで、4 スレッドのマシン（Worker 3 つ）で 90 試合が 4 分半ほど（docs/browser.md「ページの試合の時間」。
+ * 設定なしの R6 は 2 分ほどで、R3 と同じほどだった）。席を入れ替えた 2 試合がいちばん少ない組なので、1 組 2 試合のまま
  */
 const DEFAULTS = { decks: REP10_IDS, agents: ["search"], games: 2 };
 
@@ -29,12 +30,12 @@ const PRESETS: readonly DeckPreset[] = [
   { label: "全部（84 個）", keys: AZVALDT_DECK_OPTIONS.map((o) => o.key) },
 ];
 
-/** 問題集: 新しいプールの問（misses/azvaldt/）。シミュレータの中の R3 どうしの自己対戦から取った局面だけ */
+/** 問題集: 新しいプールの問（misses/azvaldt/）。シミュレータの中の AI どうしの自己対戦（R3 の打ち比べ調査と、R6 の 1 試合）から取った局面だけ */
 const MISSES: MissesSource = {
   load: () => import("../misses/azvaldtData").then((m) => m.loadMisses()),
   dir: "misses/azvaldt",
   about:
-    "局面はどれも、このシミュレータの中の AI（探索 AI に補正 R3 を入れたもの）どうしの自己対戦（打ち比べ調査）から取ったもので、ここで見られるのはリポジトリにある問だけです。",
+    "局面はどれも、このシミュレータの中の AI（探索 AI）どうしの自己対戦（補正 R3 での打ち比べ調査と、補正 R6 での 1 試合）から取ったもので、ここで見られるのはリポジトリにある問だけです。",
 };
 
 type Tab = "sim" | "misses";

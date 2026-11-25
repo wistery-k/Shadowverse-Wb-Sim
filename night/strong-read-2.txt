@@ -1,0 +1,37 @@
+# 読みの中の相手を強く読む（2 晩目）。採る前の確かめ。1 晩目（night/strong-read-1.txt、回 strong-read-1-20261125）の結果から。
+# 調べた結果は docs/ai-notes/15-2026-11-22.md「読みの中の相手を強くしたときの楽観と費用」の「夜の結果」
+#
+# 問い: 1 晩目で線を越えた「強く読む＋印なし」（51.18% ± 0.25。読みの中の相手は手で作った重み＋補正）を、筋の通った S = 0 ＋補正の版
+#   （"opponentSearch":{"beamWidth":32,"maxDepth":16,"extraEval":true,"ownWeights":true}。読みの中の相手も R6 自身と同じ評価で採点する）で、別のシードで確かめる。
+#   クラウド環境の測りでは、S = 0 ＋補正と手で作った重み＋補正の楽観はほぼ同じ（+2.7 と +2.5）
+#
+# やること:
+#   1. 強く読む（S = 0 ＋補正）＋印なし 対 R6（84 個のデッキの鏡の compare 2 万試合、g10000〜19999。1 晩目と別のシード）
+#   2. 物差し 2 つ（採るときに記録する。採らなければ台帳に候補の名前で残るだけ）
+#   3. もう 1 段強く読む（幅 64・深さ 16・S = 0 ＋補正）＋印なし 対 R6（1 と同じシード g10000〜19999。審査の勧め。強さの順に 49.73 → 50.46 → 51.18 と上がったので、その先を見る）
+#
+# 回す前に決めた問いと線:
+#   1 で 差 − 2 SE > 0 なら、S = 0 の版を採る案をユーザーに出す（既定にする範囲と、ブラウザの速さの確かめと一緒に）。
+#   差 + 2 SE < 0 なら、1 晩目の結果は S = 0 にしたことで消えたか、運だった。手で作った重み＋補正の版を別のシードで回すかをユーザーと決める。
+#   どちらでもなければ、1 晩目と合わせた数（4 万試合）と、手で作った重み＋補正の版をどうするかをユーザーと決める
+#   試合数の決め方: 1 晩目の差 +1.18 がそのままなら、2 万試合（± 0.25）で 9 割以上線を越える
+#   3（幅 64）: 差 − 2 SE > 0 で、かつ 1 との差（同じシード）が 1 より大きい向きなら、もっと強く読む方向（探索の効率化）に価値がある材料としてユーザーに出す。
+#     採る候補にするかは思考の倍率（PC で 5.6 倍ほどの見込み）と合わせてユーザーと決める。1 と見分けられなければ、幅 32 で頭打ちの材料
+#   線ではないが見る数（翌朝、クラウド環境で）: 型ごとの勝率（ledger の perDeck を型でまとめる）、1 晩目の 1 と並べる
+#
+# 見込み（PC、svwb-docker・28 スレッド）: compare は 1 晩目の実測 0.369 秒/試合で 2 時間 3 分。
+#   物差しは R6 の実測（0.158・0.186 秒/試合）に、強く読む側の思考 3.3 倍の分を (3.3 + 1) / 2 として 0.34・0.40 秒/試合で、8000 試合ずつ 45 分・53 分。
+#   幅 64 は、クラウド環境の profile の思考の比（幅 64 は 6.63 倍、幅 32 は 3.90 倍）で PC の 3.3 倍を伸ばして 5.6 倍、0.171 × (5.6 + 1) / 2 = 0.565 秒/試合で 3 時間 8 分。
+#   合わせて 6 時間 50 分ほど（3 を外すなら 3 時間 42 分）
+# 朝: 止まったときのまとめを push してもらい、ingest する
+# 回の名前は strong-read-2
+
+# 1. 強く読む（S = 0 ＋補正）＋印なし 対 R6（別のシード）
+compare 10000 '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":32,"maxDepth":16,"extraEval":true,"ownWeights":true},"imaginedInput":false}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 10000 --decks @data/pools/azvaldt/sets/all84.txt --label 強読みS0印なし対R6 --est 0.369
+
+# 2. 物差し 2 つ（新しいプールの弱い相手・強い相手）
+yardstick --ref pool-v0 --opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":32,"maxDepth":16,"extraEval":true,"ownWeights":true},"imaginedInput":false}' --games 4000 --start 0 --label 新しいプール-物差し-強読みS0印なし --est 0.34
+yardstick --ref pool-r3 --opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":32,"maxDepth":16,"extraEval":true,"ownWeights":true},"imaginedInput":false}' --games 4000 --start 0 --label 新しいプール-強い物差し-強読みS0印なし --est 0.40
+
+# 3. もう 1 段強く読む（幅 64・深さ 16・S = 0 ＋補正）＋印なし 対 R6（1 と同じシード）
+compare 10000 '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":64,"maxDepth":16,"extraEval":true,"ownWeights":true},"imaginedInput":false}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 10000 --decks @data/pools/azvaldt/sets/all84.txt --label 強読み64S0印なし対R6 --est 0.565

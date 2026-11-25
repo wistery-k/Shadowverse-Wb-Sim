@@ -29,7 +29,7 @@ Shadowverse: Worlds Beyond の対戦シミュレータ。概要・目標は `REA
     1. スターターのページとは URL を分ける。タブは「AI対戦（総当たり）」と「問題集」の 2 つだけで、AI 同士の試合と問題集の局面を表示・再生する。人間と AI の対戦・デッキの編集や貼り付け・サンドボックス・試合の記録・局面の入力は付けない
     2. デッキは取り込んだプロのデッキ（`data/pools/azvaldt/decks/` の 84 個）からだけ選べる（既定は代表 10 型 `data/pools/azvaldt/sets/rep10.txt`）。PS（プレミアシリーズ）のデッキに入らないカードは実装しない
     3. 問題集は `misses/azvaldt/` の問（シミュレータの中の自己対戦から取った局面）だけ。プロの試合の局面は入れない。URL の `#misses/<問>` は問を選ぶだけ
-    4. スターターの補正・見込み（`data/value-net.json` 等）を読み込まない（ロードを軽くするため）。探索 AI はこのページの補正・見込み（`data/pools/azvaldt/`。今は補正 R6・見込み R4）で打ち、コマンドの同じ補正と同じ手を選ぶ（`rust/engine/tests/browser_azvaldt.rs`・`tests/nets-azvaldt.test.ts`）
+    4. スターターの補正・見込み（`data/value-net.json` 等）を読み込まない（ロードを軽くするため）。探索 AI はこのページの補正・見込み（`data/pools/azvaldt/`。今は補正 R6・見込み R4）と新しいプールの既定の設定（`data/pools/azvaldt/search-options.json`）で打ち、コマンドの同じ補正・同じ設定と同じ手を選ぶ（`rust/engine/tests/browser_azvaldt.rs`・`tests/nets-azvaldt.test.ts`）
     5. 前期のローテーションのプールだけ。今のローテーションのカード・選手の名前は入れない
     - この条件を崩す変更はユーザーに確認する
 - ドキュメント・UI 文言・コミットメッセージは日本語。識別子・コードコメントの用語は英語でもよいが、ゲーム用語は `docs/rules.md` の対応表に従う
