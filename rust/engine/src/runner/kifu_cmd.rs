@@ -4,7 +4,7 @@
 //!   svwb kifu winrate <棋譜>… [--where '<条件>,…'] [--by <分け方>,…]
 //!   svwb kifu events <棋譜>… [--where '<条件>,…'] [--event '…'] [--out 出来事.jsonl]
 //!   svwb kifu seats <棋譜>… [--where '<条件>,…'] [--out 席.jsonl]
-//!   svwb kifu values <棋譜>… [--opts '<設定>'] [--reads N] [--opp-lethal 1] [--true-lethal 1] [--features 1] [--probe 1 [--after 1] [--hidden 1]] [--where '<条件>,…'] [--out ターン末.jsonl]
+//!   svwb kifu values <棋譜>… [--opts '<設定>'] [--reads N] [--opp-lethal 1] [--true-lethal 1] [--features 1] [--probe 1 [--after 1] [--hidden 1] [--hand-card <カード>]] [--where '<条件>,…'] [--out ターン末.jsonl]
 //!
 //! - 棋譜は、ファイルかフォルダ（中の `.jsonl`・`.jsonl.gz` を全部。`.tmp` は読まない）。`.gz` は `gzip -dc` で読む
 //! - count・events は試合を打ち直して出来事の列（replay_index.rs）にする。打ち直せない試合（エンジンの版が違って打てない手がある）と、
@@ -1278,7 +1278,12 @@ fn lethal_extras(s: &crate::state::GameState, p: usize) -> Vec<(String, Json)> {
 /// 入力の合計から導くもの（場の空き枠・最大の攻撃力・守護の体力・相手の伏せた手札に特定のカードがある見込み等）、
 /// 入力にそのままあるもの（比べるための体力・PP・枚数）を並べる。どれも公開の情報か自分の情報（相手の伏せた手札は、
 /// 補正の入力と同じく「まだ見えていないカード」の中の割合で見込む）。after は自分のターンの最初の局面か（false ならターン末）
-fn probe_cells(s: &crate::state::GameState, p: usize, after: bool) -> Vec<(String, Json)> {
+fn probe_cells(
+    s: &crate::state::GameState,
+    p: usize,
+    after: bool,
+    hand_card: Option<crate::data::CardIdx>,
+) -> Vec<(String, Json)> {
     use crate::data::{
         CardType, Kw, AMBUSH, AURA, BANE, BARRIER, DRAIN, INTIMIDATE, RUSH, STORM, WARD,
     };
@@ -1286,6 +1291,11 @@ fn probe_cells(s: &crate::state::GameState, p: usize, after: bool) -> Vec<(Strin
         card, Evolve, OnBoard, BOARD_LIMIT, BOARD_LOST_LAST_WORDS, EVOLVE_TURN, SUPER_EVOLVE_TURN,
     };
     let q = 1 - p;
+    let artifact = crate::data::data()
+        .tribe_names
+        .iter()
+        .position(|t| t == "アーティファクト")
+        .map(|i| i as crate::data::TribeId);
     let mut out: Vec<(String, f64)> = Vec::new();
     let mut put = |k: String, x: f64| out.push((k, x));
     let b = |x: bool| f64::from(u8::from(x));
@@ -1459,9 +1469,49 @@ fn probe_cells(s: &crate::state::GameState, p: usize, after: bool) -> Vec<(Strin
             pl.entered_counts.iter().map(|&(_, n)| n).max().unwrap_or(0) as f64,
         );
         put(format!("{side}MaxHpDiff"), (pl.leader_max_hp - 20) as f64);
+        // リーダーへのダメージを 0 にする（世界の味方・ゾーイ）が、もう一方の次に動くターンまで続くか（守りが効くのは相手の番）
+        let other_next = if x == p {
+            s.turn + 1
+        } else if after {
+            s.turn
+        } else {
+            s.turn + 2
+        };
         put(
             format!("{side}DamageZero"),
-            b(pl.leader_damage_zero_until.is_some_and(|u| next_turn <= u)),
+            b(pl.leader_damage_zero_until.is_some_and(|u| other_next <= u)),
+        );
+        // このバトル中に場に出たアーティファクトのフォロワーの種類数（ネメシス。入力に無い）
+        let artifact_kinds = pl.entered_kinds.as_ref().map_or(0, |v| {
+            v.iter()
+                .filter(|&&c| {
+                    let d = card(c);
+                    d.ctype == CardType::Follower && artifact.is_some_and(|t| d.tribes.contains(&t))
+                })
+                .count()
+        });
+        put(format!("{side}EnteredArtifactKinds"), artifact_kinds as f64);
+        // 山札のフォロワーに付いた強化（ダストデイズのクレスト等。自分の側は合計だけ入力にあり、相手の側は入力に無い）
+        let deck_followers = || {
+            pl.deck_kept
+                .iter()
+                .filter(|h| card(h.card).ctype == CardType::Follower)
+        };
+        put(
+            format!("{side}DeckAtkMod"),
+            deck_followers().map(|h| h.attack_mod as f64).sum(),
+        );
+        put(
+            format!("{side}DeckDefMod"),
+            deck_followers().map(|h| h.defense_mod as f64).sum(),
+        );
+        put(
+            format!("{side}DeckBuffMax"),
+            deck_followers()
+                .map(|h| h.attack_mod)
+                .max()
+                .unwrap_or(0)
+                .max(0) as f64,
         );
     }
     // 自分の手札（段階 1 は枚数。コストの変化・付いたキーワード・奥義ゲージは入力に無い）
@@ -1486,6 +1536,36 @@ fn probe_cells(s: &crate::state::GameState, p: usize, after: bool) -> Vec<(Strin
             .map(|h| h.ougi as f64)
             .sum(),
     );
+    // 手札の X（テトラ＆ラティカ等）とスペルブーストの、同じカードが 2 枚以上あるときの内訳。
+    // 入力はカードごとの合計（スペルブーストは 1 枚 10 回まで）だけで、X は入力に無い
+    let xs: Vec<i32> = me.hand.iter().filter_map(|h| h.x).collect();
+    put(
+        "myHandXMax".into(),
+        xs.iter().copied().max().unwrap_or(0) as f64,
+    );
+    let mut x_pairs = 0;
+    let mut x_spread = 0;
+    let mut boost_spread = 0;
+    for (k, h) in me.hand.iter().enumerate() {
+        let same: Vec<&crate::state::HandCard> =
+            me.hand.iter().filter(|o| o.card == h.card).collect();
+        // 同じカードの最初の 1 枚のところで数える
+        if same.len() < 2 || me.hand.iter().position(|o| o.card == h.card) != Some(k) {
+            continue;
+        }
+        let spread = |f: &dyn Fn(&crate::state::HandCard) -> i32| {
+            let v: Vec<i32> = same.iter().map(|o| f(o)).collect();
+            v.iter().max().unwrap_or(&0) - v.iter().min().unwrap_or(&0)
+        };
+        if h.x.is_some() {
+            x_pairs += 1;
+            x_spread = x_spread.max(spread(&|o| o.x.unwrap_or(0)));
+        }
+        boost_spread = boost_spread.max(spread(&|o| o.boosts));
+    }
+    put("myHandXPairs".into(), x_pairs as f64);
+    put("myHandXSpread".into(), x_spread as f64);
+    put("myHandBoostSpread".into(), boost_spread as f64);
     // 次の自分のターンにプレイできる手札（コストの変化込み。PP は次のターンの最大値。段階 2 と 3 の間）
     let my_next_pp = if after {
         me.max_pp
@@ -1500,6 +1580,14 @@ fn probe_cells(s: &crate::state::GameState, p: usize, after: bool) -> Vec<(Strin
             .count() as f64,
     );
     put("myPpLeft".into(), if after { 0.0 } else { me.pp as f64 });
+    put("myMaxPp".into(), me.max_pp as f64);
+    // --hand-card で選んだカードの、自分の手札の枚数（調べもの用）
+    if let Some(c) = hand_card {
+        put(
+            "myHandCard".into(),
+            me.hand.iter().filter(|h| h.card == c).count() as f64,
+        );
+    }
     put("myTurn".into(), me.turn_count as f64);
     // 相手の伏せた手札（段階 2: 補正の入力の「まだ見えていないカード」と手札の枚数から、確率としては決まる）
     let opp = &s.players[q];
@@ -1604,6 +1692,7 @@ fn probe_value_cells(
     phase: crate::ai::valuenet::ValuePhase,
     probe: bool,
     hidden: bool,
+    hand_card: Option<crate::data::CardIdx>,
 ) -> Vec<(String, Json)> {
     let mut row = Vec::new();
     let ended = at.phase == crate::state::Phase::Ended;
@@ -1621,6 +1710,7 @@ fn probe_value_cells(
                 at,
                 p,
                 phase != crate::ai::valuenet::ValuePhase::End,
+                hand_card,
             )),
         ));
     }
@@ -1921,6 +2011,7 @@ fn value_rows(
                     crate::ai::valuenet::ValuePhase::End,
                     true,
                     o.hidden,
+                    o.hand_card,
                 )
             }));
         }
@@ -1971,6 +2062,7 @@ fn value_rows(
                 crate::ai::valuenet::ValuePhase::After,
                 true,
                 o.hidden,
+                o.hand_card,
             ));
             out.push_str(&Json::Obj(row).stringify());
             out.push('\n');
@@ -1987,6 +2079,8 @@ struct ProbeOpts {
     after: bool,
     /// 隠れ層の値も書く
     hidden: bool,
+    /// --hand-card: 手札の枚数を数えるカード（probe の myHandCard）
+    hand_card: Option<crate::data::CardIdx>,
 }
 
 fn values(argv: &[String]) -> Result<(), String> {
@@ -2000,6 +2094,7 @@ fn values(argv: &[String]) -> Result<(), String> {
         "probe",
         "after",
         "hidden",
+        "hand-card",
         "where",
         "out",
     ])?;
@@ -2058,17 +2153,22 @@ fn values(argv: &[String]) -> Result<(), String> {
     };
     // 補正の読みの測り（valueWin と probe。--after 1 なら自分のターンの最初の行も、--hidden 1 なら隠れ層の値も）
     let (after, hidden) = (on("after")?, on("hidden")?);
+    let hand_card = match a.one("hand-card") {
+        None => None,
+        Some(name) => Some(crate::runner::deck_compare::find_card(&name)?),
+    };
     let probe = if on("probe")? {
         match Json::parse(&text)?.get("valueNet") {
             Some(Json::Str(path)) => Some(ProbeOpts {
                 net: crate::ai::valuenet::ValueNet::load(path)?,
                 after,
                 hidden,
+                hand_card,
             }),
             _ => return Err("--probe 1 には --opts の valueNet（採点する補正）が要ります".into()),
         }
-    } else if after || hidden {
-        return Err("--after 1・--hidden 1 には --probe 1 が要ります".into());
+    } else if after || hidden || hand_card.is_some() {
+        return Err("--after 1・--hidden 1・--hand-card には --probe 1 が要ります".into());
     } else {
         None
     };
@@ -2322,6 +2422,7 @@ mod tests {
                 .unwrap(),
                 after: true,
                 hidden: true,
+                hand_card: None,
             });
             let text = value_rows(
                 &v,
@@ -2438,7 +2539,7 @@ mod tests {
             let Some(i) = s.players[p].board.iter().position(|c| c.is_follower) else {
                 continue;
             };
-            let before = probe_cells(&s, p, false);
+            let before = probe_cells(&s, p, false, None);
             let mut t = s.clone();
             {
                 let c = &mut t.players[p].board.make_mut()[i];
@@ -2450,7 +2551,7 @@ mod tests {
                 let k = if native.has(STORM) { RUSH } else { STORM };
                 c.keywords = c.keywords.with(k);
             }
-            let after = probe_cells(&t, p, false);
+            let after = probe_cells(&t, p, false, None);
             let was = |k: &str| get(&before, k);
             assert_eq!(
                 get(&after, "mySuperEvo"),
@@ -2482,6 +2583,80 @@ mod tests {
             return;
         }
         panic!("フォロワーが場にいる局面が無い");
+    }
+
+    #[test]
+    fn probe_cells_count_hand_x_deck_buffs_and_artifact_kinds() {
+        use crate::data::{CardIdx, CardType};
+        use crate::game::create_game;
+        use crate::state::{card, Shared};
+        let d = data();
+        let get = |cells: &[(String, Json)], k: &str| -> f64 {
+            match cells.iter().find(|(n, _)| n == k) {
+                Some((_, Json::Num(x))) => *x,
+                _ => panic!("{k} が無い"),
+            }
+        };
+        let follower = (0..d.cards.len() as CardIdx)
+            .find(|&c| card(c).ctype == CardType::Follower)
+            .unwrap();
+        let other = (follower + 1..d.cards.len() as CardIdx)
+            .find(|&c| card(c).ctype == CardType::Follower)
+            .unwrap();
+        let mut s = create_game([&d.decks[0].cards, &d.decks[1].cards], 7);
+        let p = s.active;
+        let q = 1 - p;
+        // 同じカード 2 枚（X 3 と 12、スペルブースト 2 と 9）と、別のカード 1 枚（X 5）
+        let hand: Vec<_> = [(follower, 3, 2), (follower, 12, 9), (other, 5, 0)]
+            .into_iter()
+            .map(|(c, x, b)| {
+                let mut h = s.new_hand_card(c, None);
+                h.x = Some(x);
+                h.boosts = b;
+                h
+            })
+            .collect();
+        // 山札のフォロワーの強化（相手の側）: +2/+1 と +1/+1
+        let kept: Vec<_> = [(2, 1), (1, 1)]
+            .into_iter()
+            .map(|(a, df)| {
+                let mut h = s.new_hand_card(follower, None);
+                h.attack_mod = a;
+                h.defense_mod = df;
+                h
+            })
+            .collect();
+        s.players[p].hand = Shared::from(hand);
+        s.players[q].deck_kept = kept;
+        let artifact = d
+            .tribe_names
+            .iter()
+            .position(|t| t == "アーティファクト")
+            .map(|i| i as crate::data::TribeId);
+        let artifacts: Vec<CardIdx> = (0..d.cards.len() as CardIdx)
+            .filter(|&c| {
+                card(c).ctype == CardType::Follower
+                    && artifact.is_some_and(|t| card(c).tribes.contains(&t))
+            })
+            .take(2)
+            .collect();
+        s.players[q].entered_kinds = Some(artifacts.iter().copied().chain([follower]).collect());
+        let cells = probe_cells(&s, p, false, None);
+        assert_eq!(get(&cells, "myHandXMax"), 12.0);
+        assert_eq!(get(&cells, "myHandXPairs"), 1.0);
+        assert_eq!(get(&cells, "myHandXSpread"), 9.0);
+        assert_eq!(get(&cells, "myHandBoostSpread"), 7.0);
+        assert_eq!(get(&cells, "oppDeckAtkMod"), 3.0);
+        assert_eq!(get(&cells, "oppDeckDefMod"), 2.0);
+        assert_eq!(get(&cells, "oppDeckBuffMax"), 2.0);
+        assert_eq!(get(&cells, "myDeckBuffMax"), 0.0);
+        let kinds = if card(follower).tribes.iter().any(|&t| Some(t) == artifact) {
+            artifacts.len() + 1
+        } else {
+            artifacts.len()
+        };
+        assert_eq!(get(&cells, "oppEnteredArtifactKinds"), kinds as f64);
+        assert_eq!(get(&cells, "myEnteredArtifactKinds"), 0.0);
     }
 
     #[test]
