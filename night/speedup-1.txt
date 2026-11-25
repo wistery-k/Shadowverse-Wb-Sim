@@ -1,0 +1,17 @@
+# 手を変えない高速化の、PC（svwb-docker・28 スレッド）での効きを測る（2026-11-25）。見込み 25 分ほど。
+# 1. 補正の最後の隠れ層の使い回し（docs/value-net.md「最後の隠れ層の使い回し」）。--no-memo は使い回さない
+# 2. メモリの確保を jemalloc に（docs/profile.md「メモリの確保」）。--no-jemalloc は差し込まない。
+#    コンテナを作り直す前（SVWB_PRELOAD が無い）なら、どの行も差し込まない（報告の「メモリの確保」の行に出る）
+# 試合は学び直しの自己対戦と同じ all84 の組（840 試合）で、新しい既定（data/pools/azvaldt/search-options.json と同じ設定）。
+# どの行も同じ試合になるはず（手を変えない。speed-*.json の games で確かめる）。
+# 環境の揺れを避けるため、3 つの形（どちらも無し・使い回し・使い回し＋jemalloc）を 2 回ずつ交互に回す。
+# 見込みの 1 試合 0.3 秒は、R6 の profile の 0.16 秒（PC、all84）に新しい既定の思考の 1.7 倍をかけたもの（速くなった分は見込みより早く済む）。
+# 結果: speed-1〜6.md の先頭の行（思考の時間・当たりの割合・メモリの確保）。1・4 に対する 2・5 と 3・6 の思考の時間の比を出す。
+# 回の名前は speedup-1
+
+profile --no-memo --no-jemalloc --opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.3
+profile --no-jemalloc --opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.3
+profile --opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.3
+profile --no-memo --no-jemalloc --opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.3
+profile --no-jemalloc --opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.3
+profile --opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.3

@@ -79,7 +79,7 @@ const isYardstickRef = (x: string): x is YardstickRef => (YARDSTICK_REFS as read
 export type JobSpec =
   | { kind: "compare"; a: string; b: string; vs: string | null; noMirror: boolean; decks: string | null; with: string | null; without: string | null }
   | { kind: "yardstick"; ref: YardstickRef; opts: string }
-  | { kind: "profile"; opts: string; rhino: boolean; decks: string | null }
+  | { kind: "profile"; opts: string; rhino: boolean; decks: string | null; noMemo?: true; noJemalloc?: true }
   /** 見落とし問題集（docs/misses.md）。games は 1 問を打つ回数（--trials） */
   | { kind: "misses"; opts: string; seed: number }
   /** 候補の打ち比べ調査（docs/survey.md）。games は自己対戦の試合の数（1 つの番号で 1 試合）。opts は AI の設定（--opts）、decks は --decks */
@@ -264,10 +264,22 @@ export function parseJob(line: string, index: number): Job {
       const games = intOf(take("--games") ?? "49", "--games", 1);
       const start = intOf(take("--start") ?? "0", "--start", 0);
       const rhino = flag("--rhino");
+      // 補正の最後の隠れ層を使い回さない（使い回しの効きを同じコミットで測る。docs/value-net.md「最後の隠れ層の使い回し」）
+      const noMemo = flag("--no-memo");
+      // メモリの確保を jemalloc にしない（SVWB_PRELOAD があっても差し込まない。svwbEnv。効きを同じ回で比べる）。svwb には渡さない
+      const noJemalloc = flag("--no-jemalloc");
       const decks = take("--decks");
       noUnknown();
       if (rest.length > 0) throw new Error(`知らない引数: ${rest.join(" ")}`);
-      return { index, line: text, label, games, start, est, spec: { kind, opts, rhino, decks } };
+      return {
+        index,
+        line: text,
+        label,
+        games,
+        start,
+        est,
+        spec: { kind, opts, rhino, decks, ...(noMemo ? { noMemo: true as const } : {}), ...(noJemalloc ? { noJemalloc: true as const } : {}) },
+      };
     }
     case "misses": {
       // 行の頭の run は書いても書かなくてもよい
@@ -553,6 +565,7 @@ function jobArgvRaw(job: Job, first: number, count: number, dir: string): string
         "--start",
         String(first),
         ...(s.rhino ? ["--rhino"] : []),
+        ...(s.noMemo ? ["--no-memo"] : []),
         ...(s.decks === null ? [] : ["--decks", s.decks]),
         "--json",
         join(dir, `speed-${job.index}.json`),
@@ -626,7 +639,7 @@ export function jobTitle(job: Job): string {
   if (s.kind === "data") return `${s.cmd.join(" ")} → ${s.out}`;
   if (s.kind === "node") return `${s.tool} ${s.args[0] ?? ""}${s.impl === "rust" ? "（Rust）" : ""} → ${s.out}`;
   if (s.kind === "pick") return `pick（${s.from} が線を越えたら ${s.pass}、越えなければ ${s.fail}）→ ${s.out}`;
-  return `profile（速さ）${s.opts === "{}" ? "" : ` ${s.opts}`}${s.rhino ? " --rhino" : ""}${s.decks === null ? "" : ` --decks ${s.decks}`}`;
+  return `profile（速さ）${s.opts === "{}" ? "" : ` ${s.opts}`}${s.rhino ? " --rhino" : ""}${s.noMemo ? " --no-memo" : ""}${s.noJemalloc ? " --no-jemalloc" : ""}${s.decks === null ? "" : ` --decks ${s.decks}`}`;
 }
 
 // ---------------------------------------------------------------- 見積もりと区切り
@@ -1377,6 +1390,16 @@ export async function gzipKifu(dir: string, before: Map<string, string> = new Ma
   return done;
 }
 
+/**
+ * svwb に差し込むメモリの確保の置き換え（環境変数 SVWB_PRELOAD に書いた共有ライブラリ。PC のコンテナは jemalloc。
+ * docker/remote-control/Dockerfile）。値も試合も変わらず、速さだけが変わる（docs/profile.md「メモリの確保」）。
+ * svwb にだけ LD_PRELOAD で渡す（node などには入れない）。無ければ何もしない
+ */
+function svwbPreload(): { LD_PRELOAD?: string } {
+  const lib = process.env.SVWB_PRELOAD;
+  return lib && existsSync(lib) ? { LD_PRELOAD: lib } : {};
+}
+
 /** 区切りを 1 つ回す。終わりの状態（0 なら済んだ）と秒 */
 function runChunk(plan: Plan, session: Session, dir: string, c: Chunk, ctl: ChunkControl): Promise<{ code: number | null; seconds: number; why: string }> {
   const job = plan.jobs[c.job - 1];
@@ -1403,12 +1426,14 @@ function runChunk(plan: Plan, session: Session, dir: string, c: Chunk, ctl: Chun
       : [plan.bin, argv];
   const out = openSync(`${logFile}.tmp`, "w");
   const kifuBefore = kifuSnapshot(dir);
+  const preload = cmd === plan.bin && !(s.kind === "profile" && s.noJemalloc) ? svwbPreload() : {};
   return new Promise((done) => {
     const child = spawn(cmd, args, {
       cwd: plan.repo,
       stdio: ["ignore", out, out],
       env: {
         ...process.env,
+        ...preload,
         THREADS: String(session.threads),
         SVWB_LEDGER: join(dir, "ledger.jsonl"),
         SVWB_COMMIT: plan.commit,

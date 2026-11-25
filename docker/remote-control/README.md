@@ -161,6 +161,10 @@ AI 対戦（compare）の差は 0〜2% で、同じものを繰り返したと�
 
 ランダム対戦は大きなメモリを確保しては捨てる段で、ここだけ少し差が出た。
 
+メモリの確保（2026-11-25）: イメージに `libjemalloc2` を入れ、キューと `npm run svwb` が svwb を動かすときだけ `LD_PRELOAD` で差し込む
+（`Dockerfile` の `SVWB_PRELOAD`。値も試合も変わらず、自己対戦が速くなる。[docs/profile.md](../../docs/profile.md)「メモリの確保」）。
+効かせるには、回している回が無いときに `docker compose up -d --build` でイメージを作り直す。profile の報告の「メモリの確保」の行で確かめられる。
+
 ## 確かめたこと（2026-10-26）
 
 Claude のクラウド環境の Docker で、イメージを作り（ネットワークの制限で、apt の部分を外し、Claude Code を npm で入れた版）、
