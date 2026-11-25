@@ -38,7 +38,7 @@ npm run profile -- --rhino                        # リノセウスエルフは�
 確保の仕方を jemalloc に替えると、思考が 0.86 倍ほどになる（クラウド環境の 40 試合。補正の最後の隠れ層の使い回しと合わせて 0.73 倍ほど。docs/ai-notes/15-2026-11-22.md「手を変えずに自己対戦を速くする」）。
 値も試合も変わらない（同じ試合を確かめた）。glibc の設定（`GLIBC_TUNABLES` の tcache を大きくする等）では速くならなかった。
 
-- PC のコンテナ（`docker/remote-control/Dockerfile`）は `libjemalloc2` を入れ、環境変数 `SVWB_PRELOAD` にその場所を書く。
+- PC のコンテナ（`docker/remote-control/Dockerfile`。2026-11-25、ユーザーの決定。Rust の依存に足す案・確保を減らすコードを書く案は採らなかった）は `libjemalloc2` を入れ、環境変数 `SVWB_PRELOAD` にその場所を書く。
   キュー（`scripts/night-main.ts` の `svwbPreload`）と `npm run svwb`（`scripts/svwb.mjs`）は、`SVWB_PRELOAD` があれば svwb にだけ `LD_PRELOAD` で差し込む
   （node・cargo などには入れない）。ほかの環境（CI・クラウド環境）は変わらない。Rust の依存は増やしていない
 - 報告の先頭の「メモリの確保」の行に、差し込んだもの（`libjemalloc.so.2（LD_PRELOAD）`）か、Rust の既定かが出る

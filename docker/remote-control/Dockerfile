@@ -13,7 +13,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # キュー（scripts/night-main.ts）と npm run svwb（scripts/svwb.mjs）が、svwb を動かすときだけ LD_PRELOAD でこれを差し込む
-# （node・cargo などには入れない）。値も試合も変わらず、自己対戦が速くなる（docs/profile.md「メモリの確保」。2026-11-25）。
+# （node・cargo などには入れない）。値も試合も変わらず、自己対戦が速くなる（docs/profile.md「メモリの確保」。2026-11-25、ユーザーの決定）。
 # 外すならこの行を消して作り直す
 ENV SVWB_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
 
