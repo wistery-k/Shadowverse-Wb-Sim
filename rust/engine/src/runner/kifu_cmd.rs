@@ -1513,6 +1513,25 @@ fn probe_cells(
                 .unwrap_or(0)
                 .max(0) as f64,
         );
+        // 手札のフォロワーに付いた攻撃力の強化の和と、そのうち疾走を持つもの（誠実なる呪い屋・スージー等。
+        // 自分の側はカードごとに入力にあり、相手の側は入力に無い）と、PP の最大値
+        let hand_followers = || {
+            pl.hand
+                .iter()
+                .filter(|h| card(h.card).ctype == CardType::Follower)
+        };
+        put(
+            format!("{side}HandAtkMod"),
+            hand_followers().map(|h| h.attack_mod as f64).sum(),
+        );
+        put(
+            format!("{side}HandStormAtkMod"),
+            hand_followers()
+                .filter(|h| card(h.card).keywords.has(STORM) || h.keywords.has(STORM))
+                .map(|h| h.attack_mod as f64)
+                .sum(),
+        );
+        put(format!("{side}MaxPp"), pl.max_pp as f64);
     }
     // 自分の手札（段階 1 は枚数。コストの変化・付いたキーワード・奥義ゲージは入力に無い）
     let me = &s.players[p];
@@ -1580,7 +1599,6 @@ fn probe_cells(
             .count() as f64,
     );
     put("myPpLeft".into(), if after { 0.0 } else { me.pp as f64 });
-    put("myMaxPp".into(), me.max_pp as f64);
     // --hand-card で選んだカードの、自分の手札の枚数（調べもの用）
     if let Some(c) = hand_card {
         put(
@@ -2615,6 +2633,14 @@ mod tests {
                 h.boosts = b;
                 h
             })
+            .enumerate()
+            .map(|(k, mut h)| {
+                // 1 枚目に +3/+0（スージーの強化の形）
+                if k == 0 {
+                    h.attack_mod = 3;
+                }
+                h
+            })
             .collect();
         // 山札のフォロワーの強化（相手の側）: +2/+1 と +1/+1
         let kept: Vec<_> = [(2, 1), (1, 1)]
@@ -2657,6 +2683,14 @@ mod tests {
         };
         assert_eq!(get(&cells, "oppEnteredArtifactKinds"), kinds as f64);
         assert_eq!(get(&cells, "myEnteredArtifactKinds"), 0.0);
+        assert_eq!(get(&cells, "myHandAtkMod"), 3.0);
+        let storm = card(follower).keywords.has(crate::data::STORM);
+        assert_eq!(
+            get(&cells, "myHandStormAtkMod"),
+            if storm { 3.0 } else { 0.0 }
+        );
+        assert_eq!(get(&cells, "oppHandAtkMod"), 0.0);
+        assert_eq!(get(&cells, "myMaxPp"), s.players[p].max_pp as f64);
     }
 
     #[test]
