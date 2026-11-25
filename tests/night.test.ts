@@ -164,6 +164,17 @@ describe("ジョブの行", () => {
     const trRust = parseJob("td prune --model @/a.json --data @/s-1.jsonl.gz --impl rust --out @/ap.json --est 60", 5);
     expect(trRust.spec).toMatchObject({ kind: "node", tool: "td", impl: "rust", out: "@/ap.json" });
     expect(jobArgv(trRust, 0, 1, "/r")).toEqual(["td", "prune", "--model", "/r/a.json", "--data", "/r/s-1.jsonl.gz", "--out", "/r/ap.json.tmp"]);
+    // --epochOut: エポックごとの重みも作るファイルに数え、読むファイルには数えない（次のジョブが読める）
+    const ep = parseJob("td train --model @/a.json --out @/kt.json --epochOut @/kt-e{e}.json --epochs 3 --est 60", 6);
+    expect(jobProducts(ep)).toEqual(["@/kt.json", "@/kt-e1.json", "@/kt-e2.json", "@/kt-e3.json"]);
+    expect(jobInputs(ep)).toEqual(["@/a.json"]);
+    expect(jobArgv(ep, 0, 1, "/r")).toEqual(["td", "train", "--model", "/r/a.json", "--out", "/r/kt.json.tmp", "--epochOut", "/r/kt-e{e}.json", "--epochs", "3"]);
+    expect(() =>
+      parseJobs("td extend --model x.json --out @/a.json --est 1\n" + "td train --model @/a.json --out @/kt.json --epochOut @/kt-e{e}.json --epochs 2 --est 60\n" + "td prune --model @/kt-e2.json --out @/kp.json --est 1"),
+    ).not.toThrow();
+    expect(() => parseJob("td train --model a.json --out @/b.json --epochOut @/b-e{e}.json --est 1", 1)).toThrow(/--epochs/);
+    expect(() => parseJob("td train --model a.json --out @/b.json --epochOut @/b-e.json --epochs 2 --est 1", 1)).toThrow(/\{e\}/);
+    expect(() => parseJob("td train --model a.json --out @/b.json --epochOut @/b-e{e}.json --epochs 2 --impl ts --est 1", 1)).toThrow(/Rust 版/);
     expect(() => parseJob("td attr --model @/a.json --out @/b.json --impl rust --est 1", 1)).toThrow(/td train・td prune だけ/);
     expect(() => parseJob("potential train --out @/p.json --impl rust --est 1", 1)).toThrow(/td train・td prune だけ/);
     expect(() => parseJob("td train --model a.json --out @/b.json --impl wasm --est 1", 1)).toThrow(/ts か rust/);

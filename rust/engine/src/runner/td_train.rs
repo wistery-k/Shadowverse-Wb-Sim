@@ -4,7 +4,7 @@
 //!     [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--imaginedWeight 1] [--ivRes 1] [--best 0] [--bestOn end,after]
 //!     [--base default|zero|search] [--excludeDecks <デッキ>,…|--onlyDecks <デッキ>,…] [--dropInputs <入力>,…]
 //!     [--lethalHead aux|survival] [--lethalWeight 1] [--lethalTarget lost|search]
-//!     [--winHead form|aux] [--winWeight 1] [--readHead aux] [--readWeight 1] [--readMin 1] [--cutOpp 0]
+//!     [--winHead form|aux] [--winWeight 1] [--readHead aux] [--readWeight 1] [--readMin 1] [--cutOpp 0] [--epochOut m-e{e}.json]
 //!   svwb td prune --model m.json --data d0.jsonl[,…] --out mp.json [--excludeDecks …|--onlyDecks …]
 //!
 //! 移したのは学び直しの流れ（night/relearn-b.txt）が使う引数だけ。実験用の引数（--attr・--cmpWeight・--v1Only・--searchTarget・--seat・--exclude 等）と
@@ -71,7 +71,7 @@ type Args = [(String, String)];
 const FORM_WIN_START: f64 = 1e-3;
 
 /// Rust 版の td train が扱う引数（学び直しの流れが使うものと、学習の基本の --batch・--fitA）
-const TRAIN_ARGS: [&str; 29] = [
+const TRAIN_ARGS: [&str; 30] = [
     "model",
     "data",
     "out",
@@ -101,6 +101,7 @@ const TRAIN_ARGS: [&str; 29] = [
     "readWeight",
     "readMin",
     "cutOpp",
+    "epochOut",
 ];
 
 const PRUNE_ARGS: [&str; 5] = ["model", "data", "out", "excludeDecks", "onlyDecks"];
@@ -1430,6 +1431,13 @@ fn report(label: &str, d: &Dataset, v: &[f64], targets: &[f64]) {
                 if bias / nf >= 0.0 { "+" } else { "" },
                 fixed((bias / nf) * 100.0, 1)
             )
+        } else if ph == 0 {
+            // 楽観の大きさ（R7 の候補の --cutOpp で見る。確かめ用のターン末の予測の平均と、実際の勝ちの割合）
+            format!(
+                " 予測の平均 {}%・勝ちの割合 {}%",
+                fixed(pred.iter().sum::<f64>() / nf * 100.0, 2),
+                fixed(y.iter().sum::<f64>() / nf * 100.0, 2)
+            )
         } else {
             String::new()
         };
@@ -1579,6 +1587,13 @@ pub fn train(args: &Args) -> Result<(), String> {
     let out = need(args, "out")?;
     let lambda = num_arg(args, "lambda", 0.7)?;
     let cut_opp = num_arg(args, "cutOpp", 0.0)? != 0.0;
+    // --epochOut m-e{e}.json: エポックごとの重みも書き出す（{e} はエポックの番号。--best とは別に、--out は今までどおり）
+    let epoch_out = arg(args, "epochOut");
+    if epoch_out.is_some_and(|p| !p.contains("{e}")) {
+        return Err(
+            "--epochOut のファイルの名前には、エポックの番号を入れる {e} が要ります".into(),
+        );
+    }
     let epochs = int_arg(args, "epochs", 2, 0)?;
     let lr = num_arg(args, "lr", 0.001)?;
     let l2 = num_arg(args, "l2", 0.0001)?;
@@ -1941,6 +1956,11 @@ pub fn train(args: &Args) -> Result<(), String> {
         );
         head_reports(&d, &v, &hv, learner.lethal);
         let loss = holdout_loss(&d, &v, &best_on);
+        if let Some(pat) = epoch_out {
+            let path = pat.replace("{e}", &(epoch + 1).to_string());
+            write_model(&learner, &model, &base_weights, &path)?;
+            println!("エポック {} の重みを {path} に書き出しました（確かめ用の局面の勝敗の交差エントロピー {}）", epoch + 1, fixed(loss, 4));
+        }
         if keep_best && loss < best_loss {
             best_loss = loss;
             best_epoch = epoch + 1;
@@ -1971,10 +1991,22 @@ pub fn train(args: &Args) -> Result<(), String> {
         fixed(t0.elapsed().as_secs_f64(), 1)
     );
 
+    write_model(&learner, &model, &base_weights, out)?;
+    println!("{out} に書き出しました");
+    Ok(())
+}
+
+/// 今の学びの重みをモデルのファイルに書き出す（--out と --epochOut）。書き出す重みは 6 桁に丸める（td-main.ts の round(x, 6)。属性の分 attr は読んだまま）
+fn write_model(
+    learner: &Learner,
+    model: &NetModel,
+    base_weights: &Json,
+    out: &str,
+) -> Result<(), String> {
     let (w1, layers, dense) = learner.snapshot();
     let sh = &learner.shape;
     let mut m = model.clone();
-    m.base_weights = base_weights;
+    m.base_weights = base_weights.clone();
     m.w1 = w1;
     m.b1 = dense[..sh.h].to_vec();
     if sh.sizes.len() > 1 {
@@ -2015,11 +2047,8 @@ pub fn train(args: &Args) -> Result<(), String> {
     if let Some(ow) = sh.o_wr {
         m.read_head = Some(head_of(ow));
     }
-    // 書き出す重みは 6 桁に丸める（td-main.ts の round(x, 6)。属性の分 attr は読んだまま）
     let j = m.to_json(|x| Json::Num(round_precision(x, 6)));
-    write_json(out, &j)?;
-    println!("{out} に書き出しました");
-    Ok(())
+    write_json(out, &j)
 }
 
 // ---- prune ----

@@ -159,6 +159,7 @@ profile --games 49
   `--impl ts` を付けて TypeScript 版で回す（Rust 版はその引数をエラーにする）。2026-11-14 までの行（`night/relearn-b.txt` 等）は、`--impl` が無ければ TypeScript 版で回したもの。
   `--est` は TypeScript 版の時間のままの行が多い（多めに見積もる分には困らない）。PC の Rust 版の実測は、段階 4 の R1（新しいプールの自己対戦 6 万試合、入力あり）で
   学習 14 分・間引き 24 秒（`night/pool-r2.txt` の `--est` はこれから）
+  Rust 版の `td train` の `--epochOut @/m-e{e}.json`（`--epochs` を書く）は、エポックごとの重みも作るファイルに数える（後のジョブが `@/m-e2.json` 等を読める。2026-11-25、R7 の候補の `night/r7-1.txt`）
 - **pick**: `pick --compare <前の compare の台帳の名前> --pass <ファイル> --fail <ファイル> --out <ファイル>`。その compare の済んだ区切りをまとめ、
   A の勝率 − 50% − 2 SE が 0 より大きければ `--pass`、そうでなければ `--fail` のファイルを `--out` に写す（回す前に決めた線で、後のジョブの設定を選ぶ）。
   結果は回のフォルダの `pick-<番号>.json` と、`status`・まとめの表
