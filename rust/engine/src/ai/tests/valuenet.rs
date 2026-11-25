@@ -267,6 +267,38 @@ fn stacked_layers() {
     );
 }
 
+#[test]
+fn hidden_layers_match_eval() {
+    // 隠れ層の値（kifu values --hidden 1）: 層ごとに 1 つで、最後の層と出力の重みから eval と同じ値になる。eval は変えない
+    let one = model(4, |i| ((i * 31) % 11) as f64 / 10.0 - 0.5, 0.7);
+    let two = RawValueNet {
+        layers: vec![RawValueNetLayer {
+            w: (0..12).map(|k| (k % 5) as f64 / 4.0 - 0.3).collect(),
+            b: vec![0.05, 0.0, -0.1],
+        }],
+        w2: vec![0.4, -0.6, 0.9],
+        ..one.clone()
+    };
+    let net = ValueNet::new(two.clone()).expect("モデル");
+    let s = mid_game();
+    for p in 0..2 {
+        for phase in [ValuePhase::End, ValuePhase::After] {
+            let before = net.eval(&s, p, phase);
+            let layers = net.hidden_layers(&s, p, phase);
+            assert_eq!(layers.iter().map(|l| l.len()).collect::<Vec<_>>(), [4, 3]);
+            assert!(layers.iter().flatten().all(|&x| x >= 0.0));
+            let z: f64 = two.b2
+                + layers[1]
+                    .iter()
+                    .zip(&two.w2)
+                    .map(|(h, w)| h * w)
+                    .sum::<f64>();
+            assert!(((two.c + z) / two.a - before).abs() < 1e-12);
+            assert_eq!(net.eval(&s, p, phase), before);
+        }
+    }
+}
+
 /// 狂気の創造者・リーアムが人形に付与する能力（ラストワード: 相手のリーダーに 2 ダメージ）の JSON。
 /// TypeScript 側の boardGrantKeys（tests/ai.test.ts）も同じ文字列を作る
 const DOLL_LAST_WORDS: &str = r#"{"trigger":{"on":"lastWords"},"effects":[{"op":"damage","target":{"kind":"leader","side":"opponent"},"amount":2}]}"#;
