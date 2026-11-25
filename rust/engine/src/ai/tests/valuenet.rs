@@ -1116,3 +1116,111 @@ fn survival_win_form_adds_the_win_probability() {
     };
     assert!(ValueNet::new(bad).is_err());
 }
+
+/// 局面ごとの補正・3 つの出力の値（ビット）
+fn eval_bits(net: &ValueNet, states: &[GameState]) -> Vec<u64> {
+    let mut out = Vec::new();
+    for s in states {
+        for p in 0..2 {
+            for phase in [ValuePhase::End, ValuePhase::After, ValuePhase::Imagined] {
+                out.push(net.eval(s, p, phase).to_bits());
+                for x in net.head_probs(s, p, phase) {
+                    out.push(x.map_or(u64::MAX, f64::to_bits));
+                }
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn hidden_memo_keeps_values_bitwise() {
+    // 最後の隠れ層の使い回し（valuenet.rs の MEMO）: 使い回しても使い回さなくても、補正と出力はビットまで同じ。
+    // 2 回目の採点は当たる。止めるのは全部のスレッドだが、ほかのテストの値も変わらない
+    use crate::ai::valuenet::{hidden_memo_counts, set_hidden_memo};
+    let path = format!("{}/yardstick/pool-r6-net.json", env!("CARGO_MANIFEST_DIR"));
+    let pool = ValueNet::load(&path).expect("R6 の補正");
+    let with_heads = ValueNet::new(RawValueNet {
+        lethal_head: Some(RawLethalHead {
+            w: vec![0.2, -0.1, 0.3, 0.05],
+            b: -0.4,
+        }),
+        win_form: Some("survival".into()),
+        ..model(4, |i| ((i * 13) % 17) as f64 / 20.0 - 0.4, 0.6)
+    })
+    .expect("モデル");
+    let states = played_states();
+    let pool_states: Vec<GameState> = {
+        let decks = [
+            super::pool::pool_deck(include_str!(
+                "../../../../../data/pools/azvaldt/decks/ps26-27-08b/VL_ナイトメア.txt"
+            )),
+            super::pool::pool_deck(include_str!(
+                "../../../../../data/pools/azvaldt/decks/ps26-27-08b/CR_ウィッチ.txt"
+            )),
+        ];
+        let mut out = Vec::new();
+        for (k, seed) in [5u32, 17, 29].into_iter().enumerate() {
+            let mut s = new_game(&decks[k % 2], &decks[(k + 1) % 2], seed);
+            let mut agent = greedy_base();
+            let mut rng = Rng::new(seed);
+            for step in 0..300 {
+                if s.phase == Phase::Ended {
+                    break;
+                }
+                if step % 7 == 3 {
+                    out.push(s.clone());
+                }
+                let a = agent.choose_action(&s, &legal_actions(&s), &mut rng);
+                s = apply(&s, &a);
+            }
+        }
+        out
+    };
+    let nets: [(&ValueNet, &[GameState]); 4] = [
+        (&full_model(6), &states),
+        (&with_heads, &states),
+        (default_value_net(), &states),
+        (&pool, &pool_states),
+    ];
+    set_hidden_memo(false);
+    let plain: Vec<Vec<u64>> = nets.iter().map(|(n, s)| eval_bits(n, s)).collect();
+    set_hidden_memo(true);
+    let (f0, h0) = hidden_memo_counts();
+    let first: Vec<Vec<u64>> = nets.iter().map(|(n, s)| eval_bits(n, s)).collect();
+    let (f1, h1) = hidden_memo_counts();
+    let again: Vec<Vec<u64>> = nets.iter().map(|(n, s)| eval_bits(n, s)).collect();
+    let (f2, h2) = hidden_memo_counts();
+    assert_eq!(first, plain);
+    assert_eq!(again, plain);
+    assert!(f1 > f0 && f2 - f1 == f1 - f0);
+    // 2 回目はほとんど当たる（表は 1 つの位置に 1 つなので、位置がぶつかった分は外れる）
+    assert!(
+        (h2 - h1) * 4 > (f2 - f1) * 3,
+        "2 回目の当たり {} / {}（1 回目 {}）",
+        h2 - h1,
+        f2 - f1,
+        h1 - h0
+    );
+}
+
+#[test]
+fn hidden_memo_tells_nets_apart() {
+    // 補正を作っては捨てると、同じ番地に別の補正が来る。使い回しは補正の番号で見分けるので、前の補正の値を返さない
+    use crate::ai::valuenet::set_hidden_memo;
+    let s = mid_game();
+    let fill = |k: usize| move |i: usize| (((i + k) * 31) % 19) as f64 / 25.0 - 0.3;
+    let mut seen = Vec::new();
+    for k in 0..12 {
+        let net = ValueNet::new(model(4, fill(k % 3), 0.5 + k as f64 / 10.0)).expect("モデル");
+        let v = net.eval(&s, 0, ValuePhase::End).to_bits();
+        set_hidden_memo(false);
+        let plain = net.eval(&s, 0, ValuePhase::End).to_bits();
+        set_hidden_memo(true);
+        assert_eq!(v, plain, "{k} 番目の補正");
+        seen.push(v);
+    }
+    seen.sort_unstable();
+    seen.dedup();
+    assert_eq!(seen.len(), 12);
+}
