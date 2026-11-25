@@ -41,8 +41,7 @@
 ## 持ち帰り方（キュー）
 
 - キューが止まるときに、ログと一緒に棋譜も出口のフォルダ（`~/svwb-data/outbox/<回の名前>/`）にまとめる。要るときにユーザーに上げてもらい、
-  スレッドが `npm run queue -- ingest <ファイル…>` で `/mnt/project-files/data/kifu/<回の名前>/` に展開する（[queue.md](queue.md)「止まったときのまとめ」。
-  前の `npm run queue -- finish --pack` も残してある）
+  スレッドが `npm run queue -- ingest <ファイル…>` で `/mnt/project-files/data/kifu/<回の名前>/` に展開する（[queue.md](queue.md)「止まったときのまとめ」）
 - `npm run pack-run` は、フォルダの中の `kifu/` の下と、1 行目が `{"kind":"replay", …}` の `.jsonl` を棋譜として `data/kifu/<名前>/` に入れる。
   共有フォルダに展開すると `/mnt/project-files/data/kifu/<名前>/` に入る
 
