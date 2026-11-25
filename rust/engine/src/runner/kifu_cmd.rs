@@ -1282,7 +1282,7 @@ fn probe_cells(
     s: &crate::state::GameState,
     p: usize,
     after: bool,
-    hand_card: Option<crate::data::CardIdx>,
+    hand_cards: &[crate::data::CardIdx],
 ) -> Vec<(String, Json)> {
     use crate::data::{
         CardType, Kw, AMBUSH, AURA, BANE, BARRIER, DRAIN, INTIMIDATE, RUSH, STORM, WARD,
@@ -1599,11 +1599,23 @@ fn probe_cells(
             .count() as f64,
     );
     put("myPpLeft".into(), if after { 0.0 } else { me.pp as f64 });
-    // --hand-card で選んだカードの、自分の手札の枚数（調べもの用）
-    if let Some(c) = hand_card {
+    // --hand-card で選んだカード（いくつでも）の、自分の手札の枚数と、両方の側の手札のそのカードに付いた攻撃力の強化の和（調べもの用）
+    if !hand_cards.is_empty() {
+        let picked = |x: usize| {
+            s.players[x]
+                .hand
+                .iter()
+                .filter(|h| hand_cards.contains(&h.card))
+                .collect::<Vec<_>>()
+        };
+        put("myHandCard".into(), picked(p).len() as f64);
         put(
-            "myHandCard".into(),
-            me.hand.iter().filter(|h| h.card == c).count() as f64,
+            "myHandCardAtkMod".into(),
+            picked(p).iter().map(|h| h.attack_mod as f64).sum(),
+        );
+        put(
+            "oppHandCardAtkMod".into(),
+            picked(q).iter().map(|h| h.attack_mod as f64).sum(),
         );
     }
     put("myTurn".into(), me.turn_count as f64);
@@ -1710,7 +1722,7 @@ fn probe_value_cells(
     phase: crate::ai::valuenet::ValuePhase,
     probe: bool,
     hidden: bool,
-    hand_card: Option<crate::data::CardIdx>,
+    hand_cards: &[crate::data::CardIdx],
 ) -> Vec<(String, Json)> {
     let mut row = Vec::new();
     let ended = at.phase == crate::state::Phase::Ended;
@@ -1728,7 +1740,7 @@ fn probe_value_cells(
                 at,
                 p,
                 phase != crate::ai::valuenet::ValuePhase::End,
-                hand_card,
+                hand_cards,
             )),
         ));
     }
@@ -2029,7 +2041,7 @@ fn value_rows(
                     crate::ai::valuenet::ValuePhase::End,
                     true,
                     o.hidden,
-                    o.hand_card,
+                    &o.hand_cards,
                 )
             }));
         }
@@ -2080,7 +2092,7 @@ fn value_rows(
                 crate::ai::valuenet::ValuePhase::After,
                 true,
                 o.hidden,
-                o.hand_card,
+                &o.hand_cards,
             ));
             out.push_str(&Json::Obj(row).stringify());
             out.push('\n');
@@ -2097,8 +2109,8 @@ struct ProbeOpts {
     after: bool,
     /// 隠れ層の値も書く
     hidden: bool,
-    /// --hand-card: 手札の枚数を数えるカード（probe の myHandCard）
-    hand_card: Option<crate::data::CardIdx>,
+    /// --hand-card（いくつでも）: 手札の枚数と強化を数えるカード（probe の myHandCard・myHandCardAtkMod・oppHandCardAtkMod）
+    hand_cards: Vec<crate::data::CardIdx>,
 }
 
 fn values(argv: &[String]) -> Result<(), String> {
@@ -2171,21 +2183,35 @@ fn values(argv: &[String]) -> Result<(), String> {
     };
     // 補正の読みの測り（valueWin と probe。--after 1 なら自分のターンの最初の行も、--hidden 1 なら隠れ層の値も）
     let (after, hidden) = (on("after")?, on("hidden")?);
-    let hand_card = match a.one("hand-card") {
-        None => None,
-        Some(name) => Some(crate::runner::deck_compare::find_card(&name)?),
-    };
+    // 名前か ID。トークンも選べる（ゴースト等）
+    let hand_cards = a
+        .all("hand-card")
+        .iter()
+        .map(|name| {
+            let d = data();
+            d.card_by_id
+                .get(name.as_str())
+                .copied()
+                .or_else(|| {
+                    d.cards
+                        .iter()
+                        .position(|c| c.name == *name)
+                        .map(|i| i as CardIdx)
+                })
+                .ok_or_else(|| format!("カードがありません: {name}"))
+        })
+        .collect::<Result<Vec<CardIdx>, String>>()?;
     let probe = if on("probe")? {
         match Json::parse(&text)?.get("valueNet") {
             Some(Json::Str(path)) => Some(ProbeOpts {
                 net: crate::ai::valuenet::ValueNet::load(path)?,
                 after,
                 hidden,
-                hand_card,
+                hand_cards,
             }),
             _ => return Err("--probe 1 には --opts の valueNet（採点する補正）が要ります".into()),
         }
-    } else if after || hidden || hand_card.is_some() {
+    } else if after || hidden || !hand_cards.is_empty() {
         return Err("--after 1・--hidden 1・--hand-card には --probe 1 が要ります".into());
     } else {
         None
@@ -2440,7 +2466,7 @@ mod tests {
                 .unwrap(),
                 after: true,
                 hidden: true,
-                hand_card: None,
+                hand_cards: Vec::new(),
             });
             let text = value_rows(
                 &v,
@@ -2557,7 +2583,7 @@ mod tests {
             let Some(i) = s.players[p].board.iter().position(|c| c.is_follower) else {
                 continue;
             };
-            let before = probe_cells(&s, p, false, None);
+            let before = probe_cells(&s, p, false, &[]);
             let mut t = s.clone();
             {
                 let c = &mut t.players[p].board.make_mut()[i];
@@ -2569,7 +2595,7 @@ mod tests {
                 let k = if native.has(STORM) { RUSH } else { STORM };
                 c.keywords = c.keywords.with(k);
             }
-            let after = probe_cells(&t, p, false, None);
+            let after = probe_cells(&t, p, false, &[]);
             let was = |k: &str| get(&before, k);
             assert_eq!(
                 get(&after, "mySuperEvo"),
@@ -2667,7 +2693,12 @@ mod tests {
             .take(2)
             .collect();
         s.players[q].entered_kinds = Some(artifacts.iter().copied().chain([follower]).collect());
-        let cells = probe_cells(&s, p, false, None);
+        let cells = probe_cells(&s, p, false, &[]);
+        assert!(cells.iter().all(|(k, _)| k != "myHandCard"));
+        let picked = probe_cells(&s, p, false, &[follower]);
+        assert_eq!(get(&picked, "myHandCard"), 2.0);
+        assert_eq!(get(&picked, "myHandCardAtkMod"), 3.0);
+        assert_eq!(get(&picked, "oppHandCardAtkMod"), 0.0);
         assert_eq!(get(&cells, "myHandXMax"), 12.0);
         assert_eq!(get(&cells, "myHandXPairs"), 1.0);
         assert_eq!(get(&cells, "myHandXSpread"), 9.0);
