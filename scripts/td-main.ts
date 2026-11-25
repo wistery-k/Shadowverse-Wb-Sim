@@ -16,8 +16,10 @@
 //     範囲の語彙を数える（ベースの語彙に無いカード・トークン・姿・クレストの数）。--out なら語彙を JSON の配列で書く
 //     （svwb beam-gap --vocab に渡すと、見込みの学習のデータをその語彙で書く）
 //   npm run td -- widen --model m.json --hidden 256,32 --out w0.json [--seed 1]
-//     隠れ層 1 つのモデルを、補正を変えずに大きい形に移す。最初の層の先頭に元の層を写し、足した部分は乱数で始めて、
-//     2 つ目の層は元の層の値をそのまま通す（足した部分からの重みは 0）。docs/ai-notes.md「今のモデルを広げて学習を続ける」
+//     モデルを、補正を変えずに大きい形に移す。最初の層の先頭に元の層を写し、足した部分は乱数で始める。元の後ろの層は元の重みを写し、
+//     元の層より後ろに足す層は元の値をそのまま通す（足した部分からの重みは 0）。docs/ai-notes.md「今のモデルを広げて学習を続ける」。
+//     元の層はそれぞれ元の大きさ以上、足す層は元の最後の層の大きさ以上（例: 256 のモデルを 256,32 に、256,32 のモデルを 512,64 や 512,64,64 に。
+//     2026-11-24 から隠れ層 2 つ以上のモデルも）。出力（lethalHead・winHead・readHead）の重みも、足した値の分を 0 で足す
 //   rust/target/release/svwb td selfplay --model m0.json --games 2000 [--start 0] [--eps 0.1] --out d0.jsonl
 //     自己対戦は Rust 版で行う（rust/engine/src/runner/td.rs。cd rust && cargo build --release で作る）。
 //     両方の席がモデルの評価で打つ探索 AI の自己対戦（7 デッキの全 49 組を順に回す）。
@@ -426,13 +428,21 @@ function vocab(args: Args): number {
 
 function widen(args: Args): number {
   const model = loadValueNet(need(args, "model"));
-  compileValueNet(model);
-  if (model.layers?.length) throw new Error("widen は隠れ層 1 つのモデルだけ");
+  // 出力（lethalHead 等）を持つモデルも、重みを並べ直すだけなので通す
+  compileValueNet(model, { keepHead: true });
   const out = need(args, "out");
+  const old = layerSizes(model);
   const sizes = need(args, "hidden").split(",").map(Number);
   const H0 = model.hidden;
-  if (sizes.length !== 2 || !sizes.every((k) => Number.isInteger(k) && k >= H0)) throw new Error(`--hidden は元の隠れ層（${H0}）以上の 2 つの数: ${args.get("hidden")}`);
-  const [H1, H2] = sizes as [number, number];
+  if (sizes.length < Math.max(2, old.length) || !sizes.every((k) => Number.isInteger(k) && k > 0)) {
+    throw new Error(`--hidden は ${Math.max(2, old.length)} つ以上の正の整数（元の層 ${old.join(",")}）: ${args.get("hidden")}`);
+  }
+  // 元の層は元の大きさ以上。足す層（元の層より後ろ）は、元の最後の層の大きさ以上（元の値をそのまま通すため）
+  for (let k = 0; k < sizes.length; k++) {
+    const need_ = k < old.length ? old[k]! : old[old.length - 1]!;
+    if (sizes[k]! < need_) throw new Error(`--hidden の ${k + 1} つ目（${sizes[k]}）は ${need_} 以上（元の層 ${old.join(",")}）`);
+  }
+  const H1 = sizes[0]!;
   const holder = { rng: numArg(args, "seed", 1) >>> 0 };
   const nIn = inputSize(model);
   // 最初の層: 各入力の行の先頭 H0 個は元の重み、足した H1 - H0 個は init と同じ乱数
@@ -442,19 +452,45 @@ function widen(args: Args): number {
     for (let j = H0; j < H1; j++) w1.push(round(gaussian(holder) * 0.1, 6));
   }
   const b1 = [...model.b1, ...Array.from({ length: H1 - H0 }, () => 0.1)];
-  // 2 つ目の層: 元の層の値 j は自分の j 番目にそのまま通す（ReLU を 2 回かけても同じ）。足した値からの重みは 0。
-  // 足した H2 - H0 個は元の層の値から He の初期化で受け、出力への重みは 0
-  const w: number[] = [];
-  for (let i = 0; i < H1; i++) {
-    for (let j = 0; j < H2; j++) {
-      if (j < H0) w.push(i === j ? 1 : 0);
-      else w.push(i < H0 ? round(gaussian(holder) * Math.sqrt(2 / H0), 6) : 0);
+  // 後ろの層: 元の値を運ぶのは各層の先頭 carry 個。足した値（先頭 carry 個より後ろ）からの重みは 0。
+  // 元の層は元の重みをそのまま、足す層は元の値 j を自分の j 番目にそのまま通す（ReLU を 2 回かけても同じ）。
+  // どちらも足した出力の値は、元の値から He の初期化で受け、出力への重みは 0
+  const layers: { w: number[]; b: number[] }[] = [];
+  let carry = H0;
+  let prev = H1;
+  for (let k = 1; k < sizes.length; k++) {
+    const B = sizes[k]!;
+    const w: number[] = [];
+    if (k < old.length) {
+      const ol = model.layers![k - 1]!;
+      const bo = old[k]!;
+      for (let i = 0; i < prev; i++) {
+        for (let j = 0; j < B; j++) {
+          if (j < bo) w.push(i < carry ? ol.w[i * bo + j]! : 0);
+          else w.push(i < carry ? round(gaussian(holder) * Math.sqrt(2 / carry), 6) : 0);
+        }
+      }
+      layers.push({ w, b: [...ol.b, ...Array.from({ length: B - bo }, () => 0.1)] });
+      carry = bo;
+    } else {
+      for (let i = 0; i < prev; i++) {
+        for (let j = 0; j < B; j++) {
+          if (j < carry) w.push(i === j ? 1 : 0);
+          else w.push(i < carry ? round(gaussian(holder) * Math.sqrt(2 / carry), 6) : 0);
+        }
+      }
+      layers.push({ w, b: [...Array.from({ length: carry }, () => 0), ...Array.from({ length: B - carry }, () => 0.1)] });
     }
+    prev = B;
   }
-  const b = [...Array.from({ length: H0 }, () => 0), ...Array.from({ length: H2 - H0 }, () => 0.1)];
-  const w2 = [...model.w2, ...Array.from({ length: H2 - H0 }, () => 0)];
-  writeFileSync(out, JSON.stringify({ ...withoutAttr(model), hidden: H1, w1, b1, layers: [{ w, b }], w2 }));
-  console.log(`${out}: 隠れ層 ${H0} → ${H1}・${H2}（補正は元のモデルと同じ）`);
+  const pad = (w: number[]): number[] => [...w, ...Array.from({ length: prev - w.length }, () => 0)];
+  const heads: Partial<Record<"lethalHead" | "winHead" | "readHead", { w: number[]; b: number }>> = {};
+  for (const h of ["lethalHead", "winHead", "readHead"] as const) {
+    const x = model[h];
+    if (x) heads[h] = { w: pad(x.w), b: x.b };
+  }
+  writeFileSync(out, JSON.stringify({ ...withoutAttr(model), hidden: H1, w1, b1, layers, w2: pad(model.w2), ...heads }));
+  console.log(`${out}: 隠れ層 ${old.join("・")} → ${sizes.join("・")}（補正は元のモデルと同じ）`);
   return 0;
 }
 

@@ -1,45 +1,34 @@
 // キュー: ジョブを並べたファイルを上から順に、5〜10 分の区切りに分けて回す（npm run queue）。運用は docs/queue.md。
 //
-//   npm run queue -- plan <ジョブのファイル> [--threads N] [--machine 名前] [--chunk-min 7.5] [--tz Asia/Tokyo] [--at 23:00] [--name 名前] [--until 07:00] [--legacy]
-//   キュー（回す係は pueue。docs/queue.md「キュー（pueue）」。2026-11-23 から）:
+//   npm run queue -- plan <ジョブのファイル> [--threads N] [--machine 名前] [--chunk-min 7.5] [--tz Asia/Tokyo] [--at 23:00] [--name 名前] [--until 07:00]
+//   回す係は pueue（docs/queue.md「キュー（pueue）」。2026-11-23 から）。コンテナの中で（ホストからは docker/remote-control/queue.sh）:
 //   npm run queue -- add <券|回の名前>
 //   npm run queue -- start [--until 07:00|+2h]
 //   npm run queue -- pause [--wait]
 //   npm run queue -- status [名前]
 //   npm run queue -- remove <回の名前>
-//   （pueue の task が流すもの: enqueue・prepare・chunk・wrap）
-//   前のやり方（PC でキューを確かめるまで残す）:
-//   npm run queue -- go <券>
-//   npm run queue -- start <ジョブのファイル> --yes [--name 名前] [--until 07:00] [--threads N] [--chunk-min 7.5] [--allow-dirty]
-//   npm run queue -- stop [名前] [--now]
-//   npm run queue -- resume [名前] --yes [--until 07:00] [--threads N]
-//   npm run queue -- finish [名前] [--commit] [--pack] [--ledger 台帳]
-//   どちらでも:
 //   npm run queue -- wrap [名前|--pending]
-//   npm run queue -- ingest <回の名前|ファイル…> [--ledger 台帳] [--to /mnt/project-files]
 //   npm run queue -- list
+//   スレッドで:
+//   npm run queue -- ingest <回の名前|ファイル…> [--ledger 台帳] [--to /mnt/project-files]
+//   （pueue の task が流すもの: enqueue・prepare・chunk・wrap）
 //
 // - ジョブのファイルは 1 行 1 ジョブで、svwb のコマンドと同じ形（compare・yardstick・profile・misses・survey）。# から行の終わりまでは書き添え
 // - 学び直しの流れ（docs/queue.md「学び直しの流れ」）: td selfplay・td branch・beam-gap（--chunk 試合ずつ {k} を入れたファイルに書く）、
 //   td・potential（TypeScript の学習。--out のファイルを 1 つ作る）、pick（前の compare の結果で、決めておいた線を越えたかでファイルを選ぶ）。
 //   @/ は回のフォルダ、{1..20} は 1,2,…,20 に開く。作ったファイルがあれば済んだものとし、前のジョブの作るファイルが無ければ失敗にする。
 //   @run:<回の名前>/<ファイル> は、同じ根の下の前の回のフォルダのファイル（前の回で作ったモデルを読む。PC の中の道をジョブのファイルに書かない）。
-//   start のときにあるかを確かめ、無ければ始めない
+//   組み立てのときにあるかを確かめ、無ければ回さない
 // - 回は ~/svwb-data/night/<名前>/ に置く（環境変数 SVWB_NIGHT_DIR か --root で替えられる）。区切りが済むたびに印を書き、
 //   やり直したときは済んだ区切りを飛ばす。電源が切れても、失うのは回していた区切りだけ
-// - キュー: plan が計画の表と積む券（svwb-queue-1。ブランチ・コミット・ジョブのファイル・計画の指紋の 1 行。止める時刻は持たない）を出す。
-//   ユーザーがホストで docker/remote-control/queue.sh add <券> を流すと（昼でもよい）、券のコミットを回のフォルダの src/ に出し、そこの enqueue が
+// - plan が計画の表と積む券（svwb-queue-1。ブランチ・コミット・ジョブのファイル・計画の指紋の 1 行。止める時刻は持たない）を出す。
+//   ユーザーがホストで docker/remote-control/queue.sh add <券> を流すと（いつでもよい）、券のコミットを回のフォルダの src/ に出し、そこの enqueue が
 //   組み立て・区切りごと・まとめの task を pueue の組 svwb（同時に 1 つ）に積む（scripts/night-pueue.ts）。積んだだけでは回らない。
 //   回すのはユーザーが決めたときの start（--until を付ければ、その時刻に組を一時停止する task を組 svwb-ctl に置く）、止めるのは pause（回している区切りは凍らせる）。
 //   どこまで済んだかは回のフォルダの印（done/）で決め、pueue は流すだけ（pueue の状態が消えても、add <回の名前> で続きから積み直せる）
-// - 前のやり方: plan --legacy の券（svwb-night-1。止める時刻を持つ）を queue.sh go <券> で流すと、go が券のコミットを src/ に出して、そこの start を流す。
-//   start・resume は、組み立てた svwb を回のフォルダに写し、セッションから切り離した worker を立てて、すぐに戻る。
-//   止める時刻（--until）までに次の区切りが終わらない見込みなら、区切りの切れ目で止まる。stop で手で止める（--now ならすぐ）。
-//   どちらも、PC やコンテナの起動で勝手には始めない。2 つのやり方の回は同時には回さない（互いに断る）
-// - 区切りの結果は回のフォルダの台帳（ledger.jsonl）にだけ書く。止まるとき（全部済んだ・止める時刻・失敗・stop。キューでは回の最後の task のまとめと、
-//   queue-push.sh の wrap --pending）に worker が自分で、
+// - 区切りの結果は回のフォルダの台帳（ledger.jsonl）にだけ書く。回の最後の task（まとめ）と queue-push.sh の wrap --pending が、
 //   ジョブごとに 1 行にまとめた行をブランチ night/<回の名前> にコミットし（作業ツリーには触らない）、棋譜などを出口（~/svwb-data/outbox/<回の名前>/）にまとめる。
-//   ユーザーはホストで push だけ（docker/remote-control/queue-push.sh）。スレッドは ingest <回の名前> で台帳に足す（finish は残してある）
+//   ユーザーはホストで push だけ（docker/remote-control/queue-push.sh）。スレッドは ingest <回の名前> で台帳に足す
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -68,7 +57,6 @@ import {
 } from "node:fs";
 import { availableParallelism, homedir, hostname, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { createInterface } from "node:readline/promises";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createGzip } from "node:zlib";
@@ -80,8 +68,6 @@ import { CTL_GROUP, QUEUE_GROUP, STOP_LABEL, addTask, ensureGroups, isLive, labe
 /** リポジトリの根 */
 export const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SELF = fileURLToPath(import.meta.url);
-/** 止める時刻を過ぎても終わらない区切りを、ここまで待ってから止める（秒） */
-const HARD_GRACE = 15 * 60;
 
 // ---------------------------------------------------------------- ジョブのファイル
 
@@ -302,7 +288,7 @@ export function parseJob(line: string, index: number): Job {
       if (rest[0] === "run") rest.splice(0, 1);
       refuse(["--out"], "キューが回のフォルダに書く");
       const label = take("--label");
-      if (!label) throw new Error("--label で台帳の名前を付けます（朝の finish が survey report でこの名前の行を 1 つ足す）");
+      if (!label) throw new Error("--label で台帳の名前を付けます（まとめが survey report でこの名前の行を 1 つ足す）");
       const gamesText = take("--games");
       if (gamesText === null) throw new Error("survey は --games a-b で試合番号の範囲を渡します");
       const startText = take("--start");
@@ -463,7 +449,7 @@ function checkRunRef(ref: string): void {
   }
 }
 
-/** 前の回のファイル（@run:）が根の下にあるかを確かめる（start・resume の前） */
+/** 前の回のファイル（@run:）が根の下にあるかを確かめる（組み立てのとき） */
 export function checkRunRefs(jobs: Job[], root: string): void {
   for (const job of jobs) {
     for (const ref of jobRunRefs(job)) {
@@ -821,7 +807,7 @@ export interface Plan {
   /** 回のコミットの全部の sha（台帳の行をコミットするブランチの元。前の回には無い） */
   commitFull?: string;
   branch: string;
-  /** 台帳の行をコミットする git のリポジトリ（go で回すときは、回のフォルダに出したソースではなく /workspace。無ければ repo） */
+  /** 台帳の行をコミットする git のリポジトリ（券で積んだ回は、回のフォルダに出したソースではなく /workspace。無ければ repo） */
   gitDir?: string;
   /** 回す svwb（回のフォルダに写したもの） */
   bin: string;
@@ -836,15 +822,15 @@ export interface Plan {
   nodeBin?: string;
 }
 
-/** 1 回の start・resume の設定（キューの回は、積んだときの設定） */
+/** 回の設定（積んだときのもの）。前のやり方（2026-11-25 に外した）で回した回の session.json には、止める時刻（until）もある */
 export interface Session {
-  /** 始めた時刻と止める時刻（ミリ秒）。キューの回の止める時刻は 0（回のものではなく、キューの start で決める） */
+  /** 回を作った時刻（ミリ秒） */
   started: number;
-  until: number;
   tz: string;
   threads: number;
   machine: string;
-  /** 止まるときに自分でまとめる版（2026-11-19 から）で start・resume した回の印。まとめが済んでいない回を拾う（needsWrap）のは、これがある回だけ */
+  /** 止まったときにまとめる版（2026-11-19 から）で作った回の印（キューの回にはいつもある）。まとめが済んでいない回を拾う（needsWrap）のは、これがある回だけ
+   * （それより前に回した回のフォルダを、queue-push.sh の wrap --pending がまとめ直して上げないように） */
   wraps?: 1;
   /** キュー（pueue）の回の印 */
   queue?: 1;
@@ -991,27 +977,6 @@ function chunkRowOf(plan: Plan, dir: string, c: Chunk): RunRow | MissesRow | und
   return kind === "misses" ? rowOf(chunkMisses(dir), plan, dir, c) : rowOf(chunkRows(dir), plan, dir, c);
 }
 
-/** worker が動いていれば、その pid */
-export function workerPid(dir: string): number | null {
-  const f = join(dir, "worker.pid");
-  if (!existsSync(f)) return null;
-  const pid = Number(readFileSync(f, "utf8").trim());
-  if (!Number.isInteger(pid) || pid <= 0) return null;
-  try {
-    // pid が使い回されていないか（電源を入れ直した後など）。切り離した worker は引数に回のフォルダを持つ。
-    // start・resume --foreground は、その start・resume のプロセスが worker（引数に回のフォルダは無い）
-    const cmd = readFileSync(`/proc/${pid}/cmdline`, "utf8");
-    return cmd.includes("night-main") && (cmd.includes(dir) || cmd.split("\0").includes("--foreground")) ? pid : null;
-  } catch {
-    try {
-      process.kill(pid, 0);
-      return existsSync("/proc") ? null : pid;
-    } catch {
-      return null;
-    }
-  }
-}
-
 /** 根の下の回（作った順） */
 export function listRuns(root: string): string[] {
   if (!existsSync(root)) return [];
@@ -1021,13 +986,14 @@ export function listRuns(root: string): string[] {
     .sort((x, y) => readPlan(x).created.localeCompare(readPlan(y).created));
 }
 
-function findRun(root: string, name: string | undefined, pick: (dir: string) => boolean): string {
+/** 名前の回のフォルダ（名前を省くと最後に作った回） */
+function findRun(root: string, name: string | undefined): string {
   if (name !== undefined) {
     const d = join(root, name);
     if (!existsSync(join(d, "plan.json"))) throw new Error(`回がありません: ${d}`);
     return d;
   }
-  const all = listRuns(root).filter(pick);
+  const all = listRuns(root);
   const last = all[all.length - 1];
   if (last === undefined) throw new Error(`${root} に当てはまる回がありません`);
   return last;
@@ -1115,7 +1081,7 @@ export function planText(
       ? ""
       : cut === null
         ? "止める時刻までに全部終わる見込み。\n"
-        : `止める時刻までに終わらない見込み: ${cut} の前で止まる（残りは次の夜に続きから）。\n`;
+        : `止める時刻までに終わらない見込み: ${cut} の途中で一時停止する（次の start で続きから）。\n`;
   return `${head}\n${warn}\n${markdownTable(["#", "ジョブ", "台帳の名前", "試合", "区切り", "1 試合", "見込み", "終わる時刻", "見込みの出どころ"], rows)}`;
 }
 
@@ -1192,13 +1158,12 @@ function contiguous(rows: RunRow[]): RunRow[][] {
 const pct = (x: number | null) => (x === null ? "?" : `${(x * 100).toFixed(2)}%`);
 const pts = (x: number | null) => (x === null ? "?" : (x * 100).toFixed(2));
 
-/** 回の今の様子（表）。final なら worker が動いていても止まったものとして書く（止まったときのまとめに書く） */
+/** 回の今の様子（表）。final なら、まとめの結果の行を書かない（止まったときのまとめに書く） */
 export function statusText(dir: string, o: { final?: boolean } = {}): string {
   const plan = readPlan(dir);
   const session = existsSync(join(dir, "session.json")) ? readSession(dir) : null;
   const tz = session?.tz ?? "Asia/Tokyo";
   const st = readStatus(dir);
-  const pid = o.final === true ? null : workerPid(dir);
   const done = markers(dir);
   const rows = chunkRows(dir);
   const missesRows = chunkMisses(dir);
@@ -1207,17 +1172,9 @@ export function statusText(dir: string, o: { final?: boolean } = {}): string {
   if (plan.queue === 1) {
     const ps = pueueOrNull();
     state = queueRunState(plan, ps === null ? null : runTasks(ps, plan.name), done, tz);
-  } else if (pid !== null && st !== null && st.state !== "running") {
-    state = `${st.state === "done" ? "全部済んだ" : "止まった"}（${st.reason}、${fmtClock(st.at, tz)}）。結果をまとめている（pid ${pid}）`;
-  } else if (pid !== null) {
-    const cur = st?.current;
-    state = `動いている（pid ${pid}${cur ? `、区切り ${cur.id} を ${fmtClock(cur.since, tz)} から` : ""}）`;
-  } else if (st === null) {
-    state = "まだ始めていない";
-  } else if (st.state === "running") {
-    state = `止まっている（最後の記録 ${fmtClock(st.at, tz)}。電源が切れたか、途中で落ちた。resume で続きから）`;
   } else {
-    state = `${st.state === "done" ? "全部済んだ" : "止まった"}（${st.reason}、${fmtClock(st.at, tz)}）`;
+    // 前のやり方（券と go。2026-11-25 に外した）で回した回。続きは回せない
+    state = `前のやり方で回した回（${st === null ? "始めていない" : st.state === "done" ? `全部済んだ、${fmtClock(st.at, tz)}` : `最後の記録 ${fmtClock(st.at, tz)}`}）`;
   }
   const tableRows: string[][] = plan.jobs.map((job) => {
     const cs = plan.chunks.filter((c) => c.job === job.index);
@@ -1264,26 +1221,24 @@ export function statusText(dir: string, o: { final?: boolean } = {}): string {
   const head = [
     `キュー ${plan.name}（${dir}）`,
     `状態: ${state}`,
-    `コミット ${plan.commit}（${plan.branch}）、${
-      s ? `${s.machine}・${s.threads} スレッド、${s.until > 0 ? `止める時刻 ${fmtClock(s.until, tz)}（${tz}）` : "キュー（回す・止めるは queue.sh start・pause）"}` : ""
-    }`,
-    ...(o.final !== true && st?.branch !== undefined ? [`台帳の行: ${st.branch}（朝はホストで docker/remote-control/queue-push.sh）`] : []),
+    `コミット ${plan.commit}（${plan.branch}）、${s ? `${s.machine}・${s.threads} スレッド` : ""}${plan.queue === 1 ? "、キュー（回す・止めるは queue.sh start・pause）" : ""}`,
+    ...(o.final !== true && st?.branch !== undefined ? [`台帳の行: ${st.branch}（上げるのはホストで docker/remote-control/queue-push.sh）`] : []),
     ...(o.final !== true && st?.outbox !== undefined ? [`出口: ${st.outbox}`] : []),
-    ...(o.final !== true && pid === null && needsWrap(dir)
-      ? ["まとめ: まだ（電源が切れたか、まとめている途中で落ちた）。朝の docker/remote-control/queue-push.sh がまとめてから push する（手でなら npm run queue -- wrap）"]
+    ...(o.final !== true && needsWrap(dir)
+      ? ["まとめ: まだ（止まっているか、電源が切れたか、まとめている途中で落ちた）。docker/remote-control/queue-push.sh がまとめてから push する（手でなら npm run queue -- wrap）"]
       : []),
   ];
   return `${head.join("\n")}\n\n${markdownTable(["#", "ジョブ", "台帳の名前", "区切り", "試合", "かかった時間", "結果（A の勝率・正解率・局面・ファイル）", "メモ"], tableRows)}`;
 }
 
-/** 止まったときのまとめが済んでいない回か（止まるときにまとめる版で回した・worker がいない・済んだ区切りがある・status にまとめの結果が無い）。
- * 電源が切れた回と、まとめている途中で落ちた回。朝の queue-push.sh が wrap --pending でまとめる。
- * 前の版で回した回（session.json に wraps が無い）は拾わない（手で wrap <名前> を流したときだけまとめる） */
+/** 止まったときのまとめが済んでいない回か（止まったときにまとめる版で作った・済んだ区切りがある・status にまとめの結果が無い・区切りを回していない）。
+ * 一時停止した回・電源が切れた回と、まとめている途中で落ちた回。queue-push.sh が wrap --pending でまとめる。
+ * 2026-11-19 より前の版で回した回（session.json に wraps が無い）は拾わない（手で wrap <名前> を流したときだけまとめる） */
 export function needsWrap(dir: string): boolean {
   if (!existsSync(join(dir, "session.json")) || readSession(dir).wraps !== 1) return false;
   const st = readStatus(dir);
-  // キューの回は、区切りが回っている間はまとめない（一時停止して凍っている区切りは、まとめてよい）
-  return st !== null && (st.outbox === undefined || st.branch === undefined) && markers(dir).size > 0 && workerPid(dir) === null && !chunkRunning(dir);
+  // 区切りが回っている間はまとめない（一時停止して凍っている区切りは、まとめてよい）
+  return st !== null && (st.outbox === undefined || st.branch === undefined) && markers(dir).size > 0 && !chunkRunning(dir);
 }
 
 /** pick の結果（回のフォルダの pick-<番号>.json） */
@@ -1327,10 +1282,10 @@ export function runPick(plan: Plan, dir: string, job: Job): PickResult {
   return res;
 }
 
-// ---------------------------------------------------------------- worker
+// ---------------------------------------------------------------- 区切りを回す
 
-export interface WorkerControl {
-  /** すぐ止める（回している区切りを止める） */
+export interface ChunkControl {
+  /** すぐ止める（回している区切りを止める。pueue kill のとき） */
   stopNow: boolean;
   kill?: (() => void) | undefined;
 }
@@ -1410,7 +1365,7 @@ export async function gzipKifu(dir: string, before: Map<string, string> = new Ma
 }
 
 /** 区切りを 1 つ回す。終わりの状態（0 なら済んだ）と秒 */
-function runChunk(plan: Plan, session: Session, dir: string, c: Chunk, ctl: WorkerControl): Promise<{ code: number | null; seconds: number; why: string }> {
+function runChunk(plan: Plan, session: Session, dir: string, c: Chunk, ctl: ChunkControl): Promise<{ code: number | null; seconds: number; why: string }> {
   const job = plan.jobs[c.job - 1];
   if (!job) throw new Error(`ジョブ ${c.job} がありません`);
   const argv = jobArgv(job, c.first, c.count, dir);
@@ -1428,7 +1383,7 @@ function runChunk(plan: Plan, session: Session, dir: string, c: Chunk, ctl: Work
       return Promise.resolve({ code: null, seconds: (Date.now() - t0) / 1000, why: (e as Error).message });
     }
   }
-  // td・potential は、回のフォルダに写したビルド結果を回す（start が作る）。--impl rust の td train・prune は svwb td train・prune
+  // td・potential は、回のフォルダに写したビルド結果を回す（組み立てが作る）。--impl rust の td train・prune は svwb td train・prune
   const [cmd, args] =
     s.kind === "node" && s.impl === "ts"
       ? [process.execPath, [join(dir, "bin", "run-bundle.mjs"), join(dir, "bin", s.tool, `${s.tool}-main.mjs`), ...argv.slice(1)]]
@@ -1455,19 +1410,8 @@ function runChunk(plan: Plan, session: Session, dir: string, c: Chunk, ctl: Work
       why = "すぐ止めた";
       child.kill("SIGTERM");
     };
-    // 止める時刻を HARD_GRACE 過ぎても終わらなければ止める（朝に PC を使う人のため）。キューの回は止める時刻を持たない（キューを一時停止すると区切りごと凍る）
-    const hard =
-      session.until > 0
-        ? setTimeout(
-            () => {
-              why = `止める時刻を ${fmtDur(HARD_GRACE)} 過ぎた`;
-              child.kill("SIGTERM");
-            },
-            Math.max(0, session.until + HARD_GRACE * 1000 - Date.now()),
-          )
-        : undefined;
+    // 止める時刻はキューのもの（キューを一時停止すると、区切りは svwb ごと凍る）
     const finish = async (code: number | null) => {
-      clearTimeout(hard);
       ctl.kill = undefined;
       closeSync(out);
       if (code === 0) {
@@ -1530,7 +1474,7 @@ async function runAndMark(
   session: Session,
   dir: string,
   c: Chunk,
-  ctl: WorkerControl,
+  ctl: ChunkControl,
   expected: number,
 ): Promise<{ code: number | null; seconds: number; why: string }> {
   const tz = session.tz;
@@ -1571,64 +1515,6 @@ function recordFailure(plan: Plan, session: Session, dir: string, c: Chunk, r: {
   writeAtomic(join(dir, "failed.json"), JSON.stringify(failed));
 }
 
-/** 回のフォルダの計画を、済んでいない区切りから順に回す */
-export async function runWorker(dir: string, ctl: WorkerControl = { stopNow: false }): Promise<Status> {
-  const plan = readPlan(dir);
-  const session = readSession(dir);
-  const tz = session.tz;
-  const failedFile = join(dir, "failed.json");
-  const failed: Record<string, string> = {};
-  writeFileSync(join(dir, "worker.pid"), String(process.pid));
-  log(dir, tz, `始めた（pid ${process.pid}、${session.machine}・${session.threads} スレッド、止める時刻 ${fmtClock(session.until, tz)}）`);
-  const end = async (state: Status["state"], reason: string): Promise<Status> => {
-    writeStatus(dir, { state, reason, current: null });
-    log(dir, tz, `${state === "done" ? "終わった" : "止まった"}: ${reason}`);
-    writeAtomic(failedFile, JSON.stringify(failed));
-    // 朝に何も打たなくてよいよう、台帳の行をブランチにコミットし、棋譜などを出口にまとめる
-    let w: { outbox: string; branch: string };
-    try {
-      w = await wrapUp(dir, (t) => log(dir, tz, t));
-    } catch (e) {
-      const why = `まとめられなかった（${(e as Error).message}。npm run queue -- wrap でやり直す）`;
-      log(dir, tz, why);
-      w = { outbox: why, branch: why };
-    }
-    writeStatus(dir, { state, reason, current: null, ...w });
-    return { state, reason, at: Date.now(), current: null, ...w };
-  };
-  writeStatus(dir, { state: "running", reason: "", current: null });
-  for (const job of plan.jobs) {
-    const cs = plan.chunks.filter((c) => c.job === job.index);
-    for (const c of cs) {
-      const done = markers(dir);
-      if (done.has(c.id)) continue;
-      if (recoverChunk(plan, session, dir, c)) continue;
-      // 前のジョブが作るファイルが無ければ（失敗した・まだ済んでいない）、このジョブは回さない
-      const missing = missingInputs(job, dir);
-      if (missing.length > 0) {
-        failed[String(job.index)] = `入力がありません: ${missing.map((f) => basename(f)).join("・")}（前のジョブが失敗したか、済んでいない）`;
-        log(dir, tz, `ジョブ ${job.index} の入力がない（${missing.map((f) => basename(f)).join("・")}）ので飛ばす`);
-        writeAtomic(failedFile, JSON.stringify(failed));
-        break;
-      }
-      if (existsSync(join(dir, "STOP"))) return await end("stopped", "手で止めた（stop）");
-      if (ctl.stopNow) return await end("stopped", "すぐ止めた（stop --now）");
-      const expected = chunkSeconds(c, plan, measuredSpeed(plan, done, session.threads));
-      if (Date.now() + expected * 1000 > session.until) {
-        return await end("stopped", `止める時刻 ${fmtClock(session.until, tz)} までに区切り ${c.id}（見込み ${fmtDur(expected)}）が終わらない`);
-      }
-      const r = await runAndMark(plan, session, dir, c, ctl, expected);
-      if (r.code === 0) continue;
-      if (ctl.stopNow) return await end("stopped", `すぐ止めた（stop --now。区切り ${c.id} は回し直す）`);
-      if (r.why.startsWith("止める時刻")) return await end("stopped", `${r.why}ので区切り ${c.id} を止めた（回し直す）`);
-      recordFailure(plan, session, dir, c, r, failed);
-      break;
-    }
-  }
-  const allDone = plan.chunks.every((c) => markers(dir).has(c.id));
-  return await end(allDone ? "done" : "stopped", allDone ? "全部の区切りが済んだ" : "失敗したジョブがある（resume でやり直す）");
-}
-
 // ---------------------------------------------------------------- コマンド
 
 interface Args {
@@ -1636,7 +1522,7 @@ interface Args {
   opts: Map<string, string>;
 }
 
-const FLAGS = new Set(["--yes", "--allow-dirty", "--now", "--commit", "--pack", "--foreground", "--prepare-only", "--pending", "--legacy", "--wait"]);
+const FLAGS = new Set(["--pending", "--wait"]);
 
 export function parseArgs(argv: string[]): Args {
   const pos: string[] = [];
@@ -1698,14 +1584,9 @@ function repoLedger(): { runs: RunRow[]; misses: MissesRow[] } {
 
 function sessionOf(a: Args, machine: string): Session {
   const tz = a.opts.get("--tz") ?? "Asia/Tokyo";
-  const now = Date.now();
   const threadsText = a.opts.get("--threads");
   const threads = threadsText === undefined ? (SPEEDS[machine] && machine !== thisMachine() ? (SPEEDS[machine]?.threads ?? 1) : availableParallelism()) : intOf(threadsText, "--threads", 1);
-  return { started: now, until: parseUntil(a.opts.get("--until") ?? "07:00", now, tz), tz, threads, machine, wraps: 1 };
-}
-
-function activeRuns(root: string): string[] {
-  return listRuns(root).filter((d) => workerPid(d) !== null);
+  return { started: Date.now(), tz, threads, machine, wraps: 1 };
 }
 
 function run(cmd: string, args: string[]): void {
@@ -1787,7 +1668,7 @@ function validate(bin: string, jobs: Job[]): void {
   }
 }
 
-/** td・potential のジョブがあれば、そのスクリプトをビルドして回のフォルダに置く（夜の間にチェックアウトが替わっても、start のときのコードで回す）。
+/** td・potential のジョブがあれば、そのスクリプトをビルドして回のフォルダに置く（組み立てたときのコードで回す）。
  * nodeBin（試す用）があれば、ビルドせずにそこの <td|potential>/<td|potential>-main.mjs を写す */
 function prepareNodeTools(jobs: Job[], dir: string, nodeBin: string | undefined): void {
   const tools = [...new Set(jobs.flatMap((j) => (j.spec.kind === "node" && j.spec.impl === "ts" ? [j.spec.tool] : [])))];
@@ -1809,189 +1690,6 @@ function prepareNodeTools(jobs: Job[], dir: string, nodeBin: string | undefined)
     });
     if (r.status !== 0 || !existsSync(join(to, `${tool}-main.mjs`))) throw new Error(`${tool} のビルドが失敗しました`);
   }
-}
-
-/** worker を、このセッションから切り離して立てる（setsid。Remote Control のセッションが終わっても続く） */
-function launch(dir: string): number {
-  const out = openSync(join(dir, "worker.out"), "a");
-  const child = spawn(process.execPath, [SELF, "worker", dir], { cwd: REPO, detached: true, stdio: ["ignore", out, out], env: process.env });
-  child.unref();
-  closeSync(out);
-  return child.pid ?? -1;
-}
-
-function stamp(ms: number, tz: string): string {
-  const w = wallClock(ms, tz);
-  return `${w.y}${p2(w.mo)}${p2(w.d)}-${p2(w.h)}${p2(w.mi)}`;
-}
-
-function afterStart(dir: string, session: Session): string {
-  return [
-    `回のフォルダ: ${dir}（進み具合は night.log）`,
-    `止める時刻: ${fmtClock(session.until, session.tz)}（${session.tz}）`,
-    "様子: npm run queue -- status　止める: npm run queue -- stop（--now ですぐ）（ホストからは docker/remote-control/queue.sh status・stop）",
-    "朝: 止まるときに結果を自分でまとめる。ホストで docker/remote-control/queue-push.sh を流し、スレッドに「回の名前 を push した」と伝える",
-  ].join("\n");
-}
-
-export async function cmdStart(a: Args): Promise<number> {
-  // --bin（組み立てずにこの svwb を使う）・--node-bin（td・potential をビルドせずにここのものを使う）・--foreground（切り離さずに回す）・
-  // --prepare-only（回のフォルダを作るだけ）は試す用。--git-dir（台帳の行をコミットするリポジトリ）は go が渡す
-  known(a, ["--yes", "--name", "--until", "--tz", "--threads", "--chunk-min", "--allow-dirty", "--bin", "--node-bin", "--foreground", "--prepare-only", "--git-dir"], 1);
-  const file = a.pos[0];
-  if (file === undefined) throw new Error("ジョブのファイルを渡します");
-  const jobsText = readFileSync(file, "utf8");
-  const jobs = parseJobs(jobsText);
-  const root = runsRoot(a.opts.get("--root"));
-  const machine = thisMachine();
-  const session = sessionOf(a, machine);
-  const chunkMin = Number(a.opts.get("--chunk-min") ?? "7.5");
-  if (!(chunkMin > 0)) throw new Error("--chunk-min は正の数");
-  const g = gitState();
-  const { estimates, chunks } = makePlanParts(jobs, repoLedger().runs, machine, session.threads, chunkMin, repoLedger().misses);
-  const name = a.opts.get("--name") ?? `night-${stamp(session.started, session.tz)}`;
-  if (!/^[A-Za-z0-9._-]+$/.test(name)) throw new Error(`--name は英数字と . _ - だけ: ${name}`);
-  console.log(planText({ jobs, estimates, chunks }, { threads: session.threads, machine, startAt: session.started, until: session.until, tz: session.tz, title: `キュー ${name}（${file}）` }));
-  if (!a.opts.has("--yes")) {
-    console.log("\nまだ始めていません。ユーザーが回すと決めたら --yes を付けて流します（前のやり方。積むなら plan の券を queue.sh add で。docs/queue.md）。");
-    return 0;
-  }
-  const active = activeRuns(root);
-  if (active.length > 0) throw new Error(`ほかの回が動いています: ${active.join(", ")}（1 晩に 1 つ）`);
-  refuseIfQueueBusy();
-  if (g.dirty && !a.opts.has("--allow-dirty")) throw new Error("コミットしていない変更があります（push してから回す。試すだけなら --allow-dirty）");
-  const dir = join(root, name);
-  // go は先に回のフォルダにソース（src/）と券を置くので、計画（plan.json）が無ければ始めてよい
-  if (existsSync(join(dir, "plan.json"))) throw new Error(`もうあります: ${dir}（続きなら resume）`);
-  let bin = a.opts.get("--bin");
-  if (bin === undefined) {
-    console.log("svwb を組み立てる…");
-    run(process.execPath, [join(REPO, "scripts/vite-run.mjs"), "scripts/rust-data-main.ts", "--quiet"]);
-    run("cargo", ["build", "--quiet", "--release", "--manifest-path", "rust/Cargo.toml", "-p", "svwb-engine"]);
-    // go は CARGO_TARGET_DIR で /workspace のビルド結果の置き場を使い回す
-    bin = join(process.env.CARGO_TARGET_DIR ? resolve(process.env.CARGO_TARGET_DIR) : join(REPO, "rust/target"), "release/svwb");
-  }
-  checkRunRefs(jobs, root);
-  validate(resolve(bin), jobs);
-  mkdirSync(join(dir, "bin"), { recursive: true });
-  // 夜の間にほかのセッションが組み立て直しても替わらないよう、写したものを回す
-  const copied = join(dir, "bin", "svwb");
-  copyFileSync(resolve(bin), copied);
-  chmodSync(copied, 0o755);
-  const nodeBin = a.opts.get("--node-bin");
-  prepareNodeTools(jobs, dir, nodeBin === undefined ? undefined : resolve(nodeBin));
-  const gitDirOpt = a.opts.get("--git-dir");
-  const gitDir = gitDirOpt === undefined ? undefined : resolve(gitDirOpt);
-  const full = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${g.commit.replace(/\+$/, "")}^{commit}`], { cwd: nightGitDir(gitDir ?? REPO), encoding: "utf8" });
-  const plan: Plan = {
-    v: 1,
-    name,
-    created: new Date(session.started).toISOString(),
-    repo: REPO,
-    jobsFile: resolve(file),
-    commit: g.commit,
-    ...(full.status === 0 ? { commitFull: full.stdout.trim() } : {}),
-    ...(gitDir === undefined ? {} : { gitDir }),
-    branch: g.branch,
-    bin: copied,
-    chunkMin,
-    jobs,
-    estimates,
-    chunks,
-  };
-  writeFileSync(join(dir, "jobs.txt"), jobsText);
-  writeAtomic(join(dir, "plan.json"), JSON.stringify(plan, null, 1));
-  writeAtomic(join(dir, "session.json"), JSON.stringify(session));
-  if (a.opts.has("--prepare-only")) return 0;
-  if (a.opts.has("--foreground")) {
-    const st = await runWorker(dir);
-    console.log(statusText(dir));
-    return st.state === "done" ? 0 : 1;
-  }
-  const pid = launch(dir);
-  console.log(`\n始めました（worker の pid ${pid}。このセッションが終わっても続きます）。\n${afterStart(dir, session)}`);
-  return 0;
-}
-
-export async function cmdResume(a: Args): Promise<number> {
-  known(a, ["--yes", "--until", "--tz", "--threads", "--foreground"], 1);
-  const root = runsRoot(a.opts.get("--root"));
-  const dir = findRun(root, a.pos[0], (d) => readPlan(d).chunks.some((c) => !markers(d).has(c.id)));
-  if (workerPid(dir) !== null) throw new Error(`動いています: ${dir}`);
-  const plan = readPlan(dir);
-  const prev = existsSync(join(dir, "session.json")) ? readSession(dir) : null;
-  const machine = thisMachine();
-  const session = sessionOf(a, machine);
-  if (prev && !a.opts.has("--tz")) session.tz = prev.tz;
-  if (!a.opts.has("--until")) session.until = parseUntil("07:00", session.started, session.tz);
-  console.log(
-    planText(plan, { threads: session.threads, machine, startAt: session.started, until: session.until, tz: session.tz, done: markers(dir), title: `キュー ${plan.name} の続き` }),
-  );
-  if (!a.opts.has("--yes")) {
-    console.log("\nまだ始めていません。ユーザーが今夜回すと決めたら --yes を付けて流します。");
-    return 0;
-  }
-  const active = activeRuns(root);
-  if (active.length > 0) throw new Error(`ほかの回が動いています: ${active.join(", ")}（1 晩に 1 つ）`);
-  refuseIfQueueBusy();
-  checkRunRefs(plan.jobs, root);
-  if (gitState().commit !== plan.commit) {
-    console.log(`注意: 今のチェックアウト（${gitState().commit}）は回のコミット（${plan.commit}）と違う。回すのは回のフォルダに写した svwb なので、結果は ${plan.commit} のもの`);
-  }
-  rmSync(join(dir, "STOP"), { force: true });
-  writeAtomic(join(dir, "session.json"), JSON.stringify(session));
-  if (a.opts.has("--foreground")) {
-    const st = await runWorker(dir);
-    console.log(statusText(dir));
-    return st.state === "done" ? 0 : 1;
-  }
-  const pid = launch(dir);
-  console.log(`\n続きを始めました（worker の pid ${pid}）。\n${afterStart(dir, session)}`);
-  return 0;
-}
-
-function cmdStop(a: Args): number {
-  known(a, ["--now"], 1);
-  const root = runsRoot(a.opts.get("--root"));
-  const dir = findRun(root, a.pos[0], (d) => workerPid(d) !== null);
-  const pid = workerPid(dir);
-  writeFileSync(join(dir, "STOP"), new Date().toISOString());
-  if (pid === null) {
-    console.log(`動いていません: ${dir}（STOP を置いた。resume で消える）`);
-    return 0;
-  }
-  if (a.opts.has("--now")) {
-    process.kill(pid, "SIGTERM");
-    console.log(`すぐ止めます（pid ${pid}。回していた区切りは、次の resume で回し直す）`);
-  } else {
-    console.log(`回している区切りが終わったら止まります（pid ${pid}）。すぐ止めるなら --now`);
-  }
-  return 0;
-}
-
-/** git の名前とメールが決まるか（決まらないと git commit が断る）。コンテナでは .env の GIT_AUTHOR_NAME 等で渡す */
-function checkGitIdent(): void {
-  for (const v of ["GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"]) {
-    const r = spawnSync("git", ["var", v], { cwd: REPO, encoding: "utf8" });
-    if (r.status !== 0) {
-      throw new Error(
-        "git の名前とメールが決まらないので、コミットできません。台帳には何も足していません。\n" +
-          "コンテナなら docker/remote-control/.env に GIT_AUTHOR_NAME・GIT_AUTHOR_EMAIL・GIT_COMMITTER_NAME・GIT_COMMITTER_EMAIL を書き、" +
-          "ホストで docker compose up -d を流してから、finish --commit を流し直す（docs/queue.md「台帳の行のコミット」）",
-      );
-    }
-  }
-}
-
-/** この回の行のうち、作業ツリーの docs/ledger.jsonl にあって HEAD に無いものの数 */
-function uncommittedQueueRows(name: string): number {
-  const count = (text: string) => {
-    const l = parseLedger(text);
-    return [...l.runs, ...l.misses, ...l.surveys].filter((r) => (r as { queue?: string }).queue === name).length;
-  };
-  const work = existsSync(DEFAULT_LEDGER) ? count(readFileSync(DEFAULT_LEDGER, "utf8")) : 0;
-  const head = spawnSync("git", ["show", "HEAD:docs/ledger.jsonl"], { cwd: REPO, encoding: "utf8", maxBuffer: 1 << 30 });
-  return work - (head.status === 0 ? count(head.stdout) : 0);
 }
 
 export type QueueRun = RunRow & { queue: string; chunks: number };
@@ -2025,11 +1723,6 @@ type LedgerRows = { runs: RunRow[]; misses: MissesRow[]; surveys: SurveyRow[] };
 const queueOf = (r: object): string | undefined => (r as { queue?: string }).queue;
 
 /**
- * 回の済んだ区切りの行を、台帳に足す行にまとめる（finish・出口のまとめ・ingest で同じ）。compare・yardstick は試合番号の続いたまとまりごとに 1 行、
- * misses は区切りの行に回の名前を足してそのまま、survey は全部の区切りが済んでから 1 行。merged の区切りは足さない。
- * target の台帳に同じ回の同じ行があれば足さない
- */
-/**
  * 台帳の行とコミットのメッセージに書く道。PC の中の回のフォルダ（/home/wk/svwb-data/night/<回>/…）を、回の名前からの道（@<回>/…）にする。
  * 共有フォルダでは、@<回>/<ファイル> は ingest が置いた data/…/<回>/ か logs/<回>/ の同じ名前（pack-run の分け方）。ほかの道は替えない
  */
@@ -2059,6 +1752,11 @@ function portableText(text: string, dir: string, name: string): string {
   return home.length > 1 ? t.split(`${home}/`).join("~/") : t;
 }
 
+/**
+ * 回の済んだ区切りの行を、台帳に足す行にまとめる（ブランチのコミット・出口のまとめの表で同じ）。compare・yardstick は試合番号の続いたまとまりごとに 1 行、
+ * misses は区切りの行に回の名前を足してそのまま、survey は全部の区切りが済んでから 1 行。merged の区切りは足さない。
+ * target の台帳に同じ回の同じ行があれば足さない
+ */
 export function queueRows(plan: Pick<Plan, "name" | "jobs" | "chunks">, dir: string, src: RowsSource, merged: Set<string>, target: LedgerRows): QueueRows {
   const out = queueRowsRaw(plan, dir, src, merged, target);
   const p = <R>(r: R): R => portableRow(r, dir, plan.name);
@@ -2121,7 +1819,7 @@ function queueRowsRaw(plan: Pick<Plan, "name" | "jobs" | "chunks">, dir: string,
   return out;
 }
 
-/** 台帳に足す行の表（finish・出口のまとめ・ingest） */
+/** 台帳に足す行の表（ブランチのコミット・出口のまとめ・ingest） */
 export function rowsTables(plan: Pick<Plan, "jobs">, r: Pick<QueueRows, "runs" | "misses" | "surveys" | "notes">): string {
   return `${
     r.runs.length > 0
@@ -2152,11 +1850,11 @@ export function rowsTables(plan: Pick<Plan, "jobs">, r: Pick<QueueRows, "runs" |
 }
 
 /** survey のジョブを svwb survey report で 1 行にまとめる（報告は survey-<番号>.md、問題集に足す候補の局面は survey-<番号>-states/、行は survey-<番号>-ledger.jsonl）。
- * reuse なら、前に作った行があればそれを使う */
-function surveyReport(plan: Plan, dir: string, job: Job, reuse: boolean): SurveyRow {
+ * 前に作った行があればそれを使う（同じ調査の結果から作り直すと、行の at だけが違ってしまう） */
+function surveyReport(plan: Plan, dir: string, job: Job): SurveyRow {
   const one = join(dir, `survey-${job.index}-ledger.jsonl`);
   // 前に作った行は、その後に調査の結果が書き足されていなければ使う
-  if (reuse && existsSync(one) && statSync(one).mtimeMs >= (statSync(surveyFile(dir, job), { throwIfNoEntry: false })?.mtimeMs ?? 0)) {
+  if (existsSync(one) && statSync(one).mtimeMs >= (statSync(surveyFile(dir, job), { throwIfNoEntry: false })?.mtimeMs ?? 0)) {
     const rows = parseLedger(readFileSync(one, "utf8")).surveys;
     const row = rows[rows.length - 1];
     if (row) return row;
@@ -2197,65 +1895,11 @@ function appendRows(target: string, text: string): void {
 const rowsText = (r: Pick<QueueRows, "runs" | "misses" | "surveys">): string => [...r.runs, ...r.misses, ...r.surveys].map((x) => `${JSON.stringify(x)}\n`).join("");
 const rowCount = (r: Pick<QueueRows, "runs" | "misses" | "surveys">): number => r.runs.length + r.misses.length + r.surveys.length;
 
-/** 朝: ジョブごとに 1 行にまとめた行をリポジトリの台帳に足す（足した区切りは覚えておき、2 回足さない） */
-export function cmdFinish(a: Args): number {
-  known(a, ["--commit", "--pack", "--ledger"], 1);
-  const root = runsRoot(a.opts.get("--root"));
-  const dir = findRun(root, a.pos[0], () => true);
-  if (workerPid(dir) !== null) throw new Error(`まだ動いています: ${dir}（止めるなら stop）`);
-  const plan = readPlan(dir);
-  const mergedFile = join(dir, "merged.json");
-  const merged = new Set<string>(existsSync(mergedFile) ? readJson<string[]>(mergedFile) : []);
-  const target = a.opts.get("--ledger") ?? (process.env.SVWB_LEDGER || DEFAULT_LEDGER);
-  const commit = a.opts.has("--commit");
-  // コミットできないと分かっているなら、台帳に足す前に止める（足した後で止まると、足した行がコミットされずに残る）
-  if (commit) {
-    if (resolve(target) !== resolve(DEFAULT_LEDGER)) throw new Error("--commit はリポジトリの台帳（docs/ledger.jsonl）に足すときだけ");
-    checkGitIdent();
-  }
-  const targetLedger = existsSync(target) ? parseLedger(readFileSync(target, "utf8")) : { runs: [], misses: [], surveys: [] };
-  const src: RowsSource = {
-    done: new Set(markers(dir).keys()),
-    runs: chunkRows(dir),
-    misses: chunkMisses(dir),
-    pick: (job) => readPick(dir, job),
-    // 止まったときのまとめが作った行があれば使う（同じ調査の結果から作り直すと、行の at だけが違ってしまう）
-    survey: (job) => surveyReport(plan, dir, job, true),
-  };
-  const rows = queueRows(plan, dir, src, merged, targetLedger);
-  const text = rowsText(rows);
-  const added = rowCount(rows);
-  if (added > 0) {
-    appendRows(target, text);
-    appendFileSync(join(dir, "ledger-jobs.jsonl"), text);
-  }
-  writeAtomic(mergedFile, JSON.stringify([...rows.merged]));
-  const summary = `${statusText(dir)}\n\n台帳（${target}）に足した行: ${added}\n${rowsTables(plan, rows)}`;
-  writeFileSync(join(dir, "summary.md"), `${summary}\n`);
-  console.log(summary);
-  if (commit) {
-    // 今回足した行だけでなく、前の finish で足したがコミットできなかった行もコミットする（流し直せば済むように）
-    const pending = uncommittedQueueRows(plan.name);
-    if (pending > 0) {
-      const msg = `台帳: キュー ${plan.name} の結果（${pending} 行、${plan.commit}）`;
-      const r = spawnSync("git", ["commit", "-m", msg, "--", "docs/ledger.jsonl"], { cwd: REPO, stdio: "inherit" });
-      if (r.status !== 0) throw new Error("コミットできませんでした。直してから finish --commit を流し直す（足した行はそのままコミットする）");
-      console.log(`コミットしました（${gitState().branch}）。push はしていません（コンテナからはできない。ホストで git push）`);
-    } else {
-      console.log("コミットする行はありません");
-    }
-  }
-  if (a.opts.has("--pack")) {
-    run("npm", ["run", "-s", "pack-run", "--", dir, "--name", plan.name, "--note", `キュー ${plan.name}（${plan.commit}）`, "--only", "logs,kifu", "--force"]);
-  }
-  return 0;
-}
-
-// ---------------------------------------------------------------- 止まったときのまとめ（朝に何も打たなくてよいように）
+// ---------------------------------------------------------------- 止まったときのまとめ（結果を上げるのに何も打たなくてよいように）
 //
-// worker が止まるとき（全部済んだ・止める時刻・失敗・stop）に、自分で次の 2 つをする（docs/queue.md「止まったときのまとめ」）。
+// 回の最後の task（まとめ）と、queue-push.sh の wrap --pending（一時停止した回・電源が切れた回）が、次の 2 つをする（docs/queue.md「止まったときのまとめ」）。
 // 1. 台帳の行を、ブランチ night/<回の名前> にコミットする（回のコミットから枝分かれ。作業ツリーと index には触らない）。
-//    ユーザーは朝にホストで push だけをし（docker/remote-control/queue-push.sh）、スレッドは npm run queue -- ingest <回の名前> で台帳に足す
+//    ユーザーはホストで push だけをし（docker/remote-control/queue-push.sh）、スレッドは npm run queue -- ingest <回の名前> で台帳に足す
 // 2. 棋譜・ログ・作ったデータとモデルを、出口のフォルダ（~/svwb-data/outbox/<回の名前>/）に .tar.gz でまとめる。要るときだけスレッドに上げ、
 //    スレッドは npm run queue -- ingest <ファイル…> で共有フォルダに展開する
 
@@ -2296,7 +1940,7 @@ function runSource(plan: Plan, dir: string): { src: RowsSource; errors: string[]
   for (const job of plan.jobs) {
     if (job.spec.kind !== "survey" || !plan.chunks.filter((c) => c.job === job.index).every((c) => done.has(c.id))) continue;
     try {
-      surveys.set(job.index, surveyReport(plan, dir, job, true));
+      surveys.set(job.index, surveyReport(plan, dir, job));
     } catch (e) {
       errors.push((e as Error).message);
     }
@@ -2342,7 +1986,7 @@ export async function makeOutbox(dir: string, summary?: string): Promise<{ folde
 
 /**
  * 台帳に、同じ回の行が既に覆っている区切り（compare・yardstick は同じ種類・名前・コミットで試合番号が入る行、misses は同じ名前・コミット・回数・シード、
- * survey は同じ名前）。止まるたびのコミットは、ブランチの台帳が覆っている区切りを足し終えたものとして扱う（finish の merged.json と同じ働き）
+ * survey は同じ名前）。まとめるたびのコミットは、ブランチの台帳が覆っている区切りを足し終えたものとして扱う
  */
 export function coveredChunks(plan: Pick<Plan, "name" | "jobs" | "chunks" | "commit">, target: LedgerRows): Set<string> {
   const out = new Set<string>();
@@ -2452,8 +2096,8 @@ export async function wrapUp(dir: string, log: (text: string) => void): Promise<
   return { outbox, branch };
 }
 
-/** 手でまとめ直す（worker が止まったときと同じこと。電源が切れた回や、まとめが失敗したときに）。
- * --pending は、まとめが済んでいない回（needsWrap）を全部まとめる（朝の queue-push.sh が push の前に流す） */
+/** 手でまとめ直す（回の最後の task と同じこと。電源が切れた回や、まとめが失敗したときに）。
+ * --pending は、まとめが済んでいない回（needsWrap）を全部まとめる（queue-push.sh が push の前に流す） */
 async function cmdWrap(a: Args): Promise<number> {
   known(a, ["--pending"], 1);
   const root = runsRoot(a.opts.get("--root"));
@@ -2467,9 +2111,8 @@ async function cmdWrap(a: Args): Promise<number> {
     for (const dir of dirs) await wrapOne(dir);
     return 0;
   }
-  const dir = findRun(root, a.pos[0], () => true);
-  if (workerPid(dir) !== null) throw new Error(`まだ動いています: ${dir}（止まるときに自分でまとめる）`);
-  if (chunkRunning(dir)) throw new Error(`区切りを回しています: ${dir}（キューの回は、最後の task がまとめる）`);
+  const dir = findRun(root, a.pos[0]);
+  if (chunkRunning(dir)) throw new Error(`区切りを回しています: ${dir}（回の最後の task がまとめる）`);
   await wrapOne(dir);
   return 0;
 }
@@ -2480,7 +2123,7 @@ async function wrapOne(dir: string): Promise<void> {
   const r = await wrapUp(dir, (t) => log(dir, tz, t));
   const st = readStatus(dir);
   if (st !== null) writeAtomic(join(dir, "status.json"), JSON.stringify({ ...st, outbox: r.outbox, branch: r.branch }));
-  console.log(`出口: ${r.outbox}\n台帳のブランチ: ${r.branch}\n朝はホストで docker/remote-control/queue-push.sh（push だけ）`);
+  console.log(`出口: ${r.outbox}\n台帳のブランチ: ${r.branch}\n上げるのはホストで docker/remote-control/queue-push.sh（push だけ）`);
 }
 
 /** 台帳の行の重なり（同じ回・種類・名前・コミットで試合番号が重なる行、misses は同じ鍵、survey は同じ名前があるか） */
@@ -2647,27 +2290,23 @@ async function ingestFiles(paths: string[], to: string): Promise<{ ok: boolean; 
   return { ok, text, notes };
 }
 
-// ---------------------------------------------------------------- 券と go（夕方の 1 行。docs/queue.md「券と go」）
+// ---------------------------------------------------------------- 券（積むコマンドの 1 行。docs/queue.md「キュー（pueue）」）
 
-/** 券の 1 語目（形を変えたら数を上げる）。svwb-night-1 は前のやり方の券（go。止める時刻を持つ）、svwb-queue-1 は積む券（add。止める時刻を持たない） */
-export const TICKET_V = "svwb-night-1";
+/** 券の 1 語目（形を変えたら数を上げる）。svwb-queue-1 は積む券（add。止める時刻を持たない） */
 export const TICKET_Q = "svwb-queue-1";
+/** 前のやり方の券（go。止める時刻を持っていた。2026-11-25 に外した） */
+const TICKET_OLD = "svwb-night-1";
 /** ユーザーがホストで券を流すスクリプト */
 export const QUEUE_SH = "~/Shadowverse-Wb-Sim/docker/remote-control/queue.sh";
 
-/** 券: 回すものの 1 行（スレッドが plan で出し、ユーザーがホストで queue.sh add <券>（積む券）か queue.sh go <券>（前の形）を流す） */
+/** 券: 積むものの 1 行（スレッドが plan で出し、ユーザーがホストで queue.sh add <券> を流す） */
 export interface Ticket {
-  /** 2 なら積む券（svwb-queue-1。until・tz を持たない）。無ければ前のやり方の券（svwb-night-1） */
-  v?: 2;
   name: string;
   branch: string;
   /** 回すコミット（sha の頭 12 桁） */
   commit: string;
   /** ジョブのファイル（リポジトリの根からの道） */
   jobs: string;
-  /** 止める時刻（--until と同じ形。積む券には無い） */
-  until?: string;
-  tz?: string;
   threads?: number;
   /** 区切りのおよその長さ（--chunk-min） */
   chunk?: number;
@@ -2676,8 +2315,7 @@ export interface Ticket {
 }
 
 type TicketBody = Omit<Ticket, "plan">;
-const ticketHead = (t: Pick<Ticket, "v">): string => (t.v === 2 ? TICKET_Q : TICKET_V);
-const TICKET_FIELDS = ["name", "branch", "commit", "jobs", "until", "tz", "threads", "chunk"] as const;
+const TICKET_FIELDS = ["name", "branch", "commit", "jobs", "threads", "chunk"] as const;
 /** ブランチとジョブのファイルの道に使えるもの（シェルで引用符が要らない） */
 const SAFE_PATH = /^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$/;
 
@@ -2686,27 +2324,30 @@ const sha256 = (text: string): string => createHash("sha256").update(text).diges
 
 /** 計画の指紋。券の項目とジョブのファイルの中身から決まる（写し間違い・書き換えと、違うジョブのファイルを見つける） */
 export function ticketPlan(t: TicketBody, jobsText: string): string {
-  return sha256([ticketHead(t), ...ticketWords(t), `jobs-sha256=${sha256(jobsText)}`].join("\n")).slice(0, 12);
+  return sha256([TICKET_Q, ...ticketWords(t), `jobs-sha256=${sha256(jobsText)}`].join("\n")).slice(0, 12);
 }
 
 export const makeTicket = (t: TicketBody, jobsText: string): Ticket => ({ ...t, plan: ticketPlan(t, jobsText) });
-export const ticketText = (t: Ticket): string => [ticketHead(t), ...ticketWords(t), `plan=${t.plan}`].join(" ");
+export const ticketText = (t: Ticket): string => [TICKET_Q, ...ticketWords(t), `plan=${t.plan}`].join(" ");
 
 /** 券を読む（語に分かれていても、1 つの文字列でもよい） */
 export function parseTicket(words: string[]): Ticket {
   const ws = words.join(" ").trim().split(/\s+/).filter((w) => w !== "");
   const head = ws[0];
-  if (head !== TICKET_V && head !== TICKET_Q) {
+  if (head !== TICKET_Q) {
+    if (head === TICKET_OLD) {
+      throw new Error(`これは前のやり方の券（${TICKET_OLD}。queue.sh go で流していたもの）で、もう使えません。スレッドに積む券（${TICKET_Q}）を作り直してもらいます`);
+    }
     if (head !== undefined && /^svwb-(night|queue)-\d+$/.test(head)) {
       throw new Error(`この券（${head}）は、このチェックアウトのキューと形が違います。ホストの ~/Shadowverse-Wb-Sim で git pull してから流します`);
     }
-    throw new Error(`券ではありません（${TICKET_Q} か ${TICKET_V} で始まる 1 行。スレッドが出したものをそのまま渡します）`);
+    throw new Error(`券ではありません（${TICKET_Q} で始まる 1 行。スレッドが出したものをそのまま渡します）`);
   }
-  const queued = head === TICKET_Q;
   const kv = new Map<string, string>();
   for (const w of ws.slice(1)) {
     const i = w.indexOf("=");
     const k = i < 0 ? w : w.slice(0, i);
+    if (k === "until" || k === "tz") throw new Error("積む券には止める時刻（until・tz）を書きません（止める時刻は queue.sh start --until で決める）");
     if (i < 0 || !([...TICKET_FIELDS, "plan"] as string[]).includes(k)) throw new Error(`券の読めない語: ${w}`);
     if (kv.has(k)) throw new Error(`券に ${k} が 2 つあります`);
     kv.set(k, w.slice(i + 1));
@@ -2725,17 +2366,6 @@ export function parseTicket(words: string[]): Ticket {
   if (!/^[0-9a-f]{12,40}$/.test(commit)) throw bad("commit", commit);
   const jobs = need("jobs");
   if (!SAFE_PATH.test(jobs)) throw bad("jobs", jobs);
-  if (queued && (kv.has("until") || kv.has("tz"))) throw new Error("積む券（svwb-queue-1）には止める時刻（until・tz）を書きません（止める時刻は queue.sh start --until で決める）");
-  const tz = kv.get("tz");
-  if (tz !== undefined) {
-    try {
-      new Intl.DateTimeFormat("en-US", { timeZone: tz });
-    } catch {
-      throw bad("tz", tz);
-    }
-  }
-  const until = queued ? undefined : need("until");
-  if (until !== undefined) parseUntil(until, Date.now(), tz ?? "Asia/Tokyo");
   const threadsText = kv.get("threads");
   const chunkText = kv.get("chunk");
   const chunk = chunkText === undefined ? undefined : Number(chunkText);
@@ -2743,21 +2373,28 @@ export function parseTicket(words: string[]): Ticket {
   const plan = need("plan");
   if (!/^[0-9a-f]{12}$/.test(plan)) throw bad("plan", plan);
   return {
-    ...(queued ? { v: 2 as const } : {}),
     name,
     branch,
     commit,
     jobs,
-    ...(until === undefined ? {} : { until }),
-    ...(tz === undefined ? {} : { tz }),
     ...(threadsText === undefined ? {} : { threads: intOf(threadsText, "券の threads", 1) }),
     ...(chunk === undefined ? {} : { chunk }),
     plan,
   };
 }
 
+/** 回のフォルダの ticket.txt の券（無い・前のやり方の券なら null） */
+function readTicketFile(file: string): Ticket | null {
+  if (!existsSync(file)) return null;
+  try {
+    return parseTicket([readFileSync(file, "utf8")]);
+  } catch {
+    return null;
+  }
+}
+
 /** plan で券を作る。ジョブのファイルがリポジトリにコミットしてあり、今のコミットを push してあるときだけ（どちらかが欠けると理由を返す） */
-export function ticketHere(file: string, o: Omit<TicketBody, "branch" | "commit" | "jobs">, cwd: string = REPO): { ticket: Ticket } | { why: string } {
+export function ticketHere(file: string, o: Pick<TicketBody, "name" | "threads" | "chunk">, cwd: string = REPO): { ticket: Ticket } | { why: string } {
   const gitHere = (args: string[]) => spawnSync("git", args, { cwd, encoding: "utf8", maxBuffer: 1 << 26 });
   const top = gitHere(["rev-parse", "--show-toplevel"]);
   if (top.status !== 0) return { why: "git のリポジトリの中で流していない" };
@@ -2776,22 +2413,17 @@ export function ticketHere(file: string, o: Omit<TicketBody, "branch" | "commit"
   const jobsText = gitHere(["show", `HEAD:${rel}`]).stdout;
   return {
     ticket: makeTicket(
-      { ...(o.v === 2 ? { v: 2 as const } : {}), name: o.name, branch, commit: full.slice(0, 12), jobs: rel, ...(o.until === undefined ? {} : { until: o.until }), ...pick3(o) },
+      {
+        name: o.name,
+        branch,
+        commit: full.slice(0, 12),
+        jobs: rel,
+        ...(o.threads === undefined ? {} : { threads: o.threads }),
+        ...(o.chunk === undefined ? {} : { chunk: o.chunk }),
+      },
       jobsText,
     ),
   };
-}
-
-const pick3 = (o: Pick<TicketBody, "tz" | "threads" | "chunk">): Pick<TicketBody, "tz" | "threads" | "chunk"> => ({
-  ...(o.tz === undefined ? {} : { tz: o.tz }),
-  ...(o.threads === undefined ? {} : { threads: o.threads }),
-  ...(o.chunk === undefined ? {} : { chunk: o.chunk }),
-});
-
-/** 昼（7 時〜18 時）か。昼はゲームがカクつくので、go は昼なら 1 回確かめる */
-export function isDaytime(ms: number, tz: string): boolean {
-  const h = wallClock(ms, tz).h;
-  return h >= 7 && h < 18;
 }
 
 /** origin の URL を、認証の要らない https の形にする（git@github.com:o/r.git → https://github.com/o/r.git。リポジトリは公開なので、コンテナに認証情報が無くても取れる） */
@@ -2845,7 +2477,7 @@ function npmCi(src: string): void {
 
 /**
  * 回のソースの node_modules。依存（package-lock.json）が /workspace と同じなら /workspace のものを指し、違えば npm ci。
- * go のたびに（続きの夜も）確かめる: 前の go で /workspace を指した後に /workspace の依存が変わっていたら、指すのをやめて npm ci
+ * 組み立てのたびに確かめる: 前に /workspace を指した後に /workspace の依存が変わっていたら、指すのをやめて npm ci
  */
 export function prepareNodeModules(repo: string, src: string, ci: (src: string) => void = npmCi): void {
   const nm = join(src, "node_modules");
@@ -2861,112 +2493,6 @@ export function prepareNodeModules(repo: string, src: string, ci: (src: string) 
     return;
   }
   ci(src);
-}
-
-async function askYes(question: string): Promise<boolean> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    return /^(y|yes|はい)$/i.test((await rl.question(question)).trim());
-  } finally {
-    rl.close();
-  }
-}
-
-/**
- * 券で回す（コンテナの中で。ホストからは docker/remote-control/queue.sh go <券>）。
- * 券のコミットを取ってきて（無ければ）、計画の指紋を確かめ、回のフォルダの src/ に出して、そこの start を流す（svwb もそこで組み立てる）。
- * 同じ券の回があれば、動いていればそう言い、済んでいればそう言い、途中なら resume。昼なら 1 回確かめる
- */
-export async function cmdGo(a: Args): Promise<number> {
-  // --yes: 昼でも確かめない（端末の無いところで流すとき）。--bin・--node-bin・--foreground は試す用（start・resume に渡す）
-  known(a, ["--yes", "--bin", "--node-bin", "--foreground"], Number.POSITIVE_INFINITY);
-  if (a.pos.length === 0) throw new Error("券を渡します（スレッドが出した svwb-night-1 で始まる 1 行）");
-  const t = parseTicket(a.pos);
-  if (t.v === 2 || t.until === undefined) throw new Error(`これは積む券（${TICKET_Q}）です。queue.sh add <券> で積みます（docs/queue.md「キュー（pueue）」）`);
-  const until = t.until;
-  const root = runsRoot(a.opts.get("--root"));
-  const repo = nightGitDir(REPO);
-  const tz = t.tz ?? "Asia/Tokyo";
-  const dir = join(root, t.name);
-  const src = join(dir, "src");
-  const ticketFile = join(dir, "ticket.txt");
-  const full = ensureCommit(repo, t);
-  const shown = spawnSync("git", ["show", `${full}:${t.jobs}`], { cwd: repo, encoding: "utf8", maxBuffer: 1 << 26 });
-  if (shown.status !== 0) throw new Error(`券のジョブのファイル ${t.jobs} が、コミット ${t.commit} にありません`);
-  if (ticketPlan(t, shown.stdout) !== t.plan) {
-    throw new Error("券の指紋が合いません（写すときに欠けたか、書き換わった）。スレッドが出した 1 行をそのまま流します。直らなければ、スレッドに券を作り直してもらう");
-  }
-  if (existsSync(dir)) {
-    const had = existsSync(ticketFile) ? parseTicket([readFileSync(ticketFile, "utf8")]) : null;
-    if (had === null) throw new Error(`同じ名前の回が、券を使わずに作ってあります: ${dir}（スレッドに名前を替えた券を作ってもらう）`);
-    if (had.commit !== t.commit || had.jobs !== t.jobs || had.branch !== t.branch || had.chunk !== t.chunk) {
-      throw new Error(`同じ名前の別の回があります: ${dir}（その券: ${ticketText(had)}）。スレッドに名前を替えた券を作ってもらう`);
-    }
-  }
-  const started = existsSync(join(dir, "plan.json"));
-  const morning = `朝は ${QUEUE_SH.replace("queue.sh", "queue-push.sh")} を流し、スレッドに「${t.name} を push した」と伝えてください。`;
-  if (started) {
-    if (workerPid(dir) !== null) {
-      console.log(`${statusText(dir)}\n\nこの回はもう動いています。${morning}`);
-      return 0;
-    }
-    const done = markers(dir);
-    if (readPlan(dir).chunks.every((c) => done.has(c.id))) {
-      console.log(`${statusText(dir)}\n\nこの回は全部済んでいます。${morning}`);
-      return 0;
-    }
-  }
-  const others = activeRuns(root).filter((d) => d !== dir);
-  if (others.length > 0) throw new Error(`ほかの回が動いています: ${others.map((d) => basename(d)).join(", ")}（1 晩に 1 つ。止めるなら queue.sh stop）`);
-  refuseIfQueueBusy();
-  const now = Date.now();
-  if (isDaytime(now, tz) && !a.opts.has("--yes")) {
-    const msg = `今は ${fmtClock(now, tz)}（${tz}）で、昼です（7 時〜18 時）。昼はゲームがカクつくので、ふつうは夜に回します。`;
-    if (process.stdin.isTTY !== true) throw new Error(`${msg}今から回すなら、端末で流して y と答えます`);
-    if (!(await askYes(`${msg}\n今から回しますか？ [y/N] `))) {
-      console.log("回しませんでした。");
-      return 1;
-    }
-  }
-  if (!started) {
-    mkdirSync(dir, { recursive: true });
-    if (!existsSync(ticketFile)) writeFileSync(ticketFile, `${ticketText(t)}\n`);
-    console.log(`券のコミット ${t.commit} を ${src} に出す…`);
-    exportSource(repo, full, src);
-  }
-  if (!existsSync(join(src, "scripts", "night-main.ts"))) throw new Error(`回のソースがありません: ${src}`);
-  prepareNodeModules(repo, src);
-  const pass = (k: string): string[] => {
-    const v = a.opts.get(k);
-    return v === undefined ? [] : k === "--foreground" ? [k] : [k, resolve(v)];
-  };
-  const common = ["--root", root, "--until", until, "--tz", tz, ...(t.threads === undefined ? [] : ["--threads", String(t.threads)]), ...pass("--foreground")];
-  const args = started
-    ? ["resume", t.name, "--yes", ...common]
-    : [
-        "start",
-        join(src, t.jobs),
-        "--yes",
-        "--name",
-        t.name,
-        "--git-dir",
-        repo,
-        ...(t.chunk === undefined ? [] : ["--chunk-min", String(t.chunk)]),
-        ...pass("--bin"),
-        ...pass("--node-bin"),
-        ...common,
-      ];
-  const env = {
-    ...process.env,
-    // 台帳の行のコミットとブランチ（回のソースには .git が無い）
-    SVWB_COMMIT: gitIn(repo, ["rev-parse", "--short=7", full]).trim(),
-    SVWB_BRANCH: t.branch,
-    // Rust のビルド結果は /workspace の置き場（コンテナではボリューム）を使い回す
-    CARGO_TARGET_DIR: process.env.CARGO_TARGET_DIR || join(repo, "rust", "target"),
-  };
-  const r = spawnSync(process.execPath, [join(src, "scripts", "night-main.ts"), ...args], { cwd: src, stdio: "inherit", env });
-  if (r.status === 0 && !a.opts.has("--foreground")) console.log(`\n${morning}`);
-  return r.status ?? 1;
 }
 
 // ---------------------------------------------------------------- キュー（pueue。docs/queue.md「キュー（pueue）」）
@@ -2989,14 +2515,6 @@ function pueueOrNull(): PStatus | null {
   } catch {
     return null;
   }
-}
-
-/** 前のやり方（go・start・resume）で回すとき、キューが回っていれば断る（同時に 2 つ回さない） */
-function refuseIfQueueBusy(): void {
-  const st = pueueOrNull();
-  if (st === null || st.groups[QUEUE_GROUP]?.status !== "Running") return;
-  const live = st.tasks.filter((t) => t.group === QUEUE_GROUP && (t.state === "Running" || t.state === "Queued") && labelOf(t.label) !== null);
-  if (live.length > 0) throw new Error("キューが回っています（同時には回さない。止めるなら queue.sh pause）");
 }
 
 /** これから回る・回っている・止めてあるか、中断した（start が積み直す）task */
@@ -3027,7 +2545,7 @@ export interface TaskSpec {
 
 /**
  * 回の済んでいない作業を、積む順の task にする（組み立て → 区切り（計画の順）→ まとめ）。全部の区切りが済んでいれば空。
- * 区切りは同じジョブの 1 つ前の区切りの後（前が失敗したら残りを飛ばす。worker と同じ）。ジョブの最初の区切りは組み立てと、
+ * 区切りは同じジョブの 1 つ前の区切りの後（前が失敗したら残りを飛ばす）。ジョブの最初の区切りは組み立てと、
  * そのジョブが読むファイルを作るジョブ（pick はその compare）の済んでいない区切りの後。
  * 前の回のファイル（@run:）がまだ無ければ、組み立てをそれを作る区切りの後にする（producer がその task の番号を返す。無ければ断る）
  */
@@ -3239,14 +2757,15 @@ export async function cmdAdd(a: Args): Promise<number> {
   const first = a.pos[0];
   if (first === undefined) throw new Error(`券を渡します（スレッドが出した ${TICKET_Q} で始まる 1 行）。積み直すなら回の名前`);
   let t: Ticket;
-  if (a.pos.length === 1 && !first.startsWith("svwb-night-")) {
+  if (a.pos.length === 1 && /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(first)) {
     const f = join(root, first, "ticket.txt");
-    if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(first) || !existsSync(f)) throw new Error(`券で積んだ回がありません: ${join(root, first)}`);
-    t = parseTicket([readFileSync(f, "utf8")]);
+    if (!existsSync(f)) throw new Error(`券で積んだ回がありません: ${join(root, first)}`);
+    const had = readTicketFile(f);
+    if (had === null) throw new Error(`前のやり方で回した回です: ${join(root, first)}（続きは積めない。スレッドに積む券を作ってもらう）`);
+    t = had;
   } else {
     t = parseTicket(a.pos);
   }
-  if (t.v !== 2) throw new Error(`これは前のやり方の券（${TICKET_V}）です。queue.sh go <券> で流します（積むなら、スレッドに ${TICKET_Q} の券を作り直してもらう）`);
   const repo = nightGitDir(REPO);
   const dir = join(root, t.name);
   const src = join(dir, "src");
@@ -3258,8 +2777,8 @@ export async function cmdAdd(a: Args): Promise<number> {
     throw new Error("券の指紋が合いません（写すときに欠けたか、書き換わった）。スレッドが出した 1 行をそのまま流します。直らなければ、スレッドに券を作り直してもらう");
   }
   if (existsSync(dir)) {
-    const had = existsSync(ticketFile) ? parseTicket([readFileSync(ticketFile, "utf8")]) : null;
-    if (had === null || had.v !== 2) throw new Error(`同じ名前の回が、積む券を使わずに作ってあります: ${dir}（スレッドに名前を替えた券を作ってもらう）`);
+    const had = readTicketFile(ticketFile);
+    if (had === null) throw new Error(`同じ名前の回が、積む券を使わずに作ってあります: ${dir}（スレッドに名前を替えた券を作ってもらう）`);
     if (had.plan !== t.plan) throw new Error(`同じ名前の別の回があります: ${dir}（その券: ${ticketText(had)}）。スレッドに名前を替えた券を作ってもらう`);
   }
   if (!existsSync(join(dir, "plan.json"))) {
@@ -3267,9 +2786,6 @@ export async function cmdAdd(a: Args): Promise<number> {
     if (!existsSync(ticketFile)) writeFileSync(ticketFile, `${ticketText(t)}\n`);
     console.log(`券のコミット ${t.commit} を ${src} に出す…`);
     exportSource(repo, full, src);
-  }
-  if (!existsSync(join(src, "scripts", "night-pueue.ts"))) {
-    throw new Error(`この券のコミット（${t.commit}）のキューは、キューを知りません（スレッドに新しいコミットで券を作り直してもらう）`);
   }
   const pass = (k: string): string[] => {
     const v = a.opts.get(k);
@@ -3314,7 +2830,7 @@ async function cmdEnqueue(a: Args): Promise<number> {
     const jobsText = readFileSync(file, "utf8");
     const jobs = parseJobs(jobsText);
     const machine = thisMachine();
-    const session: Session = { ...sessionOf(a, machine), until: 0, queue: 1 };
+    const session: Session = { ...sessionOf(a, machine), queue: 1 };
     const chunkMin = Number(a.opts.get("--chunk-min") ?? "7.5");
     if (!(chunkMin > 0)) throw new Error("--chunk-min は正の数");
     const g = gitState();
@@ -3434,7 +2950,7 @@ async function cmdChunk(a: Args): Promise<number> {
       return 1;
     }
     if (!existsSync(plan.bin)) throw new Error(`回す svwb がありません: ${plan.bin}（組み立てが済んでいない）`);
-    const ctl: WorkerControl = { stopNow: false };
+    const ctl: ChunkControl = { stopNow: false };
     const onSignal = () => {
       ctl.stopNow = true;
       ctl.kill?.();
@@ -3474,14 +2990,13 @@ async function cmdChunk(a: Args): Promise<number> {
 /** キューを回す（積んである task を先頭から。止める時刻を決めると、その時刻にキューを一時停止する task を積む） */
 function cmdQueueStart(a: Args): number {
   // いつ回すかはユーザーが決める（流したら回す。昼かは聞かない）。止める時刻は --until を付けたときだけ（none は付けないのと同じ）
+  if (a.pos.length > 0) throw new Error("start はキューを回すだけで、ジョブのファイルは渡しません（積むのは plan が出す queue.sh add <券>）");
   known(a, ["--until", "--tz"], 0);
   const root = runsRoot(a.opts.get("--root"));
   const tz = a.opts.get("--tz") ?? "Asia/Tokyo";
   const now = Date.now();
   const untilText = a.opts.get("--until") ?? "none";
   const until = untilText === "none" ? null : parseUntil(untilText, now, tz);
-  const active = activeRuns(root);
-  if (active.length > 0) throw new Error(`前のやり方（go・start・resume）の回が動いています: ${active.map((d) => basename(d)).join(", ")}（同時には回さない。止めるなら queue.sh stop）`);
   const st = ensureGroups();
   // 中断した task（電源が切れた・コンテナが止まった）を、同じ番号のまま積み直す（後ろの task はそれを待っている）
   const killed = st.tasks.filter((t) => t.group === QUEUE_GROUP && t.state === "Killed" && labelOf(t.label) !== null).map((t) => String(t.id));
@@ -3549,15 +3064,13 @@ function cmdList(a: Args): number {
     const plan = readPlan(d);
     const done = markers(d);
     const st = readStatus(d);
-    const pid = workerPid(d);
     return [
       plan.name,
       plan.commit,
       `${plan.chunks.filter((c) => done.has(c.id)).length}/${plan.chunks.length}`,
       plan.queue === 1
         ? `キュー: ${queueRunState(plan, ps === null ? null : runTasks(ps, plan.name), done, "Asia/Tokyo")}`
-        : pid !== null
-          ? "動いている" : st === null ? "まだ" : st.state === "done" ? "全部済んだ" : st.state === "running" ? "止まっている（落ちた？）" : `止まった（${st.reason}）`,
+        : `前のやり方: ${st === null ? "始めていない" : st.state === "done" ? "全部済んだ" : `止まった（${st.reason || "落ちた"}）`}`,
     ];
   });
   console.log(rows.length === 0 ? `${root} に回はありません` : markdownTable(["名前", "コミット", "区切り", "状態"], rows));
@@ -3565,23 +3078,17 @@ function cmdList(a: Args): number {
 }
 
 const USAGE = `使い方（docs/queue.md）:
-  npm run queue -- plan <ジョブのファイル> [--threads N] [--machine 名前] [--chunk-min 7.5] [--name 名前] [--until 07:00] [--legacy]   （見込みと積むコマンド。--legacy は前のやり方の券）
+  npm run queue -- plan <ジョブのファイル> [--threads N] [--machine 名前] [--chunk-min 7.5] [--name 名前] [--at 23:00] [--until 07:00]   （見込みと積むコマンド。--until は表の見込みだけ）
   キュー（pueue。コンテナの中で。ホストからは docker/remote-control/queue.sh <同じ引数>）:
   npm run queue -- add <券|回の名前>           （積む。いつ流してもよい。回の名前なら、済んでいない作業を積み直す）
   npm run queue -- start [--until 07:00|+2h]   （キューを回す。全部済むか pause まで。--until を付ければその時刻に一時停止する）
   npm run queue -- pause [--wait]              （キューを一時停止。回している区切りは凍らせる。--wait なら済んでから止まる）
   npm run queue -- status [名前]               （名前なしはキュー全体）
   npm run queue -- remove <回の名前>           （まだ回していない task をキューから外す）
-  前のやり方（PC でキューを確かめるまで残す）:
-  npm run queue -- go <券>                    （コンテナの中で。ホストからは docker/remote-control/queue.sh go <券>。券は plan --legacy が出す 1 行）
-  npm run queue -- start <ジョブのファイル> --yes [--name 名前] [--until 07:00] [--threads N] [--chunk-min 7.5] [--allow-dirty]
-  npm run queue -- status [名前]
-  npm run queue -- stop [名前] [--now]
-  npm run queue -- resume [名前] --yes [--until 07:00] [--threads N]
-  npm run queue -- finish [名前] [--commit] [--pack] [--ledger 台帳]   （止まったときのまとめで要らなくなった。PC で確かめるまで残す）
   npm run queue -- wrap [名前|--pending]       （止まったときのまとめをやり直す: 台帳の行を night/<名前> にコミットし、出口にまとめる。--pending はまとめていない回を全部）
-  npm run queue -- ingest <回の名前|ファイル…> [--ledger 台帳] [--to /mnt/project-files]   （スレッドで: 台帳に足す・出口のファイルを展開する）
   npm run queue -- list
+  スレッドで:
+  npm run queue -- ingest <回の名前|ファイル…> [--ledger 台帳] [--to /mnt/project-files]   （台帳に足す・出口のファイルを展開する）
   （回の置き場所は --root か環境変数 SVWB_NIGHT_DIR。既定は ~/svwb-data/night。出口は SVWB_OUTBOX_DIR、既定は ~/svwb-data/outbox）`;
 
 export async function main(argv: string[]): Promise<number> {
@@ -3590,10 +3097,9 @@ export async function main(argv: string[]): Promise<number> {
     const a = parseArgs(rest);
     switch (cmd) {
       case "plan": {
-        // --at: 始める時刻（見込みの表だけ。既定は今。--until と同じ形）。--legacy: 前のやり方の券（go）を出す。
-        // 既定は積む券（add。止める時刻を持たない。--until は見込みの表だけ）
-        known(a, ["--until", "--tz", "--threads", "--machine", "--chunk-min", "--at", "--name", "--legacy"], 1);
-        const legacy = a.opts.has("--legacy");
+        // 積む券（ユーザーがホストで queue.sh add <券> を流す。いつ流してもよく、回すのは queue.sh start。docs/queue.md「キュー（pueue）」）。
+        // --at: 始める時刻、--until: 止める時刻（どちらも見込みの表だけ。券には入らない）
+        known(a, ["--until", "--tz", "--threads", "--machine", "--chunk-min", "--at", "--name"], 1);
         const file = a.pos[0];
         if (file === undefined) throw new Error("ジョブのファイルを渡します");
         const jobs = parseJobs(readFileSync(file, "utf8"));
@@ -3603,34 +3109,19 @@ export async function main(argv: string[]): Promise<number> {
         const parts = makePlanParts(jobs, repoLedger().runs, machine, session.threads, chunkMin, repoLedger().misses);
         const at = a.opts.get("--at");
         const startAt = at === undefined ? session.started : parseUntil(at, session.started, session.tz);
-        const until =
-          !legacy && !a.opts.has("--until")
-            ? null
-            : at === undefined || a.opts.has("--until")
-              ? session.until
-              : parseUntil(a.opts.get("--until") ?? "07:00", startAt, session.tz);
+        const untilText = a.opts.get("--until");
+        const until = untilText === undefined ? null : parseUntil(untilText, startAt, session.tz);
         console.log(planText({ jobs, ...parts }, { threads: session.threads, machine, startAt, until, tz: session.tz, title: `キュー（${file}）` }));
         const w = wallClock(startAt, session.tz);
         const date = `${w.y}${p2(w.mo)}${p2(w.d)}`;
         const stem = basename(file).replace(/\.txt$/, "");
-        const name = a.opts.get("--name") ?? (legacy ? `night-${date}` : /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(stem) ? `${stem}-${date}` : `q-${date}`);
+        const name = a.opts.get("--name") ?? (/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(stem) ? `${stem}-${date}` : `q-${date}`);
         if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(name)) throw new Error(`--name は英数字と . _ - だけ: ${name}`);
-        const shared = {
+        const tk = ticketHere(file, {
+          name,
           ...(a.opts.has("--threads") ? { threads: session.threads } : {}),
           ...(a.opts.has("--chunk-min") ? { chunk: chunkMin } : {}),
-        };
-        if (legacy) {
-          // 前のやり方の券（ユーザーがホストで queue.sh go <券> を流す。docs/queue.md「券と go」）
-          const tk = ticketHere(file, { name, until: a.opts.get("--until") ?? "07:00", ...(a.opts.has("--tz") ? { tz: session.tz } : {}), ...shared });
-          console.log(
-            "ticket" in tk
-              ? `\n前のやり方の券（ユーザーがホストでこの 1 行を流すと、すぐ回り始める。docs/queue.md「券と go」）:\n${QUEUE_SH} go ${ticketText(tk.ticket)}`
-              : `\n券は出していません: ${tk.why}`,
-          );
-          return 0;
-        }
-        // 積む券（ユーザーがホストで queue.sh add <券> を流す。いつ流してもよく、回すのは queue.sh start。docs/queue.md「キュー（pueue）」）
-        const tk = ticketHere(file, { v: 2, name, ...shared });
+        });
         console.log(
           "ticket" in tk
             ? `\n積むコマンド（ユーザーがホストで流す。積むだけでは回らず、回すのは queue.sh start。docs/queue.md「キュー（pueue）」）:\n${QUEUE_SH} add ${ticketText(tk.ticket)}`
@@ -3638,8 +3129,6 @@ export async function main(argv: string[]): Promise<number> {
         );
         return 0;
       }
-      case "go":
-        return await cmdGo(a);
       case "add":
         return await cmdAdd(a);
       case "enqueue":
@@ -3648,15 +3137,12 @@ export async function main(argv: string[]): Promise<number> {
         return await cmdPrepare(a);
       case "chunk":
         return await cmdChunk(a);
+      case "start":
+        return cmdQueueStart(a);
       case "pause":
         return cmdPause(a);
       case "remove":
         return cmdRemove(a);
-      case "start":
-        // ジョブのファイルを渡せば前の形（回を 1 つ作って worker で回す）、渡さなければキューを回す
-        return a.pos.length === 0 ? await cmdQueueStart(a) : await cmdStart(a);
-      case "resume":
-        return await cmdResume(a);
       case "status": {
         known(a, [], 1);
         const root = runsRoot(a.opts.get("--root"));
@@ -3665,34 +3151,15 @@ export async function main(argv: string[]): Promise<number> {
           console.log(queueOverview(root));
           return 0;
         }
-        console.log(statusText(findRun(root, a.pos[0], () => true)));
+        console.log(statusText(findRun(root, a.pos[0])));
         return 0;
       }
-      case "stop":
-        return cmdStop(a);
-      case "finish":
-        return cmdFinish(a);
       case "wrap":
         return await cmdWrap(a);
       case "ingest":
         return await cmdIngest(a);
       case "list":
         return cmdList(a);
-      case "worker": {
-        // start・resume が切り離して立てる本体（手では流さない）
-        const dir = a.pos[0];
-        if (dir === undefined) throw new Error("回のフォルダを渡します");
-        const ctl: WorkerControl = { stopNow: false };
-        process.on("SIGHUP", () => {});
-        for (const sig of ["SIGTERM", "SIGINT"] as const) {
-          process.on(sig, () => {
-            ctl.stopNow = true;
-            ctl.kill?.();
-          });
-        }
-        const st = await runWorker(dir, ctl);
-        return st.state === "done" ? 0 : 1;
-      }
       default:
         console.log(USAGE);
         return cmd === undefined || cmd === "help" || cmd === "--help" ? 0 : 2;

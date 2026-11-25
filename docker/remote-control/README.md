@@ -15,7 +15,7 @@ AI の実験（自己対戦・勝率比較など）は、既定でこのコン�
 
 PC で対戦を回すのは、ユーザーが回すと決めたときだけ。compare・yardstick はジョブのキュー（`npm run queue`、`docs/queue.md`）で回す。
 キューはセッションから切り離して動くので、Remote Control のセッションが終わっても、`claude remote-control` が立ち上げ直っても続く
-（コンテナが止まると止まる。キューは次の `./queue.sh start` で、前のやり方は同じ券の `./queue.sh go` で続きから）。
+（コンテナが止まると止まる。次の `./queue.sh start` で続きから）。
 pueue を入れる前のイメージなら、一度 `docker compose up -d --build` で作り直す（数分。回していない昼に）。
 
 公式の説明: [Remote Control](https://code.claude.com/docs/en/remote-control)・[ログイン](https://code.claude.com/docs/en/authentication)・
@@ -106,7 +106,6 @@ cd ~/Shadowverse-Wb-Sim/docker/remote-control && docker compose build && docker 
 | キューに積む（いつでも） | `./queue.sh add <券>`（このフォルダの。券はスレッドが出す `svwb-queue-1` で始まる 1 行。スレッドが見せる `~/Shadowverse-Wb-Sim/docker/remote-control/queue.sh add …` の行をそのまま流せばよい。積むだけで回らない。`docs/queue.md`「キュー（pueue）」） |
 | キューを回す・止める | `./queue.sh start`（積んだものを順に、全部済むか止めるまで回す。`--until 07:00` でその時刻に一時停止）・`./queue.sh pause`（すぐ一時停止。回していた区切りは凍り、次の `start` で続きから。`--wait` で区切りが済んでから） |
 | キューの様子を見る | `./queue.sh status`（キュー全体）・`./queue.sh status <回の名前>`。積んだ回をやめるのは `./queue.sh remove <回の名前>`（中は `docker compose exec rc npm run queue -- …`） |
-| 前のやり方でキューを始める・止める | `./queue.sh go <券>`（券は `svwb-night-1` で始まる 1 行。`docs/queue.md`「券と go」）・`./queue.sh stop`（`--now` ですぐ）。PC でキューを確かめるまで残す |
 | キューの結果を上げる | `./queue-push.sh`（このフォルダの。キューが止まるときにコミットしたブランチ `night/<回の名前>` を push する。まとめていない回のまとめと、main に入った回のブランチの片付けもする。ホストで流す） |
 | コンテナの中でシェルを開く | `docker compose exec rc bash` |
 | ログインし直す | `docker compose exec rc claude auth login` の後に `docker compose restart` |
@@ -123,8 +122,8 @@ cd ~/Shadowverse-Wb-Sim/docker/remote-control && docker compose build && docker 
 - `SVWB_DATA`: 自己対戦などの置き場所（ホストの場所）。既定は `~/svwb-data`
 - `CLAUDE_SPAWN`: 新しいセッションの作り方。既定は `same-dir`（どのセッションも `/workspace` で作業する）。`worktree` にすると
   セッションごとに git の worktree を作る（同時に複数のスレッドが作業しても混ざらないが、worktree ごとに Rust を作り直すので遅い）
-- コミットするなら `GIT_AUTHOR_NAME`・`GIT_AUTHOR_EMAIL`・`GIT_COMMITTER_NAME`・`GIT_COMMITTER_EMAIL`。キューの `finish --commit` にも要る
-  （`docs/queue.md`「台帳の行のコミット」）。止まったときのまとめのコミット（ブランチ `night/<回の名前>`）は、いつも「svwb queue」の名前で作る（公開するブランチなので、ここの名前とメールは使わない）
+- コミットするなら `GIT_AUTHOR_NAME`・`GIT_AUTHOR_EMAIL`・`GIT_COMMITTER_NAME`・`GIT_COMMITTER_EMAIL`。
+  キューのまとめのコミット（ブランチ `night/<回の名前>`）は、いつも「svwb queue」の名前で作る（公開するブランチなので、ここの名前とメールは使わない）
 
 `.env` を書き換えたら、ホストで `docker compose up -d` を流してコンテナを作り直す（`.env` はコンテナを作るときに読む。動いているセッションとキューは止まるので、回していない昼に）
 

@@ -1,4 +1,4 @@
-// キューの出口（docs/queue.md「止まったときのまとめ」）。worker が止まるとき、回のフォルダの結果を出口のフォルダ（~/svwb-data/outbox/<回の名前>/）に
+// キューの出口（docs/queue.md「止まったときのまとめ」）。回の最後の task（まとめ）が、回のフォルダの結果を出口のフォルダ（~/svwb-data/outbox/<回の名前>/）に
 // .tar.gz（300MB ごとに分ける）と案内（案内.txt）としてまとめる。ユーザーはそのフォルダのファイルを全部スレッドに上げ、
 // スレッドは npm run queue -- ingest <ファイル…> で、壊れていないかを確かめて共有フォルダに展開する（台帳の行は night-main.ts が足す）。
 // ここはファイルを選ぶ・まとめる・読む・展開するところだけ。
@@ -36,7 +36,7 @@ export interface OutboxHead<R = unknown> {
 
 const KIND_DIR: Record<Exclude<Kind, "logs">, string> = { selfplay: "data/selfplay", models: "data/models", kifu: "data/kifu" };
 
-/** 入れないもの（回のフォルダの 1 段目） */
+/** 入れないもの（回のフォルダの 1 段目。worker.pid・STOP は前のやり方で回した回にある） */
 const SKIP_TOP: Record<string, string> = {
   "worker.pid": "動いている印",
   STOP: "止める印",
