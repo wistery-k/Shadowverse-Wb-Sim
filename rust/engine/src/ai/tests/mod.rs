@@ -19,6 +19,7 @@ mod keys;
 mod lethal;
 mod match_rng;
 mod mulligan;
+mod opponent_key;
 mod pool;
 mod potential;
 mod read_lethal;

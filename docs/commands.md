@@ -707,7 +707,7 @@ JSON のオブジェクトで渡す。`{}` は今の探索 AI の既定。知ら
 - `mulliganRolloutWeights`: `turn1` で貪欲法で先へ進めるときの重み。`"ramp"`（既定。貪欲法の既定の重みの `maxPp` だけ探索の重みの値にする。竜の啓示を打つ）・
   `"greedy"`（貪欲法の既定の重みのまま。PP 最大値の項が 0 なので竜の啓示を打たない。2026-10-26 より前の既定）・`"search"`（探索の重み）。
   `mulliganRolloutBeam` が 1 以上なら効かない（ビームは探索の重みで打つ）
-- `opponentSearch`: `null`（相手のターンを読まない）か `{"beamWidth": …, "maxDepth": …, "extraEval": true|false, "ownWeights": true|false}`。`extraEval` は読みの中の相手のターン末に補正を足す。`ownWeights`（既定 false）は読みの中の相手のビームを `policyWeights` でなく自分の `weights` で採点する（R6 のように出発点の重みが 0 の補正なら、相手も自分と同じ「補正だけ」で採点する。docs/ai-notes/15-2026-11-22.md「読みの中の相手を強くしたときの楽観と費用」）
+- `opponentSearch`: `null`（相手のターンを読まない）か `{"beamWidth": …, "maxDepth": …, "extraEval": true|false, "ownWeights": true|false, "handKey": true|false, "potential": true|false}`。`extraEval` は読みの中の相手のターン末に補正を足す。`ownWeights`（既定 false）は読みの中の相手のビームを `policyWeights` でなく自分の `weights` で採点する（R6 のように出発点の重みが 0 の補正なら、相手も自分と同じ「補正だけ」で採点する。docs/ai-notes/15-2026-11-22.md「読みの中の相手を強くしたときの楽観と費用」）。`handKey`（既定 false）は `extraEval` のとき、ビームの並べ直し（残す局面を選ぶキー）を補正なしの手で作った評価（`policyWeights`。`ownWeights` によらない）だけで行い、補正は最後に選ぶ終局面の採点だけに使う。`potential`（既定 false）は並べ直しのキーに `potentialNet` の見込み（相手の席の視点、`potentialWeight`）を足す（最後に選ぶ点には足さない。「読みの中の相手のビームの並べ直しを替えたときの楽観」）
 - `weights`: 自分の評価の重み。`"default"`（基準の重み）・`"search"`（探索の既定の重み）・`"zero"`（全部 0。手で作った評価を使わず補正だけで点数を付ける）か、
   変えたい項目だけのオブジェクト（`"holdScale"` で hold を何倍にするか）
 - `policyWeights`: 手を選ぶ方策として使う重み（読みの中の相手のビームの評価、相手のターン・選択待ちを打つ貪欲法の自壊の倍率、マリガンの打ち進めの PP 最大値）。

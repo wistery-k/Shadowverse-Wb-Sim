@@ -85,6 +85,13 @@ pub struct OpponentSearch {
     /// 出発点の重みを 0 にした補正（R6 等。S = 0）なら、extra_eval と合わせて、相手も自分と同じ「補正だけ」で採点する
     /// （docs/ai-notes/15-2026-11-22.md「読みの中の相手を強くしたときの楽観と費用」）
     pub own_weights: bool,
+    /// extra_eval のとき、ビームの並べ直し（残す局面を選ぶキー）は手で作った評価（方策の重み。own_weights によらない）だけで行い、
+    /// 補正は最後に選ぶ点（終局面の採点）だけに使う（既定 false。補正の計算は終局面の分だけになる）。
+    /// docs/ai-notes/15-2026-11-22.md「読みの中の相手のビームの並べ直しを替えたときの楽観」
+    pub hand_key: bool,
+    /// 読みの中の相手のビームの並べ直しのキーに、学習した見込み（SearchOptions.potential を相手の席の視点で。重みは potential_weight）を足す（既定 false）。
+    /// 最後に選ぶ点には足さない（自分のターンのビームと同じ）
+    pub potential: bool,
 }
 
 /// 読み直す並びに、自分の山札から引く手かランダムな手（引くカード・ランダムの結果が決定化で決まっている手）があれば、その手の直前で区切り、
@@ -446,6 +453,8 @@ impl Default for SearchOptions {
                 max_depth: 8,
                 extra_eval: false,
                 own_weights: false,
+                hand_key: false,
+                potential: false,
             }),
             opp_hand_samples: 12,
             opp_hand_common: true,
@@ -1175,6 +1184,30 @@ fn best_plan_last(
         }
     }
     best.and_then(|i| pl.steps_of(terminals[i].path).pop())
+}
+
+/// best_plan_last と同じ。ただしビームは key_env の点数で並べて打ち、終局面は judge_env の点数（end_score）で選び直す（同じなら先のもの。opponentSearch.handKey）
+fn best_plan_last_judged(
+    root: &Rc<GameState>,
+    p: PlayerIndex,
+    key_env: &Env,
+    judge_env: &Env,
+) -> Option<(Action, Rc<GameState>)> {
+    let (pl, terminals, _) = turn_end_bests(root, p, key_env);
+    let judge = Planner {
+        env: judge_env,
+        p,
+        root: root.clone(),
+        steps: Vec::new(),
+    };
+    let mut best: Option<(usize, f64)> = None;
+    for (i, t) in terminals.iter().enumerate() {
+        let v = judge.score(&t.state);
+        if best.is_none_or(|(_, b)| v > b) {
+            best = Some((i, v));
+        }
+    }
+    best.and_then(|(i, _)| pl.steps_of(terminals[i].path).pop())
 }
 
 /// 相手のターンまで読み直す終局面（最初の手ごとの最善のうち、ターン末の点数の上位 rescore_top と、drawSplit が足す引く手）
@@ -2058,7 +2091,11 @@ fn opponent_search_options(opts: &SearchOptions) -> SearchOptions {
         beam_width: os.map(|o| o.beam_width).unwrap_or(opts.beam_width),
         max_depth: os.map(|o| o.max_depth).unwrap_or(opts.max_depth),
         opponent_search: None,
-        potential: None,
+        potential: if os.is_some_and(|o| o.potential) {
+            opts.potential.clone()
+        } else {
+            None
+        },
         read_lethal: None,
         ..opts.clone()
     }
@@ -2088,6 +2125,21 @@ pub fn simulate_opponent_turn_by_search(
         opp_w: ow,
         policy_w: env.policy_w,
     };
+    // opponentSearch.handKey: ビームは補正なしの手で作った評価（方策の重み）で打ち、終局面だけ opp_env の点数で選ぶ
+    let hand_key = opts
+        .opponent_search
+        .is_some_and(|o| o.hand_key && o.extra_eval)
+        && opp_opts.extra_eval.is_some();
+    let key_opts = SearchOptions {
+        extra_eval: None,
+        ..opp_opts.clone()
+    };
+    let key_env = Env {
+        opts: &key_opts,
+        w: env.opp_w,
+        opp_w: env.opp_w,
+        policy_w: env.policy_w,
+    };
     let mut s: Option<GameState> = Some(state.clone());
     let mut ended = false;
     let mut searched = false;
@@ -2111,7 +2163,12 @@ pub fn simulate_opponent_turn_by_search(
         if ended && !searched && cur.pending.is_none() && cur.active == q {
             searched = true;
             let root = Rc::new(cur.clone());
-            if let Some((action, last)) = &best_plan_last(&root, q, &opp_env) {
+            let best = if hand_key {
+                best_plan_last_judged(&root, q, &key_env, &opp_env)
+            } else {
+                best_plan_last(&root, q, &opp_env)
+            };
+            if let Some((action, last)) = &best {
                 if !matches!(action, Action::EndTurn) {
                     cur = if opts.settle_trades {
                         settle_converging_trades_with(last, q, opts.dominance)
