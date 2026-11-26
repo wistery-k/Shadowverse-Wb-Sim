@@ -1,0 +1,16 @@
+# 新しいプールの既定（2026-11-25 に採った形）を、別のシードの 2 万試合で R6 と比べ直す（確かめ直し。積むかはユーザーが決める）。
+# 採った形: 補正 R6・見込み R4 に、読みの中の相手を幅 8・深さ 8 のまま S = 0 ＋補正で打たせ（並べ直しも補正）、想像の局面の印を切ったもの
+# （data/pools/azvaldt/search-options.json）。対 R6 はキュー light-read-1 の 1 晩だけ（g10000〜19999、50.59% ± 0.25）。
+# 物差しは相手 v0 80.00% ± 0.43・相手 R3 53.97% ± 0.48 で、R6（80.80%・54.23%）と見分けられなかった（キュー light-read-yardstick）。
+# 強く読む幅 32 の形は 2 晩とも線を越えた（g0〜9999 と g10000〜19999）が、この形は g0〜9999 の手で作った重み＋補正の版（50.46%）しか無い。
+#
+# 回す前に決める線（採ったときと同じ、見落としの直しの線）:
+#   差 − 2 SE > −0.3 なら、そのまま既定に置く（勝率を落としていない）。
+#   差 + 2 SE < 0 なら、R6 より弱い見込みが強いので、既定を R6 に戻すか、幅 32 の形にするかをユーザーに出す。
+#   どちらでもなければ、light-read-1 と足し合わせた 4 万試合（npm run ledger -- sum）で同じ線を見る。
+#
+# 見込み（PC、svwb-docker・28 スレッド）: light-read-1 の実測 0.234 秒/試合で 1 時間 18 分
+# 朝: 止まったときのまとめを push してもらい、ingest する
+# 回の名前は light-read-2
+
+compare 10000 '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json"}' 20000 --decks @data/pools/azvaldt/sets/all84.txt --label 軽読み8S0印なし対R6 --est 0.234
