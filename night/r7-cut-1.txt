@@ -1,0 +1,94 @@
+# 切る版を直りきらせる調べ（対戦なし）: 1 晩目（r7-1）の自己対戦 6 万試合から、切る版 K と対照 C を、エポックを増やした形（8 エポック）と λ を上げた形（λ 0.9・6 エポック）で学び直す。
+# 審査の依頼（2026-11-26）。ユーザーの問い「切ったところの評価自体が楽観していないか」への答え（docs/ai-notes/15-2026-11-22.md「切ったところの値も楽観していないか」）で、
+#   切った目標も序盤は出発の R6 の楽観を受け継ぎ、直りは終盤から順に進むだけと分かった（1 エポック目の目標は 1〜2 ターン目で +5.3、k-e1 から作る目標でも +4.0）。
+# この調べの役目: 診断の確かめ（直りきれば楽観がほぼ 0 になるか）と、次の学び直しの形（本線はランダムな手なし、枝で後から生やす。ユーザーの案）の学びで λ とエポックをどうするかの材料。
+#   強さの比べに進むかは、結果を見てからユーザーと決める（そのときのために、対照を同じ λ・同じエポック数で作っておく）
+#
+# ---- 回す前に決めた線（この晩の後には変えない）----
+# 直りきった: 確かめ用のターン末（td train --byTurn 1。ランダムに打った局面と介入して打った試合を除く）で、その版の 予測 − 勝ち が、5 つの手番の帯（1〜2・3〜4・5〜6・7〜8・9 以上）の
+#   どれでも ±1.0 ポイント以内。かつ、2 晩目の K 対 C の棋譜（r7-2）をその版で採点し直した 勝ち − 値 が全体で −1.5 以上（翌朝クラウド環境で）。
+#   根拠: 帯ごとの勝ちの割合の ± は 0.3〜0.5 ほど（1〜2 ターン目は両方の席を数えるので勝ちは 50% に決まり、もっと小さい）で、±1.0 はおよそ 2 SE。今の K の e3 は 1〜2 ターン目が +3.8。
+#   棋譜の −1.5 は、自分で選んだ局面の上乗せ（−0.35）と、学びの世界と対戦の世界のずれが残る分を見込んだもの
+#   見込み（審査）: ターン末の行は次に来るランダムな手が相手の側なので、実際の勝敗は「どちらもランダムに打たない世界」よりわずかに高く、直りきった K は 0 より少し下に寄る。符号も見る
+# 止める: 確かめ用の局面（end・imagined）の勝敗の交差エントロピーが、C の 1 エポック（r7-1 の ct、0.5027）より悪くなったエポックから後は使わない。
+#   そこまでに直りきらなければ、その形は「直りきらない」。K9 は C9 の同じエポックの損失も並べ、悪くなったのが切ったせいか λ のせいかを分けて読む
+# 朝に並べる数（線にしない）: 各版の各エポックの、手番の帯ごとの 目標 − 勝ち と 予測 − 勝ち（学びの報告の --byTurn の行）、棋譜の全体と手番ごとの 勝ち − 値、
+#   確かめ用の損失と AUC。直りきった版が出たら、その版と同じ形の対照の強さの比べ（線は改めて決める）をユーザーに出す
+#
+# 版（どれも r7-1 の K・C と同じ学び方に、--epochs・--lambda・--epochOut・--byTurn を足したもの。出発は R6 に入力 6 つの行を 0 で足した v0）:
+#   K8・C8: λ 0.7 で 8 エポック（K は --cutOpp 1）
+#   K9・C9: λ 0.9 で 6 エポック
+#   --best 1 の選んだ版（--out）は参考に残す。朝に使うのはエポックごとの版（間引きと属性をかけたもの）
+#
+# 見込み（PC、svwb-docker・28 スレッド）: r7-1 の学び 3 エポック 11 分（読み込み 23 秒）から 1 エポック 3 分半ほどで、8 エポック 30 分・6 エポック 22 分。
+#   4 つで 1 時間 44 分に、間引き 20 秒・属性 1 秒をエポックごとに（28 回）で、合わせて 2 時間ほど
+# 朝: 止まったときのまとめを push してもらい、ingest する（モデルと学びのログが要る。自己対戦も棋譜も作らないので、出口は小さい）
+# 回の名前は r7-cut-1（plan に --name r7-cut-1 を付ける）。データは @run:r7-1 の自己対戦を読む
+
+# 1. K8（切る版、λ 0.7・8 エポック）
+td train --impl rust --model @run:r7-1/v0.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/k8t.json --epochOut @/k8t-e{e}.json --epochs 8 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks,oppDeckAtkMod,oppDeckDefMod,oppHandAtkMod,oppHandDefMod,myMaxHp,oppMaxHp --cutOpp 1 --byTurn 1 --est 1800
+td prune --impl rust --model @/k8t-e1.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/k8p-e1.json --est 30
+td attr --model @/k8p-e1.json --out @/k8-e1.json --keepA 0 --est 10
+td prune --impl rust --model @/k8t-e2.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/k8p-e2.json --est 30
+td attr --model @/k8p-e2.json --out @/k8-e2.json --keepA 0 --est 10
+td prune --impl rust --model @/k8t-e3.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/k8p-e3.json --est 30
+td attr --model @/k8p-e3.json --out @/k8-e3.json --keepA 0 --est 10
+td prune --impl rust --model @/k8t-e4.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/k8p-e4.json --est 30
+td attr --model @/k8p-e4.json --out @/k8-e4.json --keepA 0 --est 10
+td prune --impl rust --model @/k8t-e5.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/k8p-e5.json --est 30
+td attr --model @/k8p-e5.json --out @/k8-e5.json --keepA 0 --est 10
+td prune --impl rust --model @/k8t-e6.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/k8p-e6.json --est 30
+td attr --model @/k8p-e6.json --out @/k8-e6.json --keepA 0 --est 10
+td prune --impl rust --model @/k8t-e7.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/k8p-e7.json --est 30
+td attr --model @/k8p-e7.json --out @/k8-e7.json --keepA 0 --est 10
+td prune --impl rust --model @/k8t-e8.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/k8p-e8.json --est 30
+td attr --model @/k8p-e8.json --out @/k8-e8.json --keepA 0 --est 10
+
+# 2. C8（対照、λ 0.7・8 エポック）
+td train --impl rust --model @run:r7-1/v0.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/c8t.json --epochOut @/c8t-e{e}.json --epochs 8 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks,oppDeckAtkMod,oppDeckDefMod,oppHandAtkMod,oppHandDefMod,myMaxHp,oppMaxHp --byTurn 1 --est 1800
+td prune --impl rust --model @/c8t-e1.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/c8p-e1.json --est 30
+td attr --model @/c8p-e1.json --out @/c8-e1.json --keepA 0 --est 10
+td prune --impl rust --model @/c8t-e2.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/c8p-e2.json --est 30
+td attr --model @/c8p-e2.json --out @/c8-e2.json --keepA 0 --est 10
+td prune --impl rust --model @/c8t-e3.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/c8p-e3.json --est 30
+td attr --model @/c8p-e3.json --out @/c8-e3.json --keepA 0 --est 10
+td prune --impl rust --model @/c8t-e4.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/c8p-e4.json --est 30
+td attr --model @/c8p-e4.json --out @/c8-e4.json --keepA 0 --est 10
+td prune --impl rust --model @/c8t-e5.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/c8p-e5.json --est 30
+td attr --model @/c8p-e5.json --out @/c8-e5.json --keepA 0 --est 10
+td prune --impl rust --model @/c8t-e6.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/c8p-e6.json --est 30
+td attr --model @/c8p-e6.json --out @/c8-e6.json --keepA 0 --est 10
+td prune --impl rust --model @/c8t-e7.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/c8p-e7.json --est 30
+td attr --model @/c8p-e7.json --out @/c8-e7.json --keepA 0 --est 10
+td prune --impl rust --model @/c8t-e8.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/c8p-e8.json --est 30
+td attr --model @/c8p-e8.json --out @/c8-e8.json --keepA 0 --est 10
+
+# 3. K9（切る版、λ 0.9・6 エポック）
+td train --impl rust --model @run:r7-1/v0.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/k9t.json --epochOut @/k9t-e{e}.json --epochs 6 --lambda 0.9 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks,oppDeckAtkMod,oppDeckDefMod,oppHandAtkMod,oppHandDefMod,myMaxHp,oppMaxHp --cutOpp 1 --byTurn 1 --est 1350
+td prune --impl rust --model @/k9t-e1.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/k9p-e1.json --est 30
+td attr --model @/k9p-e1.json --out @/k9-e1.json --keepA 0 --est 10
+td prune --impl rust --model @/k9t-e2.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/k9p-e2.json --est 30
+td attr --model @/k9p-e2.json --out @/k9-e2.json --keepA 0 --est 10
+td prune --impl rust --model @/k9t-e3.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/k9p-e3.json --est 30
+td attr --model @/k9p-e3.json --out @/k9-e3.json --keepA 0 --est 10
+td prune --impl rust --model @/k9t-e4.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/k9p-e4.json --est 30
+td attr --model @/k9p-e4.json --out @/k9-e4.json --keepA 0 --est 10
+td prune --impl rust --model @/k9t-e5.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/k9p-e5.json --est 30
+td attr --model @/k9p-e5.json --out @/k9-e5.json --keepA 0 --est 10
+td prune --impl rust --model @/k9t-e6.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/k9p-e6.json --est 30
+td attr --model @/k9p-e6.json --out @/k9-e6.json --keepA 0 --est 10
+
+# 4. C9（対照、λ 0.9・6 エポック）
+td train --impl rust --model @run:r7-1/v0.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/c9t.json --epochOut @/c9t-e{e}.json --epochs 6 --lambda 0.9 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks,oppDeckAtkMod,oppDeckDefMod,oppHandAtkMod,oppHandDefMod,myMaxHp,oppMaxHp --byTurn 1 --est 1350
+td prune --impl rust --model @/c9t-e1.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/c9p-e1.json --est 30
+td attr --model @/c9p-e1.json --out @/c9-e1.json --keepA 0 --est 10
+td prune --impl rust --model @/c9t-e2.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/c9p-e2.json --est 30
+td attr --model @/c9p-e2.json --out @/c9-e2.json --keepA 0 --est 10
+td prune --impl rust --model @/c9t-e3.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/c9p-e3.json --est 30
+td attr --model @/c9p-e3.json --out @/c9-e3.json --keepA 0 --est 10
+td prune --impl rust --model @/c9t-e4.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/c9p-e4.json --est 30
+td attr --model @/c9p-e4.json --out @/c9-e4.json --keepA 0 --est 10
+td prune --impl rust --model @/c9t-e5.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/c9p-e5.json --est 30
+td attr --model @/c9p-e5.json --out @/c9-e5.json --keepA 0 --est 10
+td prune --impl rust --model @/c9t-e6.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/c9p-e6.json --est 30
+td attr --model @/c9p-e6.json --out @/c9-e6.json --keepA 0 --est 10
