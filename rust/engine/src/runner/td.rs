@@ -2515,6 +2515,8 @@ mod tests {
                 let v: serde_json::Value = serde_json::from_str(line).expect("JSON");
                 assert_eq!(v["iv"]["zone"], "plan");
                 assert_eq!(v["iv"]["card"], "random");
+                // 確かめ用の分け方は試合番号で決まるので、枝はもとの試合と同じ側に入る
+                assert_eq!(v["g"].as_u64(), Some(g as u64));
                 let p = v["iv"]["p"].as_u64().expect("席") as usize;
                 seats[p] += 1;
                 assert_eq!(v["samples"][p][0]["ph"], 0, "枝の最初はターン末");
