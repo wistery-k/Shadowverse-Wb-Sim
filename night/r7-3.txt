@@ -1,37 +1,27 @@
-# R7 の候補の 3 晩目: 切る版 K 対 対照 C を別のシードで 4 万試合足して 8 万試合で決め、入力の版 I を R6 と 2 万試合、I の物差し 2 つ。
+# R7 の候補の 3 晩目: 入力の版 I を R6 と 2 万試合、I の物差し 2 つ。
 # 2 晩目（r7-2、2026-11-26）の結果: K 対 C 49.71% ± 0.20（4 万試合、差 − 2 SE −0.69・差 + 2 SE +0.10 で「分からない」）、I 対 C 50.28% ± 0.18（通る。コンボE・アグロNi の絡む組 50.03% ± 0.28 も通る）、
 #   C 対 R6 50.63% ± 0.28（差 − 2 SE +0.06 で通る）。表示は K が通り（勝ち − 値 C −4.87 → K −3.11）、I は (b) が通り、(a) は基準 B2 で直した値で通る（生の値では通らない。線の文が B2 と明記していなかったので、両方の数をユーザーに出した。審査は B2 に同意）。
 #   計画は docs/ai-notes/15-2026-11-22.md「R7 の候補」、決めた線は night/r7-2.txt の先頭
+# K（切る版）を足す 4 万試合は外した（審査の勧め、2026-11-26）: 学びのデータを手番ごとに見ると、切った目標も序盤は出発の R6 の楽観を受け継ぎ（1 エポック目の目標は 1〜2 ターン目で +5.3、
+#   k-e1 から作る目標でも +4.0）、k-e1 は直しかけの版だった（ai-notes「切ったところの値も楽観していないか」）。足しても直しかけの版の強さしか分からない。
+#   2 晩目の K の結果は「分からない（直しかけの版）」として残し、切る版は対戦の前に「直りきる形」を作る調べを別に立てる
 #
 # ---- 回す前に決めた線と試合数（この晩の後には変えない）----
-# 1. K 対 C（g20000〜39999 の 4 万試合。2 晩目の g0〜19999 と合わせて 8 万試合、± 0.14 ほど）: 2 晩目と同じ線を 8 万試合の合計（npm run ledger -- sum R7切る対対照）で見る。
-#    差 − 2 SE > −0.3 なら「落とさない」、差 + 2 SE < 0 なら「下げる」。8 万試合でも「分からない」なら、表示の結果と並べてユーザーと決める（2 晩目のファイルの決まり）
-#    2 段で決めたときに通る割合は、本当の差 0 なら 69%、−0.3 なら 4%、−0.5 なら 0.1%（2 晩目のファイルの模擬）
-#    並べるだけ（審査の依頼、線にしない）: 2 晩目で K 対 C のコンボE の絡む組が 48.85% ± 0.40 だった。足す 4 万試合だけで見て、そこでも 50 を 2 SE 下回れば（勝率 + 2 SE < 50%）、
-#    型を選んだ害が再現したとしてユーザーに出す。8 万試合の全体の線はそのまま
-#    見込み（2 晩目の −0.29 ± 0.20 から、平らな事前分布で）: 8 万試合で「落とさない」は 3% ほど、「下げる」は 5 割ほど、残りは「分からない」
-# 2. I 対 R6（2 万試合、g0〜9999。C 対 R6 と同じシード、± 0.28 ほど）: 差 − 2 SE > 0 なら、I を R7 の候補として採否をユーザーに出す（C 対 R6 と同じ線）。
+# 1. I 対 R6（2 万試合、g0〜9999。C 対 R6 と同じシード、± 0.28 ほど）: 差 − 2 SE > 0 なら、I を R7 の候補として採否をユーザーに出す（C 対 R6 と同じ線）。
 #    越えなければ、C（C 対 R6 は越えた）を採るかをユーザーと相談する。見込み: I 対 C +0.28 と C 対 R6 +0.63 を足すと +0.9 ほどで、+0.9 なら 9 割ほどが線を越える
-#    K が 1 で通ったら、K・I を合わせた版 KI（I と同じエポック 1 の ki-e1）を 4 晩目で R6 と 2 万試合と物差し 2 つ（2 晩目のファイルの「組み合わせ」）。
-#    KI の分（R6 と 2 万試合・物差し 2 つ、2 時間 16 分）を今夜に先回りして入れる案もユーザーに出した（K が通る見込みが小さいので、入れないのを勧めた）
-# 3. I の物差し 2 つ（相手 v0・相手 R3、8000 試合ずつ）。I を採ったときだけ docs/yardstick.md の表に足す（R6 の候補と同じ。線にしない）
+# 2. I の物差し 2 つ（相手 v0・相手 R3、8000 試合ずつ）。I を採ったときだけ docs/yardstick.md の表に足す（R6 の候補と同じ。線にしない）
 #
 # 見込み（PC、svwb-docker・28 スレッド）: 2 晩目の compare の実測 0.213〜0.218 秒/試合から 0.215、物差しは light-read-yardstick の実測 0.218・0.263 秒/試合。
-#   K 対 C 4 万試合 2 時間 23 分、I 対 R6 2 万試合 1 時間 12 分、物差し 29 分・35 分で、合わせて 4 時間 40 分ほど
+#   I 対 R6 2 万試合 1 時間 12 分、物差し 29 分・35 分で、合わせて 2 時間 16 分ほど
 # 朝: 止まったときのまとめを push してもらい、ingest する
 # 回の名前は r7-3
 
 # 0. 1 晩目の回のフォルダのモデルを写す（2 晩目と同じ写し方）
-td extend --model @run:r7-1/c.json --out @/c.json --est 10
-td extend --model @run:r7-1/k-e1.json --out @/k.json --est 10
 td extend --model @run:r7-1/i.json --out @/i.json --est 10
 
-# 1. K 切る版 対 C 対照（4 万試合、g20000〜39999。2 晩目と同じ名前で、台帳の sum で 8 万試合を合わせる）
-compare 20000 '{"valueNet":"@/k.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' '{"valueNet":"@/c.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' 20000 --decks @data/pools/azvaldt/sets/all84.txt --label R7切る対対照 --est 0.215
-
-# 2. I 入力の版 対 R6（2 万試合、C 対 R6 と同じシード）
+# 1. I 入力の版 対 R6（2 万試合、C 対 R6 と同じシード）
 compare 10000 '{"valueNet":"@/i.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label R7入力対R6 --est 0.215
 
-# 3. I の物差し 2 つ
+# 2. I の物差し 2 つ
 yardstick --ref pool-v0 --opts '{"valueNet":"@/i.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' --games 4000 --start 0 --label 新しいプール-物差し-R7入力 --est 0.218
 yardstick --ref pool-r3 --opts '{"valueNet":"@/i.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' --games 4000 --start 0 --label 新しいプール-強い物差し-R7入力 --est 0.263
