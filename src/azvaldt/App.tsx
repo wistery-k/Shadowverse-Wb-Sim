@@ -2,7 +2,7 @@
 // タブは「AI対戦（総当たり）」と「問題集」の 2 つだけ。AI 同士の試合と、問題集の決まった局面を表示・再生する。
 // 人間と AI の対戦・デッキの編集や貼り付け・サンドボックス・試合の記録・局面の入力は付けない（実際の対戦の支援にならないように。CLAUDE.md「ソフト打ち」）。
 // AI 同士の試合のリプレイは、seed・両者の AI・デッキ（プロのデッキの ID）を持つ URL（#game?…。src/sim/gameLink.ts）で開ける（ユーザーの依頼 2026-11-20。局面は URL に入らない）。
-// AI は探索 AI に、このページが読み込む補正 R6 と見込み（data/pools/azvaldt/。2026-11-21 に R3 から R4 に、2026-11-22 に R5 に、2026-11-23 に R6 に入れ替えた。見込みは R4 のまま）と、新しいプールの既定の設定（data/pools/azvaldt/search-options.json。2026-11-25 から。読みの中の相手も補正で打つ）を入れたもの（コマンドの新しいプールの既定と同じ手を選ぶ。tests/nets-azvaldt.test.ts）
+// AI は探索 AI に、このページが読み込む補正 R7 と見込み（data/pools/azvaldt/。2026-11-21 に R3 から R4 に、2026-11-22 に R5 に、2026-11-23 に R6 に、2026-11-26 に R7 に入れ替えた。見込みは R4 のまま）と、新しいプールの既定の設定（data/pools/azvaldt/search-options.json。2026-11-25 から。読みの中の相手も補正で打つ）を入れたもの（コマンドの新しいプールの既定と同じ手を選ぶ。tests/nets-azvaldt.test.ts）
 
 import { useEffect, useState } from "preact/hooks";
 import { Footer } from "../ui/Footer";
@@ -11,9 +11,9 @@ import { Simulate, type DeckPreset } from "../ui/Simulate";
 import { isGameHash } from "../sim/gameLink";
 import { AZVALDT_DECK_OPTIONS, AZVALDT_LINK_DECKS, REP10_IDS } from "./decks";
 
-/** 総当たりで選べる AI（キーは src/ai/registry.ts。探索はこのページの補正 R6 で打つ） */
+/** 総当たりで選べる AI（キーは src/ai/registry.ts。探索はこのページの補正 R7 で打つ） */
 const AGENTS: Record<string, string> = {
-  search: "探索（補正 R6）",
+  search: "探索（補正 R7）",
   greedy: "貪欲法",
   random: "ランダム",
 };
@@ -100,7 +100,7 @@ export function AzvaldtApp() {
             note={
               <p class="muted">
                 デッキは、取り込んだプロのデッキ（プレミアシリーズ 3 回分）だけを選べます。カードは、これらのデッキに入るものだけを実装しています。
-                探索 AI は、このページ用に学習した補正 R6 で打ちます（初めて試合を始めるとき、補正のファイル 5MB ほどを読み込みます）。
+                探索 AI は、このページ用に学習した補正 R7 で打ちます（初めて試合を始めるとき、補正のファイル 5MB ほどを読み込みます）。
               </p>
             }
           />

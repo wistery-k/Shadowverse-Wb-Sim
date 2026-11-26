@@ -1,10 +1,10 @@
-//! ブラウザのアズヴォルト環境のページの AI が、コマンドの同じ補正（今は R6）・同じ設定と同じ手を選ぶか（ユーザーの依頼 2026-11-19。R3 から R4 にしたのは 2026-11-21、R5 にしたのは 2026-11-22、R6 にしたのは 2026-11-23。設定を足したのは 2026-11-25）。
+//! ブラウザのアズヴォルト環境のページの AI が、コマンドの同じ補正（今は R7）・同じ設定と同じ手を選ぶか（ユーザーの依頼 2026-11-19。R3 から R4 にしたのは 2026-11-21、R5 にしたのは 2026-11-22、R6 にしたのは 2026-11-23、R7 にしたのは 2026-11-26。設定を足したのは 2026-11-25）。
 //!
 //! ページの AI は、WASM の探索 AI（`search`）に、ページが読み込んだ補正と見込み（data/pools/azvaldt/ の JSON を詰めたもの。
 //! scripts/pack-nets.ts、src/engine/wasm.ts）を既定として入れ、探索 AI の設定（data/pools/azvaldt/search-options.json。下の PAGE_OPTIONS）を入れたもの。
 //! コマンドの側は、compare・misses の `--opts` に補正・見込みと同じ設定を書いたもの（2026-11-25 から
-//! `'{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}'`。
-//! 下の PAGE_NET・PAGE_POTENTIAL・PAGE_OPTIONS。R5・R6 は補正だけを学び直したもので、見込みは R4 のまま。
+//! `'{"valueNet":"rust/engine/yardstick/pool-r7-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}'`。
+//! 下の PAGE_NET・PAGE_POTENTIAL・PAGE_OPTIONS。R5〜R7 は補正だけを学び直したもので、見込みは R4 のまま。
 //! 設定は、2026-11-25 に読みの中の相手を幅 8 のまま補正で打たせ、想像の局面の印を切った。それまでは補正と見込みだけ）。
 //!
 //! ここではコマンドの側が決まった局面（新しいプールの問題集 misses/azvaldt/ の 13 問と、代表 10 型のデッキのマリガン）から打つ手を求め、
@@ -30,7 +30,7 @@ use svwb_engine::{acting_player, apply_action, create_game, Action, Phase};
 const MAX_STEPS: u32 = 60;
 
 /// ページの補正の凍結した写し（rust/engine/yardstick/<PAGE_NET>-net.json。data/pools/azvaldt/value-net.json と同じ中身）
-const PAGE_NET: &str = "pool-r6";
+const PAGE_NET: &str = "pool-r7";
 /// ページの見込みの凍結した写し（rust/engine/yardstick/<PAGE_POTENTIAL>-potential.json。data/pools/azvaldt/potential-net.json と同じ中身）
 const PAGE_POTENTIAL: &str = "pool-r4";
 /// ページの探索 AI の設定（補正と見込みの他。src/engine/wasm.ts が WASM に入れる。新しいプールの既定の探索 AI の --opts から補正と見込みを除いたもの）

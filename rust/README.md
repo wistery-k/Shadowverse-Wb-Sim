@@ -37,11 +37,11 @@ wasm-bindgen は使わず、要求と結果を JSON の文字列で受け渡す�
 ページの探索 AI（`search`）の設定も、補正を入れた後に `call` の `setSearchOptions` で入れられる（compare の `--opts` と同じ形。アズヴォルト環境のページは `data/pools/azvaldt/search-options.json`、2026-11-25 から。`docs/browser.md`「ブラウザの探索 AI とコマンドの探索 AI」）。
 
 - 補正のファイル: `npm run wasm` の終わりに `scripts/pack-nets.ts` が JSON から作る `src/engine/nets/<名前>.bin`（コミットしない）。
-  `starter` はスターターのページ（`data/value-net.json`・`data/potential-net.json`）、`azvaldt` はアズヴォルト環境のページ（`data/pools/azvaldt/` の補正 R6・見込み R4。2026-11-21 までは R3、2026-11-22 までは R4、2026-11-23 までは R5）
+  `starter` はスターターのページ（`data/value-net.json`・`data/potential-net.json`）、`azvaldt` はアズヴォルト環境のページ（`data/pools/azvaldt/` の補正 R7・見込み R4。2026-11-21 までは R3、2026-11-22 までは R4、2026-11-23 までは R5、2026-11-26 までは R6）
 - 形（`engine/src/ai/netpack.rs`）: 重みの数を 10 進の仮数と指数に分けてバイトの面ごとに並べ、gzip で縮める。戻した値は JSON を serde_json で解析した値とビットまで同じ
   （補正の出力は変わらない。`tests/nets.test.ts`・`tests/nets-azvaldt.test.ts` が、読み込んだ補正の指紋を JSON の指紋と比べる）
 - ページは自分の分だけを読む（`src/engine/wasm.ts` の `selectNets`。Worker は名前 `nets:<名前>` で受け取る）。画面のメインスレッドは補正を読まない（探索 AI は Worker で動く）
-- ページの探索 AI（今は補正 R6・見込み R4）がコマンドの同じ補正（`engine/yardstick/pool-r6-net.json`・`pool-r4-potential.json`）と同じ手を選ぶことは、`engine/tests/browser_azvaldt.rs`（CLI）と `tests/nets-azvaldt.test.ts`（WASM）が同じ局面の表（`tests/fixtures/browser-azvaldt.json`）で確かめる（`docs/browser.md`「ブラウザの探索 AI とコマンドの探索 AI」）
+- ページの探索 AI（今は補正 R7・見込み R4）がコマンドの同じ補正（`engine/yardstick/pool-r7-net.json`・`pool-r4-potential.json`）と同じ手を選ぶことは、`engine/tests/browser_azvaldt.rs`（CLI）と `tests/nets-azvaldt.test.ts`（WASM）が同じ局面の表（`tests/fixtures/browser-azvaldt.json`）で確かめる（`docs/browser.md`「ブラウザの探索 AI とコマンドの探索 AI」）
 
 ## テスト
 

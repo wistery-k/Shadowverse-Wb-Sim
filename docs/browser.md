@@ -5,7 +5,7 @@
 | ページ | URL | 入口 | タブ | 探索 AI の補正 |
 | --- | --- | --- | --- | --- |
 | スターター | `/Shadowverse-Wb-Sim/` | `index.html`・`src/main.tsx`・`src/ui/App.tsx` | 対戦・デッキ・AI対戦・人間との比較・問題集（開発サーバーではサンドボックス等も） | `starter`（`data/value-net.json`・`data/potential-net.json`） |
-| アズヴォルト環境 | `/Shadowverse-Wb-Sim/azvaldt/` | `azvaldt/index.html`・`src/azvaldt/main.tsx`・`src/azvaldt/App.tsx` | AI対戦（総当たり）・問題集 | `azvaldt`（`data/pools/azvaldt/` の補正 R6・見込み R4。2026-11-21 までは R3、2026-11-22 までは R4、2026-11-23 までは R5。探索 AI の設定 `search-options.json` は 2026-11-25 から。下の「ブラウザの探索 AI とコマンドの探索 AI」） |
+| アズヴォルト環境 | `/Shadowverse-Wb-Sim/azvaldt/` | `azvaldt/index.html`・`src/azvaldt/main.tsx`・`src/azvaldt/App.tsx` | AI対戦（総当たり）・問題集 | `azvaldt`（`data/pools/azvaldt/` の補正 R7・見込み R4。2026-11-21 までは R3、2026-11-22 までは R4、2026-11-23 までは R5、2026-11-26 までは R6。探索 AI の設定 `search-options.json` は 2026-11-25 から。下の「ブラウザの探索 AI とコマンドの探索 AI」） |
 
 `vite build` は 2 つの入口を束ね（`vite.config.ts` の `rollupOptions.input`）、画面の共通の部分は 1 つのチャンクにまとまる。
 ページの上の端に、もう片方のページへのリンクがある。
@@ -36,7 +36,7 @@
 - 補正のファイルは、補正と見込みの JSON の gzip（スターター 3.41MB、R3 6.18MB）より 27% 小さい
 - 上の表のアズヴォルト環境は R3 のとき。R4 にした後（2026-11-21）は、補正のファイルが 4.96MB（JSON の gzip 6.68MB より 26% 小さい）。
   R4 は手札のカードごとの攻撃力・体力の変化の入力（カードごとの行）を足したので、R3 の 4.53MB より 1 割ほど大きい。
-  R5（2026-11-22）は 4.97MB（リーサルの出力の 33 個の数と winForm が増えただけで、R4 とほぼ同じ）。R6（2026-11-23）は 4.98MB（R5 と同じ形。入力 7 つの行が 0 で増えた）
+  R5（2026-11-22）は 4.97MB（リーサルの出力の 33 個の数と winForm が増えただけで、R4 とほぼ同じ）。R6（2026-11-23）は 4.98MB（R5 と同じ形。入力 7 つの行が 0 で増えた）。R7（2026-11-26）は 5.01MB（R6 に入力 6 つと信仰値を足した形）
 - アズヴォルト環境のページは、スターターの補正（`starter-*.bin`）を一度も取りに行かない（スターターのページも `azvaldt-*.bin` を取りに行かない）
 - 公開サイト（GitHub Pages）が WASM・JS を gzip で送るかは、作業環境から公開サイトに届かないので確かめていない。
   送らなければ、開いたときはスターター 12.3MB → 3.2MB、アズヴォルト環境 3.5MB。補正のファイルは gzip 済みなので、どちらでも同じ大きさ。
@@ -85,7 +85,7 @@
 - **AI対戦（総当たり）**: スターターのページと同じ画面（`src/ui/Simulate.tsx`）に、選べるデッキ・AI・既定を渡したもの
   - デッキ: 取り込んだプロのデッキ 84 個（`data/pools/azvaldt/decks/`。`src/azvaldt/decks.ts`）だけ。大会ごとにまとめて出し、「代表 10 型」「全部」でまとめて選べる。
     既定は代表 10 型（`data/pools/azvaldt/sets/rep10.txt`。物差しと同じ組）。貼り付け・自作・編集は付けない
-  - AI: 探索（このページの補正 R6）・貪欲法・ランダム。既定は探索だけ
+  - AI: 探索（このページの補正 R7）・貪欲法・ランダム。既定は探索だけ
   - 1 組の試合数の既定は 2（席を入れ替えて 1 回ずつ）。代表 10 型の 45 組で 90 試合
   - 試合のリプレイ・「AI の考え」・「打ち比べ」はスターターのページと同じ（「サンドボックスで開く」は出さない）。
     リプレイの「再現」のコマンドには `--pool azvaldt` が付く（`npm run game -- … --pool azvaldt`。前期のローテーションのカードを足し、補正をこのページと同じにする）
@@ -116,17 +116,17 @@
 
 ### ブラウザの探索 AI とコマンドの探索 AI
 
-ページの探索 AI（今は補正 R6・見込み R4）は、WASM の探索 AI に、ページが読み込んだ補正と見込みを既定として入れ、新しいプールの既定の設定
+ページの探索 AI（今は補正 R7・見込み R4）は、WASM の探索 AI に、ページが読み込んだ補正と見込みを既定として入れ、新しいプールの既定の設定
 （`data/pools/azvaldt/search-options.json`。2026-11-25 から。読みの中の相手を幅 8・深さ 8 のまま S = 0 ＋補正で打たせ、想像の局面の印を切る）を入れたもの。
 `src/engine/wasm.ts` が補正を入れた後に WASM に渡し（`setSearchOptions`。補正を入れ直すたびに入れる）、名前が `search` の AI だけに効く。スターターのページは設定を入れない（探索 AI の既定のまま）。
 コマンドの新しいプールの既定は、補正・見込みとこの設定を `--opts` に並べたもの
-`'{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}'`
-（R5・R6 は補正だけを学び直したので、見込みは R4 のファイル。2026-11-24 までは補正と見込みだけ）。
+`'{"valueNet":"rust/engine/yardstick/pool-r7-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}'`
+（R5〜R7 は補正だけを学び直したので、見込みは R4 のファイル。2026-11-24 までは補正と見込みだけ）。
 同じ局面（`misses/azvaldt/` の 13 問と、代表 10 型のデッキのマリガン 2 つ）から同じ乱数で打った手を `tests/fixtures/browser-azvaldt.json` に書き、
 CLI（`rust/engine/tests/browser_azvaldt.rs`）と WASM（`tests/nets-azvaldt.test.ts`）の両方で比べる。
 読み込んだ補正の指紋も、JSON を serde_json で読んだものと比べる（`data/pools/azvaldt/` と `rust/engine/yardstick/` の写しの両方。指紋にはリーサルの出力と winForm も入る。2026-11-22 から）。
 入れた設定も、`search-options.json` と同じかを確かめる（WASM の `searchOptions`。コマンドの側の `browser_azvaldt.rs` も同じファイルを読む）。
 ページの補正を入れ替えるときは、`data/pools/azvaldt/` と `rust/engine/yardstick/pool-<版>-*.json` を同じファイルにし、両方のテストの `PAGE_NET`（見込みを替えないなら `PAGE_POTENTIAL` はそのまま）を直して、
 表を `SVWB_WRITE_FIXTURE=1 cargo test --release --test browser_azvaldt` で書き直す。設定を替えるときは `search-options.json` を直して、同じく表を書き直す。
-R3 → R4 では 14 行のうち 11 行の手が変わった（2026-11-21）。R4 → R5 では 10 行（2026-11-22）。R5 → R6 では 9 行（2026-11-23）。設定を足したときは 15 行のうち 4 行（2026-11-25）。
+R3 → R4 では 14 行のうち 11 行の手が変わった（2026-11-21）。R4 → R5 では 10 行（2026-11-22）。R5 → R6 では 9 行（2026-11-23）。設定を足したときは 15 行のうち 4 行（2026-11-25）。R6 → R7 では 15 行のうち 8 行（2026-11-26）。
 2026-11-19 には、ブラウザで打った 1 試合（R3 どうし）を、リプレイの「再現」のコマンドで打ち直して同じ手数・ターン数になることも確かめた。
