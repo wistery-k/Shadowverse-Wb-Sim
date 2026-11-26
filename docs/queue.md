@@ -149,7 +149,8 @@ profile --games 49
 （`--data @/s-{1..20}.jsonl.gz`）。
 
 - **td selfplay**: `td selfplay --games N [--start S] --chunk C --out @/s-{k}.jsonl.gz --est <1 試合の秒> [ほかの引数]`。C 試合ずつ（大きさはそろえる）の区切りで、
-  `{k}` に区切りの番号（1 から）を入れたファイルに書く。`.gz` なら書き終えた後にキューが gzip する。区切りの大きさは時間でなく `--chunk` で決める（後のジョブがファイルの名前で読むので）
+  `{k}` に区切りの番号（1 から）を入れたファイルに書く。`.gz` なら書き終えた後にキューが gzip する。区切りの大きさは時間でなく `--chunk` で決める（後のジョブがファイルの名前で読むので）。
+  棋譜は回のフォルダの `kifu/` に書くので、同じ回の後の `td branch` は `--from @/kifu` で読める（前の回の棋譜は `--from @run:<回の名前>/kifu`）
 - **beam-gap**（見込みの学びのデータ）: `beam-gap --games N --from S --chunk C --inputs @/pot-{k}.jsonl [--out @/pot-{k}-rows.jsonl] --est … [ほかの引数]`。区切り方は td selfplay と同じ
 - **td**・**potential**（TypeScript の学習。`npm run td`・`npm run potential` と同じ引数）: `td train … --out @/n.json --est <全体の秒>`。1 つのジョブが 1 区切りで、
   `--out` のファイルを作る。途中からは続けられない（`pause` なら凍らせて続くが、電源が切れる・中断すると次は最初から）。

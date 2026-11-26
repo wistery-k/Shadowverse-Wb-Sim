@@ -509,6 +509,8 @@ export function parseJobs(text: string): Job[] {
       if (made.has(f)) throw new Error(`ジョブ ${job.index}: ${f} を作るジョブが 2 つあります`);
       made.add(f);
     }
+    // 自己対戦は棋譜を回のフォルダの kifu/ に書く（キューの既定）。後の td branch が --from @/kifu で読める（いくつの自己対戦が書いてもよい）
+    if (s.kind === "data" && s.cmd.join(" ") === "td selfplay") made.add("@/kifu");
   }
   return jobs;
 }

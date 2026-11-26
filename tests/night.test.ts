@@ -199,6 +199,10 @@ describe("ジョブの行", () => {
     expect(() => parseJobs("td extend --model x.json --out @/a.json --est 1\ntd extend --model x.json --out @/a.json --est 1")).toThrow(/2 つあります/);
     expect(() => parseJobs("td extend --model x.json --out @/a.json --est 1\npick --compare q1 --pass @/a.json --fail @/a.json --out @/q.json")).toThrow(/q1 の compare/);
     expect(() => parseJobs(`compare 10 '{"valueNet":"@/a.json"}' '{}' --label q1`)).toThrow(/作るジョブが前にありません/);
+    // td branch は、前の自己対戦が回のフォルダの kifu/ に書いた棋譜を読める（自己対戦が無ければ断る）
+    const branch = "td branch --first random --model x.json --from @/kifu --games 10 --start 0 --chunk 5 --eps 0 --out @/b-{k}.jsonl --est 1";
+    expect(parseJobs(`td selfplay --model x.json --games 10 --chunk 5 --eps 0 --out @/s-{k}.jsonl --est 1\n${branch}`)).toHaveLength(2);
+    expect(() => parseJobs(branch)).toThrow(/@\/kifu を作るジョブが前にありません/);
     // 確かめる間は、回のフォルダのモデルを今の既定のモデルにする
     expect(standIn('{"valueNet":"@/a.json","beamWidth":8,"v":{"w":{"potentialNet":"@/p.json"}}}')).toBe(
       '{"valueNet":"data/value-net.json","beamWidth":8,"v":{"w":{"potentialNet":"data/potential-net.json"}}}',
