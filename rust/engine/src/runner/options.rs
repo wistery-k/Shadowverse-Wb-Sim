@@ -5,6 +5,7 @@
 //! docs/removed.md）は、既定の値（使わないときの値）のときだけ受け付ける。
 
 use crate::ai::aidata::{weights_from, AI_DATA_JSON};
+use crate::ai::eval::EvalWeights;
 use crate::ai::mulligan::OppMulligan;
 use crate::ai::potential::PotentialNet;
 use crate::ai::rhino::{rhino_search_options, RHINO_POTENTIAL};
@@ -176,6 +177,64 @@ fn card_names(k: &str, v: &Json) -> Result<Vec<crate::data::CardIdx>, String> {
             _ => Err(format!("\"{k}\" はカード名の配列: {}", v.stringify())),
         })
         .collect()
+}
+
+/// 読みの中の相手の採点を、自分と別のモデルにする（opponentSearch の `"valueNet"`・`"potentialNet"`。測り用で、既定では書かない）。
+/// `"valueNet"` は補正のモデルのファイルで、読みの中の相手はその補正と出発点の重み（探索 AI の既定の重みにモデルの baseWeights を
+/// 上書きしたもの。apply_value_net の自分の評価と同じ作り）で打つ。`"extraEval": true` と一緒に書き、`"ownWeights"` とは一緒に書かない。
+/// `"potentialNet"` は見込みのファイルで、読みの中の相手のビームの並べ直しのキーに足す。`"potential": true` と一緒に書く。
+/// どちらも書かなければ、読みの中の相手は今までどおり自分と同じ補正・重み・見込みで打つ
+/// （docs/ai-notes/15-2026-11-22.md「読みの中の相手を物差しの相手 v0 の評価にした付け込み」）
+fn opponent_model(v: &Json, os: &OpponentSearch, o: &mut SearchOptions) -> Result<(), String> {
+    match v.get("valueNet") {
+        None => {}
+        Some(Json::Str(path)) => {
+            if !os.extra_eval {
+                return Err(
+                    "\"opponentSearch.valueNet\" は \"extraEval\": true と一緒に書きます".into(),
+                );
+            }
+            if os.own_weights {
+                return Err("\"opponentSearch.valueNet\" はそのモデルの出発点の重みで打つので、\"ownWeights\": true とは一緒に書けません".into());
+            }
+            let (net, file) = load_model(path)?;
+            let base = file
+                .get("baseWeights")
+                .cloned()
+                .unwrap_or(Json::Obj(Vec::new()));
+            let w = match search_weights_json().spread(&base).to_value() {
+                serde_json::Value::Object(m) => weights_from(m)?,
+                _ => return Err(format!("{path} の出発点の重みが読めません")),
+            };
+            o.opp_weights = Some(Arc::new(EvalWeights::new(w)));
+            o.opp_extra_eval = Some(model_eval(net));
+        }
+        Some(x) => {
+            return Err(format!(
+                "\"opponentSearch.valueNet\" は補正のモデルのファイルの場所: {}",
+                x.stringify()
+            ))
+        }
+    }
+    match v.get("potentialNet") {
+        None => {}
+        Some(Json::Str(path)) => {
+            if !os.potential {
+                return Err(
+                    "\"opponentSearch.potentialNet\" は \"potential\": true と一緒に書きます"
+                        .into(),
+                );
+            }
+            o.opp_potential = Some(Arc::new(PotentialNet::load(path)?));
+        }
+        Some(x) => {
+            return Err(format!(
+                "\"opponentSearch.potentialNet\" は見込みのファイルの場所: {}",
+                x.stringify()
+            ))
+        }
+    }
+    Ok(())
 }
 
 /// raw の項目で base を上書きした探索 AI の設定（`{ ...base, ...raw }`）。skip の項目は呼び出し側で扱う。
@@ -360,7 +419,7 @@ pub fn search_options(
                                 );
                             }
                         }
-                        Some(OpponentSearch {
+                        let os = OpponentSearch {
                             beam_width: count(
                                 "opponentSearch.beamWidth",
                                 v.get("beamWidth").expect("beamWidth"),
@@ -385,7 +444,9 @@ pub fn search_options(
                                 None => false,
                                 Some(x) => flag("opponentSearch.potential", x)?,
                             },
-                        })
+                        };
+                        opponent_model(v, &os, &mut o)?;
+                        Some(os)
                     }
                     _ => {
                         return Err(format!(

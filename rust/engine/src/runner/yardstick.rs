@@ -130,6 +130,8 @@ pub fn reference_options() -> SearchOptions {
         potential_weight: 1.0,
         extra_eval: None,
         opp_extra_eval: None,
+        opp_weights: None,
+        opp_potential: None,
         weights: Some(Arc::new(reference_weights())),
         policy_weights: None,
         opponent_search: None,
@@ -214,6 +216,8 @@ pub fn strong_reference_options() -> SearchOptions {
         potential_weight: 1.0,
         extra_eval: Some(model_eval(strong_net())),
         opp_extra_eval: None,
+        opp_weights: None,
+        opp_potential: None,
         weights: Some(Arc::new(reference_weights())),
         policy_weights: None,
         opponent_search: Some(OpponentSearch {
@@ -335,6 +339,8 @@ pub fn pool_reference_options(name: &str) -> SearchOptions {
         potential_weight: 1.0,
         extra_eval: Some(model_eval(Arc::new(net))),
         opp_extra_eval: None,
+        opp_weights: None,
+        opp_potential: None,
         weights: Some(Arc::new(own)),
         policy_weights: if base_empty {
             None

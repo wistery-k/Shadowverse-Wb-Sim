@@ -1,0 +1,17 @@
+# 読みの中の相手を物差しの相手 v0 の評価にしたら、v0 への勝率（付け込み）が何ポイント上がるか（2026-11-27、ユーザーの興味。測りだけで、既定は変えない）。
+# 測る AI は新しいプールの今の既定（補正 R6・見込み R4、読みの中の相手は幅 8・深さ 8 で S = 0 ＋補正、印なし）。違いは読みの中の相手の採点だけ:
+#   読み相手v0 … 読みの中の相手を v0 の補正と出発点の重み（全部 0）で打たせる（opponentSearch.valueNet。幅 8・深さ 8・見込みなしは同じ）
+#   読み相手既定 … 今のまま（自分と同じ R6）。2026-11-25 のキュー light-read-yardstick と同じ設定・同じ試合（g0〜3999）なので、
+#                  手が変わっていなければ v0 に 6400/8000・R3 に 4318/8000 にちょうどなる（書かなければ今と同じ手の確かめを兼ねる）
+# 2 つを同じ試合番号（同じシード・同じデッキの組）で打ち、棋譜で組（鏡の 2 試合）を単位に対にした差と ± を出す。
+#   (a) 相手 v0: 付け込みで上がる分。(b) 相手 R3: 強い相手を弱く見たときの損
+# 「v0 の評価で打つ相手」は v0 そのもの（幅 256・深さ 16 ＋ v0 の見込み、リーサル探索、上位 4 手を自分の読みで選び直す）とは違う。
+# 見込み（PC、svwb-docker・28 スレッド）: light-read-yardstick の実測（0.218・0.263 秒/試合）に、その後の手を変えない高速化（0.73 倍）をかけて 0.16・0.19 秒/試合。
+#   読み相手v0 はクラウド環境の 40 試合で既定の 0.90 倍（0.75 秒と 0.83 秒）なので同じと見る。8000 試合ずつ 21 分・21 分・25 分・25 分で 1 時間半ほど
+# 朝: 止まったときのまとめを push してもらい、ingest する。棋譜を共有フォルダに上げてもらい、組で対にした差を出す
+# 回の名前は opp-model-v0
+
+yardstick --ref pool-v0 --opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"valueNet":"rust/engine/yardstick/pool-v0-net.json"},"imaginedInput":false}' --games 4000 --start 0 --label 読み相手v0-物差しv0 --est 0.16
+yardstick --ref pool-v0 --opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' --games 4000 --start 0 --label 読み相手既定-物差しv0 --est 0.16
+yardstick --ref pool-r3 --opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"valueNet":"rust/engine/yardstick/pool-v0-net.json"},"imaginedInput":false}' --games 4000 --start 0 --label 読み相手v0-物差しR3 --est 0.19
+yardstick --ref pool-r3 --opts '{"valueNet":"rust/engine/yardstick/pool-r6-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' --games 4000 --start 0 --label 読み相手既定-物差しR3 --est 0.19

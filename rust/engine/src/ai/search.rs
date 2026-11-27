@@ -340,6 +340,14 @@ pub struct SearchOptions {
     /// 相手のターンを読むビームの評価に足す項（opponentSearch.extraEval のとき。None なら extra_eval と同じ）。
     /// リノセウス用 AI は、エルフ用の打点の項を除いた学習した補正だけを渡す
     pub opp_extra_eval: Option<ExtraEval>,
+    /// 読みの中の相手のビームの手で作った評価の重み（opponentSearch.valueNet のとき、そのモデルの出発点の重み）。
+    /// Some なら ownWeights・policyWeights によらず、読みの中の相手はこの重み（と opp_extra_eval の補正）で打つ。
+    /// handKey の並べ直しのキーは方策の重みのまま。既定 None（測り用。docs/ai-notes/15-2026-11-22.md
+    /// 「読みの中の相手を物差しの相手 v0 の評価にした付け込み」）
+    pub opp_weights: Option<Arc<EvalWeights>>,
+    /// 読みの中の相手のビームの並べ直しのキーに足す見込み（opponentSearch.potentialNet。opponentSearch.potential のとき使う。
+    /// None なら自分のターンと同じ potential）。既定 None
+    pub opp_potential: Option<Arc<PotentialNet>>,
     /// 評価関数の重み（None なら探索 AI の既定 SEARCH_WEIGHTS）
     pub weights: Option<Arc<Weights>>,
     /// 手を選ぶ方策として使う評価の重み（None なら weights と同じ）。読みの中の相手のビームの評価、相手のターン・選択待ちを打つ貪欲法の
@@ -443,6 +451,8 @@ impl Default for SearchOptions {
             potential_weight: 1.0,
             extra_eval: Some(Arc::new(value_net_eval)),
             opp_extra_eval: None,
+            opp_weights: None,
+            opp_potential: None,
             weights,
             policy_weights,
             // 相手のターンを読むビームの幅は 4 から 16 に（6400 試合で 51.9%、物差しは 78.0% → 79.8%。
@@ -2092,7 +2102,9 @@ fn opponent_search_options(opts: &SearchOptions) -> SearchOptions {
         max_depth: os.map(|o| o.max_depth).unwrap_or(opts.max_depth),
         opponent_search: None,
         potential: if os.is_some_and(|o| o.potential) {
-            opts.potential.clone()
+            opts.opp_potential
+                .clone()
+                .or_else(|| opts.potential.clone())
         } else {
             None
         },
@@ -2113,11 +2125,11 @@ pub fn simulate_opponent_turn_by_search(
     let q = opponent(p);
     let opp_opts = opponent_search_options(opts);
     // 読みの中の相手は、自分の評価の重みでなく方策の重み（policy_weights。既定は同じ）で打つ。
-    // opponentSearch.ownWeights なら自分の評価の重みで打つ
-    let ow = if opts.opponent_search.is_some_and(|o| o.own_weights) {
-        env.w
-    } else {
-        env.opp_w
+    // opponentSearch.ownWeights なら自分の評価の重みで、opponentSearch.valueNet ならそのモデルの出発点の重み（opp_weights）で打つ
+    let ow = match opts.opp_weights.as_deref() {
+        Some(x) => x,
+        None if opts.opponent_search.is_some_and(|o| o.own_weights) => env.w,
+        None => env.opp_w,
     };
     let opp_env = Env {
         opts: &opp_opts,
