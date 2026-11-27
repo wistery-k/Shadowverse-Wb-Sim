@@ -1,0 +1,24 @@
+# R7 の学びをそのまま学び直して、同じファイルになるかの確かめ（r7-seed の添え。線にしない。回すかはユーザーが選ぶ。r7-seed を止める理由にはしない）
+# 審査の求め（2026-11-27）: r7-seed の差（d_s）が 0 でなかったとき、種のせいか、r7-1 の後の道具の変更のせいかを分けたい。
+#   r7-1（25aaaee）の後に、td のコードは 3 つのコミットで変わっている（5790ae6 の td train の --byTurn、767c71e・3893417 の td branch。どれも、使わなければ学びを変えない作りのはず）
+#   r7-1 の I の学び（night/r7-1.txt の 4.）と同じ引数・既定の種 1 で学び直し、r7-1 の it.json・ip.json・i.json と sha256 で比べる
+#   （R7 の rust/engine/yardstick/pool-r7-net.json は、i.json を r7-3 で td extend した写しなので、比べる先は i.json）
+#   学びはスレッドの数によらず同じ重みになる作り（rust/engine/src/runner/td_train.rs の先頭: 1 つの重みの勾配は局面の順に足す）。r7-1 と同じ svwb-docker・28 スレッドで回す
+#   --epochOut の書き出しが --best の --out と同じファイルになることは、r7-1 の K で確かめ済み（kt.json = kt-e2.json、kit.json = kit-e2.json。sha256 が同じ）。
+#   なので、r7-seed の種 2 の版のエポック 1 の書き出しは、R7 と同じかけ方の版と見てよい。この回は --epochOut を付けず、r7-1 と同じ引数のままにする
+#
+# 読み方（回す前に書いておく）:
+#   it1.json = r7-1/it.json で、かつ i1.json = r7-1/i.json なら、今の道具は R7 を作ったときと同じ重みを出す。d_s は種（並べ替えの順番）だけの差と読む
+#   違えば、d_s には道具の変更の分も入りうる。どこから違うか（学び・間引き・属性）と、違いの大きさ（重みの差の最大）を記録し、d_s を種だけの差とは書かない
+# r7-seed の読み方への添え書き（審査 2026-11-27）: d_1 と d_s は試合番号 g0〜19999 が重なる（R7 の側が同じデッキの組を打つ）ので、
+#   √(SE_1² + SE_s²) は控えめ（大きめ）の見積もり。結果の記録に添える
+#
+# 見込み（PC、svwb-docker・28 スレッド）: r7-1 の I の学びの実測（3 エポック 666 秒）、間引き 30 秒・属性 10 秒で 12 分ほど。
+#   r7-1 の回のフォルダだけを読む（r7-seed・rb-e1b とは別に積める）
+# 朝: 止まったときのまとめを push してもらい、出口のファイル（モデル）も上げてもらう。r7-1 のモデルは共有フォルダの data/models/r7-1/ にある
+# 回の名前は r7-repro（plan に --name r7-repro を付ける）
+
+# 1. r7-1 の I と同じ引数・同じ種（既定の 1）の学び直しと、同じ間引きと属性
+td train --impl rust --model @run:r7-1/v0.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/it1.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestStacks,oppCrestStacks --est 670
+td prune --impl rust --model @/it1.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/ip1.json --est 30
+td attr --model @/ip1.json --out @/i1.json --keepA 0 --est 10
