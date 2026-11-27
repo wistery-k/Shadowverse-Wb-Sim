@@ -244,6 +244,44 @@ pub struct DestroyedRecord {
     pub defense: i32,
 }
 
+/// 相手にも分かる強化の集計（`PlayerState::pub_mods`）。ルールには効かない。補正の入力（相手の山札・手札の強化。docs/value-net.md「相手の山札・手札の強化」）だけが使う。
+/// 決定化（ai/determinize.rs）は相手の伏せた手札・山札の状態（`deck_kept`・手札のカードの攻撃力・体力の変化）を作り直すので、その分を補正が見るときは、
+/// 本当のカードの状態ではなく、ここに数えた相手にも分かる分を使う（どちらの局面でも同じ値になる）。記録に非公開の情報は入れない
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct PubMods {
+    /// 山札のカードを強化する能力（`Effect::BuffDeck`。今はダストデイズのクレストの、山札のフォロワーを +1/+1）が働いた量の合計。
+    /// そのとき山札にあったカード 1 枚あたりの量（働くたびに足す。山札の何枚に付いたかは数えない）
+    pub deck_atk: i16,
+    pub deck_def: i16,
+    /// 伏せた手札のカードに付いた強化のうち、まだ手札にあると見込む分（どのカードかは相手に分からない。docs/rules.md「伏せた手札の…（相手に分かること）」）。
+    /// 能力が伏せたカードを強化したとき（誠実なる呪い屋・スージーの【進化時】）と、強化の付いた公開されていたカードが伏せた枠になったときに足し、
+    /// 伏せたカードを手札から出したり公開したりして見えた強化（山札の強化の分を越える分）を引く。伏せた手札が無い間に伏せたカードが入ったら 0 から数え直す
+    pub hand_atk: i16,
+    pub hand_def: i16,
+}
+
+impl PubMods {
+    pub fn is_zero(&self) -> bool {
+        *self == PubMods::default()
+    }
+
+    /// 伏せた手札の分に足す
+    pub fn add_hand(&mut self, atk: i32, def: i32) {
+        self.hand_atk = sat16(self.hand_atk as i32 + atk);
+        self.hand_def = sat16(self.hand_def as i32 + def);
+    }
+
+    /// 伏せた枠から見えたカードの強化（攻撃力・体力の変化 atk・def）のうち、山札の強化の分を越える分を、伏せた手札の分から引く（0 より下にはしない）
+    pub fn reveal_hand(&mut self, atk: i32, def: i32) {
+        let seen = |m: i32, deck: i16, t: i16| -> i16 {
+            let extra = (m - deck as i32).max(0);
+            sat16(t as i32 - extra.min(t.max(0) as i32))
+        };
+        self.hand_atk = seen(atk, self.deck_atk, self.hand_atk);
+        self.hand_def = seen(def, self.deck_def, self.hand_def);
+    }
+}
+
 /// 手札の伏せた枠に起きた、相手にも分かる出来事（`PlayerState::hand_log`）。ルールには効かない。
 /// 相手の AI の決定化が、伏せた手札のスペルブーストの回数等を見込むのに使う（docs/ai-notes/13-2026-11-13.md「伏せた相手の手札のスペルブーストを決定化で見込む」）。
 /// 相手には手札の何枚目を出したか分からない（docs/rules.md「手札から出したカードの位置」）ので、記録はどの枠かを持たない。記録に非公開の情報は入れない
@@ -278,6 +316,11 @@ pub enum HandEv {
 
 /// HandEv::Out の X が見えない・無いとき
 pub const X_HIDDEN: i16 = i16::MIN;
+
+/// i32 を i16 に丸める（範囲の外は端の値）
+pub fn sat_i16(v: i32) -> i16 {
+    sat16(v)
+}
 
 fn sat16(v: i32) -> i16 {
     v.clamp(i16::MIN as i32 + 1, i16::MAX as i32) as i16
@@ -420,6 +463,8 @@ pub struct PlayerState {
     pub hidden_discards: Shared<CardIdx>,
     /// 手札の伏せた枠に起きた、相手にも分かる出来事の記録（`HandEv`）。ルールには影響しない。相手の AI の決定化だけが使う
     pub hand_log: HandLog,
+    /// 相手にも分かる強化の集計（`PubMods`）。ルールには影響しない。補正の入力だけが使う
+    pub pub_mods: PubMods,
     pub destroyed_this_turn: Shared<DestroyedRecord>,
     pub combo: i32,
     pub evolved_this_turn: bool,
@@ -439,6 +484,21 @@ pub struct PlayerState {
     pub entered_kinds: Option<Shared<CardIdx>>,
     /// ターン終了まで変えた手札のコスト（手札の iid と、戻すときに足す量）。ターン終了時に戻す。無ければ None
     pub temp_costs: Option<Shared<(Iid, i32)>>,
+}
+
+impl PlayerState {
+    /// 伏せた手札のカードの数
+    pub fn hidden_in_hand(&self) -> usize {
+        self.hand.iter().filter(|h| !h.revealed).count()
+    }
+
+    /// 伏せたカードが手札に入る前に呼ぶ。伏せた手札が無かったなら、伏せた手札の強化の集計（PubMods の hand_*）を 0 から数え直す
+    pub fn note_hidden_in(&mut self) {
+        if self.hidden_in_hand() == 0 {
+            self.pub_mods.hand_atk = 0;
+            self.pub_mods.hand_def = 0;
+        }
+    }
 }
 
 /// 局面を写すたびに呼ぶので、derive の代わりに書いて呼び出し元に展開させる（GameState の clone を参照）。
@@ -1084,6 +1144,7 @@ impl GameState {
             return false;
         }
         if !c.revealed {
+            pl.note_hidden_in();
             pl.hand_log.push(HandEv::In {
                 deck: deck.min(u16::MAX as usize) as u16,
             });

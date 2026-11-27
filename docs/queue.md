@@ -149,7 +149,8 @@ profile --games 49
 （`--data @/s-{1..20}.jsonl.gz`）。
 
 - **td selfplay**: `td selfplay --games N [--start S] --chunk C --out @/s-{k}.jsonl.gz --est <1 試合の秒> [ほかの引数]`。C 試合ずつ（大きさはそろえる）の区切りで、
-  `{k}` に区切りの番号（1 から）を入れたファイルに書く。`.gz` なら書き終えた後にキューが gzip する。区切りの大きさは時間でなく `--chunk` で決める（後のジョブがファイルの名前で読むので）
+  `{k}` に区切りの番号（1 から）を入れたファイルに書く。`.gz` なら書き終えた後にキューが gzip する。区切りの大きさは時間でなく `--chunk` で決める（後のジョブがファイルの名前で読むので）。
+  棋譜は回のフォルダの `kifu/` に書くので、同じ回の後の `td branch` は `--from @/kifu` で読める（前の回の棋譜は `--from @run:<回の名前>/kifu`）
 - **beam-gap**（見込みの学びのデータ）: `beam-gap --games N --from S --chunk C --inputs @/pot-{k}.jsonl [--out @/pot-{k}-rows.jsonl] --est … [ほかの引数]`。区切り方は td selfplay と同じ
 - **td**・**potential**（TypeScript の学習。`npm run td`・`npm run potential` と同じ引数）: `td train … --out @/n.json --est <全体の秒>`。1 つのジョブが 1 区切りで、
   `--out` のファイルを作る。途中からは続けられない（`pause` なら凍らせて続くが、電源が切れる・中断すると次は最初から）。
@@ -159,6 +160,7 @@ profile --games 49
   `--impl ts` を付けて TypeScript 版で回す（Rust 版はその引数をエラーにする）。2026-11-14 までの行（`night/relearn-b.txt` 等）は、`--impl` が無ければ TypeScript 版で回したもの。
   `--est` は TypeScript 版の時間のままの行が多い（多めに見積もる分には困らない）。PC の Rust 版の実測は、段階 4 の R1（新しいプールの自己対戦 6 万試合、入力あり）で
   学習 14 分・間引き 24 秒（`night/pool-r2.txt` の `--est` はこれから）
+  Rust 版の `td train` の `--epochOut @/m-e{e}.json`（`--epochs` を書く）は、エポックごとの重みも作るファイルに数える（後のジョブが `@/m-e2.json` 等を読める。2026-11-25、R7 の候補の `night/r7-1.txt`）
 - **pick**: `pick --compare <前の compare の台帳の名前> --pass <ファイル> --fail <ファイル> --out <ファイル>`。その compare の済んだ区切りをまとめ、
   A の勝率 − 50% − 2 SE が 0 より大きければ `--pass`、そうでなければ `--fail` のファイルを `--out` に写す（回す前に決めた線で、後のジョブの設定を選ぶ）。
   結果は回のフォルダの `pick-<番号>.json` と、`status`・まとめの表

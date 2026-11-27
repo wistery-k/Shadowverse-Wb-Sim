@@ -1,4 +1,4 @@
-// アズヴォルト環境のページの AI（WASM の探索 AI に、ページが読み込んだ補正と見込み（今は R6。2026-11-21 に R3 から R4 に、2026-11-22 に R5 に、2026-11-23 に R6 に替えた。R5・R6 の見込みは R4 のまま）と、
+// アズヴォルト環境のページの AI（WASM の探索 AI に、ページが読み込んだ補正と見込み（今は R7。2026-11-21 に R3 から R4 に、2026-11-22 に R5 に、2026-11-23 に R6 に、2026-11-26 に R7 に替えた。R5〜R7 の見込みは R4 のまま）と、
 // 探索 AI の設定（data/pools/azvaldt/search-options.json。2026-11-25 から。読みの中の相手を補正で打たせ、想像の局面の印を切る）を入れたもの）が、
 // コマンドの同じ補正・同じ設定（compare・misses の --opts の valueNet・potentialNet と、残りの項目。rust/engine/yardstick/<PAGE_NET>-net.json・<PAGE_POTENTIAL>-potential.json）と同じ値の補正を持ち、決まった局面から同じ手を打つか。
 // 局面と手は tests/fixtures/browser-azvaldt.json（コマンドの側の手を rust/engine/tests/browser_azvaldt.rs が確かめる）
@@ -12,7 +12,7 @@ import { packNets } from "../scripts/pack-nets";
 selectNets("azvaldt");
 
 /** ページの補正と見込みの凍結した写し（rust/engine/yardstick/<PAGE_NET>-net.json・<PAGE_POTENTIAL>-potential.json。rust/engine/tests/browser_azvaldt.rs と同じ） */
-const PAGE_NET = "pool-r6";
+const PAGE_NET = "pool-r7";
 const PAGE_POTENTIAL = "pool-r4";
 
 const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
@@ -60,7 +60,7 @@ describe("補正のファイル（アズヴォルト環境）", () => {
     expect(searchOptions()).toEqual(JSON.parse(read("data/pools/azvaldt/search-options.json")));
   });
 
-  it("リーサルの出力と勝つ確率の形もハッシュに入る（R5・R6 は winForm が survival。ヘッダの JSON に残る値も確かめる）", () => {
+  it("リーサルの出力と勝つ確率の形もハッシュに入る（R5〜R7 は winForm が survival。ヘッダの JSON に残る値も確かめる）", () => {
     const valueText = read("data/pools/azvaldt/value-net.json");
     const potentialText = read("data/pools/azvaldt/potential-net.json");
     const value = JSON.parse(valueText) as { lethalHead?: { w: number[]; b: number }; winForm?: string };

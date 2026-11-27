@@ -172,6 +172,17 @@ describe("ジョブの行", () => {
     const trRust = parseJob("td prune --model @/a.json --data @/s-1.jsonl.gz --impl rust --out @/ap.json --est 60", 5);
     expect(trRust.spec).toMatchObject({ kind: "node", tool: "td", impl: "rust", out: "@/ap.json" });
     expect(jobArgv(trRust, 0, 1, "/r")).toEqual(["td", "prune", "--model", "/r/a.json", "--data", "/r/s-1.jsonl.gz", "--out", "/r/ap.json.tmp"]);
+    // --epochOut: エポックごとの重みも作るファイルに数え、読むファイルには数えない（次のジョブが読める）
+    const ep = parseJob("td train --model @/a.json --out @/kt.json --epochOut @/kt-e{e}.json --epochs 3 --est 60", 6);
+    expect(jobProducts(ep)).toEqual(["@/kt.json", "@/kt-e1.json", "@/kt-e2.json", "@/kt-e3.json"]);
+    expect(jobInputs(ep)).toEqual(["@/a.json"]);
+    expect(jobArgv(ep, 0, 1, "/r")).toEqual(["td", "train", "--model", "/r/a.json", "--out", "/r/kt.json.tmp", "--epochOut", "/r/kt-e{e}.json", "--epochs", "3"]);
+    expect(() =>
+      parseJobs("td extend --model x.json --out @/a.json --est 1\n" + "td train --model @/a.json --out @/kt.json --epochOut @/kt-e{e}.json --epochs 2 --est 60\n" + "td prune --model @/kt-e2.json --out @/kp.json --est 1"),
+    ).not.toThrow();
+    expect(() => parseJob("td train --model a.json --out @/b.json --epochOut @/b-e{e}.json --est 1", 1)).toThrow(/--epochs/);
+    expect(() => parseJob("td train --model a.json --out @/b.json --epochOut @/b-e.json --epochs 2 --est 1", 1)).toThrow(/\{e\}/);
+    expect(() => parseJob("td train --model a.json --out @/b.json --epochOut @/b-e{e}.json --epochs 2 --impl ts --est 1", 1)).toThrow(/Rust 版/);
     expect(() => parseJob("td attr --model @/a.json --out @/b.json --impl rust --est 1", 1)).toThrow(/td train・td prune だけ/);
     expect(() => parseJob("potential train --out @/p.json --impl rust --est 1", 1)).toThrow(/td train・td prune だけ/);
     expect(() => parseJob("td train --model a.json --out @/b.json --impl wasm --est 1", 1)).toThrow(/ts か rust/);
@@ -188,6 +199,10 @@ describe("ジョブの行", () => {
     expect(() => parseJobs("td extend --model x.json --out @/a.json --est 1\ntd extend --model x.json --out @/a.json --est 1")).toThrow(/2 つあります/);
     expect(() => parseJobs("td extend --model x.json --out @/a.json --est 1\npick --compare q1 --pass @/a.json --fail @/a.json --out @/q.json")).toThrow(/q1 の compare/);
     expect(() => parseJobs(`compare 10 '{"valueNet":"@/a.json"}' '{}' --label q1`)).toThrow(/作るジョブが前にありません/);
+    // td branch は、前の自己対戦が回のフォルダの kifu/ に書いた棋譜を読める（自己対戦が無ければ断る）
+    const branch = "td branch --first random --model x.json --from @/kifu --games 10 --start 0 --chunk 5 --eps 0 --out @/b-{k}.jsonl --est 1";
+    expect(parseJobs(`td selfplay --model x.json --games 10 --chunk 5 --eps 0 --out @/s-{k}.jsonl --est 1\n${branch}`)).toHaveLength(2);
+    expect(() => parseJobs(branch)).toThrow(/@\/kifu を作るジョブが前にありません/);
     // 確かめる間は、回のフォルダのモデルを今の既定のモデルにする
     expect(standIn('{"valueNet":"@/a.json","beamWidth":8,"v":{"w":{"potentialNet":"@/p.json"}}}')).toBe(
       '{"valueNet":"data/value-net.json","beamWidth":8,"v":{"w":{"potentialNet":"data/potential-net.json"}}}',

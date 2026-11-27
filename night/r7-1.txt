@@ -1,0 +1,67 @@
+# R7 の候補の 1 晩目: 新しい既定（幅 8・深さ 8、読みの中の相手は S = 0 ＋補正で並べる、印なし）で自己対戦 6 万試合と、同じデータから 4 つの版の学び。
+# 2 晩目（night/r7-2.txt）は 切る版 対 対照・入力の版 対 対照・対照 対 R6。回す前に決めた線と試合数は 2 晩目のファイルの先頭（線はこの晩の後に変えない）。
+# ユーザーの決定（2026-11-25、審査のスレッドのカード「学び直し(R7)をどの形で進めますか」）: 「入力と切る案を別々に測る」。勝率の形の切り分けは今回入れない。
+# 計画と作りは docs/ai-notes/15-2026-11-22.md「R7 の候補」、入力は docs/value-net.md「相手の山札・手札の強化」、切る設定は同じ文書の --cutOpp。
+#
+#   C 対照: R6 と同じ入力・同じ目標（R6 で外した入力 7 つと、足した入力 6 つを --dropInputs で外す）。違うのは自己対戦の打ち方（新しい既定）だけ
+#   K 切る版: C ＋ --cutOpp 1（相手のランダムな手の前でも λ 収益を切る。今は自分のランダムな手の前でだけ切る）
+#   I 入力の版: C ＋ 入力 8 つ（足した 6 つ: 相手の山札・手札のフォロワーの強化の見込み（攻撃・体力）、両方のリーダーの最大体力。
+#     R6 で外した信仰値 myCrestFaith・oppCrestFaith を戻す。信仰に付いた能力の数とカウントダウンの 5 つは外したまま。能力の数は R6 の測りで 0% の局面にしか出ない）
+#   KI 控え: K と I を合わせた版。2 晩目では比べない（K と I がどちらも通ったときに、3 晩目で R6 と比べるため。学びは 15 分ほど）
+#   エポックをそろえる（審査の指摘 2026-11-25）: 4 つとも 3 エポック学び、C と I は今までどおり確かめ用の局面の勝敗の交差エントロピーが一番小さいエポックを書き出す（--best 1）。
+#     その勝敗は相手が 1 割ランダムに打つ世界のものなので、値をわざと下げる K・KI がこの選び方で選ぶと狙いに逆らう（R6 の学びでは、学習前 0.5029・エポック 1 0.5003 で差が 0.0026 しかない）。
+#     そこで K・KI はエポックごとの重みも書き出し（--epochOut）、2 晩目には K は C が選んだのと同じエポック、KI は I が選んだのと同じエポックの版を使う。
+#     朝、C・I の学びの報告の「一番小さい エポック N」を見て、2 晩目のファイル（night/r7-2.txt の 0.）の k-e1 を k-eN に直してから積む（既定の e1 は、R6 の学びの 4 本がどれもエポック 1 を選んだから）。
+#     C が「学習前」を選んだら、K 対 C は切る効果の比べにならないので、2 晩目は積まずに相談する
+#   朝に並べる数: 各版の各エポックの学びの報告の「end の予測の平均・勝ちの割合」（確かめ用のターン末。楽観の大きさ）と、K の切ったターン末の割合
+#
+# 自己対戦: R6 の学び（r6-heads-1）と同じ引数に、新しい既定（--searchOptions data/pools/azvaldt/search-options.json）を足したもの。
+#   出発の補正は R6 に足した入力 6 つの行を 0 で足したもの（R6 と同じ値・同じ手）。印は --lostLabel 1 だけ（"ln"・"oe"。q の印と、K の切る場所）。
+#   勝ちの出力・読みの出力の印（--wonLabel・--readLabel）は使わないので付けない。見込み（potential）は R4 のまま（R6 と同じ）
+#   シードは g7600000〜7659999（r6-heads-1 は 7500000〜7559999）
+#
+# 見込み（PC、svwb-docker・28 スレッド）: 自己対戦は R6 の学び（r6-heads-1）の実測 0.43 秒/試合に、新しい既定の倍率 1.51（打ち比べのスレッドがクラウド環境で、
+#   R6 の学びと同じ引数の自己対戦を設定あり・なし 48 試合ずつ打った比。1 割ほどぶれる）をかけた 0.65 秒/試合に、手を変えない高速化（#312）の思考 0.85 倍（クラウド環境の 40 試合）を
+#   かけた 0.55 秒/試合で 9 時間 10 分ほど（下の --est）。コンテナを作り直して svwb に jemalloc が入ると、合わせて 0.73 倍の見込みで 0.47 秒/試合・7 時間 50 分ほど。
+#   PC の実測（キュー speedup-1）が出たら、それで直す。手を変えないので、どちらで回しても学びのデータは同じ
+#   学び 1 つは R6 の学び（B）の実測 11 分に、I は入力の分を足して 12〜13 分。間引き 30 秒・属性 10 秒ほど（K・KI はエポックごとに 3 つ）、profile 2 分
+# 朝: 止まったときのまとめを push してもらい、ingest する。モデル（c.json・i.json・k-e{1,2,3}.json・ki-e{1,2,3}.json）は 2 晩目が @run:r7-1/<版>.json で読む
+# 回の名前は r7-1（plan に --name r7-1 を付ける。2 晩目のキューがこの回のフォルダのモデルを読む）
+
+# 0. 出発の補正: R6 に入力 6 つの行を 0 で足したもの
+td extend --model rust/engine/yardstick/pool-r6-net.json --out @/v0.json --est 120
+
+# 1. 自己対戦 6 万試合（新しい既定）
+td selfplay --model @/v0.json --decks @data/pools/azvaldt/sets/all84.txt --games 60000 --start 7600000 --chunk 3000 --eps 0.1 --opp beam --sampling default --iv 3 --ivZone both --imagined 2 --searchValue 1 --lostLabel 1 --potential rust/engine/yardstick/pool-r4-potential.json --searchOptions data/pools/azvaldt/search-options.json --out @/s-{k}.jsonl.gz --est 0.55
+
+# 2. C 対照（R6 と同じ入力・目標）
+td train --impl rust --model @/v0.json --data @/s-{1..20}.jsonl.gz --out @/ct.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks,oppDeckAtkMod,oppDeckDefMod,oppHandAtkMod,oppHandDefMod,myMaxHp,oppMaxHp --est 720
+td prune --impl rust --model @/ct.json --data @/s-{1..20}.jsonl.gz --out @/cp.json --est 30
+td attr --model @/cp.json --out @/c.json --keepA 0 --est 10
+
+# 3. K 切る版（C ＋ --cutOpp 1。エポックごとの版 k-e1・k-e2・k-e3）
+#   --out（K 自身の選び方の版）は参考に残す。2 晩目が使うのはエポックごとの版
+td train --impl rust --model @/v0.json --data @/s-{1..20}.jsonl.gz --out @/kt.json --epochOut @/kt-e{e}.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks,oppDeckAtkMod,oppDeckDefMod,oppHandAtkMod,oppHandDefMod,myMaxHp,oppMaxHp --cutOpp 1 --est 720
+td prune --impl rust --model @/kt-e1.json --data @/s-{1..20}.jsonl.gz --out @/kp-e1.json --est 30
+td attr --model @/kp-e1.json --out @/k-e1.json --keepA 0 --est 10
+td prune --impl rust --model @/kt-e2.json --data @/s-{1..20}.jsonl.gz --out @/kp-e2.json --est 30
+td attr --model @/kp-e2.json --out @/k-e2.json --keepA 0 --est 10
+td prune --impl rust --model @/kt-e3.json --data @/s-{1..20}.jsonl.gz --out @/kp-e3.json --est 30
+td attr --model @/kp-e3.json --out @/k-e3.json --keepA 0 --est 10
+
+# 4. I 入力の版（C ＋ 入力 8 つ）
+td train --impl rust --model @/v0.json --data @/s-{1..20}.jsonl.gz --out @/it.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestStacks,oppCrestStacks --est 780
+td prune --impl rust --model @/it.json --data @/s-{1..20}.jsonl.gz --out @/ip.json --est 30
+td attr --model @/ip.json --out @/i.json --keepA 0 --est 10
+
+# 5. KI 控え（K と I を合わせた版。2 晩目では比べない。エポックごとの版 ki-e1・ki-e2・ki-e3）
+td train --impl rust --model @/v0.json --data @/s-{1..20}.jsonl.gz --out @/kit.json --epochOut @/kit-e{e}.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestStacks,oppCrestStacks --cutOpp 1 --est 780
+td prune --impl rust --model @/kit-e1.json --data @/s-{1..20}.jsonl.gz --out @/kip-e1.json --est 30
+td attr --model @/kip-e1.json --out @/ki-e1.json --keepA 0 --est 10
+td prune --impl rust --model @/kit-e2.json --data @/s-{1..20}.jsonl.gz --out @/kip-e2.json --est 30
+td attr --model @/kip-e2.json --out @/ki-e2.json --keepA 0 --est 10
+td prune --impl rust --model @/kit-e3.json --data @/s-{1..20}.jsonl.gz --out @/kip-e3.json --est 30
+td attr --model @/kip-e3.json --out @/ki-e3.json --keepA 0 --est 10
+
+# 6. 線ではないが毎回見る数字（C。新しい既定で）
+profile --opts '{"valueNet":"@/c.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.30

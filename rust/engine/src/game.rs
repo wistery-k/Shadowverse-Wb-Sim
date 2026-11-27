@@ -26,6 +26,7 @@ fn new_player(deck: Vec<CardRef>) -> PlayerState {
         destroyed_amulets: Shared::default(),
         hidden_discards: Shared::default(),
         hand_log: HandLog::default(),
+        pub_mods: PubMods::default(),
         destroyed_this_turn: Shared::default(),
         combo: 0,
         evolved_this_turn: false,
@@ -963,13 +964,17 @@ fn hide_marks_like(s: &mut GameState, p: PlayerIndex, h: &HandCard) {
         return;
     }
     let pl = &mut s.players[p];
+    if pl.hand.iter().any(&revealed_like) {
+        pl.note_hidden_in();
+    }
     for r in pl.hand.make_mut().iter_mut() {
         if revealed_like(r) {
             r.revealed = false;
-            // 公開されていたカードが伏せた枠になった（手札の記録）
+            // 公開されていたカードが伏せた枠になった（手札の記録。付いていた強化は、相手にも分かる伏せた手札の強化に移す）
             pl.hand_log.push(HandEv::InWith {
                 boosts: sat_u16(r.boosts),
             });
+            pl.pub_mods.add_hand(r.attack_mod, r.defense_mod);
         }
         if hint_like(r) {
             r.drawn_by = None;
@@ -988,6 +993,10 @@ fn apply_play(s: &mut GameState, iid: Iid) {
         s.players[p]
             .hand_log
             .push(HandEv::out_of(&h, card_shows_x(h.card)));
+        // 出したカードに見えた強化は、相手にも分かる伏せた手札の強化から引く
+        s.players[p]
+            .pub_mods
+            .reveal_hand(h.attack_mod, h.defense_mod);
     }
     let pl = &mut s.players[p];
     // アクセラレート・結晶でプレイしたら、その姿のカードをプレイしたことになる（元のコストはその姿のコスト）
@@ -1301,10 +1310,15 @@ fn apply_fuse(s: &mut GameState, host_iid: Iid, materials: &[Iid]) {
     }
     let host = &mut hand[hi];
     host.fused_this_turn = true;
+    // 伏せていた融合する側に付いていた強化は、公開されて見える（相手にも分かる伏せた手札の強化から引く）
+    let hidden_host = (!host.revealed).then_some((host.attack_mod, host.defense_mod));
     // 融合したことと融合する側のカード名は相手に公開される（素材が何だったかは公開されない。docs/rules.md「融合で相手に分かること」）
     host.revealed = true;
     let (host_card, n_kinds) = (host.card, host.fused_kinds.len() as i32);
     hand.retain(|c| !materials.contains(&c.iid));
+    if let Some((a, df)) = hidden_host {
+        s.players[p].pub_mods.reveal_hand(a, df);
+    }
     let d = data();
     let mut ctx = Ctx::new(p, host_iid);
     // 「融合したカードのコスト」は手札で変化したコスト（docs/rules.md の「コスト」と「元のコスト」）
