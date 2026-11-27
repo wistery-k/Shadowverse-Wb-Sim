@@ -1,0 +1,32 @@
+# 学びの種のぶれを測る（R7 と n7-e1 の差を割る前の土台の 1 本目。線にしない。回すかはユーザーが選ぶ）: R7（I）と同じ学び（r7-1 の 6 万試合のデータ・同じ出発の v0・同じ引数）を、
+#   並べ替えの種（--seed）だけ 2 に替えて学んだ版（R7 種 2）を、R7 と 4 万試合で比べる。
+# ユーザーの問い（2026-11-27）: n7-e1 が R7 よりやや弱そう（rb-e1 の 49.46% ± 0.29、差 −0.54）なのは、データの作り方の差（本線の試合の数・ランダムな手の入れ方・介入の試合のランダムな手）のどこから来ているか。
+#   審査の勧め（2026-11-27）: 割る前に、同じデータ・同じ学びの 2 つの版が強さでどれだけ違うか（学びの種のぶれ）を測る。まだ測ったことがない。
+#   割るための次の比べ（試合数の対照など）も 1 回ずつの学びなので、このぶれより小さな差は読めない
+#   R7 は --best 1 がエポック 1 を選んだ版（night/r7-1.txt の 4.）。この版は、--best が何を選んでもエポック 1 の重み（--epochOut）を使う（選び方の違いを混ぜない）。
+#   --best の --out（@/it2.json）は、どのエポックを選んだかを見るだけ。--seed は並べ替え（Fisher-Yates）の種だけで、確かめ用の分け方・出発の重み・目標の作り方は変えない。R7 の学びは既定の種 1
+#
+# ---- 回す前に決めた読み方（night/rb-e1b.txt と共通。この 2 晩の後には変えない）----
+# 記号: d_s = この比べの差（R7 種 2 − R7）と SE_s（4 万試合で ± 0.21 ほど）。
+#   d_1 = n7-e1 対 R7 の 8 万試合の合計（rb-e1 の 2 万試合と rb-e1b の 6 万試合を、試合数で重みを付けて合わせる）の差と SE_1（± 0.145 ほど）
+#   d_1 − d_s は、R7 を挟んだ「n7-e1 − R7 種 2」と読む（足し算で重なる前提。推測）
+# 1. d_1 + 2 SE_1 < 0 で、かつ (d_1 − d_s) + 2 √(SE_1² + SE_s²) < 0 なら、n7-e1 は R7 の学びの 2 つの版のどちらよりも弱い。
+#    次に試合数の対照（R7 の学びを r7-1 の s-1..13 だけで行った版。枝の本線と同じ試合番号の 3.9 万試合）を測る案を出す
+# 2. d_1 + 2 SE_1 < 0 だが 2 つ目の条件を満たさないなら、R7 より弱いとは言えても、学びの種のぶれと分けられない。1 回ずつの学びの比べでは 0.5 ポイントは割れないとして止める
+# 3. d_1 + 2 SE_1 < 0 でなければ、n7-e1 が R7 より弱いとは言えない（d_1 − 2 SE_1 > −0.3 なら「落とさない」）。割るものがないとして止める
+# どの場合も、|d_s| を「学びの種のぶれ」として記録する（学び直した版どうしの比べで小さな差を読むときの目安）。
+#   |d_s| − 2 SE_s > 0 なら、種だけで強さが分かれるので、1 回の学びの比べで 0.5 ポイントほどの差を読まない、と書き添える
+# 限り: n7-e1 の側の種のぶれは測らない（1 版だけ）。R7 の側の 2 版で、学びのぶれの大きさを見積もるだけ
+#
+# 見込み（PC、svwb-docker・28 スレッド）: r7-1 の I の学びの実測（3 エポック 666 秒）、間引き 30 秒・属性 10 秒、
+#   4 万試合は rb-e1 の compare の実測 0.215 秒/試合（2 万試合 1 時間 12 分）で 2 時間 23 分。合わせて 2 時間 35 分ほど。r7-1 の回のフォルダだけを読む（rb-e1b とは別に積める）
+# 朝: 止まったときのまとめを push してもらい、ingest する
+# 回の名前は r7-seed（plan に --name r7-seed を付ける）
+
+# 1. 種 2 の学び（r7-1 の I と同じ引数に --seed 2・--epochOut を足したもの）と、エポック 1 の版の間引きと属性（R7 と同じかけ方）
+td train --impl rust --model @run:r7-1/v0.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/it2.json --epochOut @/it2-e{e}.json --epochs 3 --seed 2 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestStacks,oppCrestStacks --est 670
+td prune --impl rust --model @/it2-e1.json --data @run:r7-1/s-{1..20}.jsonl.gz --out @/ip2.json --est 30
+td attr --model @/ip2.json --out @/i2.json --keepA 0 --est 10
+
+# 2. R7 種 2 対 R7（4 万試合。rb-3 と同じシード）
+compare 20000 '{"valueNet":"@/i2.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' '{"valueNet":"rust/engine/yardstick/pool-r7-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label R7種2対R7 --est 0.215
