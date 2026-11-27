@@ -901,7 +901,12 @@ pub const F_EXPLORED: u8 = 1;
 pub const F_HOLDOUT: u8 = 2;
 pub const F_WIN: u8 = 4;
 pub const F_IV: u8 = 8;
+/// ターン末の局面で、次の相手のターンの最初の手がランダムな手だった（自己対戦の "oe"。svwb td selfplay --lostLabel 1）。
+/// td train --cutOpp 1 が、この局面の λ 収益をその局面の値で切る（相手のランダムな手の得を学ばない）
+pub const F_OPP_EX: u8 = 64;
 pub const PHASE_SHIFT: u8 = 4;
+/// 局面の種類（0〜2）は flags の PHASE_SHIFT から 2 ビット
+const PHASE_MASK: u8 = 3;
 
 /// 介入の対（td-main.ts の IvPair のうち、学習の報告で使う所）
 pub struct IvPair {
@@ -944,6 +949,8 @@ pub struct Dataset {
     /// 読みの出力の印（読みの中の相手が勝った割合 "rf"。無ければ NaN。"rn" が LoadOptions::read_min より小さい局面も NaN）
     pub read: Vec<f32>,
     pub pairs: Vec<IvPair>,
+    /// "ln"（と "oe"）の付いたターン末の局面の数（svwb td selfplay --lostLabel 1 で書いた自己対戦か。td train --cutOpp が確かめる）
+    pub labeled_ends: usize,
 }
 
 impl Dataset {
@@ -966,7 +973,7 @@ impl Dataset {
 
     #[inline]
     pub fn phase(&self, i: usize) -> u8 {
-        self.flags[i] >> PHASE_SHIFT
+        (self.flags[i] >> PHASE_SHIFT) & PHASE_MASK
     }
 
     #[inline]
@@ -1113,6 +1120,7 @@ pub fn load_data(files: &[String], opts: &LoadOptions) -> Result<Dataset, String
         win: Vec::new(),
         read: Vec::new(),
         pairs: Vec::new(),
+        labeled_ends: 0,
     };
     let mut code_of: FastMap<u32, usize> = FastMap::default();
     let mut games = 0usize;
@@ -1225,8 +1233,12 @@ fn add_game(
             d.next.push(-1);
             let win = if r.winner == p as f64 { F_WIN } else { 0 };
             let ex = if x.ex { F_EXPLORED } else { 0 };
+            let oe = if x.ph == 0 && x.oe { F_OPP_EX } else { 0 };
+            if x.ph == 0 && x.ln.is_some() {
+                d.labeled_ends += 1;
+            }
             d.flags
-                .push(ex | hold | win | iv_flag | (x.ph << PHASE_SHIFT));
+                .push(ex | hold | win | iv_flag | oe | (x.ph << PHASE_SHIFT));
             // 探索の値。ターンの最初の局面には、同じターンのターン末の局面のものを入れる（ランダムに打った局面は除く）
             let qv = match (x.ph, x.qe, x.qr) {
                 (0, Some(qe), Some(qr)) => (1.0 - opts.search_mix) * qr + opts.search_mix * qe,

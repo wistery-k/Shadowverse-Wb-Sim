@@ -321,8 +321,12 @@ describe("前期のローテーション: アグロネクロマンサー", () =>
     const suzy = toBoard(s, me, "誠実なる呪い屋・スージー");
     t = applyAction(s, { type: "evolve", iid: suzy.iid });
     expect(t.players[me].hand.find((h) => h.iid === f)?.attackMod).toBe(3);
+    // 伏せた手札のどれを強化したかは相手に分からないが、量は分かる（相手にも分かる強化の集計。補正の入力だけが使う）
+    expect(t.players[me].pubMods).toEqual([0, 0, 3, 0]);
     t = play(t, f);
     expect(board(t, me)[1]).toMatchObject({ attack: 5, defense: 2 });
+    // 出したカードに +3 が見えたので、伏せた手札の分は 0 に戻る
+    expect(t.players[me].pubMods).toBeUndefined();
   });
 
   it("激烈の副総長と強襲の特攻隊長: リーダーすべてにダメージ", () => {

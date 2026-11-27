@@ -99,7 +99,7 @@
 //! "x" と "b" から出す補正が探索の補正と同じかを確かめる（場のカードのネットワークを変えたとき用）。
 //!
 //!   svwb td branch --model m0.json --from <自己対戦の棋譜のファイルかフォルダ>,… [--start 0] [--games N] [--turns 4-9] [--extra 4]
-//!     [--eps 0.1] [打ち方と印の引数は selfplay と同じ] [--kifu k.jsonl | --no-kifu] --out b0.jsonl
+//!     [--first plan|random] [--rate 0.1] [--eps 0.1] [打ち方と印の引数は selfplay と同じ] [--kifu k.jsonl | --no-kifu] --out b0.jsonl
 //!
 //! 選ばなかった候補の枝（2026-11-23。docs/ai-notes/15-2026-11-22.md「選ばなかった候補を学びに足す」）。自己対戦の棋譜の試合 g
 //! （[start, start + games) のもの。"source": "td selfplay" の行だけ）ごとに、席 g mod 2 の自分のターン（--turns の範囲）の最初を 1 つ選び、
@@ -109,6 +109,14 @@
 //! 学習は普通の自己対戦の行として読む（"plan" の行は介入の対にしない）。試合ごとの乱数は試合番号から決まり、同じ引数なら同じ行になる。
 //! 枝を作らない試合（範囲にターンが無い・リーサルがある・候補が 1 つ等）は書かず、理由ごとの数を出す。棋譜は枝の試合（もとの試合の
 //! 枝までの手と枝の手）を書く（"kind": "branch" の名前）。--model の補正は棋譜の試合を打った補正と同じものを渡す（候補を作り直すため）。
+//!
+//! --first random なら、選ばなかった候補の代わりに、ランダムな最初の手の枝を作る（2026-11-26。本線の自己対戦を --eps 0 で打ち、
+//! ランダムな手は枝で後から生やす形。docs/ai-notes/15-2026-11-22.md「ランダムな手を枝に移す」）。両方の席の自分のターンの最初
+//! （--turns の範囲。既定は 1-99）のそれぞれを確率 --rate で枝の場所にし（--eps の自己対戦のランダムな手と同じ数え方。1 試合に 0 個以上）、
+//! そこで --eps と同じ選び方（ターン終了を除く合法手から 1 つを同じ確率で。リーサルがあっても）の手を打ち、そのターンの残りと
+//! 試合の終わりまでを --model・--eps で打つ（ランダムな手を枝の最初だけにするなら --eps 0）。書く行は "iv": {"p", "k": 0, "zone": "plan",
+//! "card": "random", "b": 試合の中の枝の番号, "choices": 手の数, "turn", "i"} で、学習は選ばなかった候補の枝と同じく普通の行として読む。
+//! そのターンのうちに試合が終わった枝は書かない（"ended"）。
 
 use super::deck_compare::{read_deck, read_deck_list};
 use super::human_plan::mix;
@@ -1829,28 +1837,142 @@ fn branch_one(
     );
     out.samples = r.counts[0] + r.counts[1];
     out.line = Some(record_line(g, names, &r, Some(info), None));
-    out.replay = match &m.kifu {
-        Some(k) => {
-            let (run, seats) = &**k;
-            let mut acts = rep.actions[..i].to_vec();
-            acts.extend(r.actions.iter().cloned());
-            Some(kifu::line(
-                run,
-                &kifu::Game {
-                    g,
-                    swap: None,
-                    names: [&names[0], &names[1]],
-                    seats: [&seats[0], &seats[1]],
-                    decks: [&rep.decks[0], &rep.decks[1]],
-                    seed,
-                    end: kifu::End::of(&r.state),
-                    actions: &acts,
-                },
-            ))
-        }
-        None => None,
-    };
+    let mut acts = rep.actions[..i].to_vec();
+    acts.extend(r.actions.iter().cloned());
+    out.replay = branch_replay(g, names, rep, m, &r.state, &acts);
     out
+}
+
+/// td branch --first random の種の印（"BRRN"）
+const RANDOM_BRANCH_TAG: u32 = 0x4252_524e;
+
+/// 棋譜の試合 1 つから、ランダムな最初の手の枝を作る（td branch --first random）。
+/// 両方の席の自分のターンの最初（turns の範囲）のそれぞれを、確率 rate で枝の場所にする（自己対戦の --eps のランダムな手と同じ数え方なので、
+/// rate が --eps と同じなら、枝のターンの割合は --eps の自己対戦のランダムな手と同じになる）。枝ごとに、その局面で --eps と同じ選び方
+/// （ターン終了を除く合法手から 1 つを同じ確率で）の手を打ち、そのターンの残りと試合の終わりまでを m・eps で打つ。
+/// 分かれた局面はもとの試合の行にあるので書かず、枝のターン末から書く（"iv" の "zone" は "plan"、"card" は "random"）
+fn branch_random(
+    g: u32,
+    names: &[String; 2],
+    rep: &kifu::Replay,
+    m: &Model,
+    eps: f64,
+    turns: (i32, i32),
+    rate: f64,
+) -> Vec<BranchOut> {
+    let skip = |why: &'static str| BranchOut {
+        line: None,
+        replay: None,
+        skip: Some(why),
+        kind: "random",
+        forced_all: false,
+        samples: 0,
+    };
+    let seed = rep.seed;
+    let mut pick = seed ^ RANDOM_BRANCH_TAG;
+    let mut next_float = || {
+        let (v, next) = next_random(pick);
+        pick = next;
+        v
+    };
+    // 枝の場所（行動の添字・席・ターン）とその局面
+    let mut at: Vec<(usize, PlayerIndex, i32, GameState)> = Vec::new();
+    let mut s = create_game([&rep.decks[0], &rep.decks[1]], seed);
+    let mut seen = [-1, -1];
+    for (i, a) in rep.actions.iter().enumerate() {
+        let p = s.active;
+        if s.phase == Phase::Main
+            && s.pending.is_none()
+            && acting_player(&s) == p
+            && s.players[p].turn_count != seen[p]
+        {
+            seen[p] = s.players[p].turn_count;
+            if (turns.0..=turns.1).contains(&seen[p]) && next_float() < rate {
+                at.push((i, p, seen[p], s.clone()));
+            }
+        }
+        if !is_legal(&s, a) {
+            return vec![skip("illegal-kifu")];
+        }
+        s = apply_action(&s, a);
+    }
+    let mut outs = Vec::new();
+    for (b, (i, p, t, s)) in at.into_iter().enumerate() {
+        if !s.stack.is_empty() || !s.queue.is_empty() {
+            outs.push(skip("stack"));
+            continue;
+        }
+        let legal = legal_actions(&s);
+        let choices: Vec<&Action> = legal
+            .iter()
+            .filter(|a| !matches!(a, Action::EndTurn))
+            .collect();
+        if choices.is_empty() {
+            outs.push(skip("no-choice"));
+            continue;
+        }
+        let first = choices[(next_float() * choices.len() as f64).floor() as usize].clone();
+        let mut seen0 = [-1, -1];
+        seen0[p] = t;
+        reset_lethal();
+        reset_exact_lethal_cache();
+        let r = play_out_seen(
+            g,
+            s,
+            m,
+            eps,
+            mix(seed ^ RANDOM_BRANCH_TAG, i as u32),
+            None,
+            None,
+            seen0,
+            Some((p, std::slice::from_ref(&first))),
+        );
+        // そのターンのうちに試合が終わった（局面が無い）
+        if r.counts[0] + r.counts[1] == 0 {
+            outs.push(skip("ended"));
+            continue;
+        }
+        let info = format!(
+            "{{\"p\":{p},\"k\":0,\"zone\":\"plan\",\"card\":\"random\",\"b\":{b},\"choices\":{},\"turn\":{t},\"i\":{i}}}",
+            choices.len()
+        );
+        let mut acts = rep.actions[..i].to_vec();
+        acts.extend(r.actions.iter().cloned());
+        outs.push(BranchOut {
+            line: Some(record_line(g, names, &r, Some(info), None)),
+            replay: branch_replay(g, names, rep, m, &r.state, &acts),
+            skip: None,
+            kind: "random",
+            forced_all: true,
+            samples: r.counts[0] + r.counts[1],
+        });
+    }
+    outs
+}
+
+/// 枝の棋譜の 1 行（m.kifu があるときだけ。acts はもとの試合の分かれるまでの行動と、枝の行動）
+fn branch_replay(
+    g: u32,
+    names: &[String; 2],
+    rep: &kifu::Replay,
+    m: &Model,
+    end: &GameState,
+    acts: &[Action],
+) -> Option<String> {
+    let (run, seats) = &**m.kifu.as_ref()?;
+    Some(kifu::line(
+        run,
+        &kifu::Game {
+            g,
+            swap: None,
+            names: [&names[0], &names[1]],
+            seats: [&seats[0], &seats[1]],
+            decks: [&rep.decks[0], &rep.decks[1]],
+            seed: rep.seed,
+            end: kifu::End::of(end),
+            actions: acts,
+        },
+    ))
 }
 
 /// 棋譜の行の試合番号（最初の `,"g":<数>`）。見つからなければ None（読み解いて確かめる）
@@ -1885,7 +2007,24 @@ fn branch(args: &[(String, String)]) -> Result<(), String> {
     if extra < 0.0 || extra.fract() != 0.0 {
         return Err("--extra は 0 以上の整数".into());
     }
-    let turns = super::human_plan::parse_range(arg(args, "turns").unwrap_or("4-9"))?;
+    // --first plan（既定）: 選ばなかった候補の枝を試合ごとに 1 つ。random: 自分のターンの最初ごとに確率 --rate でランダムな最初の手の枝
+    let random = match arg(args, "first").unwrap_or("plan") {
+        "plan" => false,
+        "random" => true,
+        x => return Err(format!("--first は plan か random: {x}")),
+    };
+    let rate = num_arg(args, "rate", 0.1)?;
+    if !(0.0..=1.0).contains(&rate) {
+        return Err("--rate は 0〜1".into());
+    }
+    if !random && arg(args, "rate").is_some() {
+        return Err("--rate は --first random のときだけ".into());
+    }
+    let turns = super::human_plan::parse_range(arg(args, "turns").unwrap_or(if random {
+        "1-99"
+    } else {
+        "4-9"
+    }))?;
     // --start・--games: 枝を作る試合番号の範囲 [start, start + games)（キューの区切り）。--games が無ければ start から棋譜の全部
     let start = num_arg(args, "start", 0.0)?;
     let games = match arg(args, "games") {
@@ -1948,10 +2087,15 @@ fn branch(args: &[(String, String)]) -> Result<(), String> {
     let first = items.first().map_or(0, |x| x.0);
     let last = items.last().map_or(0, |x| x.0);
     println!(
-        "試合 {}（g{first}〜{last}）、自分のターン {}〜{}、足す候補 {extra}、{} スレッド",
+        "試合 {}（g{first}〜{last}）、自分のターン {}〜{}、{}、{} スレッド",
         items.len(),
         turns.0,
         turns.1,
+        if random {
+            format!("ランダムな最初の手（自分のターンごとに確率 {rate}）")
+        } else {
+            format!("選ばなかった候補（足す候補 {extra}）")
+        },
         super::parallel::thread_count()
     );
     let run = RunInfo::now("td branch", "");
@@ -1992,6 +2136,10 @@ fn branch(args: &[(String, String)]) -> Result<(), String> {
         if let Some(p) = arg(args, "potential") {
             ai.push(("potential".into(), Json::Str(p.into())));
         }
+        if random {
+            ai.push(("first".into(), Json::Str("random".into())));
+            ai.push(("rate".into(), Json::Num(rate)));
+        }
         let seat = Seat {
             side: None,
             agent: "td-branch".into(),
@@ -2002,15 +2150,23 @@ fn branch(args: &[(String, String)]) -> Result<(), String> {
         m.kifu = Some(Arc::new((run, [seat.clone(), seat])));
     }
     let t0 = Instant::now();
-    let results = parallel_map(
+    let per_game = parallel_map(
         &items,
-        |(g, names, rep), _| branch_one(*g, names, rep, &m, eps, turns, extra as usize),
-        |done, total, r, _| {
-            if let Some(line) = &r.line {
-                writeln!(file, "{line}").unwrap_or_else(|e| panic!("{out} に書けません: {e}"));
+        |(g, names, rep), _| {
+            if random {
+                branch_random(*g, names, rep, &m, eps, turns, rate)
+            } else {
+                vec![branch_one(*g, names, rep, &m, eps, turns, extra as usize)]
             }
-            if let (Some(w), Some(line)) = (kifu_file.as_mut(), r.replay.as_ref()) {
-                w.write(line);
+        },
+        |done, total, rs, _| {
+            for r in rs {
+                if let Some(line) = &r.line {
+                    writeln!(file, "{line}").unwrap_or_else(|e| panic!("{out} に書けません: {e}"));
+                }
+                if let (Some(w), Some(line)) = (kifu_file.as_mut(), r.replay.as_ref()) {
+                    w.write(line);
+                }
             }
             if done % 100 == 0 || done == total {
                 println!(
@@ -2024,6 +2180,8 @@ fn branch(args: &[(String, String)]) -> Result<(), String> {
         let (p, n) = w.finish()?;
         println!("棋譜: {p}（{n} 試合）");
     }
+    let games_n = per_game.len();
+    let results: Vec<BranchOut> = per_game.into_iter().flatten().collect();
     let made: Vec<&BranchOut> = results.iter().filter(|r| r.line.is_some()).collect();
     let mut skips: BTreeMap<&str, usize> = BTreeMap::new();
     for r in &results {
@@ -2032,6 +2190,17 @@ fn branch(args: &[(String, String)]) -> Result<(), String> {
         }
     }
     let kinds = |k: &str| made.iter().filter(|r| r.kind == k).count();
+    if random {
+        println!(
+            "{out}: 枝 {}（試合 {games_n}、1 試合 {}）、局面 {}、作らなかった {:?}、{} 秒",
+            made.len(),
+            fixed(made.len() as f64 / games_n.max(1) as f64, 2),
+            made.iter().map(|r| r.samples).sum::<usize>(),
+            skips,
+            fixed(seconds_since(t0), 1)
+        );
+        return Ok(());
+    }
     println!(
         "{out}: 枝 {}/{}（候補の種類 top {}・cut {}・extra {}。候補の手を全部打てた {}）、局面 {}、作らなかった {:?}、{} 秒",
         made.len(),
@@ -2310,6 +2479,74 @@ mod tests {
             assert_eq!(s.turn as i64, v["turns"].as_i64().expect("ターン"));
         }
         assert!(made >= 2, "{made}");
+    }
+
+    #[test]
+    fn random_branches_start_at_turn_ends_after_one_random_move() {
+        // td branch --first random: 両方の席の自分のターンの最初ごとに確率 rate で枝を作り、ランダムな最初の手の後のターン末から書く。
+        // 枝の棋譜は、もとの試合の分かれるまでの手と同じで、最初の局面から打ち直すと同じ終わり方になる。同じ試合からは同じ枝。
+        // rate 0 なら枝は無く、rate 1 ならターンの範囲の自分のターンのどれも枝になる
+        let decks = compare_decks();
+        let mut m = imagined_model(0);
+        let seat = kifu::same_seat("test", "{}");
+        m.kifu = Some(Arc::new((RunInfo::now("test", ""), [seat.clone(), seat])));
+        let (mut made, mut seats) = (0, [0, 0]);
+        for g in [3u32, 10, 21] {
+            let base = play_one(g, &decks, None, &m, 0.0, 0.0, IvZone::Hand, 0.0, None);
+            let j = Json::parse(base.replay.as_deref().expect("棋譜")).expect("JSON");
+            let rep = kifu::parse_replay(&j).expect("棋譜");
+            let names = base.decks.clone();
+            assert!(branch_random(g, &names, &rep, &m, 0.0, (1, 99), 0.0).is_empty());
+            let all = branch_random(g, &names, &rep, &m, 0.0, (2, 3), 1.0);
+            assert!(all.len() <= 4, "{}", all.len());
+            let a = branch_random(g, &names, &rep, &m, 0.0, (1, 99), 0.3);
+            let b = branch_random(g, &names, &rep, &m, 0.0, (1, 99), 0.3);
+            assert_eq!(a.len(), b.len());
+            for (x, y) in a.iter().zip(&b) {
+                assert_eq!(x.line, y.line);
+                assert_eq!(x.replay, y.replay);
+            }
+            for x in all.iter().chain(&a) {
+                let Some(line) = &x.line else {
+                    assert!(x.skip.is_some());
+                    continue;
+                };
+                made += 1;
+                let v: serde_json::Value = serde_json::from_str(line).expect("JSON");
+                assert_eq!(v["iv"]["zone"], "plan");
+                assert_eq!(v["iv"]["card"], "random");
+                // 確かめ用の分け方は試合番号で決まるので、枝はもとの試合と同じ側に入る
+                assert_eq!(v["g"].as_u64(), Some(g as u64));
+                let p = v["iv"]["p"].as_u64().expect("席") as usize;
+                seats[p] += 1;
+                assert_eq!(v["samples"][p][0]["ph"], 0, "枝の最初はターン末");
+                assert!(
+                    v["samples"][p]
+                        .as_array()
+                        .expect("局面")
+                        .iter()
+                        .all(|s| s.get("ex").is_none()),
+                    "枝の先にランダムな手は無い（--eps 0）"
+                );
+                let i = v["iv"]["i"].as_u64().expect("添字") as usize;
+                let k = Json::parse(x.replay.as_deref().expect("枝の棋譜")).expect("JSON");
+                let r = kifu::parse_replay(&k).expect("枝の棋譜");
+                assert_eq!(r.actions[..i], rep.actions[..i]);
+                assert!(!matches!(r.actions[i], Action::EndTurn));
+                let mut s = create_game([&r.decks[0], &r.decks[1]], r.seed);
+                for x in &r.actions {
+                    assert!(is_legal(&s, x));
+                    s = apply_action(&s, x);
+                }
+                assert_eq!(s.phase, Phase::Ended);
+                assert_eq!(s.winner.map(|w| w as u64), v["winner"].as_u64());
+                assert_eq!(s.turn as i64, v["turns"].as_i64().expect("ターン"));
+            }
+        }
+        assert!(
+            made >= 4 && seats[0] > 0 && seats[1] > 0,
+            "{made} {seats:?}"
+        );
     }
 
     #[test]

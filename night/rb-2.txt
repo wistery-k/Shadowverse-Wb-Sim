@@ -1,0 +1,52 @@
+# ランダムな手を枝に移す学び直しの 2 晩目（学びだけ。対戦なし）: rb-1 の本線（ランダムな手なし）3.9 万試合と枝から、R7（I）と同じ入力で N を学ぶ。
+# 計画と決まりは docs/ai-notes/15-2026-11-22.md「ランダムな手を枝に移す」の「計画」（審査の直し 2026-11-26 を入れた形）。入力は R7 に採った I のもの（ユーザーの決定 2026-11-26）
+#
+# ---- 回す前に決めた決め方（この晩の後には変えない）----
+# λ とエポック: N を λ 0.7（n7）と λ 0.9（n9）で 8 エポックずつ学び（--epochOut・--byTurn 1）、本線の介入でない確かめ用のターン末（学びの報告の「手番ごとの確かめ用のターン末」の行）で、
+#   5 つの帯（1〜2・3〜4・5〜6・7〜8・9 以上）の 予測 − 勝ち がどれも ±1.0 ポイント以内になる一番少ないエポック（同じなら λ 0.7）の版を使う。
+#   止める線: 確かめ用の局面（end・imagined）の勝敗の交差エントロピーが、同じ λ のエポックのうち一番小さいものより 0.002 より悪いエポックは使わない。
+#   どれも ±1.0 に届かなければ、止める線の中で、帯の |予測 − 勝ち| の一番大きいものが一番小さいエポックと λ。--best 1 の --out（n7t・n9t）は参考に残すだけ
+# 朝: 止まったときのまとめを push してもらい、ingest する。学びの報告（ログ）から版を選び、3 晩目（night/rb-3.txt。N 対 R7 の 4 万試合）をその版で書く。
+#   選んだ版が λ 0.7・1 エポックでなければ、副の比べ（同じ λ・同じエポック数で r7-1 のデータから学んだ対照との 4 万試合）を、時間を添えてユーザーに出す（回すかはユーザー）
+#
+# 見込み（PC、svwb-docker・28 スレッド）: r7-1 の I の学び（1010 万局面・3 エポック）の実測 11 分から、900 万局面・8 エポックで 26 分ほどを 2 つ。
+#   間引き 30 秒・属性 10 秒ほどをエポックごとに 16 回で 11 分。合わせて 1 時間 5 分ほど。rb-1 が済んでから積む（rb-1 の回のフォルダのデータを読む）
+# 回の名前は rb-2（plan に --name rb-2 を付ける）
+
+# 1. N（λ 0.7・8 エポック）
+td train --impl rust --model @run:r7-1/v0.json --data @run:rb-1/s-{1..13}.jsonl.gz,@run:rb-1/b-{1..13}.jsonl.gz --out @/n7t.json --epochOut @/n7t-e{e}.json --epochs 8 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestStacks,oppCrestStacks --byTurn 1 --est 1560
+td prune --impl rust --model @/n7t-e1.json --data @run:rb-1/s-{1..13}.jsonl.gz,@run:rb-1/b-{1..13}.jsonl.gz --out @/n7p-e1.json --est 30
+td attr --model @/n7p-e1.json --out @/n7-e1.json --keepA 0 --est 10
+td prune --impl rust --model @/n7t-e2.json --data @run:rb-1/s-{1..13}.jsonl.gz,@run:rb-1/b-{1..13}.jsonl.gz --out @/n7p-e2.json --est 30
+td attr --model @/n7p-e2.json --out @/n7-e2.json --keepA 0 --est 10
+td prune --impl rust --model @/n7t-e3.json --data @run:rb-1/s-{1..13}.jsonl.gz,@run:rb-1/b-{1..13}.jsonl.gz --out @/n7p-e3.json --est 30
+td attr --model @/n7p-e3.json --out @/n7-e3.json --keepA 0 --est 10
+td prune --impl rust --model @/n7t-e4.json --data @run:rb-1/s-{1..13}.jsonl.gz,@run:rb-1/b-{1..13}.jsonl.gz --out @/n7p-e4.json --est 30
+td attr --model @/n7p-e4.json --out @/n7-e4.json --keepA 0 --est 10
+td prune --impl rust --model @/n7t-e5.json --data @run:rb-1/s-{1..13}.jsonl.gz,@run:rb-1/b-{1..13}.jsonl.gz --out @/n7p-e5.json --est 30
+td attr --model @/n7p-e5.json --out @/n7-e5.json --keepA 0 --est 10
+td prune --impl rust --model @/n7t-e6.json --data @run:rb-1/s-{1..13}.jsonl.gz,@run:rb-1/b-{1..13}.jsonl.gz --out @/n7p-e6.json --est 30
+td attr --model @/n7p-e6.json --out @/n7-e6.json --keepA 0 --est 10
+td prune --impl rust --model @/n7t-e7.json --data @run:rb-1/s-{1..13}.jsonl.gz,@run:rb-1/b-{1..13}.jsonl.gz --out @/n7p-e7.json --est 30
+td attr --model @/n7p-e7.json --out @/n7-e7.json --keepA 0 --est 10
+td prune --impl rust --model @/n7t-e8.json --data @run:rb-1/s-{1..13}.jsonl.gz,@run:rb-1/b-{1..13}.jsonl.gz --out @/n7p-e8.json --est 30
+td attr --model @/n7p-e8.json --out @/n7-e8.json --keepA 0 --est 10
+
+# 2. N（λ 0.9・8 エポック）
+td train --impl rust --model @run:r7-1/v0.json --data @run:rb-1/s-{1..13}.jsonl.gz,@run:rb-1/b-{1..13}.jsonl.gz --out @/n9t.json --epochOut @/n9t-e{e}.json --epochs 8 --lambda 0.9 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestStacks,oppCrestStacks --byTurn 1 --est 1560
+td prune --impl rust --model @/n9t-e1.json --data @run:rb-1/s-{1..13}.jsonl.gz,@run:rb-1/b-{1..13}.jsonl.gz --out @/n9p-e1.json --est 30
+td attr --model @/n9p-e1.json --out @/n9-e1.json --keepA 0 --est 10
+td prune --impl rust --model @/n9t-e2.json --data @run:rb-1/s-{1..13}.jsonl.gz,@run:rb-1/b-{1..13}.jsonl.gz --out @/n9p-e2.json --est 30
+td attr --model @/n9p-e2.json --out @/n9-e2.json --keepA 0 --est 10
+td prune --impl rust --model @/n9t-e3.json --data @run:rb-1/s-{1..13}.jsonl.gz,@run:rb-1/b-{1..13}.jsonl.gz --out @/n9p-e3.json --est 30
+td attr --model @/n9p-e3.json --out @/n9-e3.json --keepA 0 --est 10
+td prune --impl rust --model @/n9t-e4.json --data @run:rb-1/s-{1..13}.jsonl.gz,@run:rb-1/b-{1..13}.jsonl.gz --out @/n9p-e4.json --est 30
+td attr --model @/n9p-e4.json --out @/n9-e4.json --keepA 0 --est 10
+td prune --impl rust --model @/n9t-e5.json --data @run:rb-1/s-{1..13}.jsonl.gz,@run:rb-1/b-{1..13}.jsonl.gz --out @/n9p-e5.json --est 30
+td attr --model @/n9p-e5.json --out @/n9-e5.json --keepA 0 --est 10
+td prune --impl rust --model @/n9t-e6.json --data @run:rb-1/s-{1..13}.jsonl.gz,@run:rb-1/b-{1..13}.jsonl.gz --out @/n9p-e6.json --est 30
+td attr --model @/n9p-e6.json --out @/n9-e6.json --keepA 0 --est 10
+td prune --impl rust --model @/n9t-e7.json --data @run:rb-1/s-{1..13}.jsonl.gz,@run:rb-1/b-{1..13}.jsonl.gz --out @/n9p-e7.json --est 30
+td attr --model @/n9p-e7.json --out @/n9-e7.json --keepA 0 --est 10
+td prune --impl rust --model @/n9t-e8.json --data @run:rb-1/s-{1..13}.jsonl.gz,@run:rb-1/b-{1..13}.jsonl.gz --out @/n9p-e8.json --est 30
+td attr --model @/n9p-e8.json --out @/n9-e8.json --keepA 0 --est 10

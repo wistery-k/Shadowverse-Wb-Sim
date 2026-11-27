@@ -4,7 +4,7 @@
 //!     [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--imaginedWeight 1] [--ivRes 1] [--best 0] [--bestOn end,after]
 //!     [--base default|zero|search] [--excludeDecks <デッキ>,…|--onlyDecks <デッキ>,…] [--dropInputs <入力>,…]
 //!     [--lethalHead aux|survival] [--lethalWeight 1] [--lethalTarget lost|search]
-//!     [--winHead form|aux] [--winWeight 1] [--readHead aux] [--readWeight 1] [--readMin 1]
+//!     [--winHead form|aux] [--winWeight 1] [--readHead aux] [--readWeight 1] [--readMin 1] [--cutOpp 0] [--epochOut m-e{e}.json] [--byTurn 0]
 //!   svwb td prune --model m.json --data d0.jsonl[,…] --out mp.json [--excludeDecks …|--onlyDecks …]
 //!
 //! 移したのは学び直しの流れ（night/relearn-b.txt）が使う引数だけ。実験用の引数（--attr・--cmpWeight・--v1Only・--searchTarget・--seat・--exclude 等）と
@@ -40,12 +40,26 @@
 //! w の印は自己対戦の "wn"（svwb td selfplay --wonLabel 1）で、次の相手のターンを生き延び（"ln" が 0）、自分の次のターンまで試合が続いた
 //! ターン末だけ（"we" が 1 の局面は除く）。r の印は "rf"（--readLabel 1）で、読みの回数 "rn" が --readMin 以上の局面だけ。
 //! 付けるときは重みを 0、偏りを学習側の局面の印の割合（印の平均）のロジットで始める。勝ちの出力・読みの出力が無ければ、学習は今までと同じ計算
+//!
+//! `--cutOpp 1`（2026-11-25、R7 の候補。docs/ai-notes/15-2026-11-22.md「補正は局面を読めているか」の、学びの自己対戦のランダムな手）: λ 収益は、
+//! 自分のランダムな手（"ex"）の前で切る（その局面の値で止め、その局面は学ばない）のに加えて、相手のランダムな手の前でも切る。
+//! 次の相手のターンの最初の手がランダムな手だったターン末（自己対戦の "oe"。svwb td selfplay --lostLabel 1）の λ 収益を、その局面の値にする
+//! （その前の局面の λ 収益はそこで止まり、そのターン末は学ばない。そのターン末の後の想像の局面は、そのターン末の値を目標にする）。
+//! 自分のランダムな手を切るのは前からで、相手の分だけを切らないと、値は「自分はランダムに打たず、相手だけ 1 割でランダムに打つ世界」の勝率になる
+//! （値が両方の席で高すぎる理由の仮説）。そのターン末はリーサルの出力の印も前から無い（"oe" は除く）。勝ちの出力・読みの出力の印のある局面でも学ばないので、
+//! 一緒に使うとその分の印も減る。既定は 0（今までと同じ計算）
+//!
+//! `--byTurn 1`（2026-11-26、R7 の候補の調べ。学習は変えない）: 学習前と各エポックの報告の後に、確かめ用のターン末（ランダムに打った局面と、
+//! 介入して打った試合（途中から始まるので何ターン目かが数えられない）を除く）を
+//! その席の何ターン目か（1〜2・3〜4・5〜6・7〜8・9 以上）に分け、予測の平均・自分のランダムな手の前だけで切る λ 収益（--cutOpp 0 の目標）の平均・
+//! 相手のランダムな手の前でも切る λ 収益（--cutOpp 1 の目標。"oe" のある自己対戦だけ）の平均・実際の勝ちの割合を並べる。
+//! 目標は、その報告の値（学習前なら出発の補正、エポック N の後ならそのエポックの値。次のエポックの目標）で作る
 
 use super::fixed;
 use super::parallel::{parallel_map, thread_count};
 use super::td_data::{
     js_to_uint32, load_data, used_inputs, Dataset, IvPair, IvZone, Layer, LethalHead, LethalTarget,
-    LoadOptions, NetModel, SSource, F_EXPLORED, F_HOLDOUT, F_IV,
+    LoadOptions, NetModel, SSource, F_EXPLORED, F_HOLDOUT, F_IV, F_OPP_EX,
 };
 use crate::ai::aidata::AI_DATA_JSON;
 use crate::data::data;
@@ -63,7 +77,7 @@ type Args = [(String, String)];
 const FORM_WIN_START: f64 = 1e-3;
 
 /// Rust 版の td train が扱う引数（学び直しの流れが使うものと、学習の基本の --batch・--fitA）
-const TRAIN_ARGS: [&str; 28] = [
+const TRAIN_ARGS: [&str; 31] = [
     "model",
     "data",
     "out",
@@ -92,6 +106,9 @@ const TRAIN_ARGS: [&str; 28] = [
     "readHead",
     "readWeight",
     "readMin",
+    "cutOpp",
+    "epochOut",
+    "byTurn",
 ];
 
 const PRUNE_ARGS: [&str; 5] = ["model", "data", "out", "excludeDecks", "onlyDecks"];
@@ -1192,8 +1209,9 @@ impl Learner {
 
 // ---- 報告（td-main.ts と同じ文） ----
 
-/// λ 収益（td-main.ts の lambdaReturns。--searchTarget は扱わない）
-fn lambda_returns(d: &Dataset, v: &[f64], lambda: f64) -> Vec<f64> {
+/// λ 収益（td-main.ts の lambdaReturns。--searchTarget は扱わない）。cut_opp なら、次の相手のターンの最初の手がランダムな手だった
+/// ターン末（F_OPP_EX）の λ 収益をその局面の値にする（--cutOpp。その前の局面の λ 収益もそこで止まる）
+fn lambda_returns(d: &Dataset, v: &[f64], lambda: f64, cut_opp: bool) -> Vec<f64> {
     let n = v.len();
     let mut g = vec![0.0; n];
     for i in (0..n).rev() {
@@ -1201,7 +1219,9 @@ fn lambda_returns(d: &Dataset, v: &[f64], lambda: f64) -> Vec<f64> {
             continue;
         }
         let j = d.next[i];
-        if j < 0 {
+        if cut_opp && d.has(i, F_OPP_EX) {
+            g[i] = v[i];
+        } else if j < 0 {
             g[i] = d.outcome(i);
         } else if d.has(j as usize, F_EXPLORED) {
             g[i] = v[j as usize];
@@ -1418,6 +1438,13 @@ fn report(label: &str, d: &Dataset, v: &[f64], targets: &[f64]) {
                 if bias / nf >= 0.0 { "+" } else { "" },
                 fixed((bias / nf) * 100.0, 1)
             )
+        } else if ph == 0 {
+            // 楽観の大きさ（R7 の候補の --cutOpp で見る。確かめ用のターン末の予測の平均と、実際の勝ちの割合）
+            format!(
+                " 予測の平均 {}%・勝ちの割合 {}%",
+                fixed(pred.iter().sum::<f64>() / nf * 100.0, 2),
+                fixed(y.iter().sum::<f64>() / nf * 100.0, 2)
+            )
         } else {
             String::new()
         };
@@ -1432,6 +1459,90 @@ fn report(label: &str, d: &Dataset, v: &[f64], targets: &[f64]) {
         parts.push(iv);
     }
     println!("{label}: {}", parts.join(" / "));
+}
+
+/// 局面ごとの、その席の何ターン目か（ターン末の局面だけ。1 から。ほかの局面は 0）。next で同じ席の続きの局面をたどり、
+/// 前の局面の無い局面から数える（想像の局面は anchor を持ち、続きに入らない。介入して打った試合は途中から始まるので、使う側が除く）
+fn turn_counts(d: &Dataset) -> Vec<u16> {
+    let n = d.len();
+    let mut has_prev = vec![false; n];
+    for i in 0..n {
+        if d.anchor[i] < 0 && d.next[i] >= 0 {
+            has_prev[d.next[i] as usize] = true;
+        }
+    }
+    let mut tc = vec![0u16; n];
+    for (start, &prev) in has_prev.iter().enumerate() {
+        if d.anchor[start] >= 0 || prev {
+            continue;
+        }
+        let (mut i, mut k) = (start as i32, 0u16);
+        while i >= 0 {
+            let u = i as usize;
+            if d.phase(u) == 0 {
+                k = k.saturating_add(1);
+                tc[u] = k;
+            }
+            i = d.next[u];
+        }
+    }
+    tc
+}
+
+/// --byTurn: 確かめ用のターン末（ランダムに打った局面と介入して打った試合を除く）を、その席の何ターン目かで分けた予測の平均・2 つの目標の平均・勝ちの割合
+fn turn_report(label: &str, d: &Dataset, v: &[f64], lambda: f64, tc: &[u16]) {
+    let own = lambda_returns(d, v, lambda, false);
+    let both = if d.labeled_ends > 0 {
+        Some(lambda_returns(d, v, lambda, true))
+    } else {
+        None
+    };
+    const BANDS: [(&str, u16, u16); 5] = [
+        ("1〜2", 1, 2),
+        ("3〜4", 3, 4),
+        ("5〜6", 5, 6),
+        ("7〜8", 7, 8),
+        ("9 以上", 9, u16::MAX),
+    ];
+    let mut parts = Vec::new();
+    for (name, lo, hi) in BANDS {
+        let (mut n, mut p, mut g0, mut g1, mut y) = (0usize, 0.0, 0.0, 0.0, 0.0);
+        for i in 0..v.len() {
+            if d.phase(i) != 0
+                || !d.has(i, F_HOLDOUT)
+                || d.has(i, F_EXPLORED)
+                || d.has(i, F_IV)
+                || tc[i] < lo
+                || tc[i] > hi
+            {
+                continue;
+            }
+            n += 1;
+            p += v[i];
+            g0 += own[i];
+            if let Some(b) = &both {
+                g1 += b[i];
+            }
+            y += d.outcome(i);
+        }
+        let nf = n.max(1) as f64;
+        let pc = |x: f64| fixed(x / nf * 100.0, 2);
+        let cut = if both.is_some() {
+            format!("・相手の手でも切る目標 {}%", pc(g1))
+        } else {
+            String::new()
+        };
+        parts.push(format!(
+            "{name}({n}) 予測 {}%・自分の手だけ切る目標 {}%{cut}・勝ち {}%",
+            pc(p),
+            pc(g0),
+            pc(y)
+        ));
+    }
+    println!(
+        "  手番ごとの確かめ用のターン末（{label}の値）: {}",
+        parts.join(" / ")
+    );
 }
 
 /// 確かめ用のターン末（ランダムに打った局面を除く）のうち印のある局面での、リーサルの出力の交差エントロピーと AUC。
@@ -1566,6 +1677,15 @@ pub fn train(args: &Args) -> Result<(), String> {
     let files: Vec<String> = need(args, "data")?.split(',').map(str::to_string).collect();
     let out = need(args, "out")?;
     let lambda = num_arg(args, "lambda", 0.7)?;
+    let cut_opp = num_arg(args, "cutOpp", 0.0)? != 0.0;
+    let by_turn = num_arg(args, "byTurn", 0.0)? != 0.0;
+    // --epochOut m-e{e}.json: エポックごとの重みも書き出す（{e} はエポックの番号。--best とは別に、--out は今までどおり）
+    let epoch_out = arg(args, "epochOut");
+    if epoch_out.is_some_and(|p| !p.contains("{e}")) {
+        return Err(
+            "--epochOut のファイルの名前には、エポックの番号を入れる {e} が要ります".into(),
+        );
+    }
     let epochs = int_arg(args, "epochs", 2, 0)?;
     let lr = num_arg(args, "lr", 0.001)?;
     let l2 = num_arg(args, "l2", 0.0001)?;
@@ -1687,6 +1807,17 @@ pub fn train(args: &Args) -> Result<(), String> {
     if d.is_empty() {
         return Err("学ぶ局面がありません（--data・--onlyDecks・--excludeDecks を見る）".into());
     }
+    if cut_opp {
+        if d.labeled_ends == 0 {
+            return Err("--cutOpp 1 には、ターン末の局面に \"oe\" のある自己対戦（svwb td selfplay --lostLabel 1）が要ります".into());
+        }
+        let ends = (0..d.len()).filter(|&i| d.phase(i) == 0).count();
+        let cut = (0..d.len()).filter(|&i| d.has(i, F_OPP_EX)).count();
+        println!(
+            "相手のランダムな手の前でも λ 収益を切る（--cutOpp 1）: ターン末 {ends} のうち {cut}（{}%）を、その局面の値で切って学ばない",
+            fixed(100.0 * cut as f64 / ends.max(1) as f64, 1)
+        );
+    }
     if let Some(b) = base_arg {
         let s = match s_source {
             SSource::S => "\"s\"",
@@ -1724,8 +1855,12 @@ pub fn train(args: &Args) -> Result<(), String> {
         "入力 {n_b} のうち、読んだ局面に出た {rows} 個の行の重みを学ぶ（出ない行は動かさない）"
     );
 
+    // --cutOpp: 相手のランダムな手の前で切ったターン末も、自分のランダムに打った局面と同じく学ばない
     let mut order: Vec<u32> = (0..n as u32)
-        .filter(|&i| !d.has(i as usize, F_HOLDOUT) && !d.has(i as usize, F_EXPLORED))
+        .filter(|&i| {
+            let i = i as usize;
+            !d.has(i, F_HOLDOUT) && !d.has(i, F_EXPLORED) && !(cut_opp && d.has(i, F_OPP_EX))
+        })
         .collect();
     // リーサルの出力: 出力の無いモデルに付けるなら wp は 0、bp は学習側の局面の印の割合のロジットで始める
     let head = match survival {
@@ -1873,7 +2008,11 @@ pub fn train(args: &Args) -> Result<(), String> {
             println!("探索の値（--searchTarget 0、--searchMix 0.5）: {line}");
         }
     }
-    report("学習前", &d, &v0, &lambda_returns(&d, &v0, lambda));
+    report("学習前", &d, &v0, &lambda_returns(&d, &v0, lambda, cut_opp));
+    let turns = if by_turn { Some(turn_counts(&d)) } else { None };
+    if let Some(t) = &turns {
+        turn_report("学習前", &d, &v0, lambda, t);
+    }
     head_reports(&d, &v0, &h0, learner.lethal);
     // --best 1: 確かめ用の局面の勝敗の交差エントロピーが一番小さかったエポックの重み
     let mut best_loss = holdout_loss(&d, &v0, &best_on);
@@ -1887,7 +2026,7 @@ pub fn train(args: &Args) -> Result<(), String> {
     let mut last = (v0, abs0);
     let mut step = 0u32;
     for epoch in 0..epochs {
-        let targets = lambda_returns(&d, &last.0, lambda);
+        let targets = lambda_returns(&d, &last.0, lambda, cut_opp);
         // 並べ替え（Fisher-Yates）
         for i in (1..order.len()).rev() {
             let (x, next) = next_random(rng);
@@ -1909,10 +2048,18 @@ pub fn train(args: &Args) -> Result<(), String> {
             ),
             &d,
             &v,
-            &lambda_returns(&d, &v, lambda),
+            &lambda_returns(&d, &v, lambda, cut_opp),
         );
+        if let Some(t) = &turns {
+            turn_report(&format!("エポック {}", epoch + 1), &d, &v, lambda, t);
+        }
         head_reports(&d, &v, &hv, learner.lethal);
         let loss = holdout_loss(&d, &v, &best_on);
+        if let Some(pat) = epoch_out {
+            let path = pat.replace("{e}", &(epoch + 1).to_string());
+            write_model(&learner, &model, &base_weights, &path)?;
+            println!("エポック {} の重みを {path} に書き出しました（確かめ用の局面の勝敗の交差エントロピー {}）", epoch + 1, fixed(loss, 4));
+        }
         if keep_best && loss < best_loss {
             best_loss = loss;
             best_epoch = epoch + 1;
@@ -1943,10 +2090,22 @@ pub fn train(args: &Args) -> Result<(), String> {
         fixed(t0.elapsed().as_secs_f64(), 1)
     );
 
+    write_model(&learner, &model, &base_weights, out)?;
+    println!("{out} に書き出しました");
+    Ok(())
+}
+
+/// 今の学びの重みをモデルのファイルに書き出す（--out と --epochOut）。書き出す重みは 6 桁に丸める（td-main.ts の round(x, 6)。属性の分 attr は読んだまま）
+fn write_model(
+    learner: &Learner,
+    model: &NetModel,
+    base_weights: &Json,
+    out: &str,
+) -> Result<(), String> {
     let (w1, layers, dense) = learner.snapshot();
     let sh = &learner.shape;
     let mut m = model.clone();
-    m.base_weights = base_weights;
+    m.base_weights = base_weights.clone();
     m.w1 = w1;
     m.b1 = dense[..sh.h].to_vec();
     if sh.sizes.len() > 1 {
@@ -1987,11 +2146,8 @@ pub fn train(args: &Args) -> Result<(), String> {
     if let Some(ow) = sh.o_wr {
         m.read_head = Some(head_of(ow));
     }
-    // 書き出す重みは 6 桁に丸める（td-main.ts の round(x, 6)。属性の分 attr は読んだまま）
     let j = m.to_json(|x| Json::Num(round_precision(x, 6)));
-    write_json(out, &j)?;
-    println!("{out} に書き出しました");
-    Ok(())
+    write_json(out, &j)
 }
 
 // ---- prune ----
@@ -2286,6 +2442,183 @@ mod tests {
                 assert_eq!(search.lethal_label(i), Some(y));
             }
         }
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// --cutOpp: 次の相手のターンの最初の手がランダムな手だったターン末（"oe"）の λ 収益はその局面の値で、その前の局面もそこで止まる。
+    /// 切らない局面の λ 収益は今までと同じ。"oe" の印は局面の種類を変えない。"oe" の無い自己対戦では --cutOpp を断る
+    #[test]
+    fn cut_opp_stops_returns_before_opp_random() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/td-train");
+        let tmp = std::env::temp_dir().join(format!("svwb-td-cutopp-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let labeled = labeled_fixture(&dir, &tmp);
+        let plain = dir.join("data.jsonl").to_string_lossy().into_owned();
+        let m = NetModel::load(&dir.join("model.json").to_string_lossy()).unwrap();
+        let load = |file: &str| {
+            load_data(
+                &[file.to_string()],
+                &LoadOptions {
+                    holdout: 0.0,
+                    iv_weight: 1.0,
+                    imagined_weight: 1.0,
+                    iv_res: true,
+                    search_mix: 0.5,
+                    s_source: SSource::Zero,
+                    lethal_target: LethalTarget::Lost,
+                    read_min: 1.0,
+                    skip_game: None,
+                    layout: &m.layout(),
+                    fallback: &m.layout(),
+                },
+            )
+            .unwrap()
+        };
+        let (d, d0) = (load(&labeled), load(&plain));
+        assert_eq!(d.len(), d0.len());
+        assert!(d.labeled_ends > 0);
+        assert_eq!(d0.labeled_ends, 0);
+        // 印は局面の種類を変えず、ターン末にだけ付く
+        let cut: Vec<usize> = (0..d.len()).filter(|&i| d.has(i, F_OPP_EX)).collect();
+        assert!(!cut.is_empty());
+        for i in 0..d.len() {
+            assert_eq!(d.phase(i), d0.phase(i));
+            assert_eq!(d.flags[i] & !F_OPP_EX, d0.flags[i]);
+        }
+        assert!(cut.iter().all(|&i| d.phase(i) == 0 && d.anchor[i] < 0));
+        let lambda = 0.7;
+        let v: Vec<f64> = (0..d.len())
+            .map(|i| 0.2 + 0.6 * ((i * 37) % 101) as f64 / 101.0)
+            .collect();
+        let (g0, g1) = (
+            lambda_returns(&d, &v, lambda, false),
+            lambda_returns(&d, &v, lambda, true),
+        );
+        assert_eq!(g0, lambda_returns(&d0, &v, lambda, false));
+        assert_eq!(g0, lambda_returns(&d, &v, lambda, false));
+        for &i in &cut {
+            assert_eq!(g1[i], v[i]);
+        }
+        // 切った局面より前（同じ席の続きで、間にランダムな手も切る局面も無い）は、そこで止まった λ 収益
+        let mut changed = 0;
+        for i in 0..d.len() {
+            if d.anchor[i] >= 0 {
+                assert_eq!(g1[i], g1[d.anchor[i] as usize]);
+                continue;
+            }
+            let j = d.next[i];
+            if d.has(i, F_OPP_EX) || j < 0 || d.has(j as usize, F_EXPLORED) {
+                continue;
+            }
+            let j = j as usize;
+            assert_eq!(g1[i], (1.0 - lambda) * v[j] + lambda * g1[j]);
+            // 先に切る局面が無ければ今までと同じ
+            let mut k = i;
+            let mut reaches = false;
+            while d.next[k] >= 0 {
+                k = d.next[k] as usize;
+                if d.has(k, F_EXPLORED) {
+                    break;
+                }
+                if d.has(k, F_OPP_EX) {
+                    reaches = true;
+                    break;
+                }
+            }
+            if reaches {
+                changed += 1;
+            } else {
+                assert_eq!(g1[i], g0[i]);
+            }
+        }
+        assert!(changed > 0);
+        // "oe" の無い自己対戦には使えない
+        let out = tmp.join("m.json").to_string_lossy().into_owned();
+        let args: Vec<(String, String)> = [
+            (
+                "model",
+                dir.join("model.json").to_string_lossy().into_owned(),
+            ),
+            ("data", plain),
+            ("out", out),
+            ("epochs", "1".to_string()),
+            ("cutOpp", "1".to_string()),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+        assert!(train(&args).unwrap_err().contains("--cutOpp"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// --byTurn の何ターン目か: 席の続きの最初のターン末が 1 で、続きのターン末ごとに 1 ずつ増える。ターン末でない局面は 0。
+    /// --byTurn を付けても学習は変わらない（同じモデルを書く）
+    #[test]
+    fn turn_counts_follow_seat_chains() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/td-train");
+        let tmp = std::env::temp_dir().join(format!("svwb-td-byturn-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let plain = dir.join("data.jsonl").to_string_lossy().into_owned();
+        let m = NetModel::load(&dir.join("model.json").to_string_lossy()).unwrap();
+        let d = load_data(
+            std::slice::from_ref(&plain),
+            &LoadOptions {
+                holdout: 0.0,
+                iv_weight: 1.0,
+                imagined_weight: 1.0,
+                iv_res: true,
+                search_mix: 0.5,
+                s_source: SSource::Zero,
+                lethal_target: LethalTarget::Lost,
+                read_min: 1.0,
+                skip_game: None,
+                layout: &m.layout(),
+                fallback: &m.layout(),
+            },
+        )
+        .unwrap();
+        let tc = turn_counts(&d);
+        let mut prev = vec![-1i64; d.len()];
+        for i in 0..d.len() {
+            if d.anchor[i] < 0 && d.next[i] >= 0 {
+                prev[d.next[i] as usize] = i as i64;
+            }
+        }
+        let mut ends = 0;
+        for i in 0..d.len() {
+            if d.anchor[i] >= 0 || d.phase(i) != 0 {
+                assert_eq!(tc[i], 0);
+                continue;
+            }
+            ends += 1;
+            // 同じ席の続きで 1 つ前のターン末
+            let mut k = prev[i];
+            while k >= 0 && d.phase(k as usize) != 0 {
+                k = prev[k as usize];
+            }
+            let want = if k < 0 { 1 } else { tc[k as usize] + 1 };
+            assert_eq!(tc[i], want);
+        }
+        assert!(ends > 0 && tc.iter().any(|&t| t >= 2));
+        let run = |by_turn: bool, out: &str| {
+            let mut args: Vec<(String, String)> = vec![
+                (
+                    "model".into(),
+                    dir.join("model.json").to_string_lossy().into_owned(),
+                ),
+                ("data".into(), plain.clone()),
+                ("out".into(), out.to_string()),
+                ("epochs".into(), "1".into()),
+            ];
+            if by_turn {
+                args.push(("byTurn".into(), "1".into()));
+            }
+            train(&args).unwrap();
+            std::fs::read_to_string(out).unwrap()
+        };
+        let a = run(false, &tmp.join("a.json").to_string_lossy());
+        let b = run(true, &tmp.join("b.json").to_string_lossy());
+        assert_eq!(a, b);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

@@ -1582,13 +1582,21 @@ fn hide_hand_choice(s: &mut GameState, p: PlayerIndex, candidates: &[Iid]) {
         return;
     }
     let pl = &mut s.players[p];
+    if pl
+        .hand
+        .iter()
+        .any(|h| candidates.contains(&h.iid) && h.revealed)
+    {
+        pl.note_hidden_in();
+    }
     for h in pl.hand.make_mut().iter_mut() {
         if candidates.contains(&h.iid) {
             if h.revealed {
-                // 公開されていたカードが伏せた枠になった（手札の記録）
+                // 公開されていたカードが伏せた枠になった（手札の記録。付いていた強化は、相手にも分かる伏せた手札の強化に移す）
                 pl.hand_log.push(HandEv::InWith {
                     boosts: sat_u16(h.boosts),
                 });
+                pl.pub_mods.add_hand(h.attack_mod, h.defense_mod);
             }
             h.revealed = false;
             h.drawn_by = None;
@@ -2195,6 +2203,12 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                     f.max_defense += d;
                     continue;
                 }
+                // 伏せた手札のカードの強化は、どのカードかは相手に分からないが、強化したことと量は分かる（相手にも分かる伏せた手札の強化に足す）
+                if let Some((q, i)) = s.find_hand(id) {
+                    if !s.players[q].hand[i].revealed {
+                        s.players[q].pub_mods.add_hand(a, d);
+                    }
+                }
                 if let Some(h) = hand_state_mut(s, id) {
                     h.attack_mod += a;
                     h.defense_mod += d;
@@ -2476,6 +2490,10 @@ fn exec(s: &mut GameState, frame: &mut Frame, eff: &'static Effect) -> bool {
                     s.players[p].deck_kept.push(h);
                 }
             }
+            // 山札を強化したことと量は相手にも分かる（山札の何枚に付いたかは数えない。相手にも分かる山札の強化に足す）
+            let m = &mut s.players[p].pub_mods;
+            m.deck_atk = m.deck_atk.saturating_add(sat_i16(*attack));
+            m.deck_def = m.deck_def.saturating_add(sat_i16(*defense));
         }
         Effect::RandomOption { options } => {
             if !options.is_empty() {

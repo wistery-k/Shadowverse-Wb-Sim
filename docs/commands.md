@@ -392,7 +392,7 @@ npm run svwb -- mulligan-data --games 6000 [--start 0] [--seed 1] [--flip 0.5] -
 npm run svwb -- td selfplay --model m.json --out d.jsonl [--games 100] [--start 0] [--eps 0.1] [--opp greedy|beam]
                 [--sampling classic|default] [--potential p.json|null] [--searchOptions <設定の JSON かファイル>] [--iv 0] [--ivZone hand|board|both|drawn] [--cmp 0] [--rollouts 8] [--board 1] [--check 0]
                 [--sDefault 0] [--searchValue 0] [--lethalLabel 0] [--lostLabel 0] [--decks <デッキ>,…] [--vs <デッキ>] [--frozen '<設定の JSON>'] [--kifu k.jsonl | --no-kifu]
-npm run svwb -- td branch --model m.json --from <自己対戦の棋譜>,… --out b.jsonl [--start 0] [--games N] [--turns 4-9] [--extra 4] [打ち方と印は td selfplay と同じ]   # 選ばなかった候補の枝
+npm run svwb -- td branch --model m.json --from <自己対戦の棋譜>,… --out b.jsonl [--start 0] [--games N] [--turns 4-9] [--extra 4] [--first plan|random] [--rate 0.1] [打ち方と印は td selfplay と同じ]   # 選ばなかった候補の枝・ランダムな最初の手の枝
 npm run svwb -- td train --model m0.json --data d0.jsonl[,d1.jsonl.gz] --out m1.json [--lambda 0.7] [--epochs 2] [--lr 0.001] [--l2 0.0001]
                 [--batch 128] [--holdout 0.1] [--fitA 1] [--seed 1] [--ivWeight 1] [--imaginedWeight 1] [--ivRes 1] [--best 0] [--bestOn end,after]
                 [--base default|zero|search] [--excludeDecks <デッキ>,…|--onlyDecks <デッキ>,…] [--dropInputs <入力>,…] [--lethalHead aux|survival] [--lethalWeight 1] [--lethalTarget lost|search]
@@ -427,7 +427,9 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
   残し方の因果的な効き目の推定と、どんなマリガンの勝率も試合を打たずに推定する（逆確率重み付け）のに使う
 - `td branch`: 自己対戦の棋譜の試合ごとに、自分のターンの最初で探索が選ばなかった候補を 1 つ打ち、最後まで同じ打ち方で打った枝を、自己対戦と同じ形の行で書く
   （学びのデータに足す。`"iv"` の `"zone"` が `"plan"`）。`--model` は棋譜の試合を打った補正。引数は `rust/engine/src/runner/td.rs` の先頭、
-  考えは docs/ai-notes.md の索引「選ばなかった候補を学びに足す」。キューでは `td selfplay` と同じく `--chunk` で区切れる
+  考えは docs/ai-notes.md の索引「選ばなかった候補を学びに足す」。キューでは `td selfplay` と同じく `--chunk` で区切れる。
+  `--first random` なら、選ばなかった候補の代わりに、両方の席の自分のターンの最初ごとに確率 `--rate` で、`--eps` と同じ選び方のランダムな手を打った枝を作る
+  （1 試合に 0 個以上。`"card": "random"`。本線の自己対戦を `--eps 0` で打ち、ランダムな手を枝に移す形。docs/ai-notes.md の索引「ランダムな手を枝に移す」）
 - `td selfplay`: TD 学習の自己対戦。各引数の意味は `rust/engine/src/runner/td.rs` の先頭。
   `--searchOptions` で、`--opp`・`--sampling`・`--potential` から作った探索 AI の設定の項目を上書きする（compare の `--opts` と同じ形。補正・見込み・重みは書けない）。
   新しいプールの既定（2026-11-25 から）は `--opp beam --sampling default --potential <見込み> --searchOptions data/pools/azvaldt/search-options.json`（compare の新しいプールの既定と同じ手。`td branch` も同じ）。

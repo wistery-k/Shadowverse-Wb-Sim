@@ -64,8 +64,13 @@ const ZONE_CREST_STACKS: usize = 23;
 /// "imagined" は、探索が相手のターンを読んだ後の想像の局面か（ValuePhase::Imagined。docs/ai-notes.md「読みの中の相手のずれを学習で直す」）。
 /// 最後の 2 つ（2026-11-20）は、自分の山札のフォロワーに付いた攻撃力・体力の変化の合計（20 で割る）。
 /// ダストデイズのクレストの山札の強化（buffDeck）は、場に出るまでどの入力にも出なかった
-/// （docs/ai-notes/14-2026-11-16.md「エルフの山札の強化（ダストデイズ）を AI が見ているか」）。deck_kept の分で、決定化で並べ直しても変わらない
-pub const SCALARS: [&str; 36] = [
+/// （docs/ai-notes/14-2026-11-16.md「エルフの山札の強化（ダストデイズ）を AI が見ているか」）。deck_kept の分で、決定化で並べ直しても変わらない。
+/// 最後の 6 つ（2026-11-25、R7 の候補）は、相手の山札・手札の強化と両方のリーダーの最大体力。相手の分は本当のカードの状態ではなく、
+/// 相手にも分かる分（PlayerState::pub_mods。決定化は相手の伏せたカードの状態を作り直すので、本当の状態を見ると決定化した局面と値が変わる）から作る:
+/// 山札は「山札を強化した 1 枚あたりの量 × 山札のフォロワーの枚数の見込み（山札の枚数 × まだ見えていないカードのうちフォロワーの割合）」（20 で割る）、
+/// 手札は「公開された手札のフォロワーに付いた強化 ＋ 伏せた手札に付いたと分かる強化」（5 で割る）。最大体力は 20 で割る
+/// （docs/ai-notes/15-2026-11-22.md「補正は局面を読めているか」の、相手の山札・手札の強化・リンクル・ゾーイの測り）
+pub const SCALARS: [&str; 42] = [
     "myHp",
     "oppHp",
     "myMaxPp",
@@ -102,7 +107,16 @@ pub const SCALARS: [&str; 36] = [
     "imagined",
     "myDeckAtkMod",
     "myDeckDefMod",
+    "oppDeckAtkMod",
+    "oppDeckDefMod",
+    "oppHandAtkMod",
+    "oppHandDefMod",
+    "myMaxHp",
+    "oppMaxHp",
 ];
+/// 相手の山札・手札の強化の入力（SCALARS の添字。体力はその次）
+const SCALAR_OPP_DECK_ATK_MOD: usize = 36;
+const SCALAR_OPP_HAND_ATK_MOD: usize = 38;
 
 /// 場のカード 1 枚ごとの数値の入力（場のカードのネットワーク。valueNet.ts の BOARD_FEATURES。モデルはこの並びの部分列を持つ）。
 /// 値は自己対戦の書き出しの "b"（td.rs の write_board_card）から valueNet.ts の boardCardInput で作るものと同じ。
@@ -929,6 +943,18 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
     let (m, o) = (&sums[0], &sums[1]);
     // 山札のフォロワーに付いた攻撃力・体力の変化（山札は手札から戻ったカードの状態と同じく deck_kept に持つ）
     let (deck_atk, deck_def) = follower_mods(me.deck_kept.iter());
+    // 相手の山札・手札の強化（相手にも分かる分。モデルに入力が無ければ数えない）
+    let has = |k: usize| net.scalar_slot[k].is_some() || net.scalar_slot[k + 1].is_some();
+    let (opp_deck_atk, opp_deck_def) = if has(SCALAR_OPP_DECK_ATK_MOD) {
+        opp_deck_mods(opp)
+    } else {
+        (0.0, 0.0)
+    };
+    let (opp_hand_atk, opp_hand_def) = if has(SCALAR_OPP_HAND_ATK_MOD) {
+        opp_hand_mods(opp)
+    } else {
+        (0.0, 0.0)
+    };
     let scalars: [f64; SCALARS.len()] = [
         me.leader_hp as f64 / 20.0,
         opp.leader_hp as f64 / 20.0,
@@ -966,6 +992,12 @@ fn encode(net: &ValueNet, s: &GameState, p: PlayerIndex, phase: ValuePhase, acc:
         b(phase == ValuePhase::Imagined),
         deck_atk / 20.0,
         deck_def / 20.0,
+        opp_deck_atk / 20.0,
+        opp_deck_def / 20.0,
+        opp_hand_atk / 5.0,
+        opp_hand_def / 5.0,
+        me.leader_max_hp as f64 / 20.0,
+        opp.leader_max_hp as f64 / 20.0,
     ];
     // 数値の入力の添字（base + k）はカードごとの入力の後ろで、項目ごとに違う（前は set で入れていたが、同じ添字は無いので同じ）
     for (j, &x) in scalars.iter().enumerate() {
@@ -995,6 +1027,44 @@ fn crest_inputs(
         }
         add(ZONE_CREST_STACKS + side, k, c.stacks as f64);
     }
+}
+
+/// 相手 opp の山札のフォロワーに付いた強化の見込み（相手にも分かる分から作る）: 山札を強化した 1 枚あたりの量 × 山札のフォロワーの枚数の見込み
+/// （山札の枚数 × まだ見えていないカード（伏せた手札・山札・どれか分からない捨てたカード）のうちフォロワーの割合）。
+/// どれも決定化で並べ直しても変わらない（決定化はまだ見えていないカードの中で配り直す）
+pub(crate) fn opp_deck_mods(opp: &PlayerState) -> (f64, f64) {
+    let m = &opp.pub_mods;
+    if (m.deck_atk == 0 && m.deck_def == 0) || opp.deck.is_empty() {
+        return (0.0, 0.0);
+    }
+    let is_f = |c: crate::data::CardIdx| card(c).ctype == CardType::Follower;
+    let (mut n, mut f) = (0usize, 0usize);
+    for c in opp
+        .hand
+        .iter()
+        .filter(|h| !h.revealed)
+        .map(|h| h.card)
+        .chain(opp.deck.iter().map(|r| r.card))
+        .chain(opp.hidden_discards.iter().copied())
+    {
+        n += 1;
+        if is_f(c) {
+            f += 1;
+        }
+    }
+    let followers = opp.deck.len() as f64 * f as f64 / n.max(1) as f64;
+    (m.deck_atk as f64 * followers, m.deck_def as f64 * followers)
+}
+
+/// 相手 opp の手札のフォロワーに付いた強化のうち、相手にも分かる分: 公開された手札のフォロワーの分と、伏せた手札に付いたと分かる分
+/// （伏せた手札が無ければ 0）。決定化は公開された手札をそのまま残し、pub_mods を写すので変わらない
+pub(crate) fn opp_hand_mods(opp: &PlayerState) -> (f64, f64) {
+    let (a, d) = follower_mods(opp.hand.iter().filter(|h| h.revealed));
+    if opp.hidden_in_hand() == 0 {
+        return (a, d);
+    }
+    let m = &opp.pub_mods;
+    (a + m.hand_atk as f64, d + m.hand_def as f64)
 }
 
 /// 山札のフォロワーに付いた攻撃力・体力の変化の合計

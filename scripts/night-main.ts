@@ -89,8 +89,9 @@ export type JobSpec =
   | { kind: "data"; cmd: string[]; startFlag: "--start" | "--from"; outFlag: "--out" | "--inputs"; out: string; chunk: number; args: string[] }
   /** 学習（npm run td・npm run potential）。out を 1 つ作る。args は --out も含めた全部。
    * impl が rust なら、td train・td prune を Rust 版（svwb td train・prune。rust/engine/src/runner/td_train.rs）で回す。
-   * td train・td prune の既定は rust（2026-11-15 から。行に --impl ts なら TypeScript 版）、ほかは ts */
-  | { kind: "node"; tool: "td" | "potential"; args: string[]; out: string; impl: "ts" | "rust" }
+   * td train・td prune の既定は rust（2026-11-15 から。行に --impl ts なら TypeScript 版）、ほかは ts。
+   * extra は out のほかに作るファイル（td train の --epochOut のエポックごとの重み。svwb が直に書き、out は最後にできる） */
+  | { kind: "node"; tool: "td" | "potential"; args: string[]; out: string; impl: "ts" | "rust"; extra: string[] }
   /** 前の compare（台帳の名前 from）の A の勝率 − 50% が 2 SE を越えたら pass、越えなければ fail のファイルを out に写す */
   | { kind: "pick"; from: string; pass: string; fail: string; out: string };
 
@@ -377,7 +378,18 @@ export function parseJob(line: string, index: number): Job {
       if (out === undefined) throw new Error("--out で作るファイルを書きます（そのファイルがあれば済んだものとする）");
       if (rest.indexOf("--out", i + 1) >= 0) throw new Error("--out が 2 回あります");
       if (est === null) throw new Error("--est で全体の見込みの秒（回すマシンで）を書きます");
-      return { index, line: text, label, games: 1, start: 0, est, spec: { kind: "node", tool, args: [...rest], out, impl: implText } };
+      // td train --epochOut @/m-e{e}.json: エポックごとの重みも作る（--epochs の数だけ。R7 の候補、2026-11-25）
+      const extra: string[] = [];
+      const ei = rest.indexOf("--epochOut");
+      if (ei >= 0) {
+        const pat = rest[ei + 1];
+        if (!(tool === "td" && sub === "train" && implText === "rust")) throw new Error("--epochOut は Rust 版の td train だけ");
+        if (pat === undefined || !pat.startsWith("@/") || !pat.includes("{e}")) throw new Error("--epochOut は {e}（エポックの番号）を入れた回のフォルダのファイル（例: @/m-e{e}.json）");
+        const n = Number(rest[rest.indexOf("--epochs") + 1]);
+        if (rest.indexOf("--epochs") < 0 || !Number.isInteger(n) || n < 1) throw new Error("--epochOut には --epochs（1 以上の整数）を書きます");
+        for (let e = 1; e <= n; e++) extra.push(pat.split("{e}").join(String(e)));
+      }
+      return { index, line: text, label, games: 1, start: 0, est, spec: { kind: "node", tool, args: [...rest], out, impl: implText, extra } };
     }
     case "pick": {
       const label = take("--label") ?? "";
@@ -424,7 +436,7 @@ export function jobProducts(job: Job): string[] {
     const n = Math.ceil(job.games / dataChunkSize(job, s.chunk));
     return Array.from({ length: n }, (_, i) => s.out.split("{k}").join(String(i + 1)));
   }
-  return s.kind === "node" || s.kind === "pick" ? [s.out] : [];
+  return s.kind === "node" ? [s.out, ...s.extra] : s.kind === "pick" ? [s.out] : [];
 }
 
 /** ジョブが読む回のフォルダのファイル（@/ の形。設定の JSON の中も見る） */
@@ -438,7 +450,7 @@ export function jobInputs(job: Job): string[] {
         : s.kind === "data"
           ? s.args.filter((a) => !a.includes("{k}"))
           : s.kind === "node"
-            ? s.args.filter((_, i) => s.args[i - 1] !== "--out")
+            ? s.args.filter((_, i) => s.args[i - 1] !== "--out" && s.args[i - 1] !== "--epochOut")
             : s.kind === "pick"
               ? [s.pass, s.fail]
               : [];
@@ -497,6 +509,8 @@ export function parseJobs(text: string): Job[] {
       if (made.has(f)) throw new Error(`ジョブ ${job.index}: ${f} を作るジョブが 2 つあります`);
       made.add(f);
     }
+    // 自己対戦は棋譜を回のフォルダの kifu/ に書く（キューの既定）。後の td branch が --from @/kifu で読める（いくつの自己対戦が書いてもよい）
+    if (s.kind === "data" && s.cmd.join(" ") === "td selfplay") made.add("@/kifu");
   }
   return jobs;
 }
@@ -1309,7 +1323,8 @@ export function chunkProducts(plan: Pick<Plan, "jobs">, dir: string, c: Chunk): 
   if (!job) return [];
   const s = job.spec;
   if (s.kind === "data") return [dataProduct(job, c.first, dir).file];
-  return s.kind === "node" || s.kind === "pick" ? [atDir(s.out, dir)] : [];
+  if (s.kind === "node") return [s.out, ...s.extra].map((f) => atDir(f, dir));
+  return s.kind === "pick" ? [atDir(s.out, dir)] : [];
 }
 
 /** 済んだ区切りの途中のファイルを、できたファイルにする（データは .gz なら gzip する） */
