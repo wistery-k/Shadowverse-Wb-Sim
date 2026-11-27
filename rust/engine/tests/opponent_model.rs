@@ -130,9 +130,14 @@ fn opponent_model_options_are_checked() {
     )))
     .expect("設定");
     assert!(o.opp_extra_eval.is_some() && o.opp_weights.is_some() && o.opp_potential.is_some());
-    // v0 の出発点の重みは全部 0（S = 0）なので、読みの中の相手の手で作った評価も 0
+    // v0 の出発点の重み（baseWeights の 39 項目）は全部 0 で hold は空（S = 0）なので、読みの中の相手の手で作った評価も 0
     let w = &o.opp_weights.as_ref().expect("重み").w;
     assert_eq!((w.my_hp, w.attack, w.my_hand), (0.0, 0.0, 0.0));
+    assert_eq!(w.doomed, 0.0);
+    assert!(
+        w.hold.iter().all(|&x| x == 0.0),
+        "hold も 0（v0 の baseWeights の hold は空）"
+    );
     // 書かなければ使わない（今までどおり自分と同じ）
     let d0 = compare_options(&options(
         r#"{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true}"#,
