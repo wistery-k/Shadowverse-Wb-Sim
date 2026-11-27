@@ -1052,6 +1052,68 @@ fn is_miss(r: &PosRow) -> bool {
     matches!(r.confirm, Some((_, d, se)) if d >= MISS_POINTS && (se.is_nan() || d >= MISS_Z * se))
 }
 
+/// デッキ（手番の側）ごとの二段目で測る得（1 局面）を、残りの型と比べる表（docs/survey.md「型ごとの内訳の読み方」。2026-11-16 に回す前に決め、
+/// 2026-11-17 は手で作った表を、報告に足した。2026-11-27）。残りは型ごとの得を局面の数で重み付けして合わせ、標準誤差は √(Σ 局面² × SE²) ÷ Σ 局面。
+/// 大きなミスの見込み m は、全部の回数 × その型の局面の割合
+fn deck_vs_rest(rows: &[PosRow], g2: &[f64], n_misses: usize, line: &mut dyn FnMut(String)) {
+    let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    for (k, r) in rows.iter().enumerate() {
+        groups
+            .entry(r.v["deck"].as_str().unwrap_or("?").to_string())
+            .or_default()
+            .push(k);
+    }
+    if groups.len() < 2 {
+        return;
+    }
+    // (名前, 局面, 得, SE, 大きなミス)
+    let stats: Vec<(String, usize, f64, f64, usize)> = groups
+        .iter()
+        .map(|(name, ks)| {
+            let (m, s) = mean_se(&ks.iter().map(|&k| g2[k]).collect::<Vec<_>>());
+            let miss = ks.iter().filter(|&&k| is_miss(&rows[k])).count();
+            (name.clone(), ks.len(), m, s, miss)
+        })
+        .collect();
+    let n = rows.len() as f64;
+    line("### デッキ（手番の側）と残りの型の差".into());
+    line(String::new());
+    line("二段目で測る得（1 局面）の、その型と残りの型の差。残りは型ごとの得を局面の数で重み付けして合わせ、標準誤差は √(Σ 局面² × SE²) ÷ Σ 局面。大きなミスの見込み m は、全部の回数 × その型の局面の割合。読むのは、得の差が差の標準誤差の 2 倍を越えたときと、大きなミスの回数と m の差が 2√m を越えたときだけ（docs/survey.md「型ごとの内訳の読み方」）".into());
+    line(String::new());
+    line("| 型 | 局面 | 得（1 局面） | 残りの型 | 差 | 差 ÷ SE | 大きなミス | 見込み m | 回数 − m | 2√m |".into());
+    line("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |".into());
+    for (j, (name, nj, m, s, miss)) in stats.iter().enumerate() {
+        let rest: Vec<&(String, usize, f64, f64, usize)> = stats
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != j)
+            .map(|(_, x)| x)
+            .collect();
+        let tot: f64 = rest.iter().map(|x| x.1 as f64).sum();
+        let rm = rest.iter().map(|x| x.1 as f64 * x.2).sum::<f64>() / tot;
+        let rse = rest
+            .iter()
+            .map(|x| (x.1 as f64 * x.3).powi(2))
+            .sum::<f64>()
+            .sqrt()
+            / tot;
+        let d = m - rm;
+        let dse = (s * s + rse * rse).sqrt();
+        let em = n_misses as f64 * *nj as f64 / n;
+        line(format!(
+            "| {name} | {nj} | {} | {} | {} | {} | {miss} | {} | {} | {} |",
+            pm(*m, *s, 2),
+            pm(rm, rse, 2),
+            pm(d, dse, 2),
+            fixed(d / dse, 2),
+            fixed(em, 1),
+            fixed(*miss as f64 - em, 1),
+            fixed(2.0 * em.sqrt(), 1)
+        ));
+    }
+    line(String::new());
+}
+
 /// svwb survey report
 fn report(argv: &[String]) -> Result<(), String> {
     let mut args = argv.to_vec();
@@ -1123,6 +1185,7 @@ fn report(argv: &[String]) -> Result<(), String> {
     let (m2, se2) = mean_se(&g2);
     let (m2x, se2x) = mean_se(&stage2(Some(EXTRA)));
     let (m2c, se2c) = mean_se(&stage2(Some(CUT)));
+    let (m2r, se2r) = mean_se(&stage2(Some(READ)));
     let compared: Vec<&PosRow> = rows.iter().filter(|r| !r.skip).collect();
     let misses: Vec<&PosRow> = rows.iter().filter(|r| is_miss(r)).collect();
     let flagged = rows.iter().filter(|r| r.confirm.is_some()).count();
@@ -1240,6 +1303,11 @@ fn report(argv: &[String]) -> Result<(), String> {
         pm(m2c, se2c, 2),
         pm(m2c * per_seat, se2c * per_seat, 2)
     ));
+    line(format!(
+        "| うち読み直した候補（打ち切らなかったもの）を選んだ局面の分 | {} | {} |",
+        pm(m2r, se2r, 2),
+        pm(m2r * per_seat, se2r * per_seat, 2)
+    ));
     line(String::new());
     line(format!(
         "半分の回で選ぶ得（回す前に決めた決まり）: 一段目の {} 回を偶数回と奇数回に分け、片方で勝ちの最も多い候補を選び、もう片方で測る",
@@ -1352,6 +1420,7 @@ fn report(argv: &[String]) -> Result<(), String> {
             &|r| r.v["deck"].as_str().unwrap_or("?").to_string(),
             &mut l,
         );
+        deck_vs_rest(&rows, &g2, misses.len(), &mut l);
         breakdown(
             "自分のターン",
             &|r| {
