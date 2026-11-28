@@ -56,7 +56,7 @@
 | `source` | 書いたランナー（`"compare"`・`"yardstick"`・`"profile"`・`"td selfplay"`・`"survey"`・`"rhino-compare"`・`"deck-compare"`・`"review zero"`・`"deep-gap"`・`"beam-gap"`・`"meta round"`・`"game"`（`npm run game --json`）） |
 | `run` | 回の名前（台帳の名前 `--label`。無ければ空） |
 | `engine` | エンジンの版（コミット。手元の変更があれば末尾に `+`。キューは組み立てたときのもの。台帳の `commit` と同じ） |
-| `pool` | カードプール（`"starter"`・`"azvaldt"`。両方のデッキのカードが入るプール。ベーシックだけなら `"starter"`。どちらにも入らなければ `"mixed"`） |
+| `pool` | カードプール（`"starter"`・`"azvaldt"`。両方のデッキのカードが入るプール。ベーシックだけなら `"starter"`。どちらにも入らなければ `"mixed"`。前期のローテーションのウィッチのデッキは、ストームブラストをスターターの ID 10131320 で読むので `"mixed"` になる。[pools/azvaldt.md](pools/azvaldt.md)） |
 | `g` | 試合番号 |
 | `swap` | 組（同じ試合番号で席とデッキを入れ替えた 2 試合）のどちらか。組の相手は、同じ回の同じ `g` で `swap` の違う試合。自己対戦（組が無い）と、席ごとにシードが違う rhino-compare・deck-compare・meta round には無い |
 | `names` | 席ごとのデッキの名前 |

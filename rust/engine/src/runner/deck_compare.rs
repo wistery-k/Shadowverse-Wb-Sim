@@ -799,6 +799,64 @@ mod tests {
         find_deck("スペルウィッチ").unwrap()
     }
 
+    /// 取り込んだプロのデッキ（data/pools/azvaldt/decks/）をコマンドが読んだカード ID の列が、
+    /// tests/fixtures/azvaldt-decks.json と同じか。同じファイルを、アズヴォルト環境のページの読み方（src/record/decks.ts）で
+    /// tests/azvaldt-page.test.ts が比べる。両方が通れば、ページとコマンドはどのデッキも同じカード ID で読む
+    /// （2026-11-28 まで、ストームブラストをページは 10831310、コマンドは 10131320 で読んでいた）。
+    /// デッキを足したら `SVWB_WRITE_FIXTURE=1 cargo test --release -p svwb-engine pro_decks_match_fixture` で書き直す
+    #[test]
+    fn pro_decks_match_fixture() {
+        let root = format!("{}/../..", env!("CARGO_MANIFEST_DIR"));
+        let dir = format!("{root}/data/pools/azvaldt/decks");
+        let mut paths: Vec<(String, String)> = Vec::new();
+        for ev in std::fs::read_dir(&dir).expect("data/pools/azvaldt/decks") {
+            let ev = ev.expect("大会のフォルダ").path();
+            if !ev.is_dir() {
+                continue;
+            }
+            let event = ev.file_name().unwrap().to_string_lossy().into_owned();
+            for f in std::fs::read_dir(&ev).expect("大会のフォルダ") {
+                let f = f.expect("デッキのファイル").path();
+                let name = f.file_name().unwrap().to_string_lossy().into_owned();
+                if let Some(stem) = name.strip_suffix(".txt") {
+                    paths.push((format!("{event}/{stem}"), f.to_string_lossy().into_owned()));
+                }
+            }
+        }
+        paths.sort();
+        assert_eq!(paths.len(), 84, "プロのデッキの数");
+        let rows: Vec<String> = paths
+            .iter()
+            .map(|(id, path)| {
+                let d = read_deck(path).unwrap_or_else(|e| panic!("{e}"));
+                let ids = Json::Arr(
+                    d.cards
+                        .iter()
+                        .map(|&c| Json::Str(card(c).id.clone()))
+                        .collect(),
+                );
+                format!("{}:{}", Json::Str(id.clone()).stringify(), ids.stringify())
+            })
+            .collect();
+        // 1 行に 1 デッキ
+        let text = format!("{{\n{}\n}}\n", rows.join(",\n"));
+        let fixture = format!("{root}/tests/fixtures/azvaldt-decks.json");
+        if std::env::var("SVWB_WRITE_FIXTURE").is_ok_and(|v| v == "1") {
+            std::fs::write(&fixture, &text).expect("書き出し");
+            return;
+        }
+        let saved = std::fs::read_to_string(&fixture).expect("tests/fixtures/azvaldt-decks.json");
+        assert_eq!(
+            Json::parse(&saved).expect("JSON").stringify(),
+            Json::parse(&text).expect("JSON").stringify(),
+            "コマンドが読むプロのデッキのカード ID が tests/fixtures/azvaldt-decks.json と違います"
+        );
+        // ストームブラストはスターターの ID（補正と見込みはこの ID で学んだ）
+        let storm = find_card("ストームブラスト").unwrap();
+        assert_eq!(card(storm).id, "10131320");
+        assert!(saved.contains("10131320") && !saved.contains("10831310"));
+    }
+
     #[test]
     fn swap_keeps_positions() {
         let base = &witch().cards;
