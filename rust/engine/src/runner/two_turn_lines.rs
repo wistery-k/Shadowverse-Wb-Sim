@@ -630,14 +630,58 @@ fn mean_se(xs: &[f64]) -> (f64, f64) {
     (m, (var / n).sqrt())
 }
 
-const KEYS: [(&str, &str); 6] = [
+const KEYS: [(&str, &str); 8] = [
     ("pick", "選ぶときの値"),
     ("read", "読み直し"),
     ("own", "次のターン末"),
     ("ownB", "次のターン末（引きを知らない）"),
     ("two", "2 ターン読み"),
     ("twoB", "2 ターン読み（引きを知らない）"),
+    ("pickL", "選ぶときの値＋次のターンのリーサル"),
+    ("pickLs", "選ぶときの値＋引く手を通らないリーサル"),
 ];
+
+/// 選ぶときの値に、次の自分のターンのリーサルだけを足した値（2026-11-28 のユーザーの案。測った後に足した、参考の値）:
+/// 2 ターン読みの引き直しごとに、相手のターンを読んだ後に次の自分のターンのリーサルが見つかった回（`own` が勝ち）は読みの点数を勝ちにし、
+/// 選ぶときの値と同じく `rescoreMix` でターン末の点数と混ぜる。`pickLs` は引く手・ランダムな手を通るリーサルを数えない
+/// （引きを知らない版の `ownB` も勝ちの回だけ。組み直しで勝てた回も入るので、おおよそ）。
+/// 次のターンのビームで相手を倒せた回もリーサルに数える
+fn add_lethal_pick(v: &mut Value, mix_w: f64) {
+    let Some(lines) = v.get_mut("lines").and_then(|l| l.as_array_mut()) else {
+        return;
+    };
+    const WIN: f64 = 1e6 - 1.0;
+    for l in lines {
+        let nums = |k: &str| -> Vec<f64> {
+            l[k].as_array()
+                .map(|a| a.iter().filter_map(|x| x.as_f64()).collect())
+                .unwrap_or_default()
+        };
+        if l["ended"].as_bool() == Some(true) {
+            let pick = l["pick"].clone();
+            l["pickL"] = pick.clone();
+            l["pickLs"] = pick;
+            continue;
+        }
+        let (read, own, own_b) = (nums("read"), nums("own"), nums("ownB"));
+        let Some(te) = l["te"].as_f64() else {
+            continue;
+        };
+        let mk = |safe: bool| -> Vec<f64> {
+            read.iter()
+                .zip(&own)
+                .zip(&own_b)
+                .map(|((&r, &o), &ob)| {
+                    let lethal = o >= WIN && (!safe || ob >= WIN);
+                    let r = if lethal { 1e6 } else { r };
+                    (1.0 - mix_w) * r + mix_w * te
+                })
+                .collect()
+        };
+        l["pickL"] = json!(mk(false));
+        l["pickLs"] = json!(mk(true));
+    }
+}
 
 /// 読んだ結果
 struct Loaded {
@@ -660,6 +704,8 @@ fn load_results(files: &[String], max_r: Option<u64>) -> Result<Loaded, String> 
         surveys: Vec::new(),
     };
     let mut a: Option<f64> = None;
+    // pickL・pickLs の混ぜ方（今の既定の rescoreMix。回の設定が違えば、最初の見出しの設定のもの）
+    let mut mix_w = SearchOptions::default().rescore_mix;
     for f in files {
         // 共有フォルダに置いた .jsonl.gz もそのまま読む
         let rows = if f.ends_with(".gz") {
@@ -682,6 +728,11 @@ fn load_results(files: &[String], max_r: Option<u64>) -> Result<Loaded, String> 
                     return Err("補正の違う結果が混ざっています".into());
                 }
                 a = x;
+                if out.configs.is_empty() {
+                    if let Some(o) = v["config"]["opts"].as_str() {
+                        mix_w = compare_options(o)?.rescore_mix;
+                    }
+                }
                 out.configs.push(v["config"].clone());
                 if !v["survey"].is_null() {
                     out.surveys.push(v["survey"].clone());
@@ -692,6 +743,8 @@ fn load_results(files: &[String], max_r: Option<u64>) -> Result<Loaded, String> 
                     }
                 }
             } else if max_r.is_none_or(|m| v["r"].as_u64().is_some_and(|r| r < m)) {
+                let mut v = v;
+                add_lethal_pick(&mut v, mix_w);
                 out.rows.push(v);
             }
         }
