@@ -25,6 +25,7 @@ pub mod profile;
 pub mod review;
 pub mod rhino_compare;
 pub mod survey;
+pub mod survey_mulligan;
 pub mod td;
 pub mod td_data;
 pub mod td_train;

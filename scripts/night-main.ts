@@ -83,7 +83,19 @@ export type JobSpec =
   /** 見落とし問題集（docs/misses.md）。games は 1 問を打つ回数（--trials） */
   | { kind: "misses"; opts: string; seed: number }
   /** 候補の打ち比べ調査（docs/survey.md）。games は自己対戦の試合の数（1 つの番号で 1 試合）。opts は AI の設定（--opts）、decks は --decks */
-  | { kind: "survey"; rate: number; m: number; extra: number; confirm: number; flag: number; batch: number; opts: string; decks: string | null }
+  | {
+      kind: "survey";
+      rate: number;
+      m: number;
+      extra: number;
+      confirm: number;
+      flag: number;
+      batch: number;
+      opts: string;
+      decks: string | null;
+      /** マリガンの打ち比べ（svwb survey run --mulligan 1。docs/survey.md「マリガンの打ち比べ」）。null ならターンの打ち比べ */
+      mulligan: { narrow: number; narrowTop: number; reseed: number } | null;
+    }
   /** データを作る svwb（td selfplay・td branch・beam-gap）。chunk 試合ずつ、out（{k} に区切りの番号を入れる）に書く。out が .gz なら書いた後に gzip する。
    * args はそのほかの引数（そのまま渡す。{k} は区切りの番号にする） */
   | { kind: "data"; cmd: string[]; startFlag: "--start" | "--from"; outFlag: "--out" | "--inputs"; out: string; chunk: number; args: string[] }
@@ -324,17 +336,35 @@ export function parseJob(line: string, index: number): Job {
         if (t.trim() === "" || !Number.isFinite(x) || !ok(x)) throw new Error(`${name} は ${what}: ${t}`);
         return x;
       };
+      const mulText = take("--mulligan");
+      if (mulText !== null && mulText !== "0" && mulText !== "1") throw new Error(`--mulligan は 0 か 1: ${mulText}`);
+      const isMul = mulText === "1";
       const rate = num("--rate", 0.1, (x) => x > 0 && x <= 1, "0 より大きく 1 以下");
-      const m = num("--m", 32, (x) => Number.isInteger(x) && x >= 2, "2 以上の整数");
+      const m = num("--m", isMul ? 16 : 32, (x) => Number.isInteger(x) && x >= 2, "2 以上の整数");
       const extra = num("--extra", 4, (x) => Number.isInteger(x) && x >= 0, "0 以上の整数");
       const confirm = num("--confirm", 96, (x) => Number.isInteger(x) && x >= 0, "0 以上の整数");
-      const flagPts = num("--flag", 10, (x) => x >= 0, "0 以上の数");
+      const flagPts = num("--flag", isMul ? 0 : 10, (x) => x >= 0, "0 以上の数");
+      if (!isMul && ["--narrow", "--narrow-top", "--reseed"].some((a) => rest.includes(a))) {
+        throw new Error("--narrow・--narrow-top・--reseed は --mulligan 1 のときだけ");
+      }
+      const intOr = (name: string, def: number): number => num(name, def, (x) => Number.isInteger(x) && x >= 0, "0 以上の整数");
+      const narrow = intOr("--narrow", 32);
+      const narrowTop = intOr("--narrow-top", 2);
+      const reseed = intOr("--reseed", 8);
       const batch = num("--batch", 8, (x) => Number.isInteger(x) && x >= 1, "1 以上の整数");
       const opts = jsonObject(take("--opts") ?? "{}", "--opts");
       const decks = take("--decks");
       noUnknown();
       if (rest.length > 0) throw new Error(`知らない引数: ${rest.join(" ")}`);
-      return { index, line: text, label, games, start, est, spec: { kind, rate, m, extra, confirm, flag: flagPts, batch, opts, decks } };
+      return {
+        index,
+        line: text,
+        label,
+        games,
+        start,
+        est,
+        spec: { kind, rate, m, extra, confirm, flag: flagPts, batch, opts, decks, mulligan: isMul ? { narrow, narrowTop, reseed } : null },
+      };
     }
     case "beam-gap":
     case "td":
@@ -585,12 +615,12 @@ function jobArgvRaw(job: Job, first: number, count: number, dir: string): string
         surveyFile(dir, job),
         "--games",
         `${first}-${first + count - 1}`,
-        "--rate",
-        String(s.rate),
+        ...(s.mulligan === null
+          ? ["--rate", String(s.rate)]
+          : ["--mulligan", "1", "--narrow", String(s.mulligan.narrow), "--narrow-top", String(s.mulligan.narrowTop), "--reseed", String(s.mulligan.reseed)]),
         "--m",
         String(s.m),
-        "--extra",
-        String(s.extra),
+        ...(s.mulligan === null ? ["--extra", String(s.extra)] : []),
         "--confirm",
         String(s.confirm),
         "--flag",
@@ -619,6 +649,9 @@ const isStep = (job: Job): boolean => job.spec.kind === "node" || job.spec.kind 
 
 /** survey の既定（docs/survey.md）と違う設定だけを並べる（AI の設定とデッキは含めない） */
 function surveyOpts(s: Extract<JobSpec, { kind: "survey" }>): string {
+  if (s.mulligan !== null) {
+    return `--mulligan 1 --m ${s.m} --narrow ${s.mulligan.narrow} --narrow-top ${s.mulligan.narrowTop} --confirm ${s.confirm} --flag ${s.flag} --reseed ${s.mulligan.reseed}`;
+  }
   const def = { rate: 0.1, m: 32, extra: 4, confirm: 96, flag: 10 };
   return (Object.keys(def) as (keyof typeof def)[])
     .filter((k) => s[k] !== def[k])
@@ -637,7 +670,7 @@ export function jobTitle(job: Job): string {
   if (s.kind === "compare") return `compare A ${s.a} 対 B ${s.b}${s.vs ? `（B は ${s.vs}）` : ""}${s.noMirror ? "（鏡なし）" : ""}${s.with ? `（${s.with} の絡む組だけ）` : ""}${s.without ? `（${s.without} の絡まない組だけ）` : ""}`;
   if (s.kind === "yardstick") return `yardstick ${s.ref}${s.opts === "{}" ? "" : ` ${s.opts}`}`;
   if (s.kind === "misses") return `misses（見落とし問題集）${s.opts === "{}" ? "" : ` ${s.opts}`}`;
-  if (s.kind === "survey") return `survey（候補の打ち比べ）${surveyOpts(s) === "" ? "" : ` ${surveyOpts(s)}`}${surveyAi(s)}`;
+  if (s.kind === "survey") return `survey（${s.mulligan === null ? "候補" : "マリガン"}の打ち比べ）${surveyOpts(s) === "" ? "" : ` ${surveyOpts(s)}`}${surveyAi(s)}`;
   if (s.kind === "data") return `${s.cmd.join(" ")} → ${s.out}`;
   if (s.kind === "node") return `${s.tool} ${s.args[0] ?? ""}${s.impl === "rust" ? "（Rust）" : ""} → ${s.out}`;
   if (s.kind === "pick") return `pick（${s.from} が線を越えたら ${s.pass}、越えなければ ${s.fail}）→ ${s.out}`;

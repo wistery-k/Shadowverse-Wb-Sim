@@ -21,7 +21,7 @@ use super::lethal::{
     GUARDED_LETHAL_OPTIONS,
 };
 use super::mulligan::{
-    model_mulligan_swap, mulligan_action, rollout_mulligan, sampled_mulligan,
+    model_mulligan_swap, mulligan_action, rollout_mulligan_sums, sampled_mulligan,
     weighted_mulligan_swap, OppMulligan, RolloutPolicy,
 };
 use super::potential::{default_potential_net, PotentialNet};
@@ -54,7 +54,7 @@ pub enum MulliganMode {
     Sample,
     /// 1 枚も返さない（マリガンの効き目の大きさを測る比べ用）
     Keep,
-    /// Sample と同じだが、引き直した後に先へ進めてから評価する（mulligan.rs の rollout_mulligan。mulligan_turns・mulligan_rollout_beam）
+    /// Sample と同じだが、引き直した後に先へ進めてから評価する（mulligan.rs の rollout_mulligan_sums。mulligan_turns・mulligan_rollout_beam）
     Turn1,
 }
 
@@ -317,7 +317,7 @@ pub struct SearchOptions {
     pub mulligan_rollout_beam: usize,
     /// 初手にあれば 1 枚目を必ず残すカード（手札の形のモデル・カードごとの表・コストのマリガンの判断の後で直す。2 枚目以降は判断のまま）
     pub mulligan_keep: Vec<crate::data::CardIdx>,
-    /// MulliganMode::Turn1 で先へ進める中の相手のマリガン（mulligan.rs の rollout_mulligan。None なら、相手がまだなら手札の形のモデル、
+    /// MulliganMode::Turn1 で先へ進める中の相手のマリガン（mulligan.rs の rollout_mulligan_sums。None なら、相手がまだなら手札の形のモデル、
     /// もう済んでいれば決定化で引き直した手札のまま）
     pub mulligan_opp: Option<OppMulligan>,
     /// MulliganMode::Turn1 で、初手にあれば全部を必ず返すカード（返し方の候補を、それを全部返すものに絞る。比べ用。
@@ -3387,6 +3387,112 @@ fn return_all_copies(
         .collect()
 }
 
+impl SearchAgent {
+    /// マリガン（`turn1`）の、返し方ごとの評価の和と、その返し方の並び（`mulliganReturn` で絞った後の合法手。絞らなければ legal のまま）。
+    /// choose_action はこの最大（同じなら先の返し方）を選ぶ。mrng はマリガンの乱数（choose_action が判断の乱数から作るもの）
+    fn turn1_sums(
+        &self,
+        real: &GameState,
+        legal: &[Action],
+        p0: PlayerIndex,
+        mrng: &Rng,
+    ) -> (Vec<Action>, Vec<f64>) {
+        let opts = &self.opts;
+        let narrowed = return_all_copies(real, p0, legal, &opts.mulligan_return);
+        let legal: Vec<Action> = if narrowed.is_empty() {
+            legal.to_vec()
+        } else {
+            narrowed
+        };
+        let extra = opts.extra_eval.clone().filter(|_| opts.mulligan_net);
+        let w = &self.w;
+        let default_w = match opts.mulligan_rollout_weights {
+            RolloutWeights::Greedy => self.default_w.clone(),
+            RolloutWeights::Ramp => {
+                let mut x = self.default_w.w.clone();
+                x.max_pp = self.opp_w.w.max_pp;
+                EvalWeights::new(x)
+            }
+            RolloutWeights::Search => self.opp_w.clone(),
+        };
+        let beam = opts.mulligan_rollout_beam;
+        // 先へ進めるときの手: 幅 beam のビーム（読み直しは 1 手・相手は貪欲法・リーサル探索なし）か、0 なら貪欲法
+        let rollout = SearchOptions {
+            beam_width: beam.max(1),
+            rescore_top: 1,
+            opponent_search: None,
+            opp_hand_samples: 1,
+            lethal: false,
+            mulligan: MulliganMode::Model,
+            draw_split: None,
+            sequential_rng: opts.sequential_rng,
+            ..SearchOptions::default()
+        };
+        let new_policy = move || -> RolloutPolicy {
+            if beam == 0 {
+                let dw = default_w.clone();
+                Box::new(move |s, l, r| choose_greedy(s, l, r, false, &dw))
+            } else {
+                let mut ag = SearchAgent::new(rollout.clone());
+                Box::new(move |s, l, r| ag.choose_action(s, l, r))
+            }
+        };
+        let sums = rollout_mulligan_sums(
+            real,
+            &legal,
+            p0,
+            (
+                opts.mulligan_samples,
+                opts.mulligan_turns,
+                opts.mulligan_opp,
+            ),
+            mrng,
+            &new_policy,
+            |s, phase| {
+                let v = if opts.mulligan_static {
+                    evaluate_with(s, p0, w)
+                } else {
+                    0.0
+                };
+                match &extra {
+                    Some(f) if s.phase != Phase::Ended => v + f(s, p0, phase),
+                    _ => v,
+                }
+            },
+        );
+        (legal, sums)
+    }
+
+    /// マリガンの局面で、choose_action と同じ乱数の取り方で、`turn1` の返し方ごとの評価の平均（1 回あたり）を出す（legal と同じ順）。
+    /// rng は choose_action に渡すものと同じ（進める）。turn1 でない・`mulliganReturn` で絞る・`pick` の設定なら None。
+    /// マリガンの打ち比べ（`survey run --mulligan`）が、試合で AI が付けた点数を行に書くのに使う
+    pub fn turn1_mulligan_scores(
+        &self,
+        real: &GameState,
+        legal: &[Action],
+        rng: &mut Rng,
+    ) -> Option<Vec<f64>> {
+        let opts = &self.opts;
+        if opts.mulligan != MulliganMode::Turn1
+            || !opts.mulligan_return.is_empty()
+            || opts.pick.is_some()
+            || legal.len() < 2
+            || !matches!(legal[0], Action::Mulligan { .. })
+        {
+            return None;
+        }
+        let base = (!opts.sequential_rng).then(|| rng.int(u32::MAX as usize) as u32);
+        let p0 = acting_player(real);
+        let mrng = match base {
+            Some(b) => purpose_rng(b, purpose::MULLIGAN, 0),
+            None => Rng::new(rng.state),
+        };
+        let (_, sums) = self.turn1_sums(real, legal, p0, &mrng);
+        let n = opts.mulligan_samples.max(1) as f64;
+        Some(sums.into_iter().map(|x| x / n).collect())
+    }
+}
+
 impl Agent for SearchAgent {
     fn think(&mut self, real: &GameState, legal: &[Action], rng: &mut Rng) -> Option<Thought> {
         self.think_with(real, legal, rng, None)
@@ -3434,68 +3540,16 @@ impl Agent for SearchAgent {
                 }
             }
             if opts.mulligan == MulliganMode::Turn1 {
-                let narrowed = return_all_copies(real, p0, legal, &opts.mulligan_return);
-                let legal = if narrowed.is_empty() {
-                    legal
-                } else {
-                    &narrowed[..]
-                };
-                let extra = opts.extra_eval.clone().filter(|_| opts.mulligan_net);
-                let w = &self.w;
-                let default_w = match opts.mulligan_rollout_weights {
-                    RolloutWeights::Greedy => self.default_w.clone(),
-                    RolloutWeights::Ramp => {
-                        let mut x = self.default_w.w.clone();
-                        x.max_pp = self.opp_w.w.max_pp;
-                        EvalWeights::new(x)
+                let (legal, sums) = self.turn1_sums(real, legal, p0, &mrng);
+                let mut best = &legal[0];
+                let mut best_v = f64::NEG_INFINITY;
+                for (a, &sum) in legal.iter().zip(&sums) {
+                    if sum > best_v {
+                        best_v = sum;
+                        best = a;
                     }
-                    RolloutWeights::Search => self.opp_w.clone(),
-                };
-                let beam = opts.mulligan_rollout_beam;
-                // 先へ進めるときの手: 幅 beam のビーム（読み直しは 1 手・相手は貪欲法・リーサル探索なし）か、0 なら貪欲法
-                let rollout = SearchOptions {
-                    beam_width: beam.max(1),
-                    rescore_top: 1,
-                    opponent_search: None,
-                    opp_hand_samples: 1,
-                    lethal: false,
-                    mulligan: MulliganMode::Model,
-                    draw_split: None,
-                    sequential_rng: opts.sequential_rng,
-                    ..SearchOptions::default()
-                };
-                let new_policy = move || -> RolloutPolicy {
-                    if beam == 0 {
-                        let dw = default_w.clone();
-                        Box::new(move |s, l, r| choose_greedy(s, l, r, false, &dw))
-                    } else {
-                        let mut ag = SearchAgent::new(rollout.clone());
-                        Box::new(move |s, l, r| ag.choose_action(s, l, r))
-                    }
-                };
-                return rollout_mulligan(
-                    real,
-                    legal,
-                    p0,
-                    (
-                        opts.mulligan_samples,
-                        opts.mulligan_turns,
-                        opts.mulligan_opp,
-                    ),
-                    &mrng,
-                    &new_policy,
-                    |s, phase| {
-                        let v = if opts.mulligan_static {
-                            evaluate_with(s, p0, w)
-                        } else {
-                            0.0
-                        };
-                        match &extra {
-                            Some(f) if s.phase != Phase::Ended => v + f(s, p0, phase),
-                            _ => v,
-                        }
-                    },
-                );
+                }
+                return best.clone();
             }
             let model_swap = if opts.mulligan == MulliganMode::Model {
                 model_mulligan_swap(real, p0)
