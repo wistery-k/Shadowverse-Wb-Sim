@@ -101,6 +101,8 @@ struct GameRec {
     decks: [Vec<CardIdx>; 2],
     /// 席ごとのデッキの名前
     names: [String; 2],
+    /// 席ごとのデッキの指定（`--decks` の組のファイルの道。組を並べないときは空）。報告がアズヴォルト環境のページの試合の URL を作るのに使う
+    keys: [String; 2],
     seed: u32,
     actions: Vec<Action>,
     /// 自分のターンの最初の局面（手の番号と席）
@@ -114,11 +116,17 @@ struct GameRec {
 /// 試合 g の自己対戦（設定 o の AI どうし。list が無ければ svwb ai-play と同じ試合、あれば並べたデッキで compare と同じ組）
 fn play_game(g: u32, list: Option<&[&'static Deck]>, o: &SearchOptions) -> GameRec {
     let t = Instant::now();
-    let (decks, seed, names, opts) = match list {
+    let (decks, seed, names, keys, opts) = match list {
         None => {
             let (decks, seed) = ai_game_setup(g, false);
             let names = [deck_name(&decks[0]), deck_name(&decks[1])];
-            (decks, seed, names, [o.clone(), o.clone()])
+            (
+                decks,
+                seed,
+                names,
+                Default::default(),
+                [o.clone(), o.clone()],
+            )
         }
         Some(list) => {
             let (a, b) = compare_pair(list, g, false);
@@ -126,6 +134,7 @@ fn play_game(g: u32, list: Option<&[&'static Deck]>, o: &SearchOptions) -> GameR
                 [a.cards.clone(), b.cards.clone()],
                 g * 7 + 1,
                 [a.name.clone(), b.name.clone()],
+                [a.key.clone(), b.key.clone()],
                 [deck_options(o, a), deck_options(o, b)],
             )
         }
@@ -158,6 +167,7 @@ fn play_game(g: u32, list: Option<&[&'static Deck]>, o: &SearchOptions) -> GameR
         g,
         decks,
         names,
+        keys,
         seed,
         actions,
         starts,
@@ -745,7 +755,7 @@ fn run_batch(
         let n = |q: PlayerIndex| rec.starts.iter().filter(|x| x.1 == q).count();
         rows.push(json!({
             "game": true, "g": rec.g, "seed": rec.seed,
-            "decks": rec.names,
+            "decks": rec.names, "deckKeys": rec.keys,
             "turnStarts": [n(0), n(1)],
             "sampled": picks.iter().filter(|x| recs[x.0].g == rec.g).count(),
             "winner": rec.winner, "actions": rec.actions.len(), "sec": round2(rec.sec),
@@ -1052,6 +1062,68 @@ fn is_miss(r: &PosRow) -> bool {
     matches!(r.confirm, Some((_, d, se)) if d >= MISS_POINTS && (se.is_nan() || d >= MISS_Z * se))
 }
 
+/// デッキ（手番の側）ごとの二段目で測る得（1 局面）を、残りの型と比べる表（docs/survey.md「型ごとの内訳の読み方」。2026-11-16 に回す前に決め、
+/// 2026-11-17 は手で作った表を、報告に足した。2026-11-27）。残りは型ごとの得を局面の数で重み付けして合わせ、標準誤差は √(Σ 局面² × SE²) ÷ Σ 局面。
+/// 大きなミスの見込み m は、全部の回数 × その型の局面の割合
+fn deck_vs_rest(rows: &[PosRow], g2: &[f64], n_misses: usize, line: &mut dyn FnMut(String)) {
+    let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    for (k, r) in rows.iter().enumerate() {
+        groups
+            .entry(r.v["deck"].as_str().unwrap_or("?").to_string())
+            .or_default()
+            .push(k);
+    }
+    if groups.len() < 2 {
+        return;
+    }
+    // (名前, 局面, 得, SE, 大きなミス)
+    let stats: Vec<(String, usize, f64, f64, usize)> = groups
+        .iter()
+        .map(|(name, ks)| {
+            let (m, s) = mean_se(&ks.iter().map(|&k| g2[k]).collect::<Vec<_>>());
+            let miss = ks.iter().filter(|&&k| is_miss(&rows[k])).count();
+            (name.clone(), ks.len(), m, s, miss)
+        })
+        .collect();
+    let n = rows.len() as f64;
+    line("### デッキ（手番の側）と残りの型の差".into());
+    line(String::new());
+    line("二段目で測る得（1 局面）の、その型と残りの型の差。残りは型ごとの得を局面の数で重み付けして合わせ、標準誤差は √(Σ 局面² × SE²) ÷ Σ 局面。大きなミスの見込み m は、全部の回数 × その型の局面の割合。読むのは、得の差が差の標準誤差の 2 倍を越えたときと、大きなミスの回数と m の差が 2√m を越えたときだけ（docs/survey.md「型ごとの内訳の読み方」）".into());
+    line(String::new());
+    line("| 型 | 局面 | 得（1 局面） | 残りの型 | 差 | 差 ÷ SE | 大きなミス | 見込み m | 回数 − m | 2√m |".into());
+    line("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |".into());
+    for (j, (name, nj, m, s, miss)) in stats.iter().enumerate() {
+        let rest: Vec<&(String, usize, f64, f64, usize)> = stats
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != j)
+            .map(|(_, x)| x)
+            .collect();
+        let tot: f64 = rest.iter().map(|x| x.1 as f64).sum();
+        let rm = rest.iter().map(|x| x.1 as f64 * x.2).sum::<f64>() / tot;
+        let rse = rest
+            .iter()
+            .map(|x| (x.1 as f64 * x.3).powi(2))
+            .sum::<f64>()
+            .sqrt()
+            / tot;
+        let d = m - rm;
+        let dse = (s * s + rse * rse).sqrt();
+        let em = n_misses as f64 * *nj as f64 / n;
+        line(format!(
+            "| {name} | {nj} | {} | {} | {} | {} | {miss} | {} | {} | {} |",
+            pm(*m, *s, 2),
+            pm(rm, rse, 2),
+            pm(d, dse, 2),
+            fixed(d / dse, 2),
+            fixed(em, 1),
+            fixed(*miss as f64 - em, 1),
+            fixed(2.0 * em.sqrt(), 1)
+        ));
+    }
+    line(String::new());
+}
+
 /// svwb survey report
 fn report(argv: &[String]) -> Result<(), String> {
     let mut args = argv.to_vec();
@@ -1123,6 +1195,7 @@ fn report(argv: &[String]) -> Result<(), String> {
     let (m2, se2) = mean_se(&g2);
     let (m2x, se2x) = mean_se(&stage2(Some(EXTRA)));
     let (m2c, se2c) = mean_se(&stage2(Some(CUT)));
+    let (m2r, se2r) = mean_se(&stage2(Some(READ)));
     let compared: Vec<&PosRow> = rows.iter().filter(|r| !r.skip).collect();
     let misses: Vec<&PosRow> = rows.iter().filter(|r| is_miss(r)).collect();
     let flagged = rows.iter().filter(|r| r.confirm.is_some()).count();
@@ -1240,6 +1313,11 @@ fn report(argv: &[String]) -> Result<(), String> {
         pm(m2c, se2c, 2),
         pm(m2c * per_seat, se2c * per_seat, 2)
     ));
+    line(format!(
+        "| うち読み直した候補（打ち切らなかったもの）を選んだ局面の分 | {} | {} |",
+        pm(m2r, se2r, 2),
+        pm(m2r * per_seat, se2r * per_seat, 2)
+    ));
     line(String::new());
     line(format!(
         "半分の回で選ぶ得（回す前に決めた決まり）: 一段目の {} 回を偶数回と奇数回に分け、片方で勝ちの最も多い候補を選び、もう片方で測る",
@@ -1352,6 +1430,7 @@ fn report(argv: &[String]) -> Result<(), String> {
             &|r| r.v["deck"].as_str().unwrap_or("?").to_string(),
             &mut l,
         );
+        deck_vs_rest(&rows, &g2, misses.len(), &mut l);
         breakdown(
             "自分のターン",
             &|r| {
@@ -1400,6 +1479,12 @@ fn report(argv: &[String]) -> Result<(), String> {
         ));
         for l in strs(&r.v["view"]) {
             out.push_str(&format!("- {l}\n"));
+        }
+        if let Some(url) = games.get(&g).and_then(page_link) {
+            out.push_str(&format!(
+                "- リプレイ（アズヴォルト環境のページが今の版の探索 AI で打ち直す）: {url}（スライダーを {i}/{} 手に合わせる）\n",
+                games[&g]["actions"]
+            ));
         }
         out.push_str(&format!(
             "- AI の手（ターン末 {}・順位 {}）: {}\n",
@@ -1693,6 +1778,41 @@ fn plan_kind(r: &PosRow, c: usize) -> &'static str {
 const RECHECK_TAG: u32 = 0x5245_4348;
 
 /// 試合の行に書いた AI の設定（`--opts`。無ければ `{}`）。違う設定の行が混ざっていれば断る（同じ調査として足し合わせない）
+/// アズヴォルト環境のページの試合の URL（`src/sim/gameLink.ts` の形。両方の席がページの探索 AI `search`）。
+/// 試合の行に、両方の席のデッキが取り込んだプロのデッキ（`data/pools/azvaldt/decks/<大会>/<ファイル>.txt`）として残っているときだけ作る。
+/// ページは今の版の探索 AI で打ち直すので、調査の `--opts` がページの既定と違う回や、版が違う回では別の試合になる
+fn page_link(game: &Value) -> Option<String> {
+    let deck_id = |k: &Value| -> Option<String> {
+        let k = k.as_str()?;
+        let rest = &k[k.find("data/pools/azvaldt/decks/")? + "data/pools/azvaldt/decks/".len()..];
+        let id = rest.strip_suffix(".txt")?;
+        (id.split('/').count() == 2).then(|| id.to_string())
+    };
+    let keys = game["deckKeys"].as_array()?;
+    let (d0, d1) = (deck_id(keys.first()?)?, deck_id(keys.get(1)?)?);
+    let seed = game["seed"].as_u64()?;
+    Some(format!(
+        "https://wistery-k.github.io/Shadowverse-Wb-Sim/azvaldt/#game?seed={seed}&p0=search&d0={}&p1=search&d1={}",
+        form_encode(&d0),
+        form_encode(&d1)
+    ))
+}
+
+/// URLSearchParams と同じ書き方（英数字と `*-._` はそのまま、空白は `+`、ほかは UTF-8 の `%XX`）
+fn form_encode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'*' | b'-' | b'.' | b'_' => {
+                out.push(b as char)
+            }
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 fn run_opts(games: &BTreeMap<u64, Value>) -> Result<String, String> {
     let set: std::collections::BTreeSet<String> = games
         .values()
@@ -3349,5 +3469,23 @@ mod tests {
             playout(&s, p, &prep.plans[prep.ai].steps, prep.seed, 0),
             first
         );
+    }
+    #[test]
+    fn page_link_matches_the_page() {
+        // 調査 survey-r7-20261127 の試合 1339（席 0 クキシロB、席 1 ランプD）。src/sim/gameLink.ts の gameHash と同じ書き方
+        let game = json!({
+            "game": true, "g": 1339, "seed": 9374,
+            "deckKeys": [
+                "data/pools/azvaldt/decks/ps26-27-09b/ZETA_ビショップ.txt",
+                "data/pools/azvaldt/decks/ps26-27-09b/CR_ドラゴン.txt"
+            ]
+        });
+        assert_eq!(
+            page_link(&game).as_deref(),
+            Some("https://wistery-k.github.io/Shadowverse-Wb-Sim/azvaldt/#game?seed=9374&p0=search&d0=ps26-27-09b%2FZETA_%E3%83%93%E3%82%B7%E3%83%A7%E3%83%83%E3%83%97&p1=search&d1=ps26-27-09b%2FCR_%E3%83%89%E3%83%A9%E3%82%B4%E3%83%B3")
+        );
+        // デッキの指定が無い回（組を並べない回・前の版の行）やプロのデッキでない回は作らない
+        assert_eq!(page_link(&json!({"seed": 1, "deckKeys": ["", ""]})), None);
+        assert_eq!(page_link(&json!({"seed": 1})), None);
     }
 }

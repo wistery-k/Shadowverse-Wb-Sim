@@ -77,10 +77,13 @@ describe("アズヴォルト環境の問題集の手順の候補", () => {
         }
       }
     }
-    expect(rethinks).toBe(4);
+    // 考え直した並び: bishop-miko-g1006 の AI の手・bishop-gem-g1029 の良い手・witch-researcher-g1461 の AI の手・elf-assassin-g1567 の良い手と、
+    // R7 の調査から足した問（2026-11-28）の nemesis-cutthroat-r7g1278 の AI の手（読みの「青錆の下っ端をプレイ」が打てない）・
+    // bishop-kandima-r7g1455 の良い手（読みの「崇奉の怯者をプレイ」が打てない）
+    expect(rethinks).toBe(6);
     // 読んだ並び（ビームの終局面まで）の後にも、AI が攻撃などを打つ並び（2026-11-19 のユーザーの指摘まで、ここでターン終了を足していた）。
-    // royal-firstmate-g1104・bishop-miko-g1006・witch-hold-g1066 の良い手と witch-tico-g1006 の AI の手
-    expect(continued).toBe(4);
+    // royal-firstmate-g1104・bishop-miko-g1006・witch-hold-g1066 の良い手と witch-tico-g1006 の AI の手、nemesis-cutthroat-r7g1278 の良い手
+    expect(continued).toBe(5);
   });
 
   it("良い手は合格、AI の手は不合格（途中から考え直した並びも。AI が打った続きで不合格になる良い手は除く）", () => {

@@ -127,7 +127,7 @@
 コマンドの新しいプールの既定は、補正・見込みとこの設定を `--opts` に並べたもの
 `'{"valueNet":"rust/engine/yardstick/pool-r7-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}'`
 （R5〜R7 は補正だけを学び直したので、見込みは R4 のファイル。2026-11-24 までは補正と見込みだけ）。
-同じ局面（`misses/azvaldt/` の 13 問と、代表 10 型のデッキのマリガン 2 つ）から同じ乱数で打った手を `tests/fixtures/browser-azvaldt.json` に書き、
+同じ局面（`misses/azvaldt/` の 23 問と、代表 10 型のデッキのマリガン 2 つ。2026-11-27 までは 13 問）から同じ乱数で打った手を `tests/fixtures/browser-azvaldt.json` に書き、
 CLI（`rust/engine/tests/browser_azvaldt.rs`）と WASM（`tests/nets-azvaldt.test.ts`）の両方で比べる。
 読み込んだ補正の指紋も、JSON を serde_json で読んだものと比べる（`data/pools/azvaldt/` と `rust/engine/yardstick/` の写しの両方。指紋にはリーサルの出力と winForm も入る。2026-11-22 から）。
 入れた設定も、`search-options.json` と同じかを確かめる（WASM の `searchOptions`。コマンドの側の `browser_azvaldt.rs` も同じファイルを読む）。
