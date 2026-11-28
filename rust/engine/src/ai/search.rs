@@ -381,6 +381,10 @@ pub struct SearchOptions {
     /// false なら印を立てず、ターンの途中の局面（ValuePhase::After）として採点する。実験用（2026-11-24。印が、相手の返せない盤面を
     /// 大きく割り引くことを確かめる。docs/ai-notes/15-2026-11-22.md「想像の局面の印が、相手の返せない盤面を大きく割り引く」）
     pub imagined_input: bool,
+    /// 読み直しで相手のターンを読んだ後に、自分の次のターンのリーサル探索をかけ、見つかれば読みの点数を勝ち（1e6）にする
+    /// （ユーザーの案、2026-11-28。速さを測る用。0 は使わない（既定）、1 はビームだけ、2 はビームで見つからなければ全探索も。
+    /// どちらもビームはターン終了の後で倒す手も見る（LethalOptions::end_turn）。3 は、ターン終了の後を見ないビームだけ（重さの切り分け用）。docs/ai-notes/15-2026-11-22.md「参考: 次の自分のターンのリーサルだけを足す値」）
+    pub read_own_lethal: u8,
 }
 
 impl Default for SearchOptions {
@@ -472,6 +476,7 @@ impl Default for SearchOptions {
             pick: None,
             read_lethal: None,
             imagined_input: true,
+            read_own_lethal: 0,
         }
     }
 }
@@ -1999,7 +2004,34 @@ fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng, gate: ReadGate) -> 
             simulate_opponent_turn(start, p, rng, env.policy_w)
         }
     };
+    if env.opts.read_own_lethal > 0 && own_lethal_after_read(env.opts, &after, p) {
+        return (1e6, after);
+    }
     (pl.eval_after(&after), after)
+}
+
+/// readOwnLethal: 相手のターンを読んだ後の局面 after（p の手番）で、p の次のターンのリーサル探索が勝てる並びを見つけるか
+/// （ビームはターン終了の後で倒す手も見る。2 なら、見つからなければ全探索も）
+fn own_lethal_after_read(opts: &SearchOptions, after: &GameState, p: PlayerIndex) -> bool {
+    if after.phase == Phase::Ended || after.active != p || after.pending.is_some() {
+        return false;
+    }
+    let _p = prof::scope(Sec::Lethal);
+    let lo = LethalOptions {
+        ward_blocked: opts.lethal_ward_blocked,
+        expand_choices: opts.lethal_expand_choices,
+        end_turn: opts.read_own_lethal != 3,
+        ..DEFAULT_LETHAL_OPTIONS
+    };
+    if search_lethal(after, p, &lo).is_some_and(|seq| !seq.is_empty()) {
+        return true;
+    }
+    opts.read_own_lethal == 2
+        && opts.lethal_exact_states > 0
+        && with_fresh_exact_cache(|| {
+            search_exact_lethal(after, p, &sure_lethal_options(opts.lethal_exact_states))
+        })
+        .is_some_and(|seq| !seq.is_empty())
 }
 
 /// readLethal: start（p のターン末）でターンを終え、相手の番の初めに、このAI と同じリーサル探索（lethal_line）で相手の勝てる並びを探す。
@@ -2113,6 +2145,7 @@ fn opponent_search_options(opts: &SearchOptions) -> SearchOptions {
             None
         },
         read_lethal: None,
+        read_own_lethal: 0,
         ..opts.clone()
     }
 }
@@ -2971,9 +3004,21 @@ impl SearchAgent {
         } else {
             None
         };
+        let lethal_end = search_lethal(
+            &after,
+            p,
+            &LethalOptions {
+                end_turn: true,
+                ..lo
+            },
+        );
         out.push(format!(
-            "次のターンのリーサル探索: {}",
+            "次のターンのリーサル探索: {}。ターン終了の後も見るビーム: {}",
             match &lethal {
+                Some(l) => format!("見つけた（{} 手）", l.len()),
+                None => "なし".into(),
+            },
+            match &lethal_end {
                 Some(l) => format!("見つけた（{} 手）", l.len()),
                 None => "なし".into(),
             }

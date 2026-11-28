@@ -312,6 +312,7 @@ pub fn search_options(
             "peekOppHand" => o.peek_opp_hand = flag(k, v)?,
             "peekAll" => o.peek_all = flag(k, v)?,
             "imaginedInput" => o.imagined_input = flag(k, v)?,
+            "readOwnLethal" => o.read_own_lethal = count(k, v)?.min(3) as u8,
             "oppHandBoosts" => o.opp_hand_boosts = flag(k, v)?,
             "oppHandCommon" => o.opp_hand_common = flag(k, v)?,
             "readOwnDeckApart" => o.read_own_deck_apart = flag(k, v)?,
@@ -738,6 +739,20 @@ mod tests {
                 .imagined_input
         );
         assert!(compare_options(r#"{"imaginedInput":0}"#).is_err());
+        // 読みの後の次の自分のターンのリーサル（既定は見ない。3 より大きい値は 3）
+        assert_eq!(compare_options("{}").unwrap().read_own_lethal, 0);
+        assert_eq!(
+            compare_options(r#"{"readOwnLethal":2}"#)
+                .unwrap()
+                .read_own_lethal,
+            2
+        );
+        assert_eq!(
+            compare_options(r#"{"readOwnLethal":9}"#)
+                .unwrap()
+                .read_own_lethal,
+            3
+        );
         // 読みの中の相手を自分の評価の重みで打たせる（既定は方策の重み）
         let own = |t: &str| {
             compare_options(t)
