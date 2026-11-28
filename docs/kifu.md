@@ -232,3 +232,19 @@ svwb kifu count data/kifu/night-20261117-0328 --where 'deck~コンボE' --event 
 | クレストの誘発・持った席 | `trigger crest`（`ab`・`own` で分ける）・`crestIn crest` |
 
 compare の `--involving`（ある型の絡む組だけを打つ）は消した。全部の組を打った回の棋譜を `svwb kifu winrate --where 'side=A,pair~<型>'` で絞る（同じ試合番号は同じ試合なので、同じ数になる）。
+
+## 枝の組（svwb kifu pairs）
+
+本線の自己対戦の棋譜と、そこから生やした枝の棋譜（`svwb td branch` の `"source": "td branch"` の行）を打ち直して、
+同じ局面から別の手順で打った 2 つのターン末の組を 1 枝 1 行で出す（2026-11-28。比べるネットの学びの組。[ai-notes/15](ai-notes/15-2026-11-22.md)「局面 2 つを比べるネットの小さな試し」）。
+
+```sh
+npm run svwb -- kifu pairs --main <本線の棋譜>[,…] --branch <枝の棋譜>[,…] --opts '<設定>' [--reads 12] --out 組.jsonl
+```
+
+- 枝ごとに同じ試合番号の本線を探し、行動の列が初めて分かれる手 `div` を選ぶ席 p のそのターン `turn` の終わり（ターン終了を選ぶ直前で、選択の途中でないもの）を、本線 `a` と枝 `b` のそれぞれで取る
+- `a`・`b` には `won`（p の勝ち 1・負け 0・引き分け 0.5）・`endTurn`・`end`・`endWin`・`x`・`v`（ターン末の値と補正の入力。kifu values の `--features 1` と同じ）・
+  `later`（その後の p のターン末ごとの [ターン, endWin]）と、`--reads N` なら `readLoss`・`readWin`・`pickWin`（kifu values と同じ。引き直しの種は試合のシードとターン番号からなので、組の 2 つで同じ）
+- 組の行のほかの項目: `g`・`k`（同じ試合の枝の何番目か）・`di`（そのターンの何手目で分かれたか）・`tc`・`seat`・`deck`・`opp`・`first`
+- どちらかがそのターンのうちに決着した枝（`ended`）・本線と同じ手順に戻った枝（`same`）は組にせず、数を出す
+- 速さ（クラウド環境の 4 スレッド）: branch-1 の 5.6 万組が読み 12 込みで 13 分半。読み無しなら 1 ファイル（4900 組）2 秒
