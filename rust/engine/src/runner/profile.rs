@@ -39,7 +39,8 @@ use super::yardstick::{command_line, commit_label_excluding, short_name};
 use super::{compare_decks, fixed};
 use crate::ai::rhino::RhinoAgent;
 use crate::ai::search::{
-    take_read_lethal_stats, ReadLethalStats, SearchAgent, SearchOptions, READ_LETHAL_EDGES,
+    take_own_lethal_stats, take_read_lethal_stats, OwnLethalStats, ReadLethalStats, SearchAgent,
+    SearchOptions, READ_LETHAL_EDGES,
 };
 use crate::ai::valuenet::hidden_memo_counts;
 use crate::ai::Agent;
@@ -95,6 +96,8 @@ struct GameRecord {
     crest_held: [BTreeMap<CrestIdx, u32>; 2],
     /// 席ごとの readLethal の数（設定に readLethal があるときだけ数える）
     read_lethal: [ReadLethalStats; 2],
+    /// 席ごとの readOwnLethal の門の数（設定に readOwnLethalGate があるときだけ数える）
+    own_lethal: [OwnLethalStats; 2],
     /// 補正の最後の隠れ層の使い回しの表を引いた数と当たった数（両方の席の合計。ai/valuenet.rs の MEMO）
     memo: (u64, u64),
     /// 棋譜の 1 行（棋譜を書くときだけ）
@@ -252,6 +255,7 @@ impl GameRecord {
             "think": self.think,
             "decisions": self.decisions,
             "readLethal": self.read_lethal.iter().map(read_lethal_json).collect::<Vec<_>>(),
+            "ownLethal": self.own_lethal.iter().map(own_lethal_json).collect::<Vec<_>>(),
         })
     }
 }
@@ -293,7 +297,9 @@ fn play_timed(
     ];
     let _ = prof::take();
     let _ = take_read_lethal_stats();
+    let _ = take_own_lethal_stats();
     let mut read_lethal: [ReadLethalStats; 2] = Default::default();
+    let mut own_lethal: [OwnLethalStats; 2] = Default::default();
     let memo0 = hidden_memo_counts();
     let t0 = Instant::now();
     let mut s = create_game([&seats[0].cards, &seats[1].cards], seed);
@@ -326,6 +332,7 @@ fn play_timed(
         think[actor] += secs;
         decisions[actor] += 1;
         read_lethal[actor].add(&take_read_lethal_stats());
+        own_lethal[actor].add(&take_own_lethal_stats());
         if s.phase != Phase::Mulligan && last_turn[actor] != s.turn {
             last_turn[actor] = s.turn;
             own_turns[actor] += 1;
@@ -438,6 +445,7 @@ fn play_timed(
         crest_fired: [st0.crest_fired, st1.crest_fired],
         crest_held: [st0.crest_held, st1.crest_held],
         read_lethal,
+        own_lethal,
     }
 }
 
@@ -450,6 +458,16 @@ fn read_lethal_json(x: &ReadLethalStats) -> Value {
         "searched": x.searched,
         "found": x.found,
         "replayFailed": x.replay_failed,
+    })
+}
+
+/// readOwnLethal の門の数の JSON（区間の下端の順）
+fn own_lethal_json(x: &OwnLethalStats) -> Value {
+    json!({
+        "edges": READ_LETHAL_EDGES,
+        "reads": x.reads,
+        "searched": x.searched,
+        "found": x.found,
     })
 }
 
@@ -663,6 +681,8 @@ struct Summary {
     check: Option<Vec<String>>,
     /// readLethal の数（全部の席の合計）
     read_lethal: ReadLethalStats,
+    /// readOwnLethal の門の数（全部の席の合計）
+    own_lethal: OwnLethalStats,
     /// 補正の最後の隠れ層の使い回しの表を引いた数と当たった数（全部の試合の合計）
     memo: (u64, u64),
     /// メモリの確保（LD_PRELOAD で差し込んだ共有ライブラリの名前。無ければ None。scripts/svwb.mjs・キューの SVWB_PRELOAD）
@@ -719,6 +739,58 @@ fn read_lethal_section(out: &mut String, x: &ReadLethalStats, seats: u32) {
             "| {}% | {} | {} | {} |\n",
             fixed(100.0 * e, 0),
             pct(sum(&x.starts[b..]), sum(&x.starts)),
+            pct(sum(&x.reads[b..]), sum(&x.reads)),
+            pct(sum(&x.found[b..]), sum(&x.found)),
+        ));
+    }
+}
+
+/// 報告の readOwnLethal の門の節（q の区間ごとの、読み・リーサル探索をした数と見つけた数、線ごとの掛かる割合）
+fn own_lethal_section(out: &mut String, x: &OwnLethalStats, seats: u32) {
+    let n = READ_LETHAL_EDGES.len();
+    let sum = |v: &[u64]| v.iter().sum::<u64>();
+    let pct = |a: u64, b: u64| {
+        if b == 0 {
+            "―".to_string()
+        } else {
+            format!("{}%", fixed(100.0 * a as f64 / b as f64, 2))
+        }
+    };
+    let per = |a: u64| fixed(a as f64 / seats.max(1) as f64, 1);
+    out.push_str("\n## 読みの後の自分のリーサル探索の門（readOwnLethalGate）\n\n");
+    out.push_str(&format!(
+        "相手のターンを読んで自分の手番に戻った読みを、読みの中の相手のターン末の、相手から見た補正のリーサルの出力 q \
+         （相手が次のターンに倒される確率）の区間ごとに数える。1 席 1 試合あたりは {seats} 席で割った数\n\n"
+    ));
+    out.push_str("| q | 読み | 読み（1 席 1 試合） | リーサル探索 | 見つけた |\n| --- | ---: | ---: | ---: | ---: |\n");
+    for b in 0..n {
+        let hi = if b + 1 < n {
+            format!("{}%", fixed(100.0 * READ_LETHAL_EDGES[b + 1], 0))
+        } else {
+            "100%".into()
+        };
+        out.push_str(&format!(
+            "| {}%〜{hi} | {} | {} | {} | {} |\n",
+            fixed(100.0 * READ_LETHAL_EDGES[b], 0),
+            x.reads[b],
+            per(x.reads[b]),
+            x.searched[b],
+            x.found[b]
+        ));
+    }
+    out.push_str(&format!(
+        "| 全部 | {} | {} | {} | {} |\n\n",
+        sum(&x.reads),
+        per(sum(&x.reads)),
+        sum(&x.searched),
+        sum(&x.found)
+    ));
+    out.push_str("線ごとの、q が線以上の読みの割合と、見つけた数のうち q が線以上の割合（リーサル探索をした区間だけの数）:\n\n");
+    out.push_str("| 線 | 読み | 見つけた |\n| --- | ---: | ---: |\n");
+    for (b, &e) in READ_LETHAL_EDGES.iter().enumerate() {
+        out.push_str(&format!(
+            "| {}% | {} | {} |\n",
+            fixed(100.0 * e, 0),
             pct(sum(&x.reads[b..]), sum(&x.reads)),
             pct(sum(&x.found[b..]), sum(&x.found)),
         ));
@@ -822,6 +894,9 @@ fn report(sm: &Summary, date: &str, commit: &str, label: &str) -> String {
     }
     if !sm.read_lethal.is_empty() {
         read_lethal_section(&mut out, &sm.read_lethal, sm.all.seats);
+    }
+    if !sm.own_lethal.is_empty() {
+        own_lethal_section(&mut out, &sm.own_lethal, sm.all.seats);
     }
     push(&mut out, "");
     push(&mut out, "## デッキごとの 1 試合の時間");
@@ -1562,6 +1637,14 @@ pub fn main(argv: &[String]) -> Result<(), String> {
             for r in &records {
                 t.add(&r.read_lethal[0]);
                 t.add(&r.read_lethal[1]);
+            }
+            t
+        },
+        own_lethal: {
+            let mut t = OwnLethalStats::default();
+            for r in &records {
+                t.add(&r.own_lethal[0]);
+                t.add(&r.own_lethal[1]);
             }
             t
         },

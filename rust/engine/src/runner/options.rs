@@ -9,8 +9,8 @@ use crate::ai::mulligan::OppMulligan;
 use crate::ai::potential::PotentialNet;
 use crate::ai::rhino::{rhino_search_options, RHINO_POTENTIAL};
 use crate::ai::search::{
-    DrawSplit, ExtraEval, MulliganMode, OpponentSearch, PickByPlayout, ReadLethal, RescoreRace,
-    RolloutWeights, SearchOptions, DEFAULT_PICK, DEFAULT_RESCORE_RACE,
+    DrawSplit, ExtraEval, MulliganMode, OpponentSearch, OwnLethalGate, PickByPlayout, ReadLethal,
+    RescoreRace, RolloutWeights, SearchOptions, DEFAULT_PICK, DEFAULT_RESCORE_RACE,
 };
 use crate::ai::valuenet::ValueNet;
 use crate::json::Json;
@@ -541,7 +541,7 @@ pub fn compare_options(text: &str) -> Result<SearchOptions, String> {
     let (mut raw, model, net) = apply_value_net_model(Json::parse(text)?)?;
     let mut read_lethal = match raw.take("readLethal") {
         None => None,
-        Some(v) => read_lethal_option(&v, net)?,
+        Some(v) => read_lethal_option(&v, net.clone())?,
     };
     if let Some(v) = raw.take("readLethalExact") {
         let Some(rl) = read_lethal.as_mut() else {
@@ -554,8 +554,19 @@ pub fn compare_options(text: &str) -> Result<SearchOptions, String> {
             raw.set(key, w);
         }
     }
+    let own_gate = match raw.take("readOwnLethalGate") {
+        None => None,
+        Some(v) => read_lethal_option(&v, net.clone())?.map(|rl| OwnLethalGate {
+            threshold: rl.threshold,
+            net: rl.net,
+        }),
+    };
     let mut o = search_options(&raw, model.as_ref(), SearchOptions::default(), &[])?;
     o.read_lethal = read_lethal;
+    if own_gate.is_some() && o.read_own_lethal == 0 {
+        return Err("\"readOwnLethalGate\" は \"readOwnLethal\" と一緒に書きます".into());
+    }
+    o.read_own_lethal_gate = own_gate;
     Ok(o)
 }
 
@@ -753,6 +764,19 @@ mod tests {
                 .read_own_lethal,
             3
         );
+        // 門は readOwnLethal と一緒にだけ書ける（リーサルの出力のある補正が要る）
+        let r7 = format!("{}/yardstick/pool-r7-net.json", env!("CARGO_MANIFEST_DIR"));
+        let gate = compare_options(&format!(
+            r#"{{"valueNet":"{r7}","readOwnLethal":1,"readOwnLethalGate":0.05}}"#
+        ))
+        .unwrap()
+        .read_own_lethal_gate
+        .expect("門");
+        assert_eq!(gate.threshold, 0.05);
+        assert!(compare_options(&format!(
+            r#"{{"valueNet":"{r7}","readOwnLethalGate":0.05}}"#
+        ))
+        .is_err());
         // 読みの中の相手を自分の評価の重みで打たせる（既定は方策の重み）
         let own = |t: &str| {
             compare_options(t)

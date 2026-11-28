@@ -159,6 +159,8 @@ thread_local! {
     static SCORED: Cell<u64> = const { Cell::new(0) };
     /// readLethal の数（調べもの用。スレッドごと。svwb profile が手番ごとに取り出す）
     static READ_LETHAL: RefCell<ReadLethalStats> = const { RefCell::new(ReadLethalStats::new()) };
+    /// readOwnLethal の門の数（調べもの用。スレッドごと。svwb profile が手番ごとに取り出す）
+    static OWN_LETHAL: RefCell<OwnLethalStats> = RefCell::new(OwnLethalStats::default());
 }
 
 /// 読み直す終局面のうち、補正のリーサルの出力（相手が次のターンにリーサルを持つ確率 q。ターン末の局面で、合流する相打ちと
@@ -174,6 +176,46 @@ pub struct ReadLethal {
     /// 読みの中のリーサル探索が、ビームで見つからないときに全探索で調べる局面数の上限（0 なら全探索をしない）。
     /// None なら、このAI のリーサル探索と同じ（lethal_exact_states）
     pub exact_states: Option<i64>,
+}
+
+/// readOwnLethal の門（ユーザーの案、2026-11-28。速さを測る用）: 読みの中の相手のターン末（合流する相打ちとターン終了時の処理の後）で、
+/// 補正のリーサルの出力 q を相手から見て出し（相手が次のターン（自分の次のターン）に倒される確率）、threshold 以上の読みだけ
+/// 自分のリーサル探索をする。数は OwnLethalStats（q の区間は READ_LETHAL_EDGES）
+#[derive(Clone)]
+pub struct OwnLethalGate {
+    pub threshold: f64,
+    /// q を出す補正（リーサルの出力のあるもの）。None なら探索 AI の既定の補正
+    pub net: Option<Arc<ValueNet>>,
+}
+
+/// readOwnLethal の数（読み 1 回ごと。q の区間ごと。門を設定したときだけ数える。threshold 0 なら全部の読みを探して、
+/// どの線でどれだけ拾えるかを数えられる）
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct OwnLethalStats {
+    /// 相手のターンを読んで自分の手番に戻った読みの数
+    pub reads: [u64; READ_LETHAL_EDGES.len()],
+    /// リーサル探索をした数と、見つけた数
+    pub searched: [u64; READ_LETHAL_EDGES.len()],
+    pub found: [u64; READ_LETHAL_EDGES.len()],
+}
+
+impl OwnLethalStats {
+    pub fn add(&mut self, o: &OwnLethalStats) {
+        for b in 0..READ_LETHAL_EDGES.len() {
+            self.reads[b] += o.reads[b];
+            self.searched[b] += o.searched[b];
+            self.found[b] += o.found[b];
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.reads.iter().all(|&x| x == 0)
+    }
+}
+
+/// このスレッドの readOwnLethal の数を取り出して 0 に戻す
+pub fn take_own_lethal_stats() -> OwnLethalStats {
+    OWN_LETHAL.with(|c| std::mem::take(&mut *c.borrow_mut()))
 }
 
 /// ReadLethalStats の q の区間の下端（q がこれ以上で次の下端より小さい）
@@ -385,6 +427,8 @@ pub struct SearchOptions {
     /// （ユーザーの案、2026-11-28。速さを測る用。0 は使わない（既定）、1 はビームだけ、2 はビームで見つからなければ全探索も。
     /// どちらもビームはターン終了の後で倒す手も見る（LethalOptions::end_turn）。3 は、ターン終了の後を見ないビームだけ（重さの切り分け用）。docs/ai-notes/15-2026-11-22.md「参考: 次の自分のターンのリーサルだけを足す値」）
     pub read_own_lethal: u8,
+    /// readOwnLethal の門（OwnLethalGate。None なら読みのたびにリーサル探索をする。既定 None）
+    pub read_own_lethal_gate: Option<OwnLethalGate>,
 }
 
 impl Default for SearchOptions {
@@ -477,6 +521,7 @@ impl Default for SearchOptions {
             read_lethal: None,
             imagined_input: true,
             read_own_lethal: 0,
+            read_own_lethal_gate: None,
         }
     }
 }
@@ -1996,18 +2041,58 @@ fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng, gate: ReadGate) -> 
             }
         }
     }
-    let after = {
+    let (after, opp_end) = {
         let _p = prof::scope(Sec::OppTurn);
         if env.opts.opponent_search.is_some() {
-            simulate_opponent_turn_by_search(start, p, rng, env)
+            simulate_opponent_turn_by_search_end(start, p, rng, env)
         } else {
-            simulate_opponent_turn(start, p, rng, env.policy_w)
+            (simulate_opponent_turn(start, p, rng, env.policy_w), None)
         }
     };
-    if env.opts.read_own_lethal > 0 && own_lethal_after_read(env.opts, &after, p) {
+    if env.opts.read_own_lethal > 0 && own_lethal_gated(env.opts, &after, opp_end.as_ref(), p) {
         return (1e6, after);
     }
     (pl.eval_after(&after), after)
+}
+
+/// readOwnLethal（門があれば、読みの中の相手のターン末 opp_end の q が線以上のときだけ）で、after から自分のリーサルを見つけるか
+fn own_lethal_gated(
+    opts: &SearchOptions,
+    after: &GameState,
+    opp_end: Option<&GameState>,
+    p: PlayerIndex,
+) -> bool {
+    let Some(gate) = &opts.read_own_lethal_gate else {
+        return own_lethal_after_read(opts, after, p);
+    };
+    if after.phase == Phase::Ended || after.active != p || after.pending.is_some() {
+        return false;
+    }
+    // 相手のターン末が取れなければ（読みの中の相手がビームで打たなかった）、門を開ける
+    let q = match opp_end {
+        Some(end) => {
+            let resolved = resolve_turn_end(end);
+            let at = resolved.as_ref().unwrap_or(end);
+            let net: &ValueNet = gate.net.as_deref().unwrap_or_else(|| default_value_net());
+            net.lethal_prob(at, opponent(p), ValuePhase::End)
+                .unwrap_or(1.0)
+        }
+        None => 1.0,
+    };
+    let bin = READ_LETHAL_EDGES.iter().rposition(|&e| q >= e).unwrap_or(0);
+    OWN_LETHAL.with(|c| c.borrow_mut().reads[bin] += 1);
+    if q < gate.threshold {
+        return false;
+    }
+    let found = own_lethal_after_read(opts, after, p);
+    OWN_LETHAL.with(|c| {
+        let mut st = c.borrow_mut();
+        st.searched[bin] += 1;
+        if found {
+            st.found[bin] += 1;
+        }
+    });
+    found
 }
 
 /// readOwnLethal: 相手のターンを読んだ後の局面 after（p の手番）で、p の次のターンのリーサル探索が勝てる並びを見つけるか
@@ -2146,6 +2231,7 @@ fn opponent_search_options(opts: &SearchOptions) -> SearchOptions {
         },
         read_lethal: None,
         read_own_lethal: 0,
+        read_own_lethal_gate: None,
         ..opts.clone()
     }
 }
@@ -2158,6 +2244,16 @@ pub fn simulate_opponent_turn_by_search(
     rng: &mut Rng,
     env: &Env,
 ) -> GameState {
+    simulate_opponent_turn_by_search_end(state, p, rng, env).0
+}
+
+/// simulate_opponent_turn_by_search と同じ。相手のターン末（ターン終了を打つ前。ビームで打ったときだけ）も返す（readOwnLethal の門）
+fn simulate_opponent_turn_by_search_end(
+    state: &GameState,
+    p: PlayerIndex,
+    rng: &mut Rng,
+    env: &Env,
+) -> (GameState, Option<GameState>) {
     let opts = env.opts;
     let q = opponent(p);
     let opp_opts = opponent_search_options(opts);
@@ -2193,6 +2289,7 @@ pub fn simulate_opponent_turn_by_search(
     let mut ended = false;
     let mut searched = false;
     let mut guard = 0;
+    let mut opp_end: Option<GameState> = None;
     while let Some(cur) = s.take() {
         if cur.phase == Phase::Ended || guard >= 80 {
             s = Some(cur);
@@ -2232,6 +2329,9 @@ pub fn simulate_opponent_turn_by_search(
                 }
             }
             if cur.pending.is_none() && cur.active == q {
+                if opts.read_own_lethal_gate.is_some() {
+                    opp_end = Some(cur.clone());
+                }
                 s = try_apply_action(&cur, &Action::EndTurn);
                 continue;
             }
@@ -2239,7 +2339,7 @@ pub fn simulate_opponent_turn_by_search(
         let a = choose_greedy(&cur, &legal_actions(&cur), rng, true, env.policy_w);
         s = try_apply_action(&cur, &a);
     }
-    s.unwrap_or_else(|| state.clone())
+    (s.unwrap_or_else(|| state.clone()), opp_end)
 }
 
 struct PlanState {
