@@ -101,6 +101,8 @@ struct GameRec {
     decks: [Vec<CardIdx>; 2],
     /// 席ごとのデッキの名前
     names: [String; 2],
+    /// 席ごとのデッキの指定（`--decks` の組のファイルの道。組を並べないときは空）。報告がアズヴォルト環境のページの試合の URL を作るのに使う
+    keys: [String; 2],
     seed: u32,
     actions: Vec<Action>,
     /// 自分のターンの最初の局面（手の番号と席）
@@ -114,11 +116,17 @@ struct GameRec {
 /// 試合 g の自己対戦（設定 o の AI どうし。list が無ければ svwb ai-play と同じ試合、あれば並べたデッキで compare と同じ組）
 fn play_game(g: u32, list: Option<&[&'static Deck]>, o: &SearchOptions) -> GameRec {
     let t = Instant::now();
-    let (decks, seed, names, opts) = match list {
+    let (decks, seed, names, keys, opts) = match list {
         None => {
             let (decks, seed) = ai_game_setup(g, false);
             let names = [deck_name(&decks[0]), deck_name(&decks[1])];
-            (decks, seed, names, [o.clone(), o.clone()])
+            (
+                decks,
+                seed,
+                names,
+                Default::default(),
+                [o.clone(), o.clone()],
+            )
         }
         Some(list) => {
             let (a, b) = compare_pair(list, g, false);
@@ -126,6 +134,7 @@ fn play_game(g: u32, list: Option<&[&'static Deck]>, o: &SearchOptions) -> GameR
                 [a.cards.clone(), b.cards.clone()],
                 g * 7 + 1,
                 [a.name.clone(), b.name.clone()],
+                [a.key.clone(), b.key.clone()],
                 [deck_options(o, a), deck_options(o, b)],
             )
         }
@@ -158,6 +167,7 @@ fn play_game(g: u32, list: Option<&[&'static Deck]>, o: &SearchOptions) -> GameR
         g,
         decks,
         names,
+        keys,
         seed,
         actions,
         starts,
@@ -745,7 +755,7 @@ fn run_batch(
         let n = |q: PlayerIndex| rec.starts.iter().filter(|x| x.1 == q).count();
         rows.push(json!({
             "game": true, "g": rec.g, "seed": rec.seed,
-            "decks": rec.names,
+            "decks": rec.names, "deckKeys": rec.keys,
             "turnStarts": [n(0), n(1)],
             "sampled": picks.iter().filter(|x| recs[x.0].g == rec.g).count(),
             "winner": rec.winner, "actions": rec.actions.len(), "sec": round2(rec.sec),
@@ -1470,6 +1480,12 @@ fn report(argv: &[String]) -> Result<(), String> {
         for l in strs(&r.v["view"]) {
             out.push_str(&format!("- {l}\n"));
         }
+        if let Some(url) = games.get(&g).and_then(page_link) {
+            out.push_str(&format!(
+                "- リプレイ（アズヴォルト環境のページが今の版の探索 AI で打ち直す）: {url}（スライダーを {i}/{} 手に合わせる）\n",
+                games[&g]["actions"]
+            ));
+        }
         out.push_str(&format!(
             "- AI の手（ターン末 {}・順位 {}）: {}\n",
             ai["turnEnd"],
@@ -1762,6 +1778,41 @@ fn plan_kind(r: &PosRow, c: usize) -> &'static str {
 const RECHECK_TAG: u32 = 0x5245_4348;
 
 /// 試合の行に書いた AI の設定（`--opts`。無ければ `{}`）。違う設定の行が混ざっていれば断る（同じ調査として足し合わせない）
+/// アズヴォルト環境のページの試合の URL（`src/sim/gameLink.ts` の形。両方の席がページの探索 AI `search`）。
+/// 試合の行に、両方の席のデッキが取り込んだプロのデッキ（`data/pools/azvaldt/decks/<大会>/<ファイル>.txt`）として残っているときだけ作る。
+/// ページは今の版の探索 AI で打ち直すので、調査の `--opts` がページの既定と違う回や、版が違う回では別の試合になる
+fn page_link(game: &Value) -> Option<String> {
+    let deck_id = |k: &Value| -> Option<String> {
+        let k = k.as_str()?;
+        let rest = &k[k.find("data/pools/azvaldt/decks/")? + "data/pools/azvaldt/decks/".len()..];
+        let id = rest.strip_suffix(".txt")?;
+        (id.split('/').count() == 2).then(|| id.to_string())
+    };
+    let keys = game["deckKeys"].as_array()?;
+    let (d0, d1) = (deck_id(keys.first()?)?, deck_id(keys.get(1)?)?);
+    let seed = game["seed"].as_u64()?;
+    Some(format!(
+        "https://wistery-k.github.io/Shadowverse-Wb-Sim/azvaldt/#game?seed={seed}&p0=search&d0={}&p1=search&d1={}",
+        form_encode(&d0),
+        form_encode(&d1)
+    ))
+}
+
+/// URLSearchParams と同じ書き方（英数字と `*-._` はそのまま、空白は `+`、ほかは UTF-8 の `%XX`）
+fn form_encode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'*' | b'-' | b'.' | b'_' => {
+                out.push(b as char)
+            }
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 fn run_opts(games: &BTreeMap<u64, Value>) -> Result<String, String> {
     let set: std::collections::BTreeSet<String> = games
         .values()
@@ -3418,5 +3469,23 @@ mod tests {
             playout(&s, p, &prep.plans[prep.ai].steps, prep.seed, 0),
             first
         );
+    }
+    #[test]
+    fn page_link_matches_the_page() {
+        // 調査 survey-r7-20261127 の試合 1339（席 0 クキシロB、席 1 ランプD）。src/sim/gameLink.ts の gameHash と同じ書き方
+        let game = json!({
+            "game": true, "g": 1339, "seed": 9374,
+            "deckKeys": [
+                "data/pools/azvaldt/decks/ps26-27-09b/ZETA_ビショップ.txt",
+                "data/pools/azvaldt/decks/ps26-27-09b/CR_ドラゴン.txt"
+            ]
+        });
+        assert_eq!(
+            page_link(&game).as_deref(),
+            Some("https://wistery-k.github.io/Shadowverse-Wb-Sim/azvaldt/#game?seed=9374&p0=search&d0=ps26-27-09b%2FZETA_%E3%83%93%E3%82%B7%E3%83%A7%E3%83%83%E3%83%97&p1=search&d1=ps26-27-09b%2FCR_%E3%83%89%E3%83%A9%E3%82%B4%E3%83%B3")
+        );
+        // デッキの指定が無い回（組を並べない回・前の版の行）やプロのデッキでない回は作らない
+        assert_eq!(page_link(&json!({"seed": 1, "deckKeys": ["", ""]})), None);
+        assert_eq!(page_link(&json!({"seed": 1})), None);
     }
 }
