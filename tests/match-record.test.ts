@@ -75,8 +75,8 @@ describe("試合の記録: プロのデッキ", () => {
     expect(cardOf(only.id)).toBe(only);
     const starter = ALL_CARDS[0]!;
     expect(cardOf(starter.id)).toBe(starter);
-    // 名前で引くと再録のストームブラスト（前期のローテーションの ID）
-    expect(id("ストームブラスト")).toBe("10831310");
+    // 名前で引くとスターターのストームブラスト（コマンドと同じ。補正と見込みはこの ID で学んだ）。再録の ID（10831310）にはしない
+    expect(id("ストームブラスト")).toBe("10131320");
   });
 });
 
@@ -112,7 +112,7 @@ describe("試合の記録: 手を入れる", () => {
     // 実体 ID は重ならない
     const iids = [...s.players[0].hand.map((h) => h.iid), ...s.players[0].deck.map((c) => c.iid)];
     expect(new Set(iids).size).toBe(40);
-    expect(() => setInitialHand(state, 0, ["10131320", ...hand.slice(1)])).toThrow(RecordError);
+    expect(() => setInitialHand(state, 0, ["10831310", ...hand.slice(1)])).toThrow(RecordError);
   });
 
   it("マリガンで引いたカードと、ターンの最初に引くカードを決めて打てる", () => {

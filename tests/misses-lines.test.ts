@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import "../src/record/pool";
 import { actingPlayer, applyAction, cardOf, legalActions, tryApplyAction, type Action, type GameState } from "../src/engine";
 import { loadMisses } from "../src/misses/azvaldtData";
+import { proDeck } from "../src/record/decks";
 import { deckRows } from "../src/misses/deck";
 import { groupNote, stepGroups, stepNotes } from "../src/misses/example";
 import { judgeTurn, passesBefore } from "../src/misses/problems";
@@ -225,6 +226,23 @@ describe("デッキと残りの山札（src/misses/deck.ts）", () => {
         expect(decks[q].cards.length, `${l.id} ${q}`).toBe(40);
         const cls = new Set(decks[q].cards.map((c) => cardOf(c).class).filter((c) => c !== "neutral"));
         expect([...cls], `${l.id} ${q}`).toEqual([leaderClasses(p.state)[q]]);
+      }
+    }
+  });
+
+  it("デッキはページの読み方のプロのデッキと同じで、盤面のカードと同じ名前なら同じ ID（同じカードが 2 行に分かれない）", () => {
+    // 2026-11-28 まで、デッキのストームブラストは 10831310、調査から取った問の盤面は 10131320 で、残りの山札に 2 行出ていた
+    for (const l of data.lines.values()) {
+      const p = byId.get(l.id)!;
+      for (const q of [0, 1] as const) {
+        const deck = l.decks![q];
+        expect(deck.cards, `${l.id} ${q}`).toEqual(proDeck(deck.id)!.cards);
+        const byName = new Map(deck.cards.map((c) => [cardOf(c).name, c]));
+        const pl = p.state.players[q];
+        for (const c of [...pl.deck, ...pl.hand]) {
+          const want = byName.get(cardOf(c.cardId).name);
+          if (want !== undefined) expect(c.cardId, `${l.id} ${q} ${cardOf(c.cardId).name}`).toBe(want);
+        }
       }
     }
   });

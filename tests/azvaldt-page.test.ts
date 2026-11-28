@@ -1,6 +1,6 @@
 // アズヴォルト環境のページ（azvaldt/index.html、src/azvaldt/）の選択肢と問題集（CLAUDE.md「決定済みの前提」のユーザーの依頼 2026-11-19）
 
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { AZVALDT_DECK_OPTIONS, eventShort, REP10_IDS, setDeckIds } from "../src/azvaldt/decks";
 import { loadMisses } from "../src/misses/azvaldtData";
@@ -12,6 +12,14 @@ describe("アズヴォルト環境のページ", () => {
     expect(AZVALDT_DECK_OPTIONS.map((d) => d.key)).toEqual(PRO_DECKS.map((d) => d.id));
     expect(new Set(AZVALDT_DECK_OPTIONS.map((d) => d.key)).size).toBe(84);
     for (const d of AZVALDT_DECK_OPTIONS) expect(d.cards).toHaveLength(40);
+  });
+
+  it("デッキはコマンドと同じカード ID で読む（tests/fixtures/azvaldt-decks.json。Rust の deck_compare.rs の pro_decks_match_fixture が同じファイルを比べる）", () => {
+    // ページの AI がコマンドと同じ手を打つため（補正と見込みはカードを ID で見る）。2026-11-28 まで、ストームブラストをページは 10831310 で読んでいた
+    const saved = JSON.parse(readFileSync("tests/fixtures/azvaldt-decks.json", "utf8")) as Record<string, string[]>;
+    expect(Object.keys(saved).sort()).toEqual(PRO_DECKS.map((d) => d.id).sort());
+    for (const d of PRO_DECKS) expect(d.cards, d.id).toEqual(saved[d.id]);
+    for (const o of AZVALDT_DECK_OPTIONS) expect(o.cards, o.key).toEqual(saved[o.key]);
   });
 
   it("既定は代表 10 型（data/pools/azvaldt/sets/rep10.txt）", () => {
