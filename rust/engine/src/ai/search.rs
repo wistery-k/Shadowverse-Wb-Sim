@@ -2506,6 +2506,9 @@ pub struct TwoTurnRead {
     pub two: f64,
     /// 自分の次のターンにリーサルがあった
     pub next_lethal: bool,
+    /// そのリーサルの並びが引く手・ランダムな手を通る（決定化の山札の順番と乱数を知って見つけたもの。own・two は勝ちにし、
+    /// own_blind・two_blind はビームで組み直す）
+    pub next_lethal_chance: bool,
     /// 自分の次のターンの最善の並びに、引く手・ランダムな手があった（決定化の山札の順番と乱数を知って組んだ並び）
     pub next_chance: bool,
     /// own の、引きを知らない版: 次のターンの最善の並びの最初の引く手・ランダムな手の直前で自分の山札の順番と乱数を作り直し、
@@ -2751,6 +2754,7 @@ impl SearchAgent {
             own: v,
             two: v,
             next_lethal: false,
+            next_lethal_chance: false,
             next_chance: false,
             own_blind: v,
             two_blind: v,
@@ -2774,26 +2778,59 @@ impl SearchAgent {
             expand_choices: self.opts.lethal_expand_choices,
             ..DEFAULT_LETHAL_OPTIONS
         };
-        let lethal = self.opts.lethal
-            && (search_lethal(&after, p, &lo).is_some()
-                || (self.opts.lethal_exact_states > 0
-                    && search_exact_lethal(
-                        &after,
-                        p,
-                        &sure_lethal_options(self.opts.lethal_exact_states),
-                    )
-                    .is_some()));
-        if lethal {
+        let lethal_line = if self.opts.lethal {
+            search_lethal(&after, p, &lo).or_else(|| {
+                (self.opts.lethal_exact_states > 0)
+                    .then(|| {
+                        search_exact_lethal(
+                            &after,
+                            p,
+                            &sure_lethal_options(self.opts.lethal_exact_states),
+                        )
+                    })
+                    .flatten()
+            })
+        } else {
+            None
+        };
+        // リーサルの並びが引く手・ランダムな手を通るか（決定化の山札の順番と乱数を知って見つけたリーサル）
+        let lethal_chance = lethal_line.as_ref().map(|line| {
+            let mut prev = after.clone();
+            line.iter().any(|a| match try_apply_action(&prev, a) {
+                Some(next) => {
+                    let c = is_chance_step(&prev, &next, p);
+                    prev = next;
+                    c
+                }
+                None => false,
+            })
+        });
+        if lethal_chance == Some(false) {
             return TwoTurnRead {
                 read,
                 own: 1e6,
                 two: 1e6,
                 next_lethal: true,
+                next_lethal_chance: false,
                 next_chance: false,
                 own_blind: 1e6,
                 two_blind: 1e6,
             };
         }
+        // 引く手を通るリーサルは、知る版（own・two）だけ勝ちにし、引きを知らない版はビームで組み直す
+        let known = |r: TwoTurnRead| -> TwoTurnRead {
+            if lethal_chance == Some(true) {
+                TwoTurnRead {
+                    own: 1e6,
+                    two: 1e6,
+                    next_lethal: true,
+                    next_lethal_chance: true,
+                    ..r
+                }
+            } else {
+                r
+            }
+        };
         let opts = SearchOptions {
             beam_width: next_beam,
             allow: None,
@@ -2808,15 +2845,16 @@ impl SearchAgent {
         let root = Rc::new(after.clone());
         let Some(steps) = best_plan_steps(&root, p, &next_env) else {
             let v = pl.eval_after(&after);
-            return TwoTurnRead {
+            return known(TwoTurnRead {
                 read,
                 own: v,
                 two: v,
                 next_lethal: false,
+                next_lethal_chance: false,
                 next_chance: false,
                 own_blind: v,
                 two_blind: v,
-            };
+            });
         };
         let pl2 = Planner {
             env: &next_env,
@@ -2859,15 +2897,16 @@ impl SearchAgent {
                 }
             }
         };
-        TwoTurnRead {
+        known(TwoTurnRead {
             read,
             own,
             two,
             next_lethal: false,
+            next_lethal_chance: false,
             next_chance: chance.is_some(),
             own_blind,
             two_blind,
-        }
+        })
     }
 
     /// 局面 root から p が手の列 actions（ターン終了の前まで）を打つ並びを、探索が選んだとして、
