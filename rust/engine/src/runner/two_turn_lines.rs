@@ -868,18 +868,16 @@ fn print_sign_check(bins: &[(usize, usize); 3]) {
     println!();
 }
 
+/// 報告の引数（結果のファイル・--group・--gate・--maxR）
+struct ReportArgs {
+    files: Vec<String>,
+    groups: Vec<(String, HashSet<String>)>,
+    gate: f64,
+    max_r: Option<u64>,
+}
+
 /// 引数: 結果のファイルと、--group <名前>=<問,…>・--gate <ポイント>・--maxR <回>
-fn report_args(
-    argv: &[String],
-) -> Result<
-    (
-        Vec<String>,
-        Vec<(String, HashSet<String>)>,
-        f64,
-        Option<u64>,
-    ),
-    String,
-> {
+fn report_args(argv: &[String]) -> Result<ReportArgs, String> {
     let mut groups = Vec::new();
     let mut gate = 10.0;
     let mut max_r = None;
@@ -920,12 +918,22 @@ fn report_args(
     if files.is_empty() {
         return Err("結果のファイルを渡してください".into());
     }
-    Ok((files, groups, gate, max_r))
+    Ok(ReportArgs {
+        files,
+        groups,
+        gate,
+        max_r,
+    })
 }
 
 /// svwb two-turn lines-report
 pub fn report(argv: &[String]) -> Result<(), String> {
-    let (files, groups, gate, max_r) = report_args(argv)?;
+    let ReportArgs {
+        files,
+        groups,
+        gate,
+        max_r,
+    } = report_args(argv)?;
     let l = load_results(&files, max_r)?;
     let a = l.a;
     let aggs = aggregate(&l);
@@ -1133,7 +1141,9 @@ pub fn report(argv: &[String]) -> Result<(), String> {
 /// いちばん大きい候補の差が --gate を超えたらその候補に替える決まりの得を、調査の一段目の勝ち負け（同じ回どうし）で数える。
 /// 決まりは勝ち負けを見ないので、選んだ偏りが無い。1 試合あたりは、調査の選んだ局面の数で割り、1 試合 1 席の局面の数を掛ける（survey report と同じ）
 pub fn gate_report(argv: &[String]) -> Result<(), String> {
-    let (files, _, gate, max_r) = report_args(argv)?;
+    let ReportArgs {
+        files, gate, max_r, ..
+    } = report_args(argv)?;
     let l = load_results(&files, max_r)?;
     let a = l.a;
     let sv = l
