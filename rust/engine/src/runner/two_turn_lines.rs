@@ -1,10 +1,14 @@
 //! 問題集の問と打ち比べ調査の局面で、2 つの並び（AI の手と、比べる手）に、今の選ぶときの値・次の自分のターン末まで読んだ値・
 //! 2 ターン読みの値を付け、どちらが上に来るかを数える（2026-11-28、測定のみ。打つ手は変えない。docs/ai-notes/15「2 ターン読みを新しいプールで測る」）。
 //!
-//!   svwb two-turn lines --out t.jsonl (--dir misses/azvaldt | --survey <調査.jsonl(.gz)> [--clear 3] [--minDiff 15])
+//!   svwb two-turn lines --out t.jsonl (--dir misses/azvaldt | --survey <調査.jsonl(.gz)> [--clear 3] [--minDiff 15] [--all 1] [--frac x])
 //!                       [--opts '<設定>'] [--m 32] [--reads 12] [--twos 2] [--nextBeam 256] [--seed 1] [--only <名前,…>] [--limit N]
-//!   svwb two-turn lines-report t.jsonl… [--group <名前>=<問,…>]… [--gate 10]
+//!   svwb two-turn lines-report t.jsonl… [--group <名前>=<問,…>]… [--gate 10] [--maxR N]
+//!   svwb two-turn lines-gate t.jsonl… [--gate 10] [--maxR N]
 //!
+//! - `--all 1` は調査の打ち比べた局面の全部で、AI の手と、AI が読み直す候補（打ち切った候補も）の全部に値を付ける（`lines-gate` 用）。
+//!   `--frac` は局面を名前の指紋で無作為に減らす。`--maxR N` は決定化の番号 N 未満だけで数える
+//! - `lines-gate` は「値の差（候補 − AI の手）がいちばん大きい候補の差が `--gate` を超えたら替える」決まりの得を、調査の一段目の勝ち負けで数える
 //! - **並び**: `--dir` は問（`<dir>/*.json`）と書き添えた調査の並び（`<dir>/lines/<問>.json` の `ai` と `good` の `steps`）。
 //!   `--survey` は調査の局面の行のうち、AI の選んだ候補が、AI が読み直す候補（読み直しを打ち切った候補も）のどれかに、
 //!   一段目の同じ回どうしの差で `--minDiff` ポイント以上かつ標準誤差の `--clear` 倍以上勝った局面（AI の手が打ち比べではっきり良かった局面）。
@@ -657,7 +661,21 @@ fn load_results(files: &[String], max_r: Option<u64>) -> Result<Loaded, String> 
     };
     let mut a: Option<f64> = None;
     for f in files {
-        for v in read_rows(f)? {
+        // 共有フォルダに置いた .jsonl.gz もそのまま読む
+        let rows = if f.ends_with(".gz") {
+            let text = read_text(f)?;
+            let mut rows = Vec::new();
+            for (n, l) in text.lines().filter(|l| !l.trim().is_empty()).enumerate() {
+                rows.push(
+                    serde_json::from_str::<Value>(l)
+                        .map_err(|e| format!("{f} の {} 行目: {e}", n + 1))?,
+                );
+            }
+            rows
+        } else {
+            read_rows(f)?
+        };
+        for v in rows {
             if v.get("tasks").is_some() {
                 let x = v["a"].as_f64();
                 if a.is_some_and(|y| Some(y) != x) {
@@ -1236,8 +1254,9 @@ pub fn gate_report(argv: &[String]) -> Result<(), String> {
             gains.push(g);
         }
         checked = true;
-        let sum: f64 = gains.iter().sum();
-        let sum2: f64 = gains.iter().map(|x| x * x).sum();
+        // 空の和は -0.0 なので、+0.0 を足して「-0.0」と出ないようにする
+        let sum: f64 = gains.iter().sum::<f64>() + 0.0;
+        let sum2: f64 = gains.iter().map(|x| x * x).sum::<f64>() + 0.0;
         let n = n_eff.max(1.0);
         let mean = sum / n;
         let var = (sum2 / n - mean * mean) * n / (n - 1.0).max(1.0);
