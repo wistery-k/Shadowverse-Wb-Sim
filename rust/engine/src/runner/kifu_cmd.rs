@@ -5,6 +5,7 @@
 //!   svwb kifu events <棋譜>… [--where '<条件>,…'] [--event '…'] [--out 出来事.jsonl]
 //!   svwb kifu seats <棋譜>… [--where '<条件>,…'] [--out 席.jsonl]
 //!   svwb kifu values <棋譜>… [--opts '<設定>'] [--reads N] [--opp-lethal 1] [--true-lethal 1] [--features 1] [--probe 1 [--after 1] [--hidden 1] [--hand-card <カード>]] [--where '<条件>,…'] [--out ターン末.jsonl]
+//!   svwb kifu pairs --main <本線の棋譜>[,…] --branch <枝の棋譜>[,…] --opts '<設定>' [--reads N] [--out 組.jsonl]（runner/kifu_pairs.rs）
 //!
 //! - 棋譜は、ファイルかフォルダ（中の `.jsonl`・`.jsonl.gz` を全部。`.tmp` は読まない）。`.gz` は `gzip -dc` で読む
 //! - count・events は試合を打ち直して出来事の列（replay_index.rs）にする。打ち直せない試合（エンジンの版が違って打てない手がある）と、
@@ -2287,7 +2288,8 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         Some("events") => events(&argv[1..]),
         Some("seats") => seats(&argv[1..]),
         Some("values") => values(&argv[1..]),
-        _ => Err("使い方: svwb kifu count <棋譜>… --event '<種類> [<条件>…]' [--where '<条件>,…'] [--per seat|game|turn] [--by <分け方>,…] | kifu winrate <棋譜>… [--where …] [--by …] | kifu events <棋譜>… [--where …] [--event …] [--out 出来事.jsonl] | kifu seats <棋譜>… [--where …] [--out 席.jsonl] | kifu values <棋譜>… [--opts '<設定>'] [--reads N] [--where …] [--out ターン末.jsonl]（docs/kifu.md「数える」「値」）".into()),
+        Some("pairs") => super::kifu_pairs::pairs(&argv[1..]),
+        _ => Err("使い方: svwb kifu count <棋譜>… --event '<種類> [<条件>…]' [--where '<条件>,…'] [--per seat|game|turn] [--by <分け方>,…] | kifu winrate <棋譜>… [--where …] [--by …] | kifu events <棋譜>… [--where …] [--event …] [--out 出来事.jsonl] | kifu seats <棋譜>… [--where …] [--out 席.jsonl] | kifu values <棋譜>… [--opts '<設定>'] [--reads N] [--where …] [--out ターン末.jsonl] | kifu pairs --main <棋譜>[,…] --branch <棋譜>[,…] --opts '<設定>' [--reads N] [--out 組.jsonl]（docs/kifu.md「数える」「値」「枝の組」）".into()),
     }
 }
 

@@ -13,6 +13,7 @@ pub mod defer_playout;
 pub mod human_plan;
 pub mod kifu;
 pub mod kifu_cmd;
+pub mod kifu_pairs;
 pub mod ledger;
 pub mod meta;
 pub mod misses;
