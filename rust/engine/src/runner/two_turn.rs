@@ -1884,6 +1884,8 @@ pub fn main(argv: &[String]) -> Result<(), String> {
         Some("show") => show(&argv[1..]),
         Some("run") => run(&argv[1..]),
         Some("report") => report(&argv[1..]),
-        _ => Err("使い方: svwb two-turn show|run|report …（runner/two_turn.rs）".into()),
+        Some("lines") => super::two_turn_lines::run(&argv[1..]),
+        Some("lines-report") => super::two_turn_lines::report(&argv[1..]),
+        _ => Err("使い方: svwb two-turn show|run|report|lines|lines-report …（runner/two_turn.rs・two_turn_lines.rs）".into()),
     }
 }

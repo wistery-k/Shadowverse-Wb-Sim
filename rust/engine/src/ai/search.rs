@@ -1186,6 +1186,22 @@ fn best_plan_last(
     best.and_then(|i| pl.steps_of(terminals[i].path).pop())
 }
 
+/// best_plan_last と同じ並びの、全部の手と各手の後の局面（SearchAgent::two_turn_read が引く手の位置を見るため）
+fn best_plan_steps(
+    root: &Rc<GameState>,
+    p: PlayerIndex,
+    env: &Env,
+) -> Option<Vec<(Action, Rc<GameState>)>> {
+    let (pl, terminals, bests) = turn_end_bests(root, p, env);
+    let mut best: Option<usize> = None;
+    for &(_, i) in &bests {
+        if best.is_none_or(|b| terminals[i].value > terminals[b].value) {
+            best = Some(i);
+        }
+    }
+    best.map(|i| pl.steps_of(terminals[i].path))
+}
+
 /// best_plan_last と同じ。ただしビームは key_env の点数で並べて打ち、終局面は judge_env の点数（end_score）で選び直す（同じなら先のもの。opponentSearch.handKey）
 fn best_plan_last_judged(
     root: &Rc<GameState>,
@@ -2490,6 +2506,13 @@ pub struct TwoTurnRead {
     pub two: f64,
     /// 自分の次のターンにリーサルがあった
     pub next_lethal: bool,
+    /// 自分の次のターンの最善の並びに、引く手・ランダムな手があった（決定化の山札の順番と乱数を知って組んだ並び）
+    pub next_chance: bool,
+    /// own の、引きを知らない版: 次のターンの最善の並びの最初の引く手・ランダムな手の直前で自分の山札の順番と乱数を作り直し、
+    /// その手を打った後を同じビームで組み直したターン末の点数（drawSplit と同じ区切り方。next_chance でなければ own と同じ）
+    pub own_blind: f64,
+    /// two の、引きを知らない版（own_blind の終局面から相手の次のターンを読んだ後の点数。next_chance でなければ two と同じ）
+    pub two_blind: f64,
 }
 
 /// 探索の外から、探索と同じ点数で局面を採点する（人間の手順と比べる runner/human_plan.rs が使う。打つ手は変えない）
@@ -2706,7 +2729,9 @@ impl SearchAgent {
     /// p のターン末の局面 end から 2 ターン先まで読んだ点数（測るための道具。runner/two_turn.rs。打つ手は変わらない）。
     /// 引き直し（seed）1 つで、相手のターンを読み直しと同じく打ち（read）、続く自分の次のターンを、リーサルがあればそれを、
     /// 無ければ幅 next_beam のビームでターン末の点数が最も高い並びを打ち（own はそのターン末の点数）、
-    /// さらに相手の次のターンを読んだ後の局面を採点する（two）。読みの中の相手は読み直しと同じ（相手のターンのビーム）
+    /// さらに相手の次のターンを読んだ後の局面を採点する（two）。読みの中の相手は読み直しと同じ（相手のターンのビーム）。
+    /// 次のターンのビームは決定化の山札の順番を知って組むので、引く手のある並びは甘くなる。own_blind・two_blind は、
+    /// その並びの最初の引く手・ランダムな手の直前で山札と乱数を作り直して組み直した版（drawSplit と同じ区切り方。2026-11-28）
     pub fn two_turn_read(
         &self,
         end: &GameState,
@@ -2726,6 +2751,9 @@ impl SearchAgent {
             own: v,
             two: v,
             next_lethal: false,
+            next_chance: false,
+            own_blind: v,
+            two_blind: v,
         };
         if end.phase == Phase::Ended {
             return same(pl.eval_state(end));
@@ -2761,6 +2789,9 @@ impl SearchAgent {
                 own: 1e6,
                 two: 1e6,
                 next_lethal: true,
+                next_chance: false,
+                own_blind: 1e6,
+                two_blind: 1e6,
             };
         }
         let opts = SearchOptions {
@@ -2775,40 +2806,67 @@ impl SearchAgent {
             policy_w: &self.policy_w,
         };
         let root = Rc::new(after.clone());
-        let Some((_, last)) = best_plan_last(&root, p, &next_env) else {
+        let Some(steps) = best_plan_steps(&root, p, &next_env) else {
             let v = pl.eval_after(&after);
             return TwoTurnRead {
                 read,
                 own: v,
                 two: v,
                 next_lethal: false,
+                next_chance: false,
+                own_blind: v,
+                two_blind: v,
             };
         };
         let pl2 = Planner {
             env: &next_env,
             p,
-            root,
+            root: root.clone(),
             steps: Vec::new(),
         };
-        if last.phase == Phase::Ended {
-            let v = pl2.eval_state(&last);
-            return TwoTurnRead {
-                read,
-                own: v,
-                two: v,
-                next_lethal: false,
-            };
-        }
-        let own = pl2.end_score(&last);
-        let settled2 = pl2.settle(&last);
-        let base2 = settled2.as_ref().unwrap_or(&last);
-        let after2 = simulate_opponent_turn_by_search(base2, p, &mut r, &env);
-        let two = pl.eval_after(&after2) - pl2.leftover(&last);
+        // ターン末の局面 last から、自分の次のターン末の点数と、相手の次のターンを乱数 rr で読んだ後の点数
+        let finish = |last: &GameState, rr: &mut Rng| -> (f64, f64) {
+            if last.phase == Phase::Ended {
+                let v = pl2.eval_state(last);
+                return (v, v);
+            }
+            let own = pl2.end_score(last);
+            let settled2 = pl2.settle(last);
+            let base2 = settled2.as_ref().unwrap_or(last);
+            let after2 = simulate_opponent_turn_by_search(base2, p, rr, &env);
+            (own, pl.eval_after(&after2) - pl2.leftover(last))
+        };
+        let last = steps
+            .last()
+            .map(|(_, st)| st.clone())
+            .unwrap_or(root.clone());
+        // 引きを知らない版も、相手の次のターンは同じ乱数で読む（差のぶれを減らす）
+        let r_state = r.state;
+        let (own, two) = finish(&last, &mut r);
+        let chance = first_chance_step(&root, &steps, p);
+        let (own_blind, two_blind) = match chance {
+            None => (own, two),
+            Some(c) => {
+                let before: &GameState = if c == 0 { &root } else { &steps[c - 1].1 };
+                let mut s = before.clone();
+                reshuffle_own(&mut s, p, &mut Rng::new(seed ^ 0x2545_F491));
+                match try_apply_action(&s, &steps[c].0) {
+                    None => (own, two),
+                    Some(s1) => {
+                        let (end_b, _) = split_turn_end(&pl2, Rc::new(s1), &next_env);
+                        finish(&end_b, &mut Rng::new(r_state))
+                    }
+                }
+            }
+        };
         TwoTurnRead {
             read,
             own,
             two,
             next_lethal: false,
+            next_chance: chance.is_some(),
+            own_blind,
+            two_blind,
         }
     }
 
