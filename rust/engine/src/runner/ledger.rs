@@ -442,6 +442,8 @@ pub struct SurveyRun {
     /// 回したマシンとコミット（試合の行から。重なりを除いて並べたもの）
     pub machines: Vec<String>,
     pub commits: Vec<String>,
+    /// 調査の種類（空ならターンの打ち比べで、行に書かない。`mulligan` はマリガンの打ち比べ。docs/survey.md「マリガンの打ち比べ」）
+    pub mode: String,
 }
 
 /// 候補の打ち比べ調査の 1 回の台帳の行（日付・時刻・コミット・ブランチを渡す形。試すため）
@@ -457,7 +459,7 @@ pub fn survey_row_with(run: &SurveyRun, date: &str, at: &str, commit: &str, bran
     };
     let pair = |[m, se]: [f64; 2]| Json::Arr(vec![r4(m), r4(se)]);
     let strs = |v: &[String]| Json::Arr(v.iter().map(|x| s(x)).collect());
-    Json::Obj(vec![
+    let mut fields: Vec<(String, Json)> = vec![
         ("v".into(), num(LEDGER_VERSION as f64)),
         ("kind".into(), s("survey")),
         ("date".into(), s(date)),
@@ -496,8 +498,12 @@ pub fn survey_row_with(run: &SurveyRun, date: &str, at: &str, commit: &str, bran
         ("seconds".into(), r4((run.seconds * 10.0).round() / 10.0)),
         ("machines".into(), strs(&run.machines)),
         ("commits".into(), strs(&run.commits)),
-        ("cmd".into(), s(&shell_line(&run.argv))),
-    ])
+    ];
+    if !run.mode.is_empty() {
+        fields.push(("mode".into(), s(&run.mode)));
+    }
+    fields.push(("cmd".into(), s(&shell_line(&run.argv))));
+    Json::Obj(fields)
 }
 
 /// 候補の打ち比べ調査の 1 回を台帳に足す（書けなければ注意を出すだけ）
@@ -664,6 +670,7 @@ mod tests {
             seconds: 190.63,
             machines: vec!["vm".into()],
             commits: vec!["c99c9f8+".into()],
+            mode: String::new(),
         };
         let text = survey_row_with(&run, "2026-11-11", "2026-11-11T06:19:12Z", "c99c9f8+", "b")
             .stringify();

@@ -46,6 +46,7 @@ use super::kifu::{self, RunInfo, Seat};
 use super::ledger;
 use super::options::compare_options;
 use super::parallel::{parallel_map, thread_count};
+use super::survey_mulligan;
 use crate::ai::determinize::determinize;
 use crate::ai::exact_lethal::reset_exact_lethal_cache;
 use crate::ai::lethal::reset_lethal;
@@ -96,25 +97,25 @@ fn deck_name(cards: &[CardIdx]) -> String {
 }
 
 /// 打った自己対戦 1 試合
-struct GameRec {
-    g: u32,
-    decks: [Vec<CardIdx>; 2],
+pub(crate) struct GameRec {
+    pub(crate) g: u32,
+    pub(crate) decks: [Vec<CardIdx>; 2],
     /// 席ごとのデッキの名前
-    names: [String; 2],
+    pub(crate) names: [String; 2],
     /// 席ごとのデッキの指定（`--decks` の組のファイルの道。組を並べないときは空）。報告がアズヴォルト環境のページの試合の URL を作るのに使う
-    keys: [String; 2],
-    seed: u32,
-    actions: Vec<Action>,
+    pub(crate) keys: [String; 2],
+    pub(crate) seed: u32,
+    pub(crate) actions: Vec<Action>,
     /// 自分のターンの最初の局面（手の番号と席）
-    starts: Vec<(usize, PlayerIndex)>,
-    winner: Option<PlayerIndex>,
+    pub(crate) starts: Vec<(usize, PlayerIndex)>,
+    pub(crate) winner: Option<PlayerIndex>,
     /// 終わり（棋譜の先攻・勝者・ターン）
-    end: kifu::End,
-    sec: f64,
+    pub(crate) end: kifu::End,
+    pub(crate) sec: f64,
 }
 
 /// 試合 g の自己対戦（設定 o の AI どうし。list が無ければ svwb ai-play と同じ試合、あれば並べたデッキで compare と同じ組）
-fn play_game(g: u32, list: Option<&[&'static Deck]>, o: &SearchOptions) -> GameRec {
+pub(crate) fn play_game(g: u32, list: Option<&[&'static Deck]>, o: &SearchOptions) -> GameRec {
     let t = Instant::now();
     let (decks, seed, names, keys, opts) = match list {
         None => {
@@ -183,12 +184,12 @@ fn sampled(g: u32, i: usize, rate: f64) -> bool {
 }
 
 /// 局面ごとの乱数の元
-fn pos_seed(rec: &GameRec, i: usize) -> u32 {
+pub(crate) fn pos_seed(rec: &GameRec, i: usize) -> u32 {
     seed_of(&[TAG, rec.seed, i as u32])
 }
 
 /// 試合の i 手目の前の局面と、試合でその局面を考えたときの AI の乱数（play_match の MatchRng と同じ）
-fn rebuild(rec: &GameRec, i: usize) -> (GameState, Rng) {
+pub(crate) fn rebuild(rec: &GameRec, i: usize) -> (GameState, Rng) {
     rebuild_from(&rec.decks, rec.seed, &rec.actions, i)
 }
 
@@ -602,7 +603,7 @@ pub(crate) fn paired(a: &[char], b: &[char], keep: impl Fn(usize) -> bool) -> Ve
         .collect()
 }
 
-fn mean(xs: &[f64]) -> f64 {
+pub(crate) fn mean(xs: &[f64]) -> f64 {
     if xs.is_empty() {
         f64::NAN
     } else {
@@ -764,7 +765,15 @@ fn run_batch(
             "commit": commit, "machine": ledger::machine(), "threads": thread_count(),
         }));
     }
-    let lines = kifu.map_or_else(Vec::new, |(run, seats)| {
+    (rows, kifu_lines(&recs, kifu))
+}
+
+/// 試合ごとの棋譜の行（試合番号と行）。kifu が無ければ空
+pub(crate) fn kifu_lines(
+    recs: &[GameRec],
+    kifu: Option<(&RunInfo, &[Seat; 2])>,
+) -> Vec<(u32, String)> {
+    kifu.map_or_else(Vec::new, |(run, seats)| {
         recs.iter()
             .map(|rec| {
                 let line = kifu::line(
@@ -783,8 +792,7 @@ fn run_batch(
                 (rec.g, line)
             })
             .collect()
-    });
-    (rows, lines)
+    })
 }
 
 pub(crate) fn float_flag(flags: &[(String, String)], k: &str, def: f64) -> Result<f64, String> {
@@ -810,9 +818,34 @@ fn run(argv: &[String]) -> Result<(), String> {
     check_flags(
         &flags,
         &[
-            "out", "games", "rate", "m", "extra", "confirm", "flag", "batch", "decks", "opts",
+            "out",
+            "games",
+            "rate",
+            "m",
+            "extra",
+            "confirm",
+            "flag",
+            "batch",
+            "decks",
+            "opts",
+            "mulligan",
+            "narrow",
+            "narrow-top",
+            "reseed",
         ],
     )?;
+    let mulligan = match flag(&flags, "mulligan") {
+        None | Some("0") => false,
+        Some("1") => true,
+        Some(v) => return Err(format!("--mulligan は 0 か 1: {v}")),
+    };
+    if !mulligan {
+        for k in ["narrow", "narrow-top", "reseed"] {
+            if flag(&flags, k).is_some() {
+                return Err(format!("--{k} は --mulligan 1 のときだけ"));
+            }
+        }
+    }
     let list: Option<Vec<&'static Deck>> = flag(&flags, "decks")
         .map(|spec| {
             read_deck_list(spec).map(|v| {
@@ -841,6 +874,19 @@ fn run(argv: &[String]) -> Result<(), String> {
         opts_text,
     };
     let batch = num_flag(&flags, "batch", 8)?.max(1) as usize;
+    let mcfg = mulligan.then(|| -> Result<survey_mulligan::MCfg, String> {
+        Ok(survey_mulligan::MCfg {
+            m: num_flag(&flags, "m", 16)?.max(2),
+            narrow: num_flag(&flags, "narrow", 32)?,
+            narrow_top: num_flag(&flags, "narrow-top", 2)? as usize,
+            confirm: num_flag(&flags, "confirm", 96)?,
+            flag: float_flag(&flags, "flag", 0.0)?,
+            reseed: num_flag(&flags, "reseed", 8)?,
+            opts: cfg.opts.clone(),
+            opts_text: cfg.opts_text.clone(),
+        })
+    });
+    let mcfg = mcfg.transpose()?;
     let mut done: HashSet<u64> = HashSet::new();
     if std::path::Path::new(out).exists() {
         let rows = read_rows(out)?;
@@ -859,17 +905,31 @@ fn run(argv: &[String]) -> Result<(), String> {
     let games: Vec<u32> = (a as u32..=b as u32)
         .filter(|g| !done.contains(&(*g as u64)))
         .collect();
-    println!(
-        "試合 g{a}〜{b} のうち残り {}（済み {}）、局面の割合 {}、一段目 {} 回・候補の足し {}・二段目 {} 回（差 {} ポイント以上）、{} スレッド",
-        games.len(),
-        done.len(),
-        cfg.rate,
-        cfg.m,
-        cfg.extra,
-        cfg.confirm,
-        cfg.flag,
-        thread_count()
-    );
+    match &mcfg {
+        None => println!(
+            "試合 g{a}〜{b} のうち残り {}（済み {}）、局面の割合 {}、一段目 {} 回・候補の足し {}・二段目 {} 回（差 {} ポイント以上）、{} スレッド",
+            games.len(),
+            done.len(),
+            cfg.rate,
+            cfg.m,
+            cfg.extra,
+            cfg.confirm,
+            cfg.flag,
+            thread_count()
+        ),
+        Some(mc) => println!(
+            "マリガンの打ち比べ: 試合 g{a}〜{b} のうち残り {}（済み {}）、一段目 {} 回・絞り込み +{} 回（裏返しと上位 {}）・二段目 {} 回（差 {} ポイントより大きければ）・AI の引き直し {} 回、{} スレッド",
+            games.len(),
+            done.len(),
+            mc.m,
+            mc.narrow,
+            mc.narrow_top,
+            mc.confirm,
+            mc.flag,
+            mc.reseed,
+            thread_count()
+        ),
+    }
     let mut file = open_append(out)?;
     let run_info = RunInfo::now("survey", "");
     let key = kifu::args_key(
@@ -901,7 +961,10 @@ fn run(argv: &[String]) -> Result<(), String> {
         .div_ceil(games.len().div_ceil(batch).max(1))
         .max(1);
     for (n, chunk) in games.chunks(size).enumerate() {
-        let (rows, lines) = run_batch(chunk, &cfg, list.as_deref(), kifu_run);
+        let (rows, lines) = match &mcfg {
+            None => run_batch(chunk, &cfg, list.as_deref(), kifu_run),
+            Some(mc) => survey_mulligan::run_batch(chunk, mc, list.as_deref(), kifu_run),
+        };
         // 棋譜を結果の行より先に書く（間で止まっても、再開でその試合を打ち直し、棋譜は 2 度書かない）
         if let Some(k) = kifu_file.as_mut() {
             for (g, l) in &lines {
@@ -1146,6 +1209,17 @@ fn report(argv: &[String]) -> Result<(), String> {
                 pos.insert((g, v["i"].as_u64().unwrap_or(u64::MAX)), v);
             }
         }
+    }
+    // マリガンの打ち比べ（survey run --mulligan 1）の行は別の報告（混ざっていれば断る）
+    let n_mull = games
+        .values()
+        .filter(|g| g["mulligan"] == json!(true))
+        .count();
+    if n_mull > 0 {
+        if n_mull != games.len() {
+            return Err("マリガンの打ち比べの行と、ターンの打ち比べの行が混ざっています".into());
+        }
+        return survey_mulligan::report(argv, no_ledger, &flags, games, pos);
     }
     // 試合の行の無い局面（途中で止めたもの）は数えない
     let rows: Vec<PosRow> = pos
@@ -1557,6 +1631,7 @@ fn report(argv: &[String]) -> Result<(), String> {
             seconds: sec,
             machines,
             commits,
+            mode: String::new(),
         });
     }
     Ok(())
@@ -1813,7 +1888,7 @@ fn form_encode(s: &str) -> String {
     out
 }
 
-fn run_opts(games: &BTreeMap<u64, Value>) -> Result<String, String> {
+pub(crate) fn run_opts(games: &BTreeMap<u64, Value>) -> Result<String, String> {
     let set: std::collections::BTreeSet<String> = games
         .values()
         .map(|g| g["opts"].as_str().unwrap_or("{}").to_string())

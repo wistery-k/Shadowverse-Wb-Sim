@@ -122,7 +122,15 @@ describe("ジョブの行", () => {
     expect(() => parseJob("survey --games 0-9 --start 3 --label x", 1)).toThrow(/--start/);
     // 新しいプールの調査: AI の設定とデッキを svwb survey run に渡す（@/ は回のフォルダ）
     const sp = parseJob(`survey --games 0-9 --label p --opts '{"valueNet":"@/r.json"}' --decks @data/pools/azvaldt/sets/rep10.txt`, 4);
-    expect(sp.spec).toMatchObject({ kind: "survey", opts: '{"valueNet":"@/r.json"}', decks: "@data/pools/azvaldt/sets/rep10.txt" });
+    expect(sp.spec).toMatchObject({ kind: "survey", opts: '{"valueNet":"@/r.json"}', decks: "@data/pools/azvaldt/sets/rep10.txt", mulligan: null });
+    // マリガンの打ち比べ（docs/survey.md「マリガンの打ち比べ」）: 既定は一段目 16 回・替える線 0、絞り込みと引き直しの数を渡す
+    const mj = parseJob("survey --mulligan 1 --games 3000-3001 --label mul --narrow 32 --confirm 96", 6);
+    expect(mj.spec).toMatchObject({ kind: "survey", m: 16, flag: 0, confirm: 96, mulligan: { narrow: 32, narrowTop: 2, reseed: 8 } });
+    expect(jobArgv(mj, 3000, 2, "/r")).toEqual(
+      ["survey", "run", "--out", "/r/survey-6.jsonl", "--games", "3000-3001", "--mulligan", "1", "--narrow", "32", "--narrow-top", "2", "--reseed", "8", "--m", "16", "--confirm", "96", "--flag", "0", "--batch", "8"],
+    );
+    expect(() => parseJob("survey --games 0-9 --label x --narrow 8", 1)).toThrow(/--mulligan 1/);
+    expect(() => parseJob("survey --games 0-9 --label x --mulligan 2", 1)).toThrow(/--mulligan/);
     expect(jobArgv(sp, 0, 10, "/r").slice(-4)).toEqual(["--opts", '{"valueNet":"/r/r.json"}', "--decks", "@data/pools/azvaldt/sets/rep10.txt"]);
     expect(jobInputs(sp)).toEqual(["@/r.json"]);
     expect(checkArgv(sp, "/t")).toEqual(["compare", "0", '{"valueNet":"data/value-net.json"}', "{}", "0", "--decks", "@data/pools/azvaldt/sets/rep10.txt", "--no-ledger"]);

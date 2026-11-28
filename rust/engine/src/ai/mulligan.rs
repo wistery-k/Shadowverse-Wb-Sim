@@ -247,7 +247,7 @@ pub(crate) fn sampled_mulligan(
 }
 
 /// 手札の形のモデルのマリガン（無ければカードごとの表、それも無ければコスト 4 以上を返す）。2026-10-26 より前の探索 AI の既定で、
-/// 今は rollout_mulligan で打ち進める中のマリガンに使う
+/// 今は rollout_mulligan_sums で打ち進める中のマリガンに使う
 pub(crate) fn default_mulligan_action(s: &GameState, legal: &[Action], p: PlayerIndex) -> Action {
     model_mulligan_swap(s, p)
         .or_else(|| weighted_mulligan_swap(s, p))
@@ -255,7 +255,7 @@ pub(crate) fn default_mulligan_action(s: &GameState, legal: &[Action], p: Player
         .unwrap_or_else(|| cost_mulligan(s, legal, p))
 }
 
-/// rollout_mulligan で先へ進める中の相手のマリガン（`mulliganOpp`。docs/ai-notes.md「先へ進める中の相手のマリガン」）
+/// rollout_mulligan_sums で先へ進める中の相手のマリガン（`mulliganOpp`。docs/ai-notes.md「先へ進める中の相手のマリガン」）
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum OppMulligan {
     /// 手札の形のモデル（default_mulligan_action）
@@ -328,15 +328,16 @@ pub(crate) fn advance_after_mulligan(
     (s, ValuePhase::End)
 }
 
-/// 返し方ごとに引き直しを n 回ずつ試し、先へ進めた局面（advance_after_mulligan）の評価の平均が最も高い返し方を選ぶ
-/// （`mulligan: "turn1"`）。sampled_mulligan は 0 ターン目の局面を採点していて、学習した補正が自己対戦で見たことのない
+/// 返し方ごとに引き直しを n 回ずつ試し、先へ進めた局面（advance_after_mulligan）の評価の和を返す（legal と同じ順）。
+/// 探索 AI（`mulligan: "turn1"`）はこの最大（同じなら先の返し方）を選ぶ（search.rs の turn1_sums。マリガンの打ち比べ `survey run --mulligan` が、
+/// AI の採点を行に書くのにも使う）。sampled_mulligan は 0 ターン目の局面を採点していて、学習した補正が自己対戦で見たことのない
 /// 局面だった（docs/ai-notes.md「マリガンで返し方ごとに引き直しを試し、評価の平均で選ぶ」）。1 ターン目の最初や
 /// ターン末は自己対戦で学んでいる局面なので、補正の値がそのまま使える。
 /// 並べ方と、その後の手を打つ乱数は、全ての返し方で共通に使う。乱数は rng を進めない（sampled_mulligan と同じ）。
 /// new_policy は試すごとに新しい打ち手を作る（探索 AI はターン内の計画を持つため）。
 /// 先へ進める中の相手のマリガンは opp。None なら、相手がまだなら手札の形のモデル、もう済んでいれば決定化で引き直した手札のまま。
 /// Some なら、相手がもう済んでいても、決定化で引き直した手札からその方法でマリガンし直す
-pub(crate) fn rollout_mulligan(
+pub(crate) fn rollout_mulligan_sums(
     real: &GameState,
     legal: &[Action],
     p: PlayerIndex,
@@ -344,7 +345,7 @@ pub(crate) fn rollout_mulligan(
     rng: &Rng,
     new_policy: &dyn Fn() -> RolloutPolicy,
     eval: impl Fn(&GameState, ValuePhase) -> f64,
-) -> Action {
+) -> Vec<f64> {
     let mut local = Rng::new(rng.state ^ 0x6d75_6c6c);
     let dets: Vec<(GameState, u32)> = (0..n.max(1))
         .map(|_| {
@@ -357,23 +358,24 @@ pub(crate) fn rollout_mulligan(
         })
         .collect();
     let opp = opp.unwrap_or(OppMulligan::Model);
-    let mut best = &legal[0];
-    let mut best_v = f64::NEG_INFINITY;
-    for a in legal {
-        let sum: f64 = dets
-            .iter()
-            .map(|(d, seed)| {
-                let s = try_apply_action(d, a).expect("マリガンの合法手");
-                let mut policy = new_policy();
-                let (s, phase) =
-                    advance_after_mulligan(s, p, turns, opp, &mut Rng::new(*seed), &mut *policy);
-                eval(&s, phase)
-            })
-            .sum();
-        if sum > best_v {
-            best_v = sum;
-            best = a;
-        }
-    }
-    best.clone()
+    legal
+        .iter()
+        .map(|a| {
+            dets.iter()
+                .map(|(d, seed)| {
+                    let s = try_apply_action(d, a).expect("マリガンの合法手");
+                    let mut policy = new_policy();
+                    let (s, phase) = advance_after_mulligan(
+                        s,
+                        p,
+                        turns,
+                        opp,
+                        &mut Rng::new(*seed),
+                        &mut *policy,
+                    );
+                    eval(&s, phase)
+                })
+                .sum()
+        })
+        .collect()
 }
