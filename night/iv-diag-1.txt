@@ -1,0 +1,49 @@
+# 補正がドラゴンの PP を伸ばす手段を低く見ている件の切り分け（測るだけ。どの版も採らない。採るなら別に compare で決める）。
+# 審査のスレッドの測り（2026-11-28、共有フォルダの logs/iv-by-card-2026-11-28/）: 自己対戦の介入の対（カード 1 枚を消して最後まで打った試合と元の試合）で、
+#   手札のカードの値打ち（消すと勝率がいくら下がるか）を R6 の見方と比べると、全体では合う（測り +8.88、補正 +8.73）が、ドラゴンの PP を伸ばす 3 枚だけ 3 SE を越えて低い。
+#   まだ PP を伸ばしていないターン（PP 最大値 = ターン数）の手札: 竜の啓示 測り +13.6・補正 +3.2、ゾーイ +16.0・+6.8、リュミオール＆アルジャンテ +22.6・+4.3。
+#   ドラゴンのターン 4〜6 の初めで「伸ばしていない・伸ばす手段も無い」局面は、実際の勝率 18.4%・補正の見方 31.1%（201 局面）。
+#
+# 同じデータ（r6-heads-1 の自己対戦 6 万試合、R5 が打ったもの）から、R6（1 晩目の B = bt.json）と同じ引数に 1 つだけ足して学び直す。自己対戦は打たない。
+#   L   目標を試合の結果に寄せる（--lambda 1。λ 収益の、補正自身の値で先を埋める分を無くす。自分のランダムな手の前で切るところは今までどおり補正の値）
+#   W3  介入して打った試合の行の重みを 3 倍（--ivWeight 3）
+#   S2  対照の種違い（--seed 2。学び直しのたびにどれだけ動くかの目安）
+#   E   対照（R6 と同じ引数）のエポックごとの版（e1 は bt.json と同じになるはず。e2・e3 は「1 エポックでは足りない」の確かめ）
+#   W0  介入して打った試合の行を使わない（--ivWeight 0。介入が値打ちの見方にどれだけ効いているか。ユーザーの問い 2026-11-28）
+#   LW  L と W3 の両方
+# どの版もエポックごとの重みを書く（--epochOut。R6 の学びはどれもエポック 1 を選んだ）。間引き・属性は掛けない（比べる相手は共有フォルダの bt.json）。
+#
+# 回す前に決めた読み方（朝、クラウド環境で。夜の後には変えない）:
+#   取り置き: r7-1 の自己対戦（R6 が打った 6 万試合。どの版の学びにも入っていない）の介入の対。手札 114904 対・自分の場 15321 対・相手の場 39174 対
+#   主に見る数: 上の 3 枚の「まだ伸ばしていないターンの手札」の、測った値打ち − 補正の見方（bt は 10.4・9.2・18.3）と、
+#     ドラゴンのターン 4〜6 の初めの「伸ばしていない・手段も無い」局面の、補正の見方 − 実際の勝率（bt は +12.7）
+#   「動いた」と書くのは、対照のエポック 1 との差が、S2 と対照の差（種の分）の 2 倍より大きく、ずれの半分以上が埋まったときだけ。それ以外は「この学び方では動かない」
+#     （測った側は全部の版で同じ対なので、版どうしの差に介入の対の標本のぶれはほとんど入らない。入るのは学び直しごとのぶれ）
+#   並べる数: 学びの報告の確かめ用の局面の交差エントロピー（その学び方の代償）、区域ごとの値打ち（手札・自分の場・相手の場）、
+#     枚数ごと（1 枚差し・3 枚積み）、高く見ていたカード（光の理・ル・オー、プロミネンスロアなど）のずれ、
+#     W0 は全部のカードの「測り 対 補正」の当たり方（介入の行を抜くと値打ちの見方がどれだけ崩れるか）
+#   データの薄さの線（同じデータの 1.5 万・3 万・6 万・12 万試合の版 d15・d30・bt・d120 で同じ数を並べる）は、共有フォルダのモデルでクラウド環境で見る（この券には入れない）
+#   入力を足す案（PP を先行した数、伸ばす手段を持っているか）はコードが要るので、この夜の結果を見てから
+#
+# 見込み（PC、svwb-docker・28 スレッド）: 学び 1 つは R6 の学び（B）の実測 11 分にエポックごとの書き出しを足して 12 分ほど、6 つで 1 時間 15 分ほど。
+#   W3 は介入の行の重みが変わるだけで局面の数は同じ。W0 は介入の行を読まない分だけ速い（見込みは同じ数で置く）
+# 朝: 止まったときのまとめを push してもらい、出口のファイル（モデル 24 個）を共有フォルダへ。前の回 r6-heads-1 のフォルダ（v0.json と s-1〜20）が PC に残っていること
+# 回の名前は iv-diag-1。上から大事な順に並べた（途中で止めても、済んだ版から読める）
+
+# 1. L 目標を試合の結果に寄せる
+td train --impl rust --model @run:r6-heads-1/v0.json --data @run:r6-heads-1/s-{1..20}.jsonl.gz --out @/lt.json --epochOut @/lt-e{e}.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks --lambda 1 --est 720
+
+# 2. W3 介入の行の重み 3 倍
+td train --impl rust --model @run:r6-heads-1/v0.json --data @run:r6-heads-1/s-{1..20}.jsonl.gz --out @/w3t.json --epochOut @/w3t-e{e}.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks --ivWeight 3 --est 720
+
+# 3. S2 対照の種違い
+td train --impl rust --model @run:r6-heads-1/v0.json --data @run:r6-heads-1/s-{1..20}.jsonl.gz --out @/s2t.json --epochOut @/s2t-e{e}.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks --seed 2 --est 720
+
+# 4. E 対照のエポックごとの版
+td train --impl rust --model @run:r6-heads-1/v0.json --data @run:r6-heads-1/s-{1..20}.jsonl.gz --out @/et.json --epochOut @/et-e{e}.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks --est 720
+
+# 5. W0 介入の行を使わない
+td train --impl rust --model @run:r6-heads-1/v0.json --data @run:r6-heads-1/s-{1..20}.jsonl.gz --out @/w0t.json --epochOut @/w0t-e{e}.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks --ivWeight 0 --est 720
+
+# 6. LW L と W3 の両方
+td train --impl rust --model @run:r6-heads-1/v0.json --data @run:r6-heads-1/s-{1..20}.jsonl.gz --out @/lwt.json --epochOut @/lwt-e{e}.json --epochs 3 --lr 0.0003 --l2 0.001 --best 1 --bestOn end,imagined --ivRes 0 --base zero --lethalHead survival --dropInputs oppBoardCountdown,myCrestCountdown,oppCrestCountdown,myCrestFaith,oppCrestFaith,myCrestStacks,oppCrestStacks --lambda 1 --ivWeight 3 --est 720
