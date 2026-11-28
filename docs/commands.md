@@ -413,6 +413,7 @@ npm run svwb -- two-turn run --out tt.jsonl [--only <局面>,…] [--m 64] [--re
 npm run svwb -- two-turn report tt.jsonl… [--only <局面>,…]
 npm run svwb -- two-turn trace --only <局面> --cand <候補> [--r 0] [--seed 1] [--opts '<設定の JSON>']
 npm run svwb -- two-turn lines --out t.jsonl (--dir misses/azvaldt | --survey <調査.jsonl(.gz)> [--clear 3] [--minDiff 15] [--all 1] [--frac x]) [--m 32] [--reads 12] [--twos 2] [--nextBeam 256] [--seed 1] [--opts '<設定の JSON>'] [--only <局面>,…]
+npm run svwb -- two-turn lines --dir misses/azvaldt --only <問> --trace N [--m 64] [--twos 2] [--opts '<設定の JSON>']   # 2 ターン読みの中身を文字で出す
 npm run svwb -- two-turn lines-report t.jsonl… [--group <名前>=<問,…>]… [--gate 10] [--maxR N]
 npm run svwb -- two-turn lines-gate t.jsonl… [--gate 10] [--maxR N]
 npm run svwb -- defer-playout --kifu <棋譜> --opts '<回す版の設定>' [--cont '<設定>'] [--seeds 8] [--seedBase 0] [--out 結果.jsonl]   # 前の --dir <記録のディレクトリ> も

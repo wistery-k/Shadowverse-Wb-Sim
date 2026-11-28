@@ -2909,6 +2909,139 @@ impl SearchAgent {
         })
     }
 
+    /// two_turn_read の 1 回分を、同じ乱数で打ち直して中身を文字にする（測る道具の確かめ用。打つ手は変えない。
+    /// `svwb two-turn lines --trace`）: 相手のターンの後の体力・次のターンのリーサル探索が見つけたか・次のターンの最善の並びと、
+    /// 手ごとの相手のリーダーの体力・ターン末（ターン終了時の処理の後）と、相手の次のターンの始めの処理の後の体力
+    pub fn two_turn_trace(
+        &self,
+        end: &GameState,
+        p: PlayerIndex,
+        seed: u32,
+        next_beam: usize,
+    ) -> Vec<String> {
+        let q = opponent(p);
+        let hp = |s: &GameState| s.players[q].leader_hp;
+        let mut out = Vec::new();
+        let env = self.env();
+        let pl = Planner {
+            env: &env,
+            p,
+            root: Rc::new(end.clone()),
+            steps: Vec::new(),
+        };
+        if end.phase == Phase::Ended {
+            out.push("このターンで決着".into());
+            return out;
+        }
+        let settled = pl.settle(end);
+        let base = settled.as_ref().unwrap_or(end);
+        let mut r = Rng::new(seed);
+        let d = read_determinize(base, p, &mut r, &self.opts);
+        let (_, after) = read_once(&pl, &d, &mut r, pl.read_gate(end));
+        out.push(format!(
+            "相手のターン: ターン末 {} → 相手のターンの後 {}{}",
+            hp(base),
+            hp(&after),
+            if after.phase == Phase::Ended {
+                format!("（決着: {:?} の勝ち）", after.winner)
+            } else {
+                String::new()
+            }
+        ));
+        if after.phase == Phase::Ended || after.active != p || after.pending.is_some() {
+            return out;
+        }
+        let lo = LethalOptions {
+            ward_blocked: self.opts.lethal_ward_blocked,
+            expand_choices: self.opts.lethal_expand_choices,
+            ..DEFAULT_LETHAL_OPTIONS
+        };
+        let lethal = if self.opts.lethal {
+            search_lethal(&after, p, &lo).or_else(|| {
+                (self.opts.lethal_exact_states > 0)
+                    .then(|| {
+                        search_exact_lethal(
+                            &after,
+                            p,
+                            &sure_lethal_options(self.opts.lethal_exact_states),
+                        )
+                    })
+                    .flatten()
+            })
+        } else {
+            None
+        };
+        out.push(format!(
+            "次のターンのリーサル探索: {}",
+            match &lethal {
+                Some(l) => format!("見つけた（{} 手）", l.len()),
+                None => "なし".into(),
+            }
+        ));
+        let opts = SearchOptions {
+            beam_width: next_beam,
+            allow: None,
+            ..self.opts.clone()
+        };
+        let next_env = Env {
+            opts: &opts,
+            w: &self.w,
+            opp_w: &self.opp_w,
+            policy_w: &self.policy_w,
+        };
+        let root = Rc::new(after.clone());
+        let Some(steps) = best_plan_steps(&root, p, &next_env) else {
+            out.push("次のターンの並びなし".into());
+            return out;
+        };
+        let mut prev: GameState = after.clone();
+        let mut line = Vec::new();
+        for (a, st) in &steps {
+            line.push(format!(
+                "{}（{}）",
+                crate::runner::human_plan::step_text(&prev, a, p),
+                hp(st)
+            ));
+            prev = (**st).clone();
+        }
+        out.push(format!("次のターンの並び: {}", line.join(" → ")));
+        let last = steps
+            .last()
+            .map(|(_, st)| (**st).clone())
+            .unwrap_or(after.clone());
+        if last.phase == Phase::Ended {
+            out.push(format!("次のターンの中で決着: {:?} の勝ち", last.winner));
+            return out;
+        }
+        let pl2 = Planner {
+            env: &next_env,
+            p,
+            root: root.clone(),
+            steps: Vec::new(),
+        };
+        let settled2 = pl2.settle(&last);
+        let base2 = settled2.as_ref().unwrap_or(&last);
+        let resolved = resolve_turn_end(base2);
+        let at_end = resolved.as_ref().unwrap_or(base2);
+        let started = try_apply_action(base2, &Action::EndTurn);
+        out.push(format!(
+            "次のターン末（ターン終了時の処理の後）{}{} → 相手の次のターンの始めの処理の後 {}",
+            hp(at_end),
+            if at_end.phase == Phase::Ended {
+                "（決着）"
+            } else {
+                ""
+            },
+            match &started {
+                Some(st) if st.phase == Phase::Ended =>
+                    format!("{}（決着: {:?} の勝ち）", hp(st), st.winner),
+                Some(st) => hp(st).to_string(),
+                None => "?".into(),
+            }
+        ));
+        out
+    }
+
     /// 局面 root から p が手の列 actions（ターン終了の前まで）を打つ並びを、探索が選んだとして、
     /// deferFuse で回せる融合を除いて実際に打つ手の列（テスト用。どの並びを選ぶかは学習した補正で変わるので、並びを決めて確かめる）
     #[cfg(test)]

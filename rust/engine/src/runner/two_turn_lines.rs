@@ -5,6 +5,7 @@
 //!                       [--opts '<設定>'] [--m 32] [--reads 12] [--twos 2] [--nextBeam 256] [--seed 1] [--only <名前,…>] [--limit N]
 //!   svwb two-turn lines-report t.jsonl… [--group <名前>=<問,…>]… [--gate 10] [--maxR N]
 //!   svwb two-turn lines-gate t.jsonl… [--gate 10] [--maxR N]
+//!   svwb two-turn lines (--dir … | --survey …) --only <名前> --trace N   # 決定化の番号 N 未満の 2 ターン読みの中身を文字で出す（値は書かない）
 //!
 //! - `--all 1` は調査の打ち比べた局面の全部で、AI の手と、AI が読み直す候補（打ち切った候補も）の全部に値を付ける（`lines-gate` 用）。
 //!   `--frac` は局面を名前の指紋で無作為に減らす。`--maxR N` は決定化の番号 N 未満だけで数える
@@ -363,6 +364,32 @@ fn round2(x: f64) -> f64 {
 }
 
 /// 局面 t の r 通り目（決定化 1 つ）で、並びごとに値を付ける
+/// --trace N: 決定化の番号 N 未満で、並びごとに 2 ターン読みの中身を文字で出す（run_unit と同じ乱数。値は書かない）
+fn trace_task(t: &Task, n: u32, cfg: &Cfg) -> Result<(), String> {
+    let start = state_from_json(&Json::parse(&t.state)?)?;
+    let p = t.p;
+    let base = mix(cfg.seed, u32::from_str_radix(&fnv(&t.id), 16).unwrap_or(0));
+    let scorer = SearchAgent::new(cfg.opts.clone());
+    println!("# {}", t.id);
+    for r in 0..n.min(cfg.m) {
+        let det = determinize(&start, p, &mut Rng::new(mix(base, 100 + r)), false);
+        for line in &t.lines {
+            let (end, _) = play_line(&det, p, line, &cfg.opts, mix(base, 200 + r))?;
+            for j in 0..cfg.twos {
+                reset_lethal();
+                reset_exact_lethal_cache();
+                let tr =
+                    scorer.two_turn_trace(&end, p, mix(base, 20_000 + r * 64 + j), cfg.next_beam);
+                println!("- r{r} {} 読み{j}", line.name);
+                for x in tr {
+                    println!("  - {x}");
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn run_unit(t: &Task, r: u32, cfg: &Cfg) -> Result<Value, String> {
     let t0 = Instant::now();
     let start = state_from_json(&Json::parse(&t.state)?)?;
@@ -477,10 +504,15 @@ pub fn run(argv: &[String]) -> Result<(), String> {
         &flags,
         &[
             "out", "dir", "survey", "clear", "minDiff", "all", "frac", "opts", "m", "reads",
-            "twos", "nextBeam", "seed", "only", "limit",
+            "twos", "nextBeam", "seed", "only", "limit", "trace",
         ],
     )?;
-    let out = flag(&flags, "out").ok_or("--out を渡してください")?;
+    let trace = num_flag(&flags, "trace", 0)?;
+    let out = if trace > 0 {
+        ""
+    } else {
+        flag(&flags, "out").ok_or("--out を渡してください")?
+    };
     let opts_text = flag(&flags, "opts").unwrap_or("{}").to_string();
     let cfg = Cfg {
         opts: compare_options(&opts_text)?,
@@ -523,6 +555,12 @@ pub fn run(argv: &[String]) -> Result<(), String> {
     }
     if tasks.is_empty() {
         return Err("比べる局面がありません".into());
+    }
+    if trace > 0 {
+        for t in &tasks {
+            trace_task(t, trace, &cfg)?;
+        }
+        return Ok(());
     }
     let mut done: HashSet<(String, u64)> = HashSet::new();
     if std::path::Path::new(out).exists() {
@@ -642,10 +680,11 @@ const KEYS: [(&str, &str); 8] = [
 ];
 
 /// 選ぶときの値に、次の自分のターンのリーサルだけを足した値（2026-11-28 のユーザーの案。測った後に足した、参考の値）:
-/// 2 ターン読みの引き直しごとに、相手のターンを読んだ後に次の自分のターンのリーサルが見つかった回（`own` が勝ち）は読みの点数を勝ちにし、
-/// 選ぶときの値と同じく `rescoreMix` でターン末の点数と混ぜる。`pickLs` は引く手・ランダムな手を通るリーサルを数えない
-/// （引きを知らない版の `ownB` も勝ちの回だけ。組み直しで勝てた回も入るので、おおよそ）。
-/// 次のターンのビームで相手を倒せた回もリーサルに数える
+/// 2 ターン読みの引き直しごとに、相手のターンを読んだ後に次の自分のターンで勝てた回は読みの点数を勝ちにし、
+/// 選ぶときの値と同じく `rescoreMix` でターン末の点数と混ぜる。勝てた回は、次のターン末（`own`。ターンの中とターン終了時の処理で倒した）か、
+/// 相手の次のターンの読みの後（`two`。相手のターンの始めの処理、焦灰のアナテマ・バーンドナイトのクレスト等で倒した）が勝ちの回。
+/// リーサル探索はターン終了を打たないので、ターン終了時の処理と相手のターンの始めの処理で倒すものを見つけない（2026-11-28、リュミオールの問）。
+/// `pickLs` は引く手・ランダムな手を通る勝ちを数えない（引きを知らない版の `ownB`・`twoB` も勝ちの回だけ。組み直しで勝てた回も入るので、おおよそ）
 fn add_lethal_pick(v: &mut Value, mix_w: f64) {
     let Some(lines) = v.get_mut("lines").and_then(|l| l.as_array_mut()) else {
         return;
@@ -664,6 +703,7 @@ fn add_lethal_pick(v: &mut Value, mix_w: f64) {
             continue;
         }
         let (read, own, own_b) = (nums("read"), nums("own"), nums("ownB"));
+        let (two, two_b) = (nums("two"), nums("twoB"));
         let Some(te) = l["te"].as_f64() else {
             continue;
         };
@@ -671,8 +711,10 @@ fn add_lethal_pick(v: &mut Value, mix_w: f64) {
             read.iter()
                 .zip(&own)
                 .zip(&own_b)
-                .map(|((&r, &o), &ob)| {
-                    let lethal = o >= WIN && (!safe || ob >= WIN);
+                .zip(two.iter().zip(&two_b))
+                .map(|(((&r, &o), &ob), (&t, &tb))| {
+                    let known = o >= WIN || t >= WIN;
+                    let lethal = known && (!safe || ob >= WIN || tb >= WIN);
                     let r = if lethal { 1e6 } else { r };
                     (1.0 - mix_w) * r + mix_w * te
                 })
