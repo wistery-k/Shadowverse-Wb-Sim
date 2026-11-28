@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::ai::lethal::{
-    find_lethal, search_lethal, DEFAULT_LETHAL_OPTIONS, GUARDED_LETHAL_OPTIONS,
+    find_lethal, search_lethal, LethalOptions, DEFAULT_LETHAL_OPTIONS, GUARDED_LETHAL_OPTIONS,
 };
 use crate::ai::lethal_hint::lethal_hint;
 use crate::ai::rhino::RhinoAgent;
@@ -87,6 +87,41 @@ fn plays_found_lethal_to_the_end() {
         let (_, end) = play_while(bail_position(), agent, &mut rng, |t| t.active == 0);
         assert_eq!(end.winner, Some(0));
     }
+}
+
+/// 場のデストロイアーティファクトβ（自分のターン終了時、相手のリーダーに 3 ダメージ）だけで倒せる局面。
+/// β はこのターンに出たので攻撃できず、手札も PP も無い
+fn turn_end_damage_position() -> (GameState, PlayerIndex) {
+    let (mut s, me, _) = rhinoceus_position();
+    let beta = board_card(&mut s, "デストロイアーティファクトβ");
+    let pl = &mut s.players[me];
+    pl.hand = Vec::new().into();
+    pl.board = vec![beta].into();
+    pl.pp = 0;
+    pl.ep = 0;
+    pl.sep = 0;
+    let opp = &mut s.players[opponent(me)];
+    opp.board = Vec::new().into();
+    opp.leader_hp = 3;
+    (s, me)
+}
+
+#[test]
+fn end_turn_option_finds_turn_end_kill() {
+    // 既定のリーサル探索はターン終了を打たないので見つけない。end_turn ならターン終了だけの並びを返す
+    let (s, me) = turn_end_damage_position();
+    assert!(search_lethal(&s, me, &DEFAULT_LETHAL_OPTIONS).is_none());
+    let lo = LethalOptions {
+        end_turn: true,
+        ..DEFAULT_LETHAL_OPTIONS
+    };
+    let seq = search_lethal(&s, me, &lo).expect("ターン終了で倒す");
+    assert_eq!(seq, vec![Action::EndTurn]);
+    assert!(wins(&s, Some(&seq), me));
+    // 体力が 1 多ければ倒せない
+    let (mut s, me) = turn_end_damage_position();
+    s.players[opponent(me)].leader_hp = 4;
+    assert!(search_lethal(&s, me, &lo).is_none());
 }
 
 #[test]

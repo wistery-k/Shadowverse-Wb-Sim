@@ -3,7 +3,9 @@
 use super::pool::pool_deck;
 use super::*;
 use crate::ai::exact_lethal::with_fresh_exact_cache;
-use crate::ai::search::{take_read_lethal_stats, SearchAgent, SearchOptions, DANGER};
+use crate::ai::search::{
+    take_own_lethal_stats, take_read_lethal_stats, SearchAgent, SearchOptions, DANGER,
+};
 use crate::game::try_apply_action;
 use crate::runner::options::compare_options;
 
@@ -174,4 +176,49 @@ fn read_lethal_option_needs_lethal_head() {
     assert_eq!(o.read_lethal.expect("readLethal").exact_states, Some(0));
     // readLethalExact だけでは書けない
     assert!(compare_options(r#"{"readLethalExact":0}"#).is_err());
+}
+
+/// readOwnLethal の門（readOwnLethalGate）の確かめ用。読みの中の相手をビームで打たせる（門の q は相手のビームのターン末で出す）
+fn own_gate(extra: &str) -> SearchAgent {
+    SearchAgent::new(r6(&format!(
+        r#","opponentSearch":{{"beamWidth":4,"maxDepth":4,"extraEval":true}}{extra}"#
+    )))
+}
+
+fn ranked(a: &SearchAgent, s: &GameState, k: usize) -> Vec<(Action, f64)> {
+    fresh();
+    a.ranked_plans(s, acting_player(s), &mut Rng::new(k as u32 * 7 + 1))
+        .into_iter()
+        .map(|x| (x.action, x.value))
+        .collect()
+}
+
+#[test]
+fn own_lethal_gate_above_one_never_searches() {
+    // 線が 1 より大きければ、自分のリーサル探索をしないので、読み直した手と点数は readOwnLethal なしと同じ。q の分かれ方だけを数える
+    let plain = own_gate("");
+    let gated = own_gate(r#","readOwnLethal":1,"readOwnLethalGate":2"#);
+    let (_, starts) = positions(4);
+    let _ = take_own_lethal_stats();
+    for (k, s) in starts.iter().take(4).enumerate() {
+        assert_eq!(ranked(&plain, s, k), ranked(&gated, s, k), "局面 {k}");
+    }
+    let st = take_own_lethal_stats();
+    assert!(st.reads.iter().sum::<u64>() > 0);
+    assert_eq!(st.searched.iter().sum::<u64>(), 0);
+}
+
+#[test]
+fn own_lethal_gate_zero_matches_ungated() {
+    // 線 0 なら、どの読みでもリーサル探索をするので、門の無い readOwnLethal と同じ
+    let ungated = own_gate(r#","readOwnLethal":1"#);
+    let gated = own_gate(r#","readOwnLethal":1,"readOwnLethalGate":0"#);
+    let (_, starts) = positions(4);
+    let _ = take_own_lethal_stats();
+    for (k, s) in starts.iter().take(4).enumerate() {
+        assert_eq!(ranked(&ungated, s, k), ranked(&gated, s, k), "局面 {k}");
+    }
+    let st = take_own_lethal_stats();
+    assert!(st.reads.iter().sum::<u64>() > 0);
+    assert_eq!(st.searched, st.reads);
 }

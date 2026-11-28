@@ -159,6 +159,8 @@ thread_local! {
     static SCORED: Cell<u64> = const { Cell::new(0) };
     /// readLethal の数（調べもの用。スレッドごと。svwb profile が手番ごとに取り出す）
     static READ_LETHAL: RefCell<ReadLethalStats> = const { RefCell::new(ReadLethalStats::new()) };
+    /// readOwnLethal の門の数（調べもの用。スレッドごと。svwb profile が手番ごとに取り出す）
+    static OWN_LETHAL: RefCell<OwnLethalStats> = RefCell::new(OwnLethalStats::default());
 }
 
 /// 読み直す終局面のうち、補正のリーサルの出力（相手が次のターンにリーサルを持つ確率 q。ターン末の局面で、合流する相打ちと
@@ -174,6 +176,46 @@ pub struct ReadLethal {
     /// 読みの中のリーサル探索が、ビームで見つからないときに全探索で調べる局面数の上限（0 なら全探索をしない）。
     /// None なら、このAI のリーサル探索と同じ（lethal_exact_states）
     pub exact_states: Option<i64>,
+}
+
+/// readOwnLethal の門（ユーザーの案、2026-11-28。速さを測る用）: 読みの中の相手のターン末（合流する相打ちとターン終了時の処理の後）で、
+/// 補正のリーサルの出力 q を相手から見て出し（相手が次のターン（自分の次のターン）に倒される確率）、threshold 以上の読みだけ
+/// 自分のリーサル探索をする。数は OwnLethalStats（q の区間は READ_LETHAL_EDGES）
+#[derive(Clone)]
+pub struct OwnLethalGate {
+    pub threshold: f64,
+    /// q を出す補正（リーサルの出力のあるもの）。None なら探索 AI の既定の補正
+    pub net: Option<Arc<ValueNet>>,
+}
+
+/// readOwnLethal の数（読み 1 回ごと。q の区間ごと。門を設定したときだけ数える。threshold 0 なら全部の読みを探して、
+/// どの線でどれだけ拾えるかを数えられる）
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct OwnLethalStats {
+    /// 相手のターンを読んで自分の手番に戻った読みの数
+    pub reads: [u64; READ_LETHAL_EDGES.len()],
+    /// リーサル探索をした数と、見つけた数
+    pub searched: [u64; READ_LETHAL_EDGES.len()],
+    pub found: [u64; READ_LETHAL_EDGES.len()],
+}
+
+impl OwnLethalStats {
+    pub fn add(&mut self, o: &OwnLethalStats) {
+        for b in 0..READ_LETHAL_EDGES.len() {
+            self.reads[b] += o.reads[b];
+            self.searched[b] += o.searched[b];
+            self.found[b] += o.found[b];
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.reads.iter().all(|&x| x == 0)
+    }
+}
+
+/// このスレッドの readOwnLethal の数を取り出して 0 に戻す
+pub fn take_own_lethal_stats() -> OwnLethalStats {
+    OWN_LETHAL.with(|c| std::mem::take(&mut *c.borrow_mut()))
 }
 
 /// ReadLethalStats の q の区間の下端（q がこれ以上で次の下端より小さい）
@@ -381,6 +423,12 @@ pub struct SearchOptions {
     /// false なら印を立てず、ターンの途中の局面（ValuePhase::After）として採点する。実験用（2026-11-24。印が、相手の返せない盤面を
     /// 大きく割り引くことを確かめる。docs/ai-notes/15-2026-11-22.md「想像の局面の印が、相手の返せない盤面を大きく割り引く」）
     pub imagined_input: bool,
+    /// 読み直しで相手のターンを読んだ後に、自分の次のターンのリーサル探索をかけ、見つかれば読みの点数を勝ち（1e6）にする
+    /// （ユーザーの案、2026-11-28。速さを測る用。0 は使わない（既定）、1 はビームだけ、2 はビームで見つからなければ全探索も。
+    /// どちらもビームはターン終了の後で倒す手も見る（LethalOptions::end_turn）。3 は、ターン終了の後を見ないビームだけ（重さの切り分け用）。docs/ai-notes/15-2026-11-22.md「参考: 次の自分のターンのリーサルだけを足す値」）
+    pub read_own_lethal: u8,
+    /// readOwnLethal の門（OwnLethalGate。None なら読みのたびにリーサル探索をする。既定 None）
+    pub read_own_lethal_gate: Option<OwnLethalGate>,
 }
 
 impl Default for SearchOptions {
@@ -472,6 +520,8 @@ impl Default for SearchOptions {
             pick: None,
             read_lethal: None,
             imagined_input: true,
+            read_own_lethal: 0,
+            read_own_lethal_gate: None,
         }
     }
 }
@@ -1184,6 +1234,22 @@ fn best_plan_last(
         }
     }
     best.and_then(|i| pl.steps_of(terminals[i].path).pop())
+}
+
+/// best_plan_last と同じ並びの、全部の手と各手の後の局面（SearchAgent::two_turn_read が引く手の位置を見るため）
+fn best_plan_steps(
+    root: &Rc<GameState>,
+    p: PlayerIndex,
+    env: &Env,
+) -> Option<Vec<(Action, Rc<GameState>)>> {
+    let (pl, terminals, bests) = turn_end_bests(root, p, env);
+    let mut best: Option<usize> = None;
+    for &(_, i) in &bests {
+        if best.is_none_or(|b| terminals[i].value > terminals[b].value) {
+            best = Some(i);
+        }
+    }
+    best.map(|i| pl.steps_of(terminals[i].path))
 }
 
 /// best_plan_last と同じ。ただしビームは key_env の点数で並べて打ち、終局面は judge_env の点数（end_score）で選び直す（同じなら先のもの。opponentSearch.handKey）
@@ -1975,15 +2041,82 @@ fn read_once(pl: &Planner, start: &GameState, rng: &mut Rng, gate: ReadGate) -> 
             }
         }
     }
-    let after = {
+    let (after, opp_end) = {
         let _p = prof::scope(Sec::OppTurn);
         if env.opts.opponent_search.is_some() {
-            simulate_opponent_turn_by_search(start, p, rng, env)
+            simulate_opponent_turn_by_search_end(start, p, rng, env)
         } else {
-            simulate_opponent_turn(start, p, rng, env.policy_w)
+            (simulate_opponent_turn(start, p, rng, env.policy_w), None)
         }
     };
+    if env.opts.read_own_lethal > 0 && own_lethal_gated(env.opts, &after, opp_end.as_ref(), p) {
+        return (1e6, after);
+    }
     (pl.eval_after(&after), after)
+}
+
+/// readOwnLethal（門があれば、読みの中の相手のターン末 opp_end の q が線以上のときだけ）で、after から自分のリーサルを見つけるか
+fn own_lethal_gated(
+    opts: &SearchOptions,
+    after: &GameState,
+    opp_end: Option<&GameState>,
+    p: PlayerIndex,
+) -> bool {
+    let Some(gate) = &opts.read_own_lethal_gate else {
+        return own_lethal_after_read(opts, after, p);
+    };
+    if after.phase == Phase::Ended || after.active != p || after.pending.is_some() {
+        return false;
+    }
+    // 相手のターン末が取れなければ（読みの中の相手がビームで打たなかった）、門を開ける
+    let q = match opp_end {
+        Some(end) => {
+            let resolved = resolve_turn_end(end);
+            let at = resolved.as_ref().unwrap_or(end);
+            let net: &ValueNet = gate.net.as_deref().unwrap_or_else(|| default_value_net());
+            net.lethal_prob(at, opponent(p), ValuePhase::End)
+                .unwrap_or(1.0)
+        }
+        None => 1.0,
+    };
+    let bin = READ_LETHAL_EDGES.iter().rposition(|&e| q >= e).unwrap_or(0);
+    OWN_LETHAL.with(|c| c.borrow_mut().reads[bin] += 1);
+    if q < gate.threshold {
+        return false;
+    }
+    let found = own_lethal_after_read(opts, after, p);
+    OWN_LETHAL.with(|c| {
+        let mut st = c.borrow_mut();
+        st.searched[bin] += 1;
+        if found {
+            st.found[bin] += 1;
+        }
+    });
+    found
+}
+
+/// readOwnLethal: 相手のターンを読んだ後の局面 after（p の手番）で、p の次のターンのリーサル探索が勝てる並びを見つけるか
+/// （ビームはターン終了の後で倒す手も見る。2 なら、見つからなければ全探索も）
+fn own_lethal_after_read(opts: &SearchOptions, after: &GameState, p: PlayerIndex) -> bool {
+    if after.phase == Phase::Ended || after.active != p || after.pending.is_some() {
+        return false;
+    }
+    let _p = prof::scope(Sec::Lethal);
+    let lo = LethalOptions {
+        ward_blocked: opts.lethal_ward_blocked,
+        expand_choices: opts.lethal_expand_choices,
+        end_turn: opts.read_own_lethal != 3,
+        ..DEFAULT_LETHAL_OPTIONS
+    };
+    if search_lethal(after, p, &lo).is_some_and(|seq| !seq.is_empty()) {
+        return true;
+    }
+    opts.read_own_lethal == 2
+        && opts.lethal_exact_states > 0
+        && with_fresh_exact_cache(|| {
+            search_exact_lethal(after, p, &sure_lethal_options(opts.lethal_exact_states))
+        })
+        .is_some_and(|seq| !seq.is_empty())
 }
 
 /// readLethal: start（p のターン末）でターンを終え、相手の番の初めに、このAI と同じリーサル探索（lethal_line）で相手の勝てる並びを探す。
@@ -2097,6 +2230,8 @@ fn opponent_search_options(opts: &SearchOptions) -> SearchOptions {
             None
         },
         read_lethal: None,
+        read_own_lethal: 0,
+        read_own_lethal_gate: None,
         ..opts.clone()
     }
 }
@@ -2109,6 +2244,16 @@ pub fn simulate_opponent_turn_by_search(
     rng: &mut Rng,
     env: &Env,
 ) -> GameState {
+    simulate_opponent_turn_by_search_end(state, p, rng, env).0
+}
+
+/// simulate_opponent_turn_by_search と同じ。相手のターン末（ターン終了を打つ前。ビームで打ったときだけ）も返す（readOwnLethal の門）
+fn simulate_opponent_turn_by_search_end(
+    state: &GameState,
+    p: PlayerIndex,
+    rng: &mut Rng,
+    env: &Env,
+) -> (GameState, Option<GameState>) {
     let opts = env.opts;
     let q = opponent(p);
     let opp_opts = opponent_search_options(opts);
@@ -2144,6 +2289,7 @@ pub fn simulate_opponent_turn_by_search(
     let mut ended = false;
     let mut searched = false;
     let mut guard = 0;
+    let mut opp_end: Option<GameState> = None;
     while let Some(cur) = s.take() {
         if cur.phase == Phase::Ended || guard >= 80 {
             s = Some(cur);
@@ -2183,6 +2329,9 @@ pub fn simulate_opponent_turn_by_search(
                 }
             }
             if cur.pending.is_none() && cur.active == q {
+                if opts.read_own_lethal_gate.is_some() {
+                    opp_end = Some(cur.clone());
+                }
                 s = try_apply_action(&cur, &Action::EndTurn);
                 continue;
             }
@@ -2190,7 +2339,7 @@ pub fn simulate_opponent_turn_by_search(
         let a = choose_greedy(&cur, &legal_actions(&cur), rng, true, env.policy_w);
         s = try_apply_action(&cur, &a);
     }
-    s.unwrap_or_else(|| state.clone())
+    (s.unwrap_or_else(|| state.clone()), opp_end)
 }
 
 struct PlanState {
@@ -2490,6 +2639,16 @@ pub struct TwoTurnRead {
     pub two: f64,
     /// 自分の次のターンにリーサルがあった
     pub next_lethal: bool,
+    /// そのリーサルの並びが引く手・ランダムな手を通る（決定化の山札の順番と乱数を知って見つけたもの。own・two は勝ちにし、
+    /// own_blind・two_blind はビームで組み直す）
+    pub next_lethal_chance: bool,
+    /// 自分の次のターンの最善の並びに、引く手・ランダムな手があった（決定化の山札の順番と乱数を知って組んだ並び）
+    pub next_chance: bool,
+    /// own の、引きを知らない版: 次のターンの最善の並びの最初の引く手・ランダムな手の直前で自分の山札の順番と乱数を作り直し、
+    /// その手を打った後を同じビームで組み直したターン末の点数（drawSplit と同じ区切り方。next_chance でなければ own と同じ）
+    pub own_blind: f64,
+    /// two の、引きを知らない版（own_blind の終局面から相手の次のターンを読んだ後の点数。next_chance でなければ two と同じ）
+    pub two_blind: f64,
 }
 
 /// 探索の外から、探索と同じ点数で局面を採点する（人間の手順と比べる runner/human_plan.rs が使う。打つ手は変えない）
@@ -2706,7 +2865,9 @@ impl SearchAgent {
     /// p のターン末の局面 end から 2 ターン先まで読んだ点数（測るための道具。runner/two_turn.rs。打つ手は変わらない）。
     /// 引き直し（seed）1 つで、相手のターンを読み直しと同じく打ち（read）、続く自分の次のターンを、リーサルがあればそれを、
     /// 無ければ幅 next_beam のビームでターン末の点数が最も高い並びを打ち（own はそのターン末の点数）、
-    /// さらに相手の次のターンを読んだ後の局面を採点する（two）。読みの中の相手は読み直しと同じ（相手のターンのビーム）
+    /// さらに相手の次のターンを読んだ後の局面を採点する（two）。読みの中の相手は読み直しと同じ（相手のターンのビーム）。
+    /// 次のターンのビームは決定化の山札の順番を知って組むので、引く手のある並びは甘くなる。own_blind・two_blind は、
+    /// その並びの最初の引く手・ランダムな手の直前で山札と乱数を作り直して組み直した版（drawSplit と同じ区切り方。2026-11-28）
     pub fn two_turn_read(
         &self,
         end: &GameState,
@@ -2726,6 +2887,10 @@ impl SearchAgent {
             own: v,
             two: v,
             next_lethal: false,
+            next_lethal_chance: false,
+            next_chance: false,
+            own_blind: v,
+            two_blind: v,
         };
         if end.phase == Phase::Ended {
             return same(pl.eval_state(end));
@@ -2746,23 +2911,59 @@ impl SearchAgent {
             expand_choices: self.opts.lethal_expand_choices,
             ..DEFAULT_LETHAL_OPTIONS
         };
-        let lethal = self.opts.lethal
-            && (search_lethal(&after, p, &lo).is_some()
-                || (self.opts.lethal_exact_states > 0
-                    && search_exact_lethal(
-                        &after,
-                        p,
-                        &sure_lethal_options(self.opts.lethal_exact_states),
-                    )
-                    .is_some()));
-        if lethal {
+        let lethal_line = if self.opts.lethal {
+            search_lethal(&after, p, &lo).or_else(|| {
+                (self.opts.lethal_exact_states > 0)
+                    .then(|| {
+                        search_exact_lethal(
+                            &after,
+                            p,
+                            &sure_lethal_options(self.opts.lethal_exact_states),
+                        )
+                    })
+                    .flatten()
+            })
+        } else {
+            None
+        };
+        // リーサルの並びが引く手・ランダムな手を通るか（決定化の山札の順番と乱数を知って見つけたリーサル）
+        let lethal_chance = lethal_line.as_ref().map(|line| {
+            let mut prev = after.clone();
+            line.iter().any(|a| match try_apply_action(&prev, a) {
+                Some(next) => {
+                    let c = is_chance_step(&prev, &next, p);
+                    prev = next;
+                    c
+                }
+                None => false,
+            })
+        });
+        if lethal_chance == Some(false) {
             return TwoTurnRead {
                 read,
                 own: 1e6,
                 two: 1e6,
                 next_lethal: true,
+                next_lethal_chance: false,
+                next_chance: false,
+                own_blind: 1e6,
+                two_blind: 1e6,
             };
         }
+        // 引く手を通るリーサルは、知る版（own・two）だけ勝ちにし、引きを知らない版はビームで組み直す
+        let known = |r: TwoTurnRead| -> TwoTurnRead {
+            if lethal_chance == Some(true) {
+                TwoTurnRead {
+                    own: 1e6,
+                    two: 1e6,
+                    next_lethal: true,
+                    next_lethal_chance: true,
+                    ..r
+                }
+            } else {
+                r
+            }
+        };
         let opts = SearchOptions {
             beam_width: next_beam,
             allow: None,
@@ -2775,41 +2976,215 @@ impl SearchAgent {
             policy_w: &self.policy_w,
         };
         let root = Rc::new(after.clone());
-        let Some((_, last)) = best_plan_last(&root, p, &next_env) else {
+        let Some(steps) = best_plan_steps(&root, p, &next_env) else {
             let v = pl.eval_after(&after);
-            return TwoTurnRead {
+            return known(TwoTurnRead {
                 read,
                 own: v,
                 two: v,
                 next_lethal: false,
-            };
+                next_lethal_chance: false,
+                next_chance: false,
+                own_blind: v,
+                two_blind: v,
+            });
         };
         let pl2 = Planner {
             env: &next_env,
             p,
-            root,
+            root: root.clone(),
             steps: Vec::new(),
         };
-        if last.phase == Phase::Ended {
-            let v = pl2.eval_state(&last);
-            return TwoTurnRead {
-                read,
-                own: v,
-                two: v,
-                next_lethal: false,
-            };
-        }
-        let own = pl2.end_score(&last);
-        let settled2 = pl2.settle(&last);
-        let base2 = settled2.as_ref().unwrap_or(&last);
-        let after2 = simulate_opponent_turn_by_search(base2, p, &mut r, &env);
-        let two = pl.eval_after(&after2) - pl2.leftover(&last);
-        TwoTurnRead {
+        // ターン末の局面 last から、自分の次のターン末の点数と、相手の次のターンを乱数 rr で読んだ後の点数
+        let finish = |last: &GameState, rr: &mut Rng| -> (f64, f64) {
+            if last.phase == Phase::Ended {
+                let v = pl2.eval_state(last);
+                return (v, v);
+            }
+            let own = pl2.end_score(last);
+            let settled2 = pl2.settle(last);
+            let base2 = settled2.as_ref().unwrap_or(last);
+            let after2 = simulate_opponent_turn_by_search(base2, p, rr, &env);
+            (own, pl.eval_after(&after2) - pl2.leftover(last))
+        };
+        let last = steps
+            .last()
+            .map(|(_, st)| st.clone())
+            .unwrap_or(root.clone());
+        // 引きを知らない版も、相手の次のターンは同じ乱数で読む（差のぶれを減らす）
+        let r_state = r.state;
+        let (own, two) = finish(&last, &mut r);
+        let chance = first_chance_step(&root, &steps, p);
+        let (own_blind, two_blind) = match chance {
+            None => (own, two),
+            Some(c) => {
+                let before: &GameState = if c == 0 { &root } else { &steps[c - 1].1 };
+                let mut s = before.clone();
+                reshuffle_own(&mut s, p, &mut Rng::new(seed ^ 0x2545_F491));
+                match try_apply_action(&s, &steps[c].0) {
+                    None => (own, two),
+                    Some(s1) => {
+                        let (end_b, _) = split_turn_end(&pl2, Rc::new(s1), &next_env);
+                        finish(&end_b, &mut Rng::new(r_state))
+                    }
+                }
+            }
+        };
+        known(TwoTurnRead {
             read,
             own,
             two,
             next_lethal: false,
+            next_lethal_chance: false,
+            next_chance: chance.is_some(),
+            own_blind,
+            two_blind,
+        })
+    }
+
+    /// two_turn_read の 1 回分を、同じ乱数で打ち直して中身を文字にする（測る道具の確かめ用。打つ手は変えない。
+    /// `svwb two-turn lines --trace`）: 相手のターンの後の体力・次のターンのリーサル探索が見つけたか・次のターンの最善の並びと、
+    /// 手ごとの相手のリーダーの体力・ターン末（ターン終了時の処理の後）と、相手の次のターンの始めの処理の後の体力
+    pub fn two_turn_trace(
+        &self,
+        end: &GameState,
+        p: PlayerIndex,
+        seed: u32,
+        next_beam: usize,
+    ) -> Vec<String> {
+        let q = opponent(p);
+        let hp = |s: &GameState| s.players[q].leader_hp;
+        let mut out = Vec::new();
+        let env = self.env();
+        let pl = Planner {
+            env: &env,
+            p,
+            root: Rc::new(end.clone()),
+            steps: Vec::new(),
+        };
+        if end.phase == Phase::Ended {
+            out.push("このターンで決着".into());
+            return out;
         }
+        let settled = pl.settle(end);
+        let base = settled.as_ref().unwrap_or(end);
+        let mut r = Rng::new(seed);
+        let d = read_determinize(base, p, &mut r, &self.opts);
+        let (_, after) = read_once(&pl, &d, &mut r, pl.read_gate(end));
+        out.push(format!(
+            "相手のターン: ターン末 {} → 相手のターンの後 {}{}",
+            hp(base),
+            hp(&after),
+            if after.phase == Phase::Ended {
+                format!("（決着: {:?} の勝ち）", after.winner)
+            } else {
+                String::new()
+            }
+        ));
+        if after.phase == Phase::Ended || after.active != p || after.pending.is_some() {
+            return out;
+        }
+        let lo = LethalOptions {
+            ward_blocked: self.opts.lethal_ward_blocked,
+            expand_choices: self.opts.lethal_expand_choices,
+            ..DEFAULT_LETHAL_OPTIONS
+        };
+        let lethal = if self.opts.lethal {
+            search_lethal(&after, p, &lo).or_else(|| {
+                (self.opts.lethal_exact_states > 0)
+                    .then(|| {
+                        search_exact_lethal(
+                            &after,
+                            p,
+                            &sure_lethal_options(self.opts.lethal_exact_states),
+                        )
+                    })
+                    .flatten()
+            })
+        } else {
+            None
+        };
+        let lethal_end = search_lethal(
+            &after,
+            p,
+            &LethalOptions {
+                end_turn: true,
+                ..lo
+            },
+        );
+        out.push(format!(
+            "次のターンのリーサル探索: {}。ターン終了の後も見るビーム: {}",
+            match &lethal {
+                Some(l) => format!("見つけた（{} 手）", l.len()),
+                None => "なし".into(),
+            },
+            match &lethal_end {
+                Some(l) => format!("見つけた（{} 手）", l.len()),
+                None => "なし".into(),
+            }
+        ));
+        let opts = SearchOptions {
+            beam_width: next_beam,
+            allow: None,
+            ..self.opts.clone()
+        };
+        let next_env = Env {
+            opts: &opts,
+            w: &self.w,
+            opp_w: &self.opp_w,
+            policy_w: &self.policy_w,
+        };
+        let root = Rc::new(after.clone());
+        let Some(steps) = best_plan_steps(&root, p, &next_env) else {
+            out.push("次のターンの並びなし".into());
+            return out;
+        };
+        let mut prev: GameState = after.clone();
+        let mut line = Vec::new();
+        for (a, st) in &steps {
+            line.push(format!(
+                "{}（{}）",
+                crate::runner::human_plan::step_text(&prev, a, p),
+                hp(st)
+            ));
+            prev = (**st).clone();
+        }
+        out.push(format!("次のターンの並び: {}", line.join(" → ")));
+        let last = steps
+            .last()
+            .map(|(_, st)| (**st).clone())
+            .unwrap_or(after.clone());
+        if last.phase == Phase::Ended {
+            out.push(format!("次のターンの中で決着: {:?} の勝ち", last.winner));
+            return out;
+        }
+        let pl2 = Planner {
+            env: &next_env,
+            p,
+            root: root.clone(),
+            steps: Vec::new(),
+        };
+        let settled2 = pl2.settle(&last);
+        let base2 = settled2.as_ref().unwrap_or(&last);
+        let resolved = resolve_turn_end(base2);
+        let at_end = resolved.as_ref().unwrap_or(base2);
+        let started = try_apply_action(base2, &Action::EndTurn);
+        out.push(format!(
+            "次のターン末（ターン終了時の処理の後）{}{} → 相手の次のターンの始めの処理の後 {}",
+            hp(at_end),
+            if at_end.phase == Phase::Ended {
+                "（決着）"
+            } else {
+                ""
+            },
+            match &started {
+                Some(st) if st.phase == Phase::Ended =>
+                    format!("{}（決着: {:?} の勝ち）", hp(st), st.winner),
+                Some(st) => hp(st).to_string(),
+                None => "?".into(),
+            }
+        ));
+        out
     }
 
     /// 局面 root から p が手の列 actions（ターン終了の前まで）を打つ並びを、探索が選んだとして、

@@ -29,6 +29,7 @@ pub mod td;
 pub mod td_data;
 pub mod td_train;
 pub mod two_turn;
+pub mod two_turn_lines;
 pub mod yardstick;
 
 use crate::data::{data, Deck};

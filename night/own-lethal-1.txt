@@ -1,0 +1,34 @@
+# 読みの後に、次の自分のターンのリーサル探索をかける（readOwnLethal 1 ＋ 門 readOwnLethalGate 5%）が勝率に効くかを、新しいプールの既定（R7）と比べる
+# （ユーザーの依頼 2026-11-28〜29。docs/ai-notes/15-2026-11-22.md「速さ: 読みの後にリーサル探索をかける」「門: 読みの中の相手のターン末の q で絞る」）。
+#
+# 案: 読み直しの 1 回ごとに、読みの中の相手がビームで打ったターン末で、相手から見た R7 のリーサルの出力 q（相手が次のターンに倒される確率）を出し、
+#   q が 5% 以上の読みだけ、相手のターンの後（次の自分のターンの初め）でリーサル探索（ビームだけ。ターン終了の後の勝ちも見る。全探索はしない）をかける。
+#   見つければその読みの点数を勝ち（1e6）にし、見つけなければ今までどおり。自分のターンの初めのリーサル探索は今までどおり（ターン終了の後は見ない）
+# 線と全探索の外し方はクラウド環境の測り（2026-11-28、代表 10 型 50 試合ずつ）から決めた:
+#   門なしは思考 2.65 倍（全探索も足すと 8.7 倍）で重すぎる（ユーザー）。門 5% は 1.25 倍で、読みの 18% を探し、門なしで見つけたリーサルの 94.8% を拾う
+#   （1% は 1.50 倍・97.7%、10% は 1.21 倍・92.1%）。5% はユーザーが選んだ
+#
+# 回す前に決めた問いと線（84 個のデッキの鏡の compare 4 万試合。見込みはどちらも R4）:
+#   見込み: 0〜+0.5 ポイント（推測）。前例は小さい: 相手の側の同じ形（readLethal 5%、R6）は 4 万試合で 49.90% ± 0.08、
+#     スターターの nextLethal（読んだ後のリーサルに 200 点）は全デッキ 500 試合で 50.6%・リノセウス用 AI の 3600 試合で差し引き 0。
+#     一方、自分のリーサルは相手のリーサルより、見えたときに選びやすいかもしれない（ユーザーの推測、未確認）。
+#     2 ターン読みの測りの出力から作った参考の値（pickL、手を替える決まり）は 1 試合 +0.7 ± 0.7
+#   試合数: readLethal と同じ 4 万試合。探索の変更で勝敗の分かれる組が少なければ ± 0.1 ほど（readLethal は ± 0.08）、多ければ ± 0.15 ほど。
+#     +0.3 なら 2 SE の線を越える割合は半分〜9 割
+#   差 − 2 SE > 0 なら、readOwnLethal 1・門 5% を新しいプールの既定にする案をユーザーに出す（思考 1.25 倍と並べて。ページの設定も替えるかはその後に決める）。
+#   差 + 2 SE < 0 なら「損」として区切る。どちらでもなければ「分からない」として区切り、試合を足すかはユーザーが決める。どの場合も台帳に decide を足す
+#   線ではないが見る数（朝、クラウド環境で）:
+#     - 型ごとの勝率（svwb kifu winrate --where side=A --by arch・oppArch）
+#     - 思考の時間と、q の区間ごとの読み・見つけたリーサルの数（下の profile。同じ試合番号の既定と並べる）
+#
+# 見込み（PC、svwb-docker・28 スレッド）: compare は R7 どうしの実測 0.215 秒/試合（rb-e1）に、A の席の思考 1.25 倍の半分を足して 0.24 秒/試合、4 万試合で 2 時間 40 分。
+#   profile 2 つで 7 分ほど
+# 朝: 止まったときのまとめ（台帳の行・棋譜）を push してもらい、ingest する
+# 回の名前は own-lethal-1
+
+# 1. readOwnLethal 1・門 5% 対 R7（4 万試合）
+compare 20000 '{"valueNet":"rust/engine/yardstick/pool-r7-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false,"readOwnLethal":1,"readOwnLethalGate":0.05}' '{"valueNet":"rust/engine/yardstick/pool-r7-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' 0 --decks @data/pools/azvaldt/sets/all84.txt --label 読みの後の自分のリーサル-門5%対R7 --est 0.24
+
+# 2. 思考の時間（同じ試合番号の 840 試合。既定と門 5%）
+profile --opts '{"valueNet":"rust/engine/yardstick/pool-r7-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.22
+profile --opts '{"valueNet":"rust/engine/yardstick/pool-r7-net.json","potentialNet":"rust/engine/yardstick/pool-r4-potential.json","opponentSearch":{"beamWidth":8,"maxDepth":8,"extraEval":true,"ownWeights":true},"imaginedInput":false,"readOwnLethal":1,"readOwnLethalGate":0.05}' --games 420 --decks @data/pools/azvaldt/sets/all84.txt --est 0.27

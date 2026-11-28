@@ -149,6 +149,8 @@ pub fn reference_options() -> SearchOptions {
         pick: None,
         read_lethal: None,
         imagined_input: true,
+        read_own_lethal: 0,
+        read_own_lethal_gate: None,
     }
 }
 
@@ -240,6 +242,8 @@ pub fn strong_reference_options() -> SearchOptions {
         pick: None,
         read_lethal: None,
         imagined_input: true,
+        read_own_lethal: 0,
+        read_own_lethal_gate: None,
     }
 }
 
@@ -376,6 +380,8 @@ pub fn pool_reference_options(name: &str) -> SearchOptions {
         pick: None,
         read_lethal: None,
         imagined_input: true,
+        read_own_lethal: 0,
+        read_own_lethal_gate: None,
     }
 }
 

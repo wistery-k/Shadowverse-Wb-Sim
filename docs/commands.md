@@ -412,6 +412,10 @@ npm run svwb -- two-turn show [--only <局面>,…] [--sandbox <フォルダ>]
 npm run svwb -- two-turn run --out tt.jsonl [--only <局面>,…] [--m 64] [--reads 4] [--twos 2] [--nextBeam 256] [--seed 1] [--opts '<設定の JSON>']
 npm run svwb -- two-turn report tt.jsonl… [--only <局面>,…]
 npm run svwb -- two-turn trace --only <局面> --cand <候補> [--r 0] [--seed 1] [--opts '<設定の JSON>']
+npm run svwb -- two-turn lines --out t.jsonl (--dir misses/azvaldt | --survey <調査.jsonl(.gz)> [--clear 3] [--minDiff 15] [--all 1] [--frac x]) [--m 32] [--reads 12] [--twos 2] [--nextBeam 256] [--seed 1] [--opts '<設定の JSON>'] [--only <局面>,…]
+npm run svwb -- two-turn lines --dir misses/azvaldt --only <問> --trace N [--m 64] [--twos 2] [--opts '<設定の JSON>']   # 2 ターン読みの中身を文字で出す
+npm run svwb -- two-turn lines-report t.jsonl… [--group <名前>=<問,…>]… [--gate 10] [--maxR N]
+npm run svwb -- two-turn lines-gate t.jsonl… [--gate 10] [--maxR N]
 npm run svwb -- defer-playout --kifu <棋譜> --opts '<回す版の設定>' [--cont '<設定>'] [--seeds 8] [--seedBase 0] [--out 結果.jsonl]   # 前の --dir <記録のディレクトリ> も
 npm run svwb -- beam-gap [--games 50] [--from 0] [--every 1] [--ref '{"beamWidth":4096,"potentialNet":null}'] [--variants '{"名前":{設定},…}'] [--sample 0] [--nodes 局面.jsonl] [--out 結果.jsonl] [--positions 局面の集まり.jsonl] [--savePositions 局面の集まり.jsonl] [--refFrom 前の結果.jsonl] [--inputs 学習のデータ.jsonl] [--vocab 語彙.json] [--decks <デッキ>,…|@<デッキの組>]   # 自己対戦を打つ回は棋譜も書く
 ```
@@ -479,6 +483,10 @@ draw-stability・fuse-gap・tree-gap・read-log・read-gap・lethal-read・letha
   AI の点数・読み直し・次の自分のターン末（幅 `--nextBeam`）・2 ターン読み・次のターンのリーサル・最後まで打った勝ち負けを 1 行ずつ追記する（済んだものは飛ばす）。
   `report` は今の AI との対の差を Markdown で出す。`trace` は 1 通りの候補のターンと、その後の試合を全部出す。`--opts` は候補のターンを打つ AI の設定（compare の設定と同じ形）。
   docs/ai-notes.md「2 ターン以上の計画が効きそうな局面を手で作って比べる」
+- `two-turn lines`: 問題集の問（`--dir`。書き添えた調査の並び `lines/` の `ai` と `good`）と打ち比べ調査の局面（`--survey`。既定は AI の手がはっきり良かった局面、`--all 1` は打ち比べた局面の全部と読み直す候補の全部）で、
+  並びを同じ決定化 `--m` 通りで打ってターン末を作り、今の選ぶときの値・次の自分のターン末・2 ターン読み（と、次のターンの引きを知らない版）を付けて 1 行ずつ追記する（済んだものは飛ばす。打つ手は変えない）。
+  `lines-report` は並びどうしの差と、正解が上に来た局面の数を Markdown で出す。`lines-gate` は「差がいちばん大きい候補の差が `--gate` を超えたら替える」決まりの得を、調査の一段目の勝ち負けで 1 試合あたりにして出す。
+  `rust/engine/src/runner/two_turn_lines.rs`、docs/ai-notes.md「2 ターン読みを新しいプールで測る」
 - `defer-playout`: 融合を回す版（`deferFuse`）で `rhino-compare --subject af` が書いた棋譜（`--kifu`。2026-11-17 までの `--record <ディレクトリ>` は `--dir`）の試合を打ち直し、AFネメシスの側（棋譜の `sides` が A の席）がターン終了を打った局面ごとに、
   `--opts` から `deferFuse` だけを外した AI に同じ局面から打たせる。ターン終了まで融合だけを打つなら、それが回した融合。「そのままターンを終える」と「その融合をしてから終える」を、
   同じ乱数（相手の手札・山札の並べ直しと AI の乱数）で `--seeds` 通り最後まで打ち、勝ち数を比べる。分かれ目の後は自分を `--cont`（既定は `--opts`）、相手を今の既定の探索 AI で打つ。

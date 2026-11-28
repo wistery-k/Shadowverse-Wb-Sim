@@ -45,6 +45,11 @@ pub struct LethalOptions {
     /// 自分の選択待ち（超進化時の対象の選択など）になった局面を、その場で選択肢ごとに展開して同じ深さの子にする。
     /// 選んだ後の打点（クオンの超進化で式神に付ける疾走など）で点数を付けるため
     pub expand_choices: bool,
+    /// ターン終了を打った後（自分のターン終了時の処理と、相手のターンの始めの処理の後）に相手が倒れている局面も、勝ちとして見つける
+    /// （進化した律する《正義》・イランツァのターン終了時の 8 ダメージ、相手の『クレスト：焦灰のアナテマ・バーンドナイト』のターン開始時の 2 ダメージ等）。
+    /// ビームの全部の局面でターン終了を試す（全探索は試さない）。測る用（2026-11-28、ユーザーの指摘。既定 false。
+    /// docs/ai-notes/15-2026-11-22.md「参考: 次の自分のターンのリーサルだけを足す値」）
+    pub end_turn: bool,
 }
 
 pub const DEFAULT_LETHAL_OPTIONS: LethalOptions = LethalOptions {
@@ -54,6 +59,7 @@ pub const DEFAULT_LETHAL_OPTIONS: LethalOptions = LethalOptions {
     scorings: &[DIRECT_SCORING, SETUP_SCORING],
     ward_blocked: 0.0,
     expand_choices: false,
+    end_turn: false,
 };
 
 /// 探索 AI の既定と対戦画面のリーサル表示で使う設定: 守護の奥の打点を数え、選択待ちをその場で展開する
@@ -274,6 +280,9 @@ fn beam_lethal(
     opts: &LethalOptions,
     w: &LethalScoring,
 ) -> Option<Vec<Action>> {
+    if opts.end_turn && ends_turn_winning(root, p) {
+        return Some(vec![Action::EndTurn]);
+    }
     let mut frontier = vec![Node {
         state: root.clone(),
         seq: Vec::new(),
@@ -323,6 +332,11 @@ fn beam_lethal(
                     }
                     continue;
                 }
+                if opts.end_turn && ends_turn_winning(&next, p) {
+                    let mut seq = seq;
+                    seq.push(Action::EndTurn);
+                    return Some(seq);
+                }
                 let score = lethal_score(&next, p, w, opts.ward_blocked);
                 children.push(Node {
                     state: next,
@@ -335,6 +349,14 @@ fn beam_lethal(
         depth += 1;
     }
     None
+}
+
+/// s（p の手番で、選択待ちが無い）でターン終了を打つと、ターン終了時の処理か相手のターンの始めの処理で p が勝つ
+fn ends_turn_winning(s: &GameState, p: PlayerIndex) -> bool {
+    if s.phase == Phase::Ended || s.active != p || s.pending.is_some() {
+        return false;
+    }
+    matches!(try_apply_action(s, &Action::EndTurn), Some(n) if n.phase == Phase::Ended && n.winner == Some(p))
 }
 
 /// 1 つの局面で、勝てる行動の並びを探す
